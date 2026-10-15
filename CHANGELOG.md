@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.44.0 - 2026-10-14
+
+Behaviour change in the PHP template renderer (shared by Android and iOS);
+the hosts, protocol and native engines are unchanged from 1.43.0.
+
+- Declared component props are no longer also applied to the component's
+  root element. A prop whose name matched an element attribute
+  (`translationX`, `visible`, `width`, `maxWidth`, `top`, `position`,
+  `rotation`, `selected`, `autoFocus`...) used to reach the component and,
+  a second time, its root, overriding what the root template computed: a
+  photo viewport moved the whole page by the zoom offset, a modal's
+  `visible || closing` lost its closing state, a list was capped to a bubble
+  `maxWidth`, an index prop named `position` became a CSS position. Apps that
+  relied on it must set the attribute on their root explicitly (for example
+  `<Column :width="$width">`). Undeclared attributes on a component tag are
+  still rejected at compile time.
+
 ## 1.43.0 - 2026-10-14
 
 - Add bounded native photo zoom: `gestureNativeBounds` and

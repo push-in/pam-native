@@ -248,6 +248,11 @@ parameters are required props; PHP defaults define optional props. PAM updates
 mutable public props on stable child instances. A changed private or readonly
 constructor prop intentionally remounts the child instead of mutating it.
 
+Props belong to the component only. Since 1.44.0 a prop named like an element
+attribute (`width`, `visible`, `translationX`, `maxWidth`, `top`...) is no
+longer also applied to the component's root element; bind it in the template
+where it should apply (`<Column :width="$width">`).
+
 ## Composition
 
 Any discovered class can be used by its short class name:

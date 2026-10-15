@@ -31,6 +31,12 @@ final class PamPhpRegistry
     /** @var array<class-string<Component>, string> */
     private static array $classFiles = [];
 
+    /** @var array<string, class-string<Component>> template tag => component class */
+    private static array $tagClasses = [];
+
+    /** @var array<string, array<string, true>> template tag => constructor prop names */
+    private static array $tagPropNames = [];
+
     /**
      * @var array<class-string<Component>, array{
      *     factory: Closure(array): Component,
@@ -84,6 +90,8 @@ final class PamPhpRegistry
             }
             self::$components[$className] = $component;
             self::$classFiles[$className] = $component->classFile;
+            self::$tagClasses[$component->tag] = $className;
+            unset(self::$tagPropNames[$component->tag]);
             TemplateRegistry::compiledComponent(
                 $component->tag,
                 static fn (
@@ -226,11 +234,38 @@ final class PamPhpRegistry
         return get_object_vars($component);
     }
 
+    /**
+     * @internal Constructor prop names of the PAM component registered for
+     * $tag (null for other tags): they belong to the component and never
+     * reach its root element.
+     *
+     * @return array<string, true>|null
+     */
+    public static function propNamesForTag(string $tag): ?array
+    {
+        if (isset(self::$tagPropNames[$tag])) {
+            return self::$tagPropNames[$tag];
+        }
+        $className = self::$tagClasses[$tag] ?? null;
+        if ($className === null) {
+            return null;
+        }
+        self::autoload($className);
+        $names = [];
+        foreach (self::metadata($className)['parameters'] as $parameter) {
+            $names[$parameter['name']] = true;
+        }
+
+        return self::$tagPropNames[$tag] = $names;
+    }
+
     public static function reset(): void
     {
         self::releaseInstances();
         self::$components = [];
         self::$classFiles = [];
+        self::$tagClasses = [];
+        self::$tagPropNames = [];
         self::$metadata = [];
         self::$propertyParameters = [];
     }

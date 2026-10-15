@@ -5498,6 +5498,61 @@ final class InheritedStyleHost extends Component
 PAM,
 );
 
+file_put_contents(
+    $pamPhpDirectory.'/ZoomSurface.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class ZoomSurface extends Component
+{
+    public function __construct(
+        public float $translationX = 0.0,
+        public float $opacity = 1.0,
+        public bool $visible = true,
+        public float $maxWidth = 0.0,
+    ) {
+    }
+}
+?>
+
+<template>
+    <View :maxWidth="$maxWidth > 0 ? $maxWidth / 2 : 1000">
+        <View :translationX="$translationX" :opacity="$opacity" :visible="$visible" />
+    </View>
+</template>
+PAM,
+);
+file_put_contents(
+    $pamPhpDirectory.'/ZoomSurfaceHost.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class ZoomSurfaceHost extends Component
+{
+    public float $x = 40.0;
+}
+?>
+
+<template>
+    <Column>
+        <ZoomSurface key="zoom-surface" :translationX="$x" opacity="0.5" visible="false" maxWidth="300" />
+    </Column>
+</template>
+PAM,
+);
+
 $invalidPamPhpDirectory = $pamPhpDirectory.'-invalid';
 if (
     !is_dir($invalidPamPhpDirectory)
@@ -5805,6 +5860,22 @@ $assert(
     $conditionalRoot->properties()[PropKey::Visible->value] === false
         && $conditionalRoot->children() === [],
     'A false conditional root must render an inert zero-layout placeholder.',
+);
+$zoomHost = App::make('Pam\\Native\\Tests\\Sfc\\ZoomSurfaceHost')->toElement();
+$zoomRoot = $zoomHost->children()[0] ?? null;
+$zoomInner = $zoomRoot?->children()[0] ?? null;
+$assert(
+    $zoomRoot instanceof \Pam\Native\Element
+        && $zoomInner instanceof \Pam\Native\Element
+        && !array_key_exists(PropKey::TranslationX->value, $zoomRoot->properties())
+        && !array_key_exists(PropKey::Opacity->value, $zoomRoot->properties())
+        && !array_key_exists(PropKey::Visible->value, $zoomRoot->properties())
+        && (float) $zoomRoot->properties()[PropKey::MaxWidth->value] === 150.0
+        && (float) $zoomInner->properties()[PropKey::TranslationX->value] === 40.0
+        && (float) $zoomInner->properties()[PropKey::Opacity->value] === 0.5
+        && $zoomInner->properties()[PropKey::Visible->value] === false
+        && $zoomRoot->elementKey() === 'zoom-surface',
+    'Declared component props must reach only the component (never its root element), and must not override what the root template computed.',
 );
 $dashboard = App::make($dashboardClass);
 App::run($dashboard);
@@ -7201,8 +7272,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.43.0',
-    'The runtime SDK contract must match the 1.43.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.44.0',
+    'The runtime SDK contract must match the 1.44.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

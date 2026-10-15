@@ -1547,6 +1547,7 @@ final class TemplateRenderer
             $values['__pamNodePath'] = $data['__pamNodePath'] ?? $tag;
         }
         $componentValues = $values;
+        $rootValues = null;
         if ($factory !== null) {
             $declaredNames = $plan['declaredNames'] ?? null;
             if ($declaredNames === null) {
@@ -1563,6 +1564,11 @@ final class TemplateRenderer
                     || $name === '__pamNodePath',
                 ARRAY_FILTER_USE_KEY,
             );
+            // A declared prop belongs to the component and never reaches its
+            // root element. It used to be applied there as well whenever its
+            // name matched an element attribute (translationX, visible, width,
+            // maxWidth, position...), overriding what the template computed.
+            $rootValues = array_diff_key($values, PamPhpRegistry::propNamesForTag($tag) ?? []);
         }
 
         $inheritedVariants = $data['__pamParentVariants'] ?? null;
@@ -2009,7 +2015,7 @@ final class TemplateRenderer
             // A memoized component returns the same element every render;
             // decorating it the same way must return the same copy so the
             // encoder reuses the subtree instead of re-encoding it.
-            $decorationKey = self::decorationKey($element, $resolvedClass, $values, $sheet);
+            $decorationKey = self::decorationKey($element, $resolvedClass, $rootValues ?? $values, $sheet);
             if ($decorationKey !== null) {
                 $decorated = (self::$decorations[$element] ?? [])[$decorationKey] ?? null;
                 if ($decorated !== null) {
@@ -2034,7 +2040,7 @@ final class TemplateRenderer
             $element = self::withDomClasses($element, $resolvedClass);
         }
 
-        $element = self::attributes($element, $values);
+        $element = self::attributes($element, $rootValues ?? $values);
 
         foreach ($plan['events'] ?? self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
@@ -3196,7 +3202,7 @@ final class TemplateRenderer
                         return $call->decorated;
                     }
 
-                    return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+                    return self::decorateComponent($call, $element, $resolvedClass, array_diff_key($values, PamPhpRegistry::propNamesForTag($tag) ?? []), $sheet, $data);
                 }
             }
         }
@@ -3278,7 +3284,7 @@ final class TemplateRenderer
         $element = $component->toElement();
         self::$freshElement = null;
 
-        return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+        return self::decorateComponent($call, $element, $resolvedClass, array_diff_key($values, PamPhpRegistry::propNamesForTag($tag) ?? []), $sheet, $data);
     }
 
     /**
