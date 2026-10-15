@@ -39,7 +39,10 @@
   ids made `LongSparseArray.put` O(n²)); virtual-list row removals/reorders
   are applied once per commit and the adapter updates by ranges in one O(N)
   walk instead of DiffUtil's O(N+D²); the answer to a press/text change/
-  submit/toggle commits in its first frame. A filter keystroke over 10,000
+  submit/toggle jumps the main queue and mounts as soon as it is decoded, so
+  the next traversal draws it, like a native click handler (it used to wait
+  for a frame callback, a full frame whenever it landed after a vsync):
+  touch-to-pixel of a like went from ~47 ms to ~37 ms (native ~34 ms). A filter keystroke over 10,000
   rows went from seconds of UI-thread work to milliseconds.
 - `Style::properties()` is read natively on Android/iOS (same result, 14x).
 - `NavigationContainer::linking()` routes the launch URL before the first

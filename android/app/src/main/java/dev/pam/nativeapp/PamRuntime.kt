@@ -619,10 +619,15 @@ class PamRuntime(
             Trace.endSection()
         }
         val decodeNanos = System.nanoTime() - decodeStarted
-        main.post {
+        // The answer to a press/keystroke is what the user waits for: it jumps
+        // the main queue and mounts at once, so the next traversal draws it
+        // (like a native click handler). Waiting for a frame callback cost a
+        // full frame whenever the post landed right after a vsync.
+        val interactive = SystemClock.uptimeMillis() - lastInteractionUptime <= INTERACTION_COMMIT_WINDOW_MS
+        val deliver = Runnable {
             if (closed.get() || awaitingRemount || !attachedSurface) {
                 releaseBatch(batchHandle)
-                return@post
+                return@Runnable
             }
             pendingBatches.addLast(
                 PendingBatch(
@@ -632,7 +637,18 @@ class PamRuntime(
                 ),
             )
             markReadyForEvents()
-            if (surfaceAwaitingFirstFrame) flushFirstFrame() else scheduleFrame()
+            when {
+                surfaceAwaitingFirstFrame -> flushFirstFrame()
+                interactive && !commitAfterFrameScheduled && !renderer.isListScrolling() -> flushBatches()
+                else -> scheduleFrame()
+            }
+        }
+        if (interactive) {
+            val message = android.os.Message.obtain(main, deliver)
+            message.isAsynchronous = true
+            main.sendMessageAtFrontOfQueue(message)
+        } else {
+            main.post(deliver)
         }
         return true
     }
