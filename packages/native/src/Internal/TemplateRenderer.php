@@ -2036,8 +2036,10 @@ final class TemplateRenderer
                 self::gestureType($values['gestureType'] ?? 'tap'),
                 self::singleChild($children, $tag),
             ),
-            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
-            'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
+            'Pressable', 'TouchableNativeFeedback' => Pressable::make(...$children),
+            // The press feedback of the builder classes (TouchableOpacity::make()...).
+            'TouchableOpacity', 'TouchableHighlight', 'TouchableWithoutFeedback' => Pressable::make(...$children)
+                ->pressedOpacity(self::TOUCHABLE_OPACITY[$tag]),
             'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
                 $values['animating'] ?? $values['visible'] ?? true,
                 'ActivityIndicator animating',
@@ -2350,6 +2352,13 @@ final class TemplateRenderer
     }
 
     /** Native tags rendered by fastTag() when their entry allows it. */
+    /** Pressed opacity of TouchableOpacity/Highlight/WithoutFeedback (as their make()). */
+    private const TOUCHABLE_OPACITY = [
+        'TouchableOpacity' => 0.65,
+        'TouchableHighlight' => 0.82,
+        'TouchableWithoutFeedback' => 1.0,
+    ];
+
     private const FAST_TAGS = [
         'View' => true,
         'Column' => true,
@@ -2783,6 +2792,8 @@ final class TemplateRenderer
             $base[PropKey::Source->value] = $source;
         } elseif ($tag === 'Grid') {
             $base[PropKey::GridColumns->value] = 12;
+        } elseif (isset(self::TOUCHABLE_OPACITY[$tag])) {
+            $base[PropKey::PressOpacity->value] = self::TOUCHABLE_OPACITY[$tag];
         }
         $prebuilt = null;
         if ($richParts !== null) {

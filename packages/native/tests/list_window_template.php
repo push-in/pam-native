@@ -204,3 +204,22 @@ $assert(
 );
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];
+
+// Template touchables get the press feedback of their builder classes
+// (TouchableWithoutFeedback none), on the first and the fast render path.
+$touchTemplate = \Pam\Native\Internal\TemplateCompiler::compile(
+    '<Column><TouchableWithoutFeedback><Text>a</Text></TouchableWithoutFeedback>'
+    .'<TouchableOpacity><Text>b</Text></TouchableOpacity>'
+    .'<TouchableWithoutFeedback pressedOpacity="0.5"><Text>c</Text></TouchableWithoutFeedback></Column>',
+);
+for ($pass = 0; $pass < 3; $pass++) {
+    $touch = \Pam\Native\Internal\TemplateRenderer::render($touchTemplate, null, []);
+    $opacities = array_map(
+        static fn ($child) => $child->properties[PropKey::PressOpacity->value] ?? null,
+        $touch->children,
+    );
+    $assert(
+        $opacities === [1.0, 0.65, 0.5],
+        'Template touchables must keep their builder press feedback (pass '.$pass.': '.json_encode($opacities).').',
+    );
+}

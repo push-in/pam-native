@@ -9895,7 +9895,6 @@ class PamRenderer(
         /** Last ListWindow request ("firstId,lastId") and when it was sent. */
         var listWindowRequest: String? = null,
         var listWindowRequestedAt: Long = 0L,
-        val pageTracker: PamPageTracker = PamPageTracker(),
         var virtualListItemIds: List<Long> = emptyList(),
         /** Active keyed section the list last showed (null before the first sync). */
         var appliedListSection: String? = null,
@@ -9914,7 +9913,6 @@ class PamRenderer(
         var modalKeyboardSubscription: AutoCloseable? = null,
         var keyboardModalHost: PamModalHost? = null,
         var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
-        val inputInFlight: ArrayDeque<Pair<String, Long>> = ArrayDeque(),
         var keyboardViewportReconcileGeneration: Int = 0,
         var keyboardAvoidingScrollId: Long = 0L,
         var keyboardAvoidingViewportInset: Int = 0,
@@ -9949,6 +9947,16 @@ class PamRenderer(
         var inputDeleting: Boolean = false,
         var inputDigitsBeforeChange: Int = 0,
     ) {
+        // Allocated on first use: most nodes (list rows, placeholders) never
+        // page or edit text.
+        private var pageTrackerOrNull: PamPageTracker? = null
+        val pageTracker: PamPageTracker
+            get() = pageTrackerOrNull ?: PamPageTracker().also { pageTrackerOrNull = it }
+
+        private var inputInFlightOrNull: ArrayDeque<Pair<String, Long>>? = null
+        val inputInFlight: ArrayDeque<Pair<String, Long>>
+            get() = inputInFlightOrNull ?: ArrayDeque<Pair<String, Long>>().also { inputInFlightOrNull = it }
+
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
 
         fun inputDebounceMs(): Long =
