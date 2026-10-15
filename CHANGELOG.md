@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.44.0 - 2026-10-15
+
+- Long lists are materialized by window, with no app change (Android and
+  iOS): a vertical `VirtualizedList`/`VirtualGrid` (or `p-for` inside
+  `<VirtualizedList>`) with more than 96 rows ships its first 48 rows (and
+  the rows around `initialScrollIndex`) plus childless placeholder roots,
+  sized by their authored height or the list estimate. Hosts report the rows
+  on screen when a placeholder comes within a screen of them and the next
+  frame turns the rows ahead into full rows in place (same node ids, so
+  views, decoded images and state are kept). Sticky headers and full-span
+  rows are always materialized; horizontal and short lists are unchanged.
+  On the framework suite's 10,000-row list (x86_64 API 36 emulator, release
+  builds, three alternating runs against 1.43.0) the content shows in
+  ~1.0 s instead of ~2.9 s and PSS drops from 336-383 MB to 205 MB, with
+  frame p99 unchanged at 16 ms; PHP encodes a 424 KB first frame instead of
+  2 MB, 4x faster with 3.6x less memory. Flinging through placeholders costs
+  ~20% more CPU (each window growth is still an O(rows) patch).
+- Protocol: properties 541 (`ListPlaceholder`) and 542 (`ListWindowed`) and
+  event 80 (`ListWindow`, consumed by the runtime) are appended. Android,
+  iOS, Rust and PHP tables stay in parity.
+
 ## 1.43.0 - 2026-10-14
 
 - Add bounded native photo zoom: `gestureNativeBounds` and
