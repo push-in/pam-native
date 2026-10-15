@@ -302,3 +302,26 @@ Mac validation (not compiled on Linux):
   thread; `dispatchLifecycle` redirects callers from other threads.
 
 UIKit guide behavior: [Apple documentation](https://developer.apple.com/documentation/uikit/uikeyboardlayoutguide/followsundockedkeyboard).
+
+## Media thumbnails, Files::exists, raw drag drivers and accessibilitySelected (1.42.0)
+
+Mac validation (not compiled on Linux):
+
+- `swift build` and `swift test --filter "MediaLibraryModuleTests|PamMotionTests|PamProtocolTests|CapabilityIntegrationTests"`.
+- Photos grid: `Image` with `$asset->thumbnailUri` (a `phasset://` source)
+  draws photos and video poster frames at the cell size.
+- `MediaLibrary::thumbnail($id, 256, ...)` returns a `file://` JPEG in
+  `Caches/pam-media-thumbnails` whose longer edge is at most 256 px, for a
+  photo, a video and an iCloud-only asset; a second call is a cache hit (same
+  URI, no PhotoKit request). Edit the photo: a new URI.
+- With "Selected Photos" access, `refreshLimitedSelection` presents the
+  limited picker; after Done it answers `limited: true` and `assets()` reflects
+  the new selection. With full access it answers false without UI.
+- `assets()`/`albums()` with permission denied call `failure` (no exception).
+- `Files::exists` (file true, directory false, missing false) and
+  `Files::stat` on a missing file call `missing` without throwing.
+- `Drag::driveRaw('hero', 'scale', [0, 200], [1, 1.4])` on a drag bounded at
+  0: the hero keeps scaling past 200 pt while the target stays pinned; after
+  release it follows the settle.
+- VoiceOver reads "selected" for `accessibilitySelected="true"` without the
+  visual selected style, and not for `selected` + `accessibilitySelected="false"`.

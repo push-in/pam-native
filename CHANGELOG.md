@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.42.0 - Unreleased
+
+Protocol: property 537 (`accessibilitySelected`) and 538
+(`keyboardShouldPersistTaps`), append-only. New module methods need no
+protocol change.
+
+- Media library thumbnails: every `MediaAsset` carries `thumbnailUri` (Android
+  the typed images/video MediaStore URI that `Image` decodes at the view size
+  from the platform thumbnail cache, videos as a frame; iOS the `phasset://`
+  source drawn at the view size). `MediaLibrary::thumbnail($assetId, $maxPx,
+  $done, $failure)` writes a JPEG of at most `$maxPx` (32-1024) on its longer
+  edge, video frames included, decoded at that size (Android 10+
+  `loadThumbnail`, sampled decode or `getScaledFrameAtTime` before; PhotoKit
+  on iOS) into a bounded disk cache (24 MiB / 600 files, LRU trimmed to 75%,
+  keyed by the asset's modification date) and reports its `file://` URI.
+- `MediaLibrary::assets(..., failure:)` and `albums(..., $failure)`: native
+  failures (missing permission, closed module) reach the closure instead of
+  throwing.
+- `MediaLibrary::refreshLimitedSelection(fn (bool $limited) => ...)`: with
+  limited photo access, shows the system selection again (iOS 14+
+  `presentLimitedLibraryPicker`, Android 14+ re-request of the visual media
+  permissions); full or no access completes at once without UI.
+- `Files::exists($path, fn (bool $exists) => ...)` and `Files::find()`
+  (`?FileReference`); `Files::stat()` no longer throws for a missing file: it
+  calls the new optional `missing` closure (or nothing), other failures go to
+  the optional `failure` closure.
+- `Drag::driveRaw()` drives a property from the raw finger translation (before
+  `bounds()`/`rubberBand()`) and extrapolates past its points;
+  `driveUnbounded()` makes every `drive()` of the drag behave that way.
+- `accessibilitySelected` (`Element::accessibilitySelected()`): announces
+  selection to TalkBack (`AccessibilityNodeInfo.isSelected`) and VoiceOver
+  (`.selected` trait) without the visual `selected` state; it wins over
+  `selected` for assistive technology only.
+- Add `Contacts::openNewContactForm(fn (bool $created), $failure)`: system
+  "new contact" editor (Android `ACTION_INSERT`, iOS
+  `CNContactViewController(forNewContact:)`), no contacts permission needed;
+  failures go to `$failure`.
+- `Share::text()` gains `?Closure $failure`; `$opened` now fires only once the
+  sheet was presented (iOS answered before presenting; failures no longer
+  call `$opened`).
+- Add `Alert::choose()` with 1-3 `AlertButton`s (`AlertButtonStyle`
+  Default/Cancel/Destructive) answering the pressed index (`Alert::DISMISSED`
+  = -1); optional keys on the existing Alert operation.
+- Add `Permissions::shouldShowRationale()` (Android
+  `shouldShowRequestPermissionRationale`, iOS always false) and
+  `PermissionRationale`: `requestKind(..., rationale:)` explains a re-request
+  in a native alert first; cancelling answers the current status.
+- `Permissions::status()/requestKind()` and `Caches::usage()/clear()` accept
+  `?Closure $failure`; with it native failures are delivered instead of
+  thrown (still thrown without it).
+- Android: `PamActivity.launchForResult` drops its callback when the launch
+  throws and pending activity-result callbacks are cleared on destroy; open
+  choice alerts and contact forms are failed/dismissed when their module
+  closes.
+<!-- batch-c -->
 ## 1.41.0 - 2026-10-14
 
 - Covered routes release native media (Android and iOS): a route covered by a
