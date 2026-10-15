@@ -1837,6 +1837,63 @@ fn unconstrained_natural_scroll_extent(
         Axis::Vertical => (padding_before + border_top, padding_after + border_bottom),
         Axis::Horizontal => (padding_before + border_left, padding_after + border_right),
     };
+    // The cross axis is definite (the viewport, or this node's own size):
+    // children are measured inside its padding box, like layout places them.
+    let cross_padding = match axis {
+        Axis::Vertical => {
+            finite_non_negative(number(node, PropKey::PaddingLeft).unwrap_or(horizontal_padding))?
+                + finite_non_negative(
+                    number(node, PropKey::PaddingRight).unwrap_or(horizontal_padding),
+                )?
+                + border_left
+                + border_right
+        }
+        Axis::Horizontal => {
+            finite_non_negative(number(node, PropKey::PaddingTop).unwrap_or(vertical_padding))?
+                + finite_non_negative(
+                    number(node, PropKey::PaddingBottom).unwrap_or(vertical_padding),
+                )?
+                + border_top
+                + border_bottom
+        }
+    };
+    let own_cross = match axis {
+        Axis::Vertical => number(node, PropKey::Width),
+        Axis::Horizontal => number(node, PropKey::Height),
+    }
+    .filter(|value| value.is_finite() && *value >= 0.0)
+    .unwrap_or(available_cross);
+    let inner_cross = (own_cross - cross_padding).max(0.0);
+    if matches!(integer(node, PropKey::FlexWrap), Some(2 | 3)) && node_axis != axis {
+        // A wrapping row in a vertical scroller (chips, tags) is as tall as
+        // its lines at the available width, not one line (the tallest item).
+        let gap = finite_non_negative(number(node, PropKey::Gap).unwrap_or(0.0))?;
+        let column_gap = finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(gap))?;
+        let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(gap))?;
+        let (main_gap, cross_gap) = match node_axis {
+            Axis::Horizontal => (column_gap, row_gap),
+            Axis::Vertical => (row_gap, column_gap),
+        };
+        let (width, height) = match axis {
+            Axis::Vertical => (inner_cross, f32::INFINITY),
+            Axis::Horizontal => (f32::INFINITY, inner_cross),
+        };
+        let content = wrapped_intrinsic_cross(
+            children,
+            &visible_children,
+            node,
+            node_axis,
+            inner_cross,
+            width,
+            height,
+            main_gap,
+            cross_gap,
+            text_scale,
+            text_metrics,
+            depth + 1,
+        )?;
+        return finite_non_negative(padding_before + content + padding_after);
+    }
     let mut extents = Vec::with_capacity(visible_children.len());
     let mut grow_total = 0.0_f32;
     let mut grow_unit = 0.0_f32;
@@ -1847,7 +1904,7 @@ fn unconstrained_natural_scroll_extent(
             child,
             axis,
             available_main,
-            available_cross,
+            inner_cross,
             text_scale,
             text_metrics,
             depth + 1,
@@ -5696,6 +5753,81 @@ mod tests {
             layouts[&3].height, 1033.0,
             "the wrapper keeps its child's padding"
         );
+    }
+
+    #[test]
+    fn wrapping_row_in_a_vertical_scroll_measures_every_line() {
+        // Six 100x40 chips with a 10 gap in a 360 wide scroller padded by 20:
+        // 320 of width holds three per line, so two lines (40 + 10 + 40).
+        let chip = |id: u64, index: u32| {
+            (
+                id,
+                node(
+                    id,
+                    4,
+                    index,
+                    NodeKind::View,
+                    [
+                        (PropKey::Width, PropValue::Float(100.0)),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            )
+        };
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Screen, [])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Scroll,
+                    [(PropKey::FlexGrow, PropValue::Float(1.0))],
+                ),
+            ),
+            (
+                3,
+                node(
+                    3,
+                    2,
+                    0,
+                    NodeKind::Column,
+                    [
+                        (PropKey::PaddingHorizontal, PropValue::Float(20.0)),
+                        (PropKey::PaddingBottom, PropValue::Float(16.0)),
+                    ],
+                ),
+            ),
+            (
+                4,
+                node(
+                    4,
+                    3,
+                    0,
+                    NodeKind::Row,
+                    [
+                        (PropKey::FlexWrap, PropValue::Integer(2)),
+                        (PropKey::Gap, PropValue::Float(10.0)),
+                    ],
+                ),
+            ),
+        ]);
+        for index in 0..6 {
+            let (id, chip) = chip(10 + u64::from(index), index);
+            nodes.insert(id, chip);
+        }
+        let layouts = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 360.0,
+                height: 64.0,
+            },
+        )
+        .expect("scroll layout");
+        assert_eq!(layouts[&4].height, 90.0);
+        assert_eq!(layouts[&15].y, 50.0);
+        assert_eq!(layouts[&3].height, 106.0, "the content covers both lines");
     }
 
     #[test]

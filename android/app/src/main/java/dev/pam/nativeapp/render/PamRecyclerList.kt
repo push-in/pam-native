@@ -31,6 +31,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var horizontal = false
     private var columns = 1
     private var inverted = false
+    private var followEndOnResize = true
+    // Set only by a real scroll (a drag, fling or scroll request) that left
+    // the list at its end, never by a resize or a re-layout: a list whose
+    // viewport grows under its last row (a sheet animating its height) is
+    // not "at its end" and must keep its offset.
+    private var scrolledToEnd = false
     private var prefetchItems = 5
     private var adaptivePrefetchItems = prefetchItems
     private var lastScrollNanos = 0L
@@ -104,6 +110,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
 
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if ((if (horizontal) dx else dy) != 0) {
+                    scrolledToEnd = restingAtEnd() && canScrollTowardStart()
+                }
                 updateAdaptivePrefetch(if (horizontal) dx else dy)
                 updateAccessibilityVisibility()
                 dispatchViewport()
@@ -136,6 +145,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      * A viewport that shrinks while resting at its end (a banner or composer
      * growing around a chat timeline) keeps that end visible, like a
      * bottom-anchored React Native list, instead of hiding the newest rows.
+     * Only a list opened at its end (`initialScrollIndex`) or scrolled there
+     * follows it; an inverted list keeps its newest rows natively. A sheet
+     * or modal growing around a list at offset 0 leaves it at offset 0, and
+     * `followEndOnResize=false` turns the behaviour off.
      */
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         val oldExtent = if (horizontal) oldWidth else oldHeight
@@ -143,8 +156,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // A list resting at its start (an inbox whose first rows all fit)
         // is not "at its end": only one opened at its end or scrolled away
         // from its start follows the end.
-        val wasAtEnd = initialPositionApplied && oldExtent > 0 && newExtent != oldExtent &&
-            restingAtEnd() && (initialIndex > 0 || canScrollTowardStart())
+        val wasAtEnd = followsEnd() && oldExtent > 0 && newExtent != oldExtent && restingAtEnd()
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         if (wasAtEnd && !inverted) {
             post {
@@ -233,8 +245,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             ids.isNotEmpty() &&
             ids == richIds &&
             pixelExtents != richExtents &&
-            restingAtEnd() &&
-            (initialIndex > 0 || canScrollTowardStart())
+            followsEnd() &&
+            restingAtEnd()
         // A page appended under (or history prepended above) the prefetched
         // space would otherwise be laid out and bound all at once (a dozen
         // rows in one frame). Only that side restarts: the rows already laid
@@ -599,6 +611,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (columns == next) return
         columns = next
         updateLayoutManager()
+    }
+
+    fun setFollowEndOnResize(value: Boolean) {
+        followEndOnResize = value
     }
 
     fun setInverted(value: Boolean) {
@@ -979,6 +995,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private fun canScrollTowardStart(): Boolean =
         if (horizontal) canScrollHorizontally(-1) else canScrollVertically(-1)
+
+    private fun followsEnd(): Boolean =
+        followEndOnResize && !inverted && initialPositionApplied && (initialIndex > 0 || scrolledToEnd)
 
     private fun restingAtEnd(): Boolean {
         val count = adapter?.itemCount ?: 0

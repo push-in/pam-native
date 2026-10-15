@@ -546,4 +546,5 @@ enum PropKey: int
     case ScrollKeyboardPersistTaps = 538;
     case GestureNativeBounds = 539;
     case GestureNativeContentAspect = 540;
+    case ListFollowEndOnResize = 541;
 }

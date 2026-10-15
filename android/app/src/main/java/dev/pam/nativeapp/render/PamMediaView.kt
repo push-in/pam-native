@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
@@ -607,6 +608,15 @@ internal class PamMediaView(
         }
     }
 
+    private fun seekPrepared(player: MediaPlayer, seconds: Double) {
+        val positionMs = (seconds.coerceAtLeast(0.0) * 1_000).toLong()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+        } else {
+            player.seekTo(positionMs.toInt())
+        }
+    }
+
     private fun installListeners(player: MediaPlayer, generation: Long) {
         player.setOnPreparedListener {
             if (generation != playerGeneration) return@setOnPreparedListener
@@ -625,7 +635,12 @@ internal class PamMediaView(
                 runCatching {
                     it.isLooping = loop
                     it.setVolume(level, level)
-                    if (startAt > 0) it.seekTo((startAt * 1_000).toInt())
+                    if (startAt > 0 || !playback.mayPlay) {
+                        // A paused player (autoPlay=false) draws the frame at
+                        // currentTime, like expo-video: MediaPlayer renders
+                        // nothing on its surface until it starts or seeks.
+                        seekPrepared(it, startAt)
+                    }
                     applyPlayback(it)
                 }
             }

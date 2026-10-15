@@ -137,6 +137,13 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
      */
     private val imeReconciliation = Runnable { reconcileImeInset() }
 
+    init {
+        // The root absorbs the focus of a blurred input (below). Back leaves
+        // touch mode, and Android 8+ would then paint its default focus
+        // highlight (~8% black) over the whole screen until the next touch.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) defaultFocusHighlightEnabled = false
+    }
+
     private fun imeInsetOf(insets: WindowInsets): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             visibleImeInset(
@@ -184,6 +191,10 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         val focused = findFocus() as? android.widget.EditText ?: return
         isFocusableInTouchMode = true
         if (!requestFocus()) focused.clearFocus()
+        // Only absorb this blur: the root must not keep taking focus (and
+        // highlighting) on later touches. Holding the focus it just took is
+        // fine; clearing it would make Android refocus the first input.
+        isFocusableInTouchMode = false
     }
 
     fun addPointerObserver(observer: (MotionEvent) -> Unit) {
