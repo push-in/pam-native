@@ -179,6 +179,18 @@ $assert(
 );
 $mountedAfterGrow = count($tileClass::$mounts);
 
+// Scrolling far away slides the window: rows left behind unmount (their
+// instances stay keyed while the owner is reused) and come back with state.
+$placeholders = $lazyPlaceholders();
+Runtime::dispatchEvent($listId, EventKind::ListWindow->value, $placeholders[count($placeholders) - 20].','.$placeholders[count($placeholders) - 10]);
+$syncNative();
+$tiles = $lazyTiles();
+$assert(
+    !isset($tiles['item-1000:0']) && isset($tiles['item-1990:0'], $tiles['item-3:1'])
+        && ($tileClass::$unmounts['item-1000'] ?? 0) === 1 && !isset($tileClass::$unmounts['item-3']),
+    'Rows the window slid away from must unmount; the head stays.',
+);
+
 // Reordering keeps identity: item-3's state follows its key.
 $lazyHost->items = array_reverse($lazyHost->items);
 $lazyHost->items = array_merge(['item-3'], array_values(array_diff($lazyHost->items, ['item-3'])));
@@ -198,7 +210,7 @@ Runtime::render();
 $syncNative();
 $tiles = $lazyTiles();
 $assert(
-    count($tiles) === 2 && isset($tiles['item-3:1']) && ($tileClass::$unmounts['item-1000'] ?? 0) === 1
+    count($tiles) === 2 && isset($tiles['item-3:1']) && ($tileClass::$unmounts['item-1990'] ?? 0) === 1
         && !isset($tileClass::$unmounts['item-3']) && $lazyPlaceholders() === [],
     'Rows that leave the list must unmount; short lists render eagerly.',
 );

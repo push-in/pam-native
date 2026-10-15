@@ -87,8 +87,8 @@ $assert(
         && !$isPlaceholder($listRows[836]) && !$isPlaceholder($listRows[974])
         && $isPlaceholder($listRows[835]) && $isPlaceholder($listRows[975])
         && $childCount($nodes, $listRows[900]) === 2
-        && !$isPlaceholder($listRows[10]),
-    'A grown window must patch placeholders into full rows in place (same ids), keeping earlier rows.',
+        && !$isPlaceholder($listRows[10]) && $isPlaceholder($listRows[300]),
+    'A grown window must patch placeholders into full rows in place (same ids), returning far rows to placeholders.',
 );
 $assert($encoder->encode($list)['frame'] === null, 'An unchanged list and window must not produce a frame.');
 
@@ -171,6 +171,20 @@ $assert(
         && !$isPlaceholder($lazyRows[5_000]) && $isPlaceholder($lazyRows[4_935]) && $isPlaceholder($lazyRows[5_075])
         && $lazyRows[5_000]->id !== $lazyIds[5_000],
     'Growing a lazy window must build exactly the new rows (the placeholders are replaced).',
+);
+// The window slides: rows far from the visible ones return to placeholders.
+$lazyIds = array_map(static fn (EncodedNode $node): int => $node->id, $lazyRows);
+$assert(
+    $lazyEncoder->extendWindow($lazyListNode->id, $lazyIds[9_000], $lazyIds[9_010]) === true,
+    'A lazy window must grow far down the list.',
+);
+$lazyEncoder->encode($lazyList);
+[, $lazyRows] = $windowRows($lazyEncoder->frameNodes());
+$materialized = array_keys(array_filter($lazyRows, static fn (EncodedNode $node): bool => !$isPlaceholder($node)));
+$assert(
+    !$isPlaceholder($lazyRows[0]) && $isPlaceholder($lazyRows[100]) && $isPlaceholder($lazyRows[5_000]) && !$isPlaceholder($lazyRows[9_005])
+        && count($lazyRows) === 10_000 && min(array_filter($materialized, static fn (int $row): bool => $row >= 48)) >= 9_000 - 64 * 4 && max($materialized) < 9_010 + 64 * 4 + 1,
+    'Rows far from the visible ones must go back to placeholders ('.count($materialized).' materialized).',
 );
 $shortLazy = new TreeEncoder();
 $shortLazy->encode(VirtualizedList::of([['id' => 'a'], ['id' => 'b']], static fn (array $item) => Text::make($item['id']))->toElement());

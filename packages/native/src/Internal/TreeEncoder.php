@@ -45,6 +45,9 @@ final class TreeEncoder
      */
     private const WINDOW_MARGIN_ROWS = 64;
 
+    /** Materialized rows kept around the visible ones, in margins (sliding window). */
+    private const WINDOW_KEEP_MARGINS = 4;
+
     /** @var array<string, list<array{0: int, 1: int}>> materialized [start, end) row ranges by list path */
     private array $windowRanges = [];
 
@@ -248,7 +251,16 @@ final class TreeEncoder
         if (self::covers($ranges, max(0, $first - intdiv($margin, 2)), $last + intdiv($margin, 2) + 1)) {
             return false;
         }
-        $this->windowRanges[$path] = self::addRange($ranges, max(0, $first - $margin), $last + $margin + 1);
+        // The window slides: rows farther than WINDOW_KEEP_MARGINS margins
+        // from the visible ones go back to placeholders, so memory stays
+        // bounded however far the list is scrolled.
+        $keep = $margin * self::WINDOW_KEEP_MARGINS;
+        // The head stays: a filtered or reset list shows it without a round trip.
+        $this->windowRanges[$path] = self::addRange(self::clipRanges(
+            self::addRange($ranges, max(0, $first - $margin), $last + $margin + 1),
+            $first - $keep,
+            $last + $keep + 1,
+        ), 0, self::WINDOW_INITIAL_ROWS);
         ++$this->windowStamp;
 
         return true;
@@ -285,6 +297,24 @@ final class TreeEncoder
         }
 
         return $merged;
+    }
+
+    /**
+     * @param list<array{0: int, 1: int}> $ranges
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function clipRanges(array $ranges, int $start, int $end): array
+    {
+        $clipped = [];
+        foreach ($ranges as [$from, $to]) {
+            $from = max($from, $start);
+            $to = min($to, $end);
+            if ($from < $to) {
+                $clipped[] = [$from, $to];
+            }
+        }
+
+        return $clipped;
     }
 
     /** @param list<array{0: int, 1: int}> $ranges */

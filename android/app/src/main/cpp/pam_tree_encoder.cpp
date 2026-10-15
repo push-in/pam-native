@@ -400,6 +400,16 @@ Ranges add_range(Ranges ranges, zend_long start, zend_long end) {
     return merged;
 }
 
+Ranges clip_ranges(const Ranges& ranges, zend_long start, zend_long end) {
+    Ranges clipped;
+    for (const auto& [from, to] : ranges) {
+        const zend_long a = std::max(from, start);
+        const zend_long b = std::min(to, end);
+        if (a < b) clipped.emplace_back(a, b);
+    }
+    return clipped;
+}
+
 bool in_ranges(const Ranges& ranges, zend_long index) {
     for (const auto& [from, to] : ranges) {
         if (index >= from && index < to) return true;
@@ -1046,7 +1056,14 @@ PHP_FUNCTION(pam_native_encoder_extend_window) {
     const zend_long margin = std::max<zend_long>(static_cast<zend_long>(encoder->window.margin_rows), (last - first + 1) * 2);
     Ranges& ranges = encoder->window_ranges[list->second.path];
     if (covers(ranges, std::max<zend_long>(0, first - margin / 2), last + margin / 2 + 1)) RETURN_FALSE;
-    ranges = add_range(ranges, std::max<zend_long>(0, first - margin), last + margin + 1);
+    // Sliding window (TreeEncoder::WINDOW_KEEP_MARGINS): rows farther than
+    // four margins from the visible ones go back to placeholders.
+    const zend_long keep = margin * 4;
+    // The head stays materialized (a filtered or reset list shows it at once).
+    ranges = add_range(
+        clip_ranges(add_range(ranges, std::max<zend_long>(0, first - margin), last + margin + 1), first - keep, last + keep + 1),
+        0,
+        static_cast<zend_long>(encoder->window.initial_rows));
     ++encoder->window_generation;
     RETURN_TRUE;
 }

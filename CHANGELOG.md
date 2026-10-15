@@ -11,6 +11,10 @@
   frame turns the rows ahead into full rows in place (same node ids, so
   views, decoded images and state are kept). Sticky headers and full-span
   rows are always materialized; horizontal and short lists are unchanged.
+  The window slides: rows more than four margins (256+ rows) away from the
+  visible ones go back to placeholders (their row components unmount), and
+  the first 48 rows stay, so memory stays bounded however far a list is
+  scrolled.
   On the framework suite's 10,000-row list (x86_64 API 36 emulator, release
   builds, three alternating runs against 1.43.0) the content shows in
   ~1.0 s instead of ~2.9 s and PSS drops from 336-383 MB to 205 MB, with

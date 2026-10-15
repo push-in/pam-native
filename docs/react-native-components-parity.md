@@ -62,7 +62,10 @@ While the user scrolls, the host reports the rows on screen whenever a
 placeholder comes within a screen of them (event kind 80, framework-owned,
 never an app callback) and the next frame turns the rows ahead into full rows
 in place: same node ids, so materialized rows keep their views, decoded
-images and state and are never re-encoded. Sticky headers and full-span rows
+images and state and are never re-encoded. The window slides: rows more than
+four margins (at least 256 rows) away from the visible ones go back to
+placeholders, and the first 48 rows always stay, so a list scrolled end to
+end keeps a bounded number of rows in PHP, the engine and the host. Sticky headers and full-span rows
 are always materialized; horizontal lists and lists up to 96 rows are encoded
 completely as before. On a 10,000-row list this removes ~99% of the first
 frame's nodes from the PHP encoder, the engine's measure/layout pass and the
