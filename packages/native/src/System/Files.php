@@ -247,8 +247,12 @@ final class Files
     {
         return self::stat(
             $path,
-            static fn (FileReference $file): mixed => $callback($file),
-            static fn (): mixed => $callback(null),
+            static function (FileReference $file) use ($callback): void {
+                $callback($file);
+            },
+            static function () use ($callback): void {
+                $callback(null);
+            },
             $failure,
         );
     }
