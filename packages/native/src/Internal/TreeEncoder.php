@@ -102,28 +102,72 @@ final class TreeEncoder
      */
     private function refreshHosted(Element $element): Element
     {
+        return self::refreshHost($this->refreshHosts, $element);
+    }
+
+    /** @param \WeakMap<Element, Element> $hosts */
+    private static function refreshHost(\WeakMap $hosts, Element $element): Element
+    {
         $kind = $element->kind;
         if ($kind !== NodeKind::Scroll && $kind !== NodeKind::List
             && $kind !== NodeKind::VirtualList && $kind !== NodeKind::SectionList
         ) {
             return $element;
         }
-        if (isset($this->refreshHosts[$element])) {
-            return $this->refreshHosts[$element];
+        if (isset($hosts[$element])) {
+            return $hosts[$element];
         }
         $host = $element->__pamRefreshHost();
         if ($host === null) {
             return $element;
         }
-        $this->refreshHosts[$element] = $host;
+        $hosts[$element] = $host;
 
         return $host;
     }
 
-    public function __construct()
+    /**
+     * Handle of the host's native encoder (Android/iOS register
+     * pam_native_encoder_*): the same frames and patches, byte for byte,
+     * written natively. PAM_NATIVE_ENCODER=php keeps this PHP encoder.
+     */
+    private ?int $native = null;
+
+    public function __construct(?bool $native = null)
     {
         $this->subtreeCache = new WeakMap();
         $this->refreshHosts = new WeakMap();
+        if ($native ?? self::nativeAvailable()) {
+            $hosts = $this->refreshHosts;
+            $this->native = pam_native_encoder_create(
+                self::EVENT_PROPERTIES,
+                [NodeKind::Scroll->value, NodeKind::List->value, NodeKind::VirtualList->value, NodeKind::SectionList->value],
+                static fn (Element $element): Element => self::refreshHost($hosts, $element),
+                static fn (mixed $value): string => self::encodeProperty($value),
+                static fn (int $kind): int => self::eventProperty($kind),
+            );
+        }
+    }
+
+    public function __destruct()
+    {
+        if ($this->native !== null) {
+            pam_native_encoder_destroy($this->native);
+        }
+    }
+
+    /** Whether this encoder writes frames natively. */
+    public function isNative(): bool
+    {
+        return $this->native !== null;
+    }
+
+    private static function nativeAvailable(): bool
+    {
+        // Unqualified on purpose: a fully qualified function_exists() of a
+        // host-registered (MODULE_TEMPORARY) function is folded by the OPcache
+        // optimizer, which dereferences the function's missing module.
+        return function_exists('pam_native_encoder_create') && getenv('PAM_NATIVE_ENCODER') !== 'php';
     }
 
     /**
@@ -135,6 +179,11 @@ final class TreeEncoder
      */
     public function forceFullFrame(): void
     {
+        if ($this->native !== null) {
+            pam_native_encoder_reset($this->native);
+
+            return;
+        }
         $this->previousTree = null;
         $this->previousRoot = null;
         $this->emitted = [];
@@ -145,6 +194,10 @@ final class TreeEncoder
      */
     public function encode(Element $root): array
     {
+        if ($this->native !== null) {
+            /** @var array{frame: ?string, callbacks: array<string, Closure>, full: bool} */
+            return pam_native_encoder_encode($this->native, $root);
+        }
         $root = $this->refreshHosted($root);
         $cachedRoot = ($this->subtreeCache[$root] ?? [])['root'] ?? null;
 
@@ -208,6 +261,13 @@ final class TreeEncoder
     public function frameNodes(): array
     {
         $nodes = [];
+        if ($this->native !== null) {
+            foreach (pam_native_encoder_nodes($this->native) as [$id, $parent, $index, $kind, $properties]) {
+                $nodes[$id] = new EncodedNode($id, $parent, $index, $kind, $properties);
+            }
+
+            return $nodes;
+        }
         if ($this->previousTree !== null) {
             $emitting = $this->emitting;
             $this->flatten($this->previousTree, $nodes);

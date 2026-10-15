@@ -3394,6 +3394,15 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         bridge.join("include/pam_native_ios_bridge.h"),
     )
     .map_err(|error| format!("cannot stage iOS bridge header: {error}"))?;
+    // The native tree encoder is shared with Android; the iOS bridge
+    // compiles it into the same translation unit.
+    for file in ["pam_tree_encoder.cpp", "pam_tree_encoder.h"] {
+        fs::copy(
+            native_home.join("android/app/src/main/cpp").join(file),
+            bridge.join(file),
+        )
+        .map_err(|error| format!("cannot stage iOS native tree encoder: {error}"))?;
+    }
 
     let runtime_destination = workspace.join("Runtime");
     fs::create_dir_all(&runtime_destination)

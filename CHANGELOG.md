@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Native tree encoder (Android and iOS, transparent): the hosts register a
+  C++ port of `Internal\TreeEncoder` and the runtime uses it automatically.
+  Frames, patches, node ids, callbacks and errors are byte-for-byte those of
+  the PHP encoder (`tests/native_encoder_equivalence.php`, run by
+  `scripts/native-encoder-test.sh`; `PAM_NATIVE_ENCODER=php` keeps the PHP
+  encoder). Re-encoding a rebuilt 43,000-node tree drops from ~257 ms to
+  ~35 ms on the host.
+
 ## 1.43.1 - 2026-10-15
 
 - Android baseline profile covers Media3 (ExoPlayer, common, decoder,

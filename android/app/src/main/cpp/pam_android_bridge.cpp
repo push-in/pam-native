@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include "pam_native_engine.h"
+#include "pam_tree_encoder.h"
 
 namespace {
 
@@ -702,6 +703,16 @@ bool register_php_runtime_api(RuntimeState* state) {
         report_error(state, "Pam Native failed to register its PHP runtime API.");
         return false;
     }
+    // The native tree encoder (same frames as Pam\\Native\\Internal\\TreeEncoder).
+    if (zend_register_functions(
+            nullptr,
+            pam_tree_encoder_functions,
+            nullptr,
+            MODULE_TEMPORARY
+        ) == FAILURE) {
+        report_error(state, "Pam Native failed to register its native tree encoder.");
+        return false;
+    }
     return true;
 }
 
@@ -817,6 +828,7 @@ bool initialize_php(RuntimeState* state) {
         return false;
     }
     if (!register_php_runtime_api(state)) {
+        pam_tree_encoder_shutdown();
         php_embed_shutdown();
         return false;
     }
@@ -1193,6 +1205,7 @@ void runtime_loop(RuntimeState* state) {
         ) {
             // A failed request is ended right away so its memory (often the
             // exhausted memory_limit) is not held while the error shows.
+            pam_tree_encoder_shutdown();
             php_request_shutdown(nullptr);
             if (outcome == RequestOutcome::Failed) {
                 log_debug("PHP request failed; waiting for a reload.");
@@ -1231,6 +1244,7 @@ void runtime_loop(RuntimeState* state) {
             php_register_variable("PHP_SELF", "-", nullptr);
             outcome = run_php_request(state);
         }
+        pam_tree_encoder_shutdown();
         php_embed_shutdown();
     }
     active_runtime = nullptr;
