@@ -9877,76 +9877,277 @@ class PamRenderer(
         val mountOrder: Long,
         var updating: Boolean = false,
         var applyingInitialProperties: Boolean = false,
-        var initialTextUpdates: PamInitialTextUpdates? = null,
-        var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null,
-        var pressableConfiguredDuringInitialization: Boolean = false,
-        var textWatcherInstalled: Boolean = false,
-        var pendingChange: Runnable? = null,
-        var nativeValue: String = "",
-        var nativeValueAcknowledged: Boolean = true,
-        var deferredInputValue: String? = null,
-        var baseText: String = "",
-        var spanPressInstalled: Boolean = false,
-        var pressOpacity: Float = 0.72f,
-        var pressScale: Float = 1f,
-        var scrollScheduled: Boolean = false,
-        var pendingScrollOffset: Float = 0f,
-        var endReachedSent: Boolean = false,
-        /** Last ListWindow request ("firstId,lastId") and when it was sent. */
-        var listWindowRequest: String? = null,
-        var listWindowRequestedAt: Long = 0L,
-        var virtualListItemIds: List<Long> = emptyList(),
-        /** Active keyed section the list last showed (null before the first sync). */
-        var appliedListSection: String? = null,
-        var keyboardBehavior: Int = KEYBOARD_RESIZE,
-        var safeBottomInset: Int = 0,
-        var safeAreaLeftInset: Int = 0,
-        var safeAreaTopInset: Int = 0,
-        var safeAreaRightInset: Int = 0,
-        var safeAreaBottomInset: Int = 0,
-        var keyboardInset: Int = 0,
-        var keyboardAnimating: Boolean = false,
-        var keyboardBaseHeight: Int = 0,
-        var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
-        var legacyKeyboardSubscription: AutoCloseable? = null,
-        /** Set while the KAV lives in a Modal/BottomSheet window: that window's IME feed. */
-        var modalKeyboardSubscription: AutoCloseable? = null,
-        var keyboardModalHost: PamModalHost? = null,
-        var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
-        var keyboardViewportReconcileGeneration: Int = 0,
-        var keyboardAvoidingScrollId: Long = 0L,
-        var keyboardAvoidingViewportInset: Int = 0,
-        var keyboardFocusedInput: EditText? = null,
-        var defaultHighlightColor: Int = Color.TRANSPARENT,
-        var propertyAnimator: ObjectAnimator? = null,
-        var keyframeAnimator: ValueAnimator? = null,
-        var motionRunner: PamMotionRunner? = null,
-        var motionProgramId: Long = Long.MIN_VALUE,
-        var motionRestartKey: Long = Long.MIN_VALUE,
-        var transitionRules: Map<String, PamTransitionRule> = emptyMap(),
-        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>? = null,
-        var dragSnapRequest: Long = Long.MIN_VALUE,
-        var textLayoutSignature: String = "",
-        var textLayoutListener: View.OnLayoutChangeListener? = null,
-        var workletAnimator: ValueAnimator? = null,
-        var loadingDrawable: PamButtonLoadingDrawable? = null,
-        var filterLayer: Boolean = false,
         var virtual: Boolean = false,
-        var imageLoading: Boolean = false,
-        var imageProgressScheduled: Boolean = false,
-        var imageProgressLoaded: Long = 0L,
-        var imageProgressTotal: Long = 0L,
-        var inputSelectionScheduled: Boolean = false,
-        var directiveLayoutListener: View.OnLayoutChangeListener? = null,
-        var intersectionObserver: PamIntersectionObserver? = null,
-        var nativeInteractionsInstalled: Boolean = false,
-        var outsidePointerObserver: ((MotionEvent) -> Unit)? = null,
-        var lastDirectiveIntersection: Boolean? = null,
-        var inputSelectionStart: Int = 0,
-        var inputSelectionEnd: Int = 0,
-        var inputDeleting: Boolean = false,
-        var inputDigitsBeforeChange: Int = 0,
     ) {
+        // Members most nodes never touch live in [NodeExtras], allocated on
+        // the first write: a list placeholder or plain row stays a few words.
+        private var extras: NodeExtras? = null
+
+        private fun extras(): NodeExtras = extras ?: NodeExtras().also { extras = it }
+
+        var initialTextUpdates: PamInitialTextUpdates?
+            get() = extras?.initialTextUpdates
+            set(value) { extras().initialTextUpdates = value }
+
+        var initialBackgroundUpdate: PamInitialBackgroundUpdate?
+            get() = extras?.initialBackgroundUpdate
+            set(value) { extras().initialBackgroundUpdate = value }
+
+        var pressableConfiguredDuringInitialization: Boolean
+            get() = extras?.pressableConfiguredDuringInitialization ?: false
+            set(value) { extras().pressableConfiguredDuringInitialization = value }
+
+        var textWatcherInstalled: Boolean
+            get() = extras?.textWatcherInstalled ?: false
+            set(value) { extras().textWatcherInstalled = value }
+
+        var pendingChange: Runnable?
+            get() = extras?.pendingChange
+            set(value) { extras().pendingChange = value }
+
+        var nativeValue: String
+            get() = extras?.nativeValue ?: ""
+            set(value) { extras().nativeValue = value }
+
+        var nativeValueAcknowledged: Boolean
+            get() = extras?.nativeValueAcknowledged ?: true
+            set(value) { extras().nativeValueAcknowledged = value }
+
+        var deferredInputValue: String?
+            get() = extras?.deferredInputValue
+            set(value) { extras().deferredInputValue = value }
+
+        var baseText: String
+            get() = extras?.baseText ?: ""
+            set(value) { extras().baseText = value }
+
+        var spanPressInstalled: Boolean
+            get() = extras?.spanPressInstalled ?: false
+            set(value) { extras().spanPressInstalled = value }
+
+        var pressOpacity: Float
+            get() = extras?.pressOpacity ?: 0.72f
+            set(value) { extras().pressOpacity = value }
+
+        var pressScale: Float
+            get() = extras?.pressScale ?: 1f
+            set(value) { extras().pressScale = value }
+
+        var scrollScheduled: Boolean
+            get() = extras?.scrollScheduled ?: false
+            set(value) { extras().scrollScheduled = value }
+
+        var pendingScrollOffset: Float
+            get() = extras?.pendingScrollOffset ?: 0f
+            set(value) { extras().pendingScrollOffset = value }
+
+        var endReachedSent: Boolean
+            get() = extras?.endReachedSent ?: false
+            set(value) { extras().endReachedSent = value }
+
+        /** Last ListWindow request ("firstId,lastId") and when it was sent. */
+        var listWindowRequest: String?
+            get() = extras?.listWindowRequest
+            set(value) { extras().listWindowRequest = value }
+
+        var listWindowRequestedAt: Long
+            get() = extras?.listWindowRequestedAt ?: 0L
+            set(value) { extras().listWindowRequestedAt = value }
+
+        var virtualListItemIds: List<Long>
+            get() = extras?.virtualListItemIds ?: emptyList()
+            set(value) { extras().virtualListItemIds = value }
+
+        /** Active keyed section the list last showed (null before the first sync). */
+        var appliedListSection: String?
+            get() = extras?.appliedListSection
+            set(value) { extras().appliedListSection = value }
+
+        var keyboardBehavior: Int
+            get() = extras?.keyboardBehavior ?: KEYBOARD_RESIZE
+            set(value) { extras().keyboardBehavior = value }
+
+        var safeBottomInset: Int
+            get() = extras?.safeBottomInset ?: 0
+            set(value) { extras().safeBottomInset = value }
+
+        var safeAreaLeftInset: Int
+            get() = extras?.safeAreaLeftInset ?: 0
+            set(value) { extras().safeAreaLeftInset = value }
+
+        var safeAreaTopInset: Int
+            get() = extras?.safeAreaTopInset ?: 0
+            set(value) { extras().safeAreaTopInset = value }
+
+        var safeAreaRightInset: Int
+            get() = extras?.safeAreaRightInset ?: 0
+            set(value) { extras().safeAreaRightInset = value }
+
+        var safeAreaBottomInset: Int
+            get() = extras?.safeAreaBottomInset ?: 0
+            set(value) { extras().safeAreaBottomInset = value }
+
+        var keyboardInset: Int
+            get() = extras?.keyboardInset ?: 0
+            set(value) { extras().keyboardInset = value }
+
+        var keyboardAnimating: Boolean
+            get() = extras?.keyboardAnimating ?: false
+            set(value) { extras().keyboardAnimating = value }
+
+        var keyboardBaseHeight: Int
+            get() = extras?.keyboardBaseHeight ?: 0
+            set(value) { extras().keyboardBaseHeight = value }
+
+        var keyboardLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.keyboardLayoutListener
+            set(value) { extras().keyboardLayoutListener = value }
+
+        var legacyKeyboardSubscription: AutoCloseable?
+            get() = extras?.legacyKeyboardSubscription
+            set(value) { extras().legacyKeyboardSubscription = value }
+
+        /** Set while the KAV lives in a Modal/BottomSheet window: that window's IME feed. */
+        var modalKeyboardSubscription: AutoCloseable?
+            get() = extras?.modalKeyboardSubscription
+            set(value) { extras().modalKeyboardSubscription = value }
+
+        var keyboardModalHost: PamModalHost?
+            get() = extras?.keyboardModalHost
+            set(value) { extras().keyboardModalHost = value }
+
+        var keyboardSelfLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.keyboardSelfLayoutListener
+            set(value) { extras().keyboardSelfLayoutListener = value }
+
+        var keyboardViewportReconcileGeneration: Int
+            get() = extras?.keyboardViewportReconcileGeneration ?: 0
+            set(value) { extras().keyboardViewportReconcileGeneration = value }
+
+        var keyboardAvoidingScrollId: Long
+            get() = extras?.keyboardAvoidingScrollId ?: 0L
+            set(value) { extras().keyboardAvoidingScrollId = value }
+
+        var keyboardAvoidingViewportInset: Int
+            get() = extras?.keyboardAvoidingViewportInset ?: 0
+            set(value) { extras().keyboardAvoidingViewportInset = value }
+
+        var keyboardFocusedInput: EditText?
+            get() = extras?.keyboardFocusedInput
+            set(value) { extras().keyboardFocusedInput = value }
+
+        var defaultHighlightColor: Int
+            get() = extras?.defaultHighlightColor ?: Color.TRANSPARENT
+            set(value) { extras().defaultHighlightColor = value }
+
+        var propertyAnimator: ObjectAnimator?
+            get() = extras?.propertyAnimator
+            set(value) { extras().propertyAnimator = value }
+
+        var keyframeAnimator: ValueAnimator?
+            get() = extras?.keyframeAnimator
+            set(value) { extras().keyframeAnimator = value }
+
+        var motionRunner: PamMotionRunner?
+            get() = extras?.motionRunner
+            set(value) { extras().motionRunner = value }
+
+        var motionProgramId: Long
+            get() = extras?.motionProgramId ?: Long.MIN_VALUE
+            set(value) { extras().motionProgramId = value }
+
+        var motionRestartKey: Long
+            get() = extras?.motionRestartKey ?: Long.MIN_VALUE
+            set(value) { extras().motionRestartKey = value }
+
+        var transitionRules: Map<String, PamTransitionRule>
+            get() = extras?.transitionRules ?: emptyMap()
+            set(value) { extras().transitionRules = value }
+
+        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>?
+            get() = extras?.transitionRunners
+            set(value) { extras().transitionRunners = value }
+
+        var dragSnapRequest: Long
+            get() = extras?.dragSnapRequest ?: Long.MIN_VALUE
+            set(value) { extras().dragSnapRequest = value }
+
+        var textLayoutSignature: String
+            get() = extras?.textLayoutSignature ?: ""
+            set(value) { extras().textLayoutSignature = value }
+
+        var textLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.textLayoutListener
+            set(value) { extras().textLayoutListener = value }
+
+        var workletAnimator: ValueAnimator?
+            get() = extras?.workletAnimator
+            set(value) { extras().workletAnimator = value }
+
+        var loadingDrawable: PamButtonLoadingDrawable?
+            get() = extras?.loadingDrawable
+            set(value) { extras().loadingDrawable = value }
+
+        var filterLayer: Boolean
+            get() = extras?.filterLayer ?: false
+            set(value) { extras().filterLayer = value }
+
+        var imageLoading: Boolean
+            get() = extras?.imageLoading ?: false
+            set(value) { extras().imageLoading = value }
+
+        var imageProgressScheduled: Boolean
+            get() = extras?.imageProgressScheduled ?: false
+            set(value) { extras().imageProgressScheduled = value }
+
+        var imageProgressLoaded: Long
+            get() = extras?.imageProgressLoaded ?: 0L
+            set(value) { extras().imageProgressLoaded = value }
+
+        var imageProgressTotal: Long
+            get() = extras?.imageProgressTotal ?: 0L
+            set(value) { extras().imageProgressTotal = value }
+
+        var inputSelectionScheduled: Boolean
+            get() = extras?.inputSelectionScheduled ?: false
+            set(value) { extras().inputSelectionScheduled = value }
+
+        var directiveLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.directiveLayoutListener
+            set(value) { extras().directiveLayoutListener = value }
+
+        var intersectionObserver: PamIntersectionObserver?
+            get() = extras?.intersectionObserver
+            set(value) { extras().intersectionObserver = value }
+
+        var nativeInteractionsInstalled: Boolean
+            get() = extras?.nativeInteractionsInstalled ?: false
+            set(value) { extras().nativeInteractionsInstalled = value }
+
+        var outsidePointerObserver: ((MotionEvent) -> Unit)?
+            get() = extras?.outsidePointerObserver
+            set(value) { extras().outsidePointerObserver = value }
+
+        var lastDirectiveIntersection: Boolean?
+            get() = extras?.lastDirectiveIntersection
+            set(value) { extras().lastDirectiveIntersection = value }
+
+        var inputSelectionStart: Int
+            get() = extras?.inputSelectionStart ?: 0
+            set(value) { extras().inputSelectionStart = value }
+
+        var inputSelectionEnd: Int
+            get() = extras?.inputSelectionEnd ?: 0
+            set(value) { extras().inputSelectionEnd = value }
+
+        var inputDeleting: Boolean
+            get() = extras?.inputDeleting ?: false
+            set(value) { extras().inputDeleting = value }
+
+        var inputDigitsBeforeChange: Int
+            get() = extras?.inputDigitsBeforeChange ?: 0
+            set(value) { extras().inputDigitsBeforeChange = value }
+
         // Allocated on first use: most nodes (list rows, placeholders) never
         // page or edit text.
         private var pageTrackerOrNull: PamPageTracker? = null
@@ -10002,6 +10203,75 @@ class PamRenderer(
             callback: (PamPressPointer) -> Unit,
         ): ((PamPressPointer) -> Unit)? =
             callback.takeIf { properties[key] != null }
+    }
+
+    /** The rarely used members of a [NodeState] (see NodeState.extras). */
+    private class NodeExtras {
+        var initialTextUpdates: PamInitialTextUpdates? = null
+        var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null
+        var pressableConfiguredDuringInitialization: Boolean = false
+        var textWatcherInstalled: Boolean = false
+        var pendingChange: Runnable? = null
+        var nativeValue: String = ""
+        var nativeValueAcknowledged: Boolean = true
+        var deferredInputValue: String? = null
+        var baseText: String = ""
+        var spanPressInstalled: Boolean = false
+        var pressOpacity: Float = 0.72f
+        var pressScale: Float = 1f
+        var scrollScheduled: Boolean = false
+        var pendingScrollOffset: Float = 0f
+        var endReachedSent: Boolean = false
+        var listWindowRequest: String? = null
+        var listWindowRequestedAt: Long = 0L
+        var virtualListItemIds: List<Long> = emptyList()
+        var appliedListSection: String? = null
+        var keyboardBehavior: Int = KEYBOARD_RESIZE
+        var safeBottomInset: Int = 0
+        var safeAreaLeftInset: Int = 0
+        var safeAreaTopInset: Int = 0
+        var safeAreaRightInset: Int = 0
+        var safeAreaBottomInset: Int = 0
+        var keyboardInset: Int = 0
+        var keyboardAnimating: Boolean = false
+        var keyboardBaseHeight: Int = 0
+        var keyboardLayoutListener: View.OnLayoutChangeListener? = null
+        var legacyKeyboardSubscription: AutoCloseable? = null
+        var modalKeyboardSubscription: AutoCloseable? = null
+        var keyboardModalHost: PamModalHost? = null
+        var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null
+        var keyboardViewportReconcileGeneration: Int = 0
+        var keyboardAvoidingScrollId: Long = 0L
+        var keyboardAvoidingViewportInset: Int = 0
+        var keyboardFocusedInput: EditText? = null
+        var defaultHighlightColor: Int = Color.TRANSPARENT
+        var propertyAnimator: ObjectAnimator? = null
+        var keyframeAnimator: ValueAnimator? = null
+        var motionRunner: PamMotionRunner? = null
+        var motionProgramId: Long = Long.MIN_VALUE
+        var motionRestartKey: Long = Long.MIN_VALUE
+        var transitionRules: Map<String, PamTransitionRule> = emptyMap()
+        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>? = null
+        var dragSnapRequest: Long = Long.MIN_VALUE
+        var textLayoutSignature: String = ""
+        var textLayoutListener: View.OnLayoutChangeListener? = null
+        var workletAnimator: ValueAnimator? = null
+        var loadingDrawable: PamButtonLoadingDrawable? = null
+        var filterLayer: Boolean = false
+        var imageLoading: Boolean = false
+        var imageProgressScheduled: Boolean = false
+        var imageProgressLoaded: Long = 0L
+        var imageProgressTotal: Long = 0L
+        var inputSelectionScheduled: Boolean = false
+        var directiveLayoutListener: View.OnLayoutChangeListener? = null
+        var intersectionObserver: PamIntersectionObserver? = null
+        var nativeInteractionsInstalled: Boolean = false
+        var outsidePointerObserver: ((MotionEvent) -> Unit)? = null
+        var lastDirectiveIntersection: Boolean? = null
+        var inputSelectionStart: Int = 0
+        var inputSelectionEnd: Int = 0
+        var inputDeleting: Boolean = false
+        var inputDigitsBeforeChange: Int = 0
     }
 
     private data class AccessibilityActionSpec(val name: String, val label: String)
