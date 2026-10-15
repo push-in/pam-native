@@ -54,7 +54,19 @@ protocol change.
   throws and pending activity-result callbacks are cleared on destroy; open
   choice alerts and contact forms are failed/dismissed when their module
   closes.
-<!-- batch-c -->
+- `keyboardShouldPersistTaps` on `ScrollView`, `FlatList`, `SectionList` and
+  `VirtualizedList`, as in React Native: `never` (a tap dismisses the keyboard
+  and is consumed), `handled` (dismisses only when no child handles the tap)
+  and `always`, plus RN's booleans; enum `KeyboardPersistTaps`. Without the
+  attribute the current behaviour stays (a tap never closes the keyboard);
+  nothing is installed when absent or `always`.
+- Per-route error boundaries: `PendingRoute::errorBoundary()`,
+  `Router::errorBoundary()` and the global `Route::errorBoundary()` render a
+  fallback in place of a stack route that throws while created, mounted or
+  rendered; other routes and tabs keep working, `$retry()` renders the route
+  again and the error is reported once as non-fatal. Direct `Route::tab()` /
+  `drawerScreen()` items have no boundary.
+
 ## 1.41.0 - 2026-10-14
 
 - Covered routes release native media (Android and iOS): a route covered by a
