@@ -717,11 +717,11 @@ class PamRenderer(
     }
     private var appliedStatusBar: StatusBarConfig? = null
     private var appliedHostBackground: Int? = null
-    private val nodes = LongSparseArray<NodeState>()
+    private val nodes = PamLongMap<NodeState>(256)
 
     /** True while [id] is part of the committed tree (events for removed nodes are stale). */
     fun hasNode(id: Long): Boolean = nodes.indexOfKey(id) >= 0
-    private val frames = LongSparseArray<Frame>()
+    private val frames = PamLongMap<Frame>(256)
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
     private val mediaCache = NativeMediaFileCache(context)
@@ -1144,13 +1144,23 @@ class PamRenderer(
     private fun syncLocalModalTriggers() {
         val modals = HashMap<String, PamModalHost>()
         val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
+        // Position of a node among all node ids in ascending order (what
+        // LongSparseArray.indexOfKey returned), computed only when needed.
+        var sortedIds: LongArray? = null
+        fun keyRank(id: Long): Int {
+            val ids = sortedIds ?: LongArray(nodes.size()) { nodes.keyAt(it) }.also {
+                it.sort()
+                sortedIds = it
+            }
+            return java.util.Arrays.binarySearch(ids, id)
+        }
         for (id in localModalIds) {
             val state = nodes[id] ?: continue
             val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
             if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[id] as? PamModalHost)?.let { modal ->
                     modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = modal
-                    orderedModals += nodes.indexOfKey(id) to modal
+                    orderedModals += keyRank(id) to modal
                 }
             }
         }
@@ -1189,7 +1199,7 @@ class PamRenderer(
         orderedModals.sortBy { it.first }
         val orderedInputs = ArrayList<Pair<Int, EditText>>(inputIds.size)
         for (id in inputIds) {
-            (views[id] as? EditText)?.let { orderedInputs += nodes.indexOfKey(id) to it }
+            (views[id] as? EditText)?.let { orderedInputs += keyRank(id) to it }
         }
         orderedInputs.sortBy { it.first }
         orderedInputs.forEach { (inputPosition, input) ->

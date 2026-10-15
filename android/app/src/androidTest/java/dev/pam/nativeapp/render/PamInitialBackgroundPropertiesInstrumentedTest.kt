@@ -171,7 +171,7 @@ class PamInitialBackgroundPropertiesInstrumentedTest {
 
     /** Exercise the previous immediate path against the same complete state. */
     private fun replayUnbatched(renderer: PamRenderer, view: View, properties: Map<PropKey, PropValue>) {
-        val state = (field(renderer, "nodes") as LongSparseArray<*>)[2]
+        val state = (field(renderer, "nodes") as PamLongMap<*>)[2]
         val apply = PamRenderer::class.java.declaredMethods.single { it.name == "applyProperty" }.apply { isAccessible = true }
         properties.forEach { (key, value) -> apply.invoke(renderer, view, state, key, value) }
     }
