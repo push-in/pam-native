@@ -50,6 +50,8 @@ internal object PamAlertButtons {
 
 /** Platform permissions whose rationale flag answers `Permissions::shouldShowRationale()`. */
 internal object PermissionRationalePermissions {
+    // Permission names are plain strings; each branch is gated by [sdk].
+    @android.annotation.SuppressLint("InlinedApi")
     fun forKind(kind: Int, sdk: Int): List<String> = when (kind) {
         1 -> listOf(Manifest.permission.CAMERA)
         2 -> listOf(Manifest.permission.RECORD_AUDIO)
