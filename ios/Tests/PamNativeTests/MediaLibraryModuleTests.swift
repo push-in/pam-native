@@ -11,6 +11,25 @@ final class MediaLibraryModuleTests: XCTestCase {
         XCTAssertNil(PamPhotoAssetURI.identifier("phasset://asset/%2F"))
     }
 
+    func testThumbnailCacheBoundsEdgesAndEvictsLeastRecentlyUsed() throws {
+        XCTAssertEqual(PamMediaThumbnailCache.clampEdge(1), 32)
+        XCTAssertEqual(PamMediaThumbnailCache.clampEdge(100_000), 1024)
+        XCTAssertTrue(PamMediaThumbnailCache.fittedSize(width: 4032, height: 3024, maxPx: 256) == (256, 192))
+        XCTAssertTrue(PamMediaThumbnailCache.fittedSize(width: 100, height: 50, maxPx: 256) == (100, 50))
+        let entries = (0..<10).map { PamMediaThumbnailCache.Entry(name: "t\($0).jpg", bytes: 100, lastUsed: Double($0)) }
+        XCTAssertEqual(PamMediaThumbnailCache.victims(entries, maxBytes: 1_000, maxFiles: 10), [])
+        XCTAssertEqual(PamMediaThumbnailCache.victims(entries, maxBytes: 900, maxFiles: 10), (0...3).map { "t\($0).jpg" })
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let cache = PamMediaThumbnailCache(directory: directory)
+        let file = cache.file(for: "id:1:256")
+        XCTAssertEqual(file, cache.file(for: "id:1:256"))
+        XCTAssertNotEqual(file, cache.file(for: "id:2:256"))
+        XCTAssertFalse(cache.hit(file))
+        try cache.store(Data([1]), at: file)
+        XCTAssertTrue(cache.hit(file))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     func testMediaLibraryModuleIsRegisteredAndRejectsUnknownMethod() {
         let registry = NativeModuleRegistry()
         let completed = expectation(description: "registered media library responds")

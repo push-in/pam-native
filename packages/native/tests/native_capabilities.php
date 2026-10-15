@@ -11,6 +11,7 @@ use Pam\Native\ImagePrefetchResult;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\Wire;
 use Pam\Native\MediaAsset;
+use Pam\Native\MediaPickerType;
 use Pam\Native\MediaPriority;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Navigation\DeepLink;
@@ -233,6 +234,42 @@ $assert(
     $rejects(static fn () => MediaLibrary::save('a.jpg', album: '../x'))
         && $rejects(static fn () => MediaLibrary::save('a.pdf', mimeType: 'application/pdf')),
     'MediaLibrary::save must reject unsafe albums and non-media MIME types.',
+);
+
+$mediaSeen = ['uri' => null, 'thumbFailure' => null, 'pageFailure' => null, 'albumFailure' => null, 'limited' => null, 'page' => null];
+MediaLibrary::thumbnail('42', 99_999, static function (string $uri) use (&$mediaSeen): void { $mediaSeen['uri'] = $uri; });
+$thumb = $lastCall();
+$assert(
+    $thumb['module'] === 'media-library' && $thumb['method'] === 'thumbnail'
+        && $thumb['values'] == ['id' => '42', 'maxPx' => 1024],
+    'MediaLibrary::thumbnail must bridge the asset id and clamp the edge.',
+);
+Runtime::dispatchModuleResult($thumb['requestId'], ModuleResultStatus::Success->value, Wire::map(['uri' => 'file:///cache/pam-media-thumbnails/a.jpg']));
+MediaLibrary::thumbnail('43', 8, static function (string $_): void {}, static function (string $message) use (&$mediaSeen): void { $mediaSeen['thumbFailure'] = $message; });
+$assert($lastCall()['values']['maxPx'] === 32, 'MediaLibrary::thumbnail must clamp tiny edges to 32 px.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Media asset not found');
+MediaLibrary::assets(MediaPickerType::Media, static function ($page) use (&$mediaSeen): void { $mediaSeen['page'] = $page; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map([
+    'items' => json_encode([['id' => '9', 'uri' => 'content://media/external/file/9', 'thumbnailUri' => 'content://media/external/video/media/9', 'mimeType' => 'video/mp4']]),
+    'hasMore' => false,
+]));
+MediaLibrary::assets(MediaPickerType::Media, static function ($_): void {}, failure: static function (string $message) use (&$mediaSeen): void { $mediaSeen['pageFailure'] = $message; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Photos permission is not granted');
+MediaLibrary::albums(MediaPickerType::Media, static function (array $_): void {}, static function (string $message) use (&$mediaSeen): void { $mediaSeen['albumFailure'] = $message; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Photos permission is not granted');
+MediaLibrary::refreshLimitedSelection(static function (bool $limited) use (&$mediaSeen): void { $mediaSeen['limited'] = $limited; });
+$assert($lastCall()['method'] === 'refreshLimitedSelection', 'refreshLimitedSelection must call the native media library.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['limited' => true]));
+$assert(
+    $mediaSeen['uri'] === 'file:///cache/pam-media-thumbnails/a.jpg'
+        && $mediaSeen['thumbFailure'] === 'Media asset not found'
+        && $mediaSeen['page']?->items[0]->thumbnailUri === 'content://media/external/video/media/9'
+        && $mediaSeen['pageFailure'] === 'Photos permission is not granted'
+        && $mediaSeen['albumFailure'] === 'Photos permission is not granted'
+        && $mediaSeen['limited'] === true
+        && (new MediaAsset('1', 'u', 'n', 'image/jpeg', 1, 1, 0, 1, 0, 0, '', '', false))->thumbnailUri === ''
+        && $rejects(static fn () => MediaLibrary::thumbnail(' ', 64, static function (string $_): void {})),
+    'MediaLibrary must expose thumbnails, thumbnailUri, limited reselection and failure callbacks without exceptions.',
 );
 
 // 5. Secure screens, explicit and route-scoped.

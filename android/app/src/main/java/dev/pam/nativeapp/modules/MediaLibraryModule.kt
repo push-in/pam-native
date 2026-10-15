@@ -28,7 +28,11 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             save(payload, completion)
             return
         }
-        if (method != "assets" && method != "albums") {
+        if (method == "refreshLimitedSelection") {
+            refreshLimitedSelection(completion)
+            return
+        }
+        if (method != "assets" && method != "albums" && method != "thumbnail") {
             completion.failure("Unknown media-library method $method")
             return
         }
@@ -41,6 +45,7 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
                 runCatching {
                     when (method) {
                         "assets" -> assets(payload)
+                        "thumbnail" -> thumbnail(payload)
                         else -> albums(payload)
                     }
                 }.fold(
@@ -107,6 +112,127 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             }
         }
     }
+
+    /**
+     * Android 14+ with partial ("selected photos") access: asks again so the
+     * user can change the selection. Completes with whether access is still
+     * limited; other versions and full access complete at once.
+     */
+    private fun refreshLimitedSelection(completion: ModuleCompletion) {
+        val activity = context as? dev.pam.nativeapp.PamActivity
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || !limitedAccess() || activity == null) {
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("limited" to WireValue.Flag(limitedAccess()))),
+            )
+            return
+        }
+        activity.runOnUiThread {
+            activity.requestPamPermissionsAgain(
+                arrayOf(
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                ),
+            ) {
+                completion.complete(
+                    ModuleResultStatus.SUCCESS,
+                    WireMap.encode(mapOf("limited" to WireValue.Flag(limitedAccess()))),
+                )
+            }
+        }
+    }
+
+    private fun limitedAccess(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) &&
+            !granted(Manifest.permission.READ_MEDIA_IMAGES) &&
+            !granted(Manifest.permission.READ_MEDIA_VIDEO)
+
+    /**
+     * A JPEG of at most `maxPx` on its longer edge (videos: a frame) in a
+     * bounded disk cache, decoded at the requested size: the platform
+     * thumbnail provider on Android 10+, a sampled decode or a scaled video
+     * frame before. Returns a `file://` URI.
+     */
+    private fun thumbnail(payload: ByteArray): ByteArray {
+        check(!closed.get()) { "Media-library module is closed" }
+        val values = WireMap.decode(payload)
+        val id = values.text("id")?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+            ?: error("Media asset id is invalid")
+        val maxPx = MediaThumbnails.clampEdge(values.integer("maxPx", 256L))
+        val row = context.contentResolver.query(
+            ContentUris.withAppendedId(collection(), id),
+            arrayOf(
+                MediaStore.Files.FileColumns.MEDIA_TYPE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+            ),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) null else cursor.getInt(0) to cursor.getLong(1)
+        } ?: error("Media asset not found")
+        val video = row.first == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+        if (!video && row.first != MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE) {
+            error("Media asset is not an image or video")
+        }
+        val cache = MediaThumbnails(File(context.cacheDir, "pam-media-thumbnails"))
+        val file = cache.file("$id:${row.second}:$maxPx")
+        if (cache.hit(file)) return thumbnailResult(file)
+        val typed = ContentUris.withAppendedId(
+            if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            id,
+        )
+        val bitmap = decodeThumbnail(typed, video, maxPx) ?: error("Cannot create a thumbnail for this asset")
+        val fitted = MediaThumbnails.fit(bitmap, maxPx)
+        try {
+            cache.store(file, fitted)
+        } finally {
+            if (fitted !== bitmap) fitted.recycle()
+            bitmap.recycle()
+        }
+        return thumbnailResult(file)
+    }
+
+    private fun thumbnailResult(file: File): ByteArray =
+        WireMap.encode(mapOf("uri" to WireValue.Text(android.net.Uri.fromFile(file).toString())))
+
+    private fun decodeThumbnail(uri: android.net.Uri, video: Boolean, maxPx: Int): android.graphics.Bitmap? =
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                return@runCatching context.contentResolver.loadThumbnail(uri, android.util.Size(maxPx, maxPx), null)
+            }
+            if (video) {
+                val retriever = android.media.MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, uri)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                        retriever.getScaledFrameAtTime(
+                            0L,
+                            android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            maxPx,
+                            maxPx,
+                        )
+                    } else {
+                        retriever.getFrameAtTime(0L)
+                    }
+                } finally {
+                    retriever.release()
+                }
+            } else {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use {
+                    android.graphics.BitmapFactory.decodeStream(it, null, bounds)
+                }
+                val options = android.graphics.BitmapFactory.Options().apply {
+                    inSampleSize = MediaThumbnails.sampleSize(bounds.outWidth, bounds.outHeight, maxPx)
+                }
+                context.contentResolver.openInputStream(uri)?.use {
+                    android.graphics.BitmapFactory.decodeStream(it, null, options)
+                }
+            }
+        }.getOrNull()
 
     private fun declaresPermission(permission: String): Boolean = runCatching {
         @Suppress("DEPRECATION")
@@ -213,9 +339,11 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
         val mimeType = cursor.string(MediaStore.MediaColumns.MIME_TYPE)
         val createdAt = cursor.long(MediaStore.MediaColumns.DATE_ADDED).coerceAtLeast(0L) * 1_000L
         val modifiedAt = cursor.long(MediaStore.MediaColumns.DATE_MODIFIED).coerceAtLeast(0L) * 1_000L
+        val mediaType = cursor.int(MediaStore.Files.FileColumns.MEDIA_TYPE)
         return JSONObject().apply {
             put("id", id.toString())
             put("uri", ContentUris.withAppendedId(collection(), id).toString())
+            put("thumbnailUri", typedUri(id, mediaType).toString())
             put("name", cursor.string(MediaStore.MediaColumns.DISPLAY_NAME))
             put("mimeType", mimeType)
             put("width", cursor.int(MediaStore.MediaColumns.WIDTH).coerceAtLeast(0))
@@ -268,6 +396,20 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
         }
         return clauses.joinToString(" AND ") to arguments.toTypedArray()
     }
+
+    /**
+     * The typed images/video URI: an `Image` with it draws from the platform
+     * thumbnail cache at the view size (videos: a frame).
+     */
+    private fun typedUri(id: Long, mediaType: Int): android.net.Uri =
+        ContentUris.withAppendedId(
+            if (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO) {
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            },
+            id,
+        )
 
     private fun collection() =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

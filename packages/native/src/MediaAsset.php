@@ -20,6 +20,12 @@ final readonly class MediaAsset
         public string $albumId,
         public string $albumTitle,
         public bool $favorite,
+        /**
+         * Source for a grid cell: an `Image` with it decodes at the view
+         * size from the platform thumbnail cache (videos: a frame). Empty
+         * when the host does not report one; use `uri` then.
+         */
+        public string $thumbnailUri = '',
     ) {
     }
 

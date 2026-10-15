@@ -26,13 +26,18 @@ final class MediaLibrary
     {
     }
 
-    /** @param Closure(MediaAssetPage): void $callback */
+    /**
+     * @param Closure(MediaAssetPage): void $callback
+     * @param null|Closure(string): void $failure native failures (no
+     *        permission, closed module) instead of an exception
+     */
     public static function assets(
         MediaPickerType $type,
         Closure $callback,
         int $limit = 80,
         int $offset = 0,
         ?string $albumId = null,
+        ?Closure $failure = null,
     ): int {
         return self::invoke(
             'assets',
@@ -53,13 +58,18 @@ final class MediaLibrary
                     hasMore: (bool) ($values['hasMore'] ?? false),
                 ));
             },
+            $failure,
         );
     }
 
-    /** @param Closure(list<MediaAlbum>): void $callback */
+    /**
+     * @param Closure(list<MediaAlbum>): void $callback
+     * @param null|Closure(string): void $failure
+     */
     public static function albums(
         MediaPickerType $type,
         Closure $callback,
+        ?Closure $failure = null,
     ): int {
         return self::invoke(
             'albums',
@@ -73,6 +83,70 @@ final class MediaLibrary
                 ),
                 self::decodeList((string) ($values['items'] ?? '[]')),
             )),
+            $failure,
+        );
+    }
+
+    /** Longest edge accepted by {@see thumbnail()}. */
+    public const THUMBNAIL_MAX_PX = 1024;
+
+    /**
+     * Writes a JPEG thumbnail of a library asset (videos: a frame) whose
+     * longer edge is at most [$maxPx] (32-1024) into a bounded disk cache and
+     * reports its `file://` URI. Decoded at that size natively; repeated
+     * calls for an unchanged asset are cache hits.
+     *
+     * @param Closure(string $uri): void $done
+     * @param null|Closure(string): void $failure
+     */
+    public static function thumbnail(
+        string $assetId,
+        int $maxPx,
+        Closure $done,
+        ?Closure $failure = null,
+    ): int {
+        $assetId = trim($assetId);
+        if ($assetId === '' || strlen($assetId) > 256 || preg_match('/[\x00-\x1f]/', $assetId) === 1) {
+            throw new InvalidArgumentException('Media asset id is invalid.');
+        }
+
+        return self::invoke(
+            'thumbnail',
+            ['id' => $assetId, 'maxPx' => max(32, min(self::THUMBNAIL_MAX_PX, $maxPx))],
+            static function (array $values) use ($done, $failure): void {
+                $uri = (string) ($values['uri'] ?? '');
+                if ($uri === '') {
+                    if ($failure === null) {
+                        throw new RuntimeException('Native thumbnail payload is invalid.');
+                    }
+                    $failure('Native thumbnail payload is invalid.');
+
+                    return;
+                }
+                $done($uri);
+            },
+            $failure,
+        );
+    }
+
+    /**
+     * With limited ("selected photos") access — iOS 14+ and Android 14+ —
+     * shows the system selection again so the user can add or remove items;
+     * then reload `assets()`. Completes with whether access is still limited.
+     * With full or no access it completes at once without UI.
+     *
+     * @param Closure(bool $limited): void $done
+     * @param null|Closure(string): void $failure
+     */
+    public static function refreshLimitedSelection(Closure $done, ?Closure $failure = null): int
+    {
+        return self::invoke(
+            'refreshLimitedSelection',
+            [],
+            static function (array $values) use ($done): void {
+                $done((bool) ($values['limited'] ?? false));
+            },
+            $failure,
         );
     }
 
@@ -153,6 +227,7 @@ final class MediaLibrary
             albumId: (string) ($item['albumId'] ?? ''),
             albumTitle: (string) ($item['albumTitle'] ?? ''),
             favorite: (bool) ($item['favorite'] ?? false),
+            thumbnailUri: (string) ($item['thumbnailUri'] ?? ''),
         );
     }
 
@@ -171,14 +246,19 @@ final class MediaLibrary
         return array_values(array_filter($items, 'is_array'));
     }
 
-    private static function invoke(string $method, array $payload, Closure $callback): int
+    private static function invoke(string $method, array $payload, Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'media-library',
             $method,
             $payload,
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $callback($result->payload === '' ? [] : Wire::decodeMap($result->payload));

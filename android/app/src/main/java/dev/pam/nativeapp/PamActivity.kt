@@ -707,6 +707,17 @@ class PamActivity : FragmentActivity() {
         requestPermissions(permissions, request)
     }
 
+    /**
+     * Requests [permissions] even when one is already granted: on Android 14+
+     * with partial media access this shows the photo/video selection again.
+     */
+    fun requestPamPermissionsAgain(permissions: Array<String>, callback: (Boolean) -> Unit) {
+        val request = nextPermissionRequest++
+        if (nextPermissionRequest > 60_000) nextPermissionRequest = 40_000
+        permissionCallbacks[request] = callback
+        requestPermissions(permissions, request)
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,

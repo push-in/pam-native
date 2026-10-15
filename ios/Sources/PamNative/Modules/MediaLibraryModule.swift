@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import UIKit
 import UniformTypeIdentifiers
 
 enum PamPhotoAssetURI {
@@ -49,7 +50,11 @@ final class MediaLibraryModule: NativeModule {
             save(payload, completion)
             return
         }
-        guard method == "assets" || method == "albums" else {
+        if method == "refreshLimitedSelection" {
+            DispatchQueue.main.async { self.refreshLimitedSelection(completion) }
+            return
+        }
+        guard method == "assets" || method == "albums" || method == "thumbnail" else {
             completion(.failure, Data("Unknown media-library method \(method)".utf8))
             return
         }
@@ -64,6 +69,14 @@ final class MediaLibraryModule: NativeModule {
                 let values = try WireMap.decode(payload)
                 let type = Int(self.integer(values, "type", fallback: 5))
                 let result: [String: WireValue]
+                if method == "thumbnail" {
+                    try self.thumbnail(
+                        id: self.text(values, "id"),
+                        maxPx: PamMediaThumbnailCache.clampEdge(self.integer(values, "maxPx", fallback: 256)),
+                        completion: completion
+                    )
+                    return
+                }
                 switch method {
                 case "assets":
                     result = try self.assets(
@@ -110,6 +123,73 @@ final class MediaLibraryModule: NativeModule {
             "items": .text(try json(items)),
             "hasMore": .flag(end < result.count),
         ]
+    }
+
+    /// A JPEG of at most `maxPx` on its longer edge (videos: the poster
+    /// frame), decoded by Photos at that size into a bounded disk cache.
+    /// Runs on the module queue; completes with a `file://` URI.
+    private func thumbnail(id: String, maxPx: Int, completion: @escaping ModuleCompletion) throws {
+        guard !id.isEmpty,
+              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject,
+              asset.mediaType == .image || asset.mediaType == .video else {
+            completion(.failure, Data("Media asset not found".utf8))
+            return
+        }
+        let cache = PamMediaThumbnailCache.shared
+        let file = cache.file(for: "\(id):\(milliseconds(asset.modificationDate)):\(maxPx)")
+        if cache.hit(file) {
+            completion(.success, try WireMap.encode(["uri": .text(file.absoluteString)]))
+            return
+        }
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.isSynchronous = true
+        var produced: UIImage?
+        var failure: String?
+        PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: CGSize(width: maxPx, height: maxPx),
+            contentMode: .aspectFit,
+            options: options
+        ) { image, info in
+            if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
+            produced = image
+            failure = (info?[PHImageErrorKey] as? Error)?.localizedDescription
+        }
+        guard let image = produced,
+              let data = PamMediaThumbnailCache.fitted(image, maxPx: maxPx).jpegData(compressionQuality: 0.82) else {
+            completion(.failure, Data((failure ?? "Cannot create a thumbnail for this asset").utf8))
+            return
+        }
+        try cache.store(data, at: file)
+        completion(.success, try WireMap.encode(["uri": .text(file.absoluteString)]))
+    }
+
+    /// iOS 14+ limited Photos access: presents the limited-library picker so
+    /// the user can change the selection; completes with whether access is
+    /// still limited. Other states complete at once.
+    private func refreshLimitedSelection(_ completion: @escaping ModuleCompletion) {
+        func finish() {
+            let limited = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
+            completion(.success, (try? WireMap.encode(["limited": .flag(limited)])) ?? Data())
+        }
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited,
+              let presenter = Self.presenter() else {
+            finish()
+            return
+        }
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter) { _ in
+            DispatchQueue.main.async { finish() }
+        }
+    }
+
+    private static func presenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var controller = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        return controller
     }
 
     private func albums(type: Int) throws -> [String: WireValue] {
@@ -168,6 +248,8 @@ final class MediaLibraryModule: NativeModule {
         return [
             "id": asset.localIdentifier,
             "uri": PamPhotoAssetURI.make(asset.localIdentifier),
+            // The renderer draws a Photos asset at the view size (videos: poster frame).
+            "thumbnailUri": PamPhotoAssetURI.make(asset.localIdentifier),
             "name": resource?.originalFilename ?? "",
             "mimeType": mime,
             "width": asset.pixelWidth,
