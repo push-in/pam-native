@@ -33,9 +33,23 @@ final class VirtualizedList extends Element
      *
      * Assign stable keys to stateful or reorderable children. Null and false
      * items are holes that keep the following siblings' identities stable.
+     *
+     * Rows may also be closures returning the row (or a generator / iterable
+     * of rows and closures): a closure row is called only when the list
+     * window reaches it, and is identified by its position.
+     *
+     * @param Renderable|Closure(): (Renderable|false|null)|iterable<Renderable|Closure|false|null>|array<string>|false|null ...$items
      */
-    public static function make(Renderable|array|false|null ...$items): self
+    public static function make(Renderable|Closure|iterable|false|null ...$items): self
     {
+        if (count($items) === 1 && $items[0] instanceof \Traversable) {
+            $items = iterator_to_array($items[0], false);
+        }
+        foreach ($items as $item) {
+            if ($item instanceof Closure) {
+                return self::deferred($items);
+            }
+        }
         if (count($items) === 1 && is_array($items[0])) {
             $strings = [];
             foreach ($items[0] as $item) {
@@ -79,6 +93,51 @@ final class VirtualizedList extends Element
         }
         $list = new self(NodeKind::VirtualList);
         $list->lazyRows = new LazyRows($values, $keys, $row);
+
+        return $list;
+    }
+
+    /**
+     * Closure rows are built when the window reaches them; the other rows
+     * are kept as given (keyed by their key, or by position).
+     *
+     * @param array<int|string, mixed> $items
+     */
+    private static function deferred(array $items): self
+    {
+        $rows = [];
+        $keys = [];
+        $seen = [];
+        foreach (array_values($items) as $index => $item) {
+            if ($item === null || $item === false) {
+                continue;
+            }
+            if (!$item instanceof Closure && !$item instanceof Renderable) {
+                throw new InvalidArgumentException('VirtualizedList rows must be renderable or closures returning one.');
+            }
+            $key = $item instanceof Element && $item->elementKey !== null ? $item->elementKey : '#'.$index;
+            if (isset($seen[$key])) {
+                throw new InvalidArgumentException("Duplicate VirtualizedList row key {$key}.");
+            }
+            $seen[$key] = true;
+            $rows[] = $item;
+            $keys[] = $key;
+        }
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = new LazyRows(
+            $rows,
+            $keys,
+            static fn (Renderable|Closure $row): Renderable|false|null => $row instanceof Closure ? $row() : $row,
+        );
+
+        return $list;
+    }
+
+    /** @internal Rows built by the encoders on demand (template p-for, see TemplateRenderer). */
+    public static function __pamRows(LazyRows $rows): self
+    {
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = $rows;
 
         return $list;
     }

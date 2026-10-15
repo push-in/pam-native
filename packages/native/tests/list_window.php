@@ -179,3 +179,30 @@ $assert(
     count($shortRows) === 2 && array_filter($shortRows, $isPlaceholder) === [],
     'Short lazy lists build every row (keys default to the item id).',
 );
+
+// VirtualizedList::make() with closure rows (or a generator of them) defers
+// them like ::of(): only the window is built, rows keyed by position.
+$closureBuilt = 0;
+$closureRows = [];
+for ($i = 0; $i < 5_000; $i++) {
+    $closureRows[] = static function () use ($i, &$closureBuilt, $windowRow) {
+        $closureBuilt++;
+
+        return $windowRow($i);
+    };
+}
+$closureEncoder = new TreeEncoder();
+$closureEncoder->encode(VirtualizedList::make(...$closureRows)->estimatedRowHeight(64)->toElement());
+[, $closureListRows] = $windowRows($closureEncoder->frameNodes());
+$assert(
+    $closureBuilt === 48 && count($closureListRows) === 5_000
+        && count(array_filter($closureListRows, $isPlaceholder)) === 5_000 - 48,
+    "Closure rows must be built only inside the window (built {$closureBuilt}).",
+);
+$closureBuilt = 0;
+$generator = (static function () use ($closureRows) {
+    yield from $closureRows;
+})();
+$generatorEncoder = new TreeEncoder();
+$generatorEncoder->encode(VirtualizedList::make($generator)->toElement());
+$assert($closureBuilt === 48, "A generator of closure rows must be deferred too (built {$closureBuilt}).");

@@ -20,10 +20,17 @@
 - Protocol: properties 541 (`ListPlaceholder`) and 542 (`ListWindowed`) and
   event 80 (`ListWindow`, consumed by the runtime) are appended. Android,
   iOS, Rust and PHP tables stay in parity.
-- `VirtualizedList::of($items, $row, $key)` / `VirtualGrid::of()`: data-driven
-  lists (FlatList/FlashList `data` + `renderItem` + `keyExtractor`) whose rows
-  are built only when the window materializes them; the PHP and native
-  encoders send keyed placeholders for the rest.
+- Rows are rendered only when the window reaches them, with no app change:
+  a `p-for` that is the only child of `<VirtualizedList>`/`<VirtualGrid>`
+  (more than 96 items) renders each row when the encoder materializes it,
+  exactly as the eager loop would (same keys, slots, events and component
+  instances). Row components mount as children of the component that owns
+  the template, keep their state by key across re-renders and reorders, and
+  unmount when they leave the list (or the materialized window). On the
+  10,000-row list the template screen builds 48 rows instead of 10,000.
+  `VirtualizedList::make()` defers closure rows (and generators of them) the
+  same way, and `VirtualizedList::of($items, $row, $key)` / `VirtualGrid::of()`
+  remain as the data-driven builder (FlatList `data` + `renderItem`).
 - Android renderer: node and frame maps are O(1) (`PamLongMap`; hashed node
   ids made `LongSparseArray.put` O(n²)); virtual-list row removals/reorders
   are applied once per commit and the adapter updates by ranges in one O(N)

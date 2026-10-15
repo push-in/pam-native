@@ -33,7 +33,7 @@ final class TreeEncoder
      * the list's estimate. Native reports the rows it shows (EventKind
      * ListWindow) and the window grows ahead of the scroll.
      */
-    private const WINDOW_MIN_ROWS = 96;
+    public const WINDOW_MIN_ROWS = 96;
 
     /** Rows materialized when a list first mounts (and around initialScrollIndex). */
     private const WINDOW_INITIAL_ROWS = 48;
@@ -615,6 +615,7 @@ final class TreeEncoder
                     }
                 }
             }
+            $lazy->settle();
         }
         $candidate = $path === 'root' || ($cacheable && $children !== []);
         if ($candidate) {

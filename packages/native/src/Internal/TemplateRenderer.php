@@ -836,56 +836,7 @@ final class TemplateRenderer
             $plan = $node->pamPlan ??= self::nodePlan($node);
 
             if ($plan['for'] !== null) {
-                [$variable, $source, $keyExpression, $staticKey, $indexName, $indexValid, $loopNode] = $plan['for'];
-                $items = TemplateExpression::evaluate($source, $scope, $data);
-                if (is_int($items)) {
-                    $items = $items > 0 ? range(1, $items) : [];
-                } elseif ($items instanceof Traversable) {
-                    $items = iterator_to_array($items);
-                }
-                if (!is_array($items)) {
-                    throw new RuntimeException(
-                        'p-for source must resolve to an integer, array, or Traversable.',
-                    );
-                }
-                if (!$indexValid) {
-                    throw new RuntimeException('p-index must be a safe variable name.');
-                }
-                if (
-                    $keyExpression === null
-                    && $staticKey === null
-                    && count($items) > 1
-                ) {
-                    DevWarnings::warn(
-                        'p-for children should declare p-key (or :key) so native identities follow items, not positions',
-                        $node->source.':'.$node->line.':'.$node->column,
-                    );
-                }
-                $seenKeys = [];
-                $loopPath = $data['__pamNodePath'].'.';
-                foreach ($items as $itemIndex => $item) {
-                    $iterationData = $data;
-                    $iterationData[$variable] = $item;
-                    $iterationData[$indexName] = $itemIndex;
-                    $identity = $itemIndex;
-                    if ($keyExpression !== null || $staticKey !== null) {
-                        $identity = $keyExpression !== null
-                            ? self::dynamicValue($keyExpression, $scope, $iterationData)
-                            : self::value($staticKey, $scope, $iterationData);
-                        if (!is_string($identity) && !is_int($identity)) {
-                            throw new RuntimeException('p-key must resolve to a string or integer.');
-                        }
-                        $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
-                        if (isset($seenKeys[$fingerprint])) {
-                            throw new RuntimeException("Duplicate p-key {$identity} in loop.");
-                        }
-                        $seenKeys[$fingerprint] = true;
-                    }
-                    $iterationData['__pamNodePath'] = $loopPath.$identity;
-                    foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
-                        $output[] = $rendered;
-                    }
-                }
+                self::eagerLoop($output, $plan['for'], $node, self::loopItems($plan['for'], $scope, $data), $scope, $data, $slot);
                 $branchMatched = false;
                 continue;
             }
@@ -961,6 +912,205 @@ final class TemplateRenderer
         }
 
         return $output;
+    }
+
+    /**
+     * The items of a p-for loop.
+     *
+     * @param array<int, mixed> $for the loop plan (nodePlan()['for'])
+     * @param array<string, mixed> $data
+     * @return array<array-key, mixed>
+     */
+    private static function loopItems(array $for, ?object $scope, array $data): array
+    {
+        $items = TemplateExpression::evaluate($for[1], $scope, $data);
+        if (is_int($items)) {
+            $items = $items > 0 ? range(1, $items) : [];
+        } elseif ($items instanceof Traversable) {
+            $items = iterator_to_array($items);
+        }
+        if (!is_array($items)) {
+            throw new RuntimeException(
+                'p-for source must resolve to an integer, array, or Traversable.',
+            );
+        }
+        if (!$for[5]) {
+            throw new RuntimeException('p-index must be a safe variable name.');
+        }
+
+        return $items;
+    }
+
+    /**
+     * The identity of each loop item: its p-key (unique), or its index.
+     *
+     * @param array<int, mixed> $for
+     * @param array<array-key, mixed> $items
+     * @param array<string, mixed> $data
+     * @return array<array-key, int|string> by item index
+     */
+    private static function loopIdentities(
+        array $for,
+        CompiledTemplateNode $node,
+        array $items,
+        ?object $scope,
+        array $data,
+    ): array {
+        [$variable, , $keyExpression, $staticKey, $indexName] = $for;
+        if ($keyExpression === null && $staticKey === null) {
+            if (count($items) > 1) {
+                DevWarnings::warn(
+                    'p-for children should declare p-key (or :key) so native identities follow items, not positions',
+                    $node->source.':'.$node->line.':'.$node->column,
+                );
+            }
+            $identities = [];
+            foreach ($items as $itemIndex => $_) {
+                $identities[$itemIndex] = $itemIndex;
+            }
+
+            return $identities;
+        }
+        $identities = [];
+        $seenKeys = [];
+        foreach ($items as $itemIndex => $item) {
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $identity = $keyExpression !== null
+                ? self::dynamicValue($keyExpression, $scope, $iterationData)
+                : self::value($staticKey, $scope, $iterationData);
+            if (!is_string($identity) && !is_int($identity)) {
+                throw new RuntimeException('p-key must resolve to a string or integer.');
+            }
+            $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
+            if (isset($seenKeys[$fingerprint])) {
+                throw new RuntimeException("Duplicate p-key {$identity} in loop.");
+            }
+            $seenKeys[$fingerprint] = true;
+            $identities[$itemIndex] = $identity;
+        }
+
+        return $identities;
+    }
+
+    /**
+     * Renders every item of a p-for loop into $output.
+     *
+     * @param list<Element|string> $output
+     * @param array<int, mixed> $for
+     * @param array<array-key, mixed> $items
+     * @param array<string, mixed> $data with __pamNodePath set to the loop's path
+     */
+    private static function eagerLoop(
+        array &$output,
+        array $for,
+        CompiledTemplateNode $node,
+        array $items,
+        ?object $scope,
+        array $data,
+        string $slot,
+    ): void {
+        [$variable, , , , $indexName, , $loopNode] = $for;
+        $identities = self::loopIdentities($for, $node, $items, $scope, $data);
+        $loopPath = $data['__pamNodePath'].'.';
+        foreach ($items as $itemIndex => $item) {
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $identity = $identities[$itemIndex];
+            $iterationData['__pamNodePath'] = $loopPath.$identity;
+            foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
+                $output[] = $rendered;
+            }
+        }
+    }
+
+    /**
+     * The children of a VirtualizedList / VirtualGrid whose only child is a
+     * p-for loop: long loops become lazy rows (only the rows the encoder
+     * materializes are rendered, each exactly as the eager loop renders
+     * it), short ones render eagerly. Null when the children are anything
+     * else.
+     *
+     * @param list<CompiledTemplateNode> $nodes
+     * @param array<string, mixed> $data the list's child data
+     * @return LazyRows|list<Element|string>|null
+     */
+    private static function listLoop(array $nodes, ?object $scope, array $data): LazyRows|array|null
+    {
+        if (count($nodes) !== 1 || $nodes[0]->kind === 2) {
+            return null;
+        }
+        $node = $nodes[0];
+        $plan = $node->pamPlan ??= self::nodePlan($node);
+        $for = $plan['for'];
+        if ($for === null) {
+            return null;
+        }
+        // Same path and slot as nodes() gives its first child.
+        $parentPath = $data['__pamNodePath'] ?? 'root';
+        $parentPath = is_string($parentPath) || is_int($parentPath) ? (string) $parentPath : 'root';
+        $data['__pamNodePath'] = $parentPath.'.0';
+        $slot = '0';
+        $items = self::loopItems($for, $scope, $data);
+        $loopNode = $for[6];
+        $rowPlan = $loopNode->pamPlan ??= self::nodePlan($loopNode);
+        if (
+            count($items) <= TreeEncoder::WINDOW_MIN_ROWS
+            || $rowPlan['for'] !== null
+            || $rowPlan['control']
+        ) {
+            $output = [];
+            self::eagerLoop($output, $for, $node, $items, $scope, $data, $slot);
+
+            return $output;
+        }
+        $identities = self::loopIdentities($for, $node, $items, $scope, $data);
+        $indexes = array_keys($items);
+        $keys = [];
+        foreach ($identities as $identity) {
+            $key = (string) $identity;
+            if ($key === '' || strlen($key) > 128) {
+                // Not usable as a native element key: render eagerly.
+                $output = [];
+                self::eagerLoop($output, $for, $node, $items, $scope, $data, $slot);
+
+                return $output;
+            }
+            $keys[] = $key;
+        }
+        [$variable, , , , $indexName] = $for;
+        $loopPath = $data['__pamNodePath'].'.';
+        $render = static function (mixed $item, int $row) use (
+            $variable,
+            $indexName,
+            $loopNode,
+            $scope,
+            $data,
+            $slot,
+            $indexes,
+            $keys,
+            $loopPath,
+        ): ?Element {
+            $itemIndex = $indexes[$row];
+            $identity = $keys[$row];
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $iterationData['__pamNodePath'] = $loopPath.$identity;
+            $element = null;
+            foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
+                if (!$rendered instanceof Element || $element !== null) {
+                    throw new RuntimeException('Each virtualized row must render exactly one element.');
+                }
+                $element = $rendered;
+            }
+
+            return $element;
+        };
+
+        return new LazyRows(array_values($items), $keys, $render);
     }
 
     /**
@@ -1688,7 +1838,20 @@ final class TemplateRenderer
         } else {
             [$defaultNodes, $slotNodes] = self::componentSlotNodes($childNodes);
         }
-        $renderedChildren = $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
+        $lazyRows = null;
+        $renderedChildren = null;
+        if ($factory === null && $slotNodes === [] && ($tag === 'VirtualizedList' || $tag === 'VirtualGrid')) {
+            // `<VirtualizedList><Row p-for="...">` renders only the rows the
+            // encoder materializes (the window), like FlashList's renderItem.
+            $loop = self::listLoop($defaultNodes, $scope, $childData);
+            if ($loop instanceof LazyRows) {
+                $lazyRows = $loop;
+                $renderedChildren = [];
+            } else {
+                $renderedChildren = $loop;
+            }
+        }
+        $renderedChildren ??= $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
         $children = [];
         $text = '';
         foreach ($renderedChildren as $rendered) {
@@ -1849,16 +2012,23 @@ final class TemplateRenderer
             'FlatList', 'NativeList' => FlatList::make(
                 self::stringItems($values['items'] ?? []),
             ),
-            'VirtualizedList' => $children === []
-                ? FlatList::make(self::stringItems($values['items'] ?? []))
-                : VirtualizedList::make(...$children),
-            'VirtualGrid' => VirtualGrid::make(
-                max(1, self::intValue(
+            'VirtualizedList' => $lazyRows !== null
+                ? VirtualizedList::__pamRows($lazyRows)
+                : ($children === []
+                    ? FlatList::make(self::stringItems($values['items'] ?? []))
+                    : VirtualizedList::make(...$children)),
+            'VirtualGrid' => $lazyRows !== null
+                ? VirtualizedList::__pamRows($lazyRows)->columns(max(1, self::intValue(
                     $values['columns'] ?? $values['numColumns'] ?? 2,
                     'VirtualGrid columns',
-                )),
-                ...$children,
-            ),
+                )))
+                : VirtualGrid::make(
+                    max(1, self::intValue(
+                        $values['columns'] ?? $values['numColumns'] ?? 2,
+                        'VirtualGrid columns',
+                    )),
+                    ...$children,
+                ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
             'Swipeable' => self::swipeable($values, $children),

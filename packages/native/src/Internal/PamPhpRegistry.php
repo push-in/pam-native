@@ -314,7 +314,11 @@ final class PamPhpRegistry
         $seen = self::$seen ??= ++self::$pass;
         if ($bucket->pass !== $seen) {
             $bucket->pass = $seen;
-            $bucket->active = [];
+            // An owner reused this pass renders here only through a lazy
+            // list row: what it rendered before stays, as in finishRender().
+            $bucket->active = $owner instanceof Component && ComponentLifecycle::retainedWithoutRender($owner)
+                ? array_fill_keys(array_keys($bucket->instances), true)
+                : [];
         }
         $bucket->active[$cacheKey] = true;
         $instance = $bucket->instances[$cacheKey] ?? null;

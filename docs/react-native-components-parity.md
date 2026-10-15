@@ -68,6 +68,29 @@ completely as before. On a 10,000-row list this removes ~99% of the first
 frame's nodes from the PHP encoder, the engine's measure/layout pass and the
 native mount, so the list appears in the time of a short one.
 
+### Rows rendered on demand (templates, closures)
+
+Nothing to opt into: when a `p-for` is the only child of a
+`<VirtualizedList>` or `<VirtualGrid>` with more than 96 items, each row is
+rendered when the window reaches it, exactly as the eager loop would render
+it (same `p-key`, slot, events and component instances).
+
+```html
+<VirtualizedList estimatedRowHeight="72">
+    <MessageRow p-for="$message in $messages" :key="$message['id']" :message="$message" />
+</VirtualizedList>
+```
+
+Row components are children of the component that owns the template: they
+mount when their row is first rendered, keep their state by key across
+re-renders and reorders, and unmount when they leave the list or the
+materialized window (while the owner is not re-rendered, their instances
+stay keyed, so state survives a return to the window). State a row reads
+subscribes the owner, so changing it re-renders the list as before. Loops
+with 96 items or fewer, loops of control tags and lists with other children
+render eagerly. `VirtualizedList::make()` defers closure rows (and
+generators of them) the same way, keyed by position.
+
 ### Data-driven lists (`VirtualizedList::of`)
 
 The FlatList/FlashList shape: items, a row builder and a key.

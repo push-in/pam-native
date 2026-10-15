@@ -703,6 +703,12 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
             zval_ptr_dtor(&built);
             if (!encoded) return false;
         } ZEND_HASH_FOREACH_END();
+        // Rows built before but outside this window are dropped (their
+        // components unmount): LazyRows::settle().
+        zval settled;
+        zend_call_method_with_0_params(lazy, lazy->ce, nullptr, "settle", &settled);
+        zval_ptr_dtor(&settled);
+        if (EG(exception)) return false;
     }
     if (window != nullptr) {
         path.resize(mark);
