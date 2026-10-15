@@ -392,6 +392,19 @@ Drag::horizontal()->target('thumb')->atTouch(14)->bounds(0, 360)
     ->driveText('clock', [0, 360], [0, 125], DragTextFormat::ClockWithTotal);
 ```
 
+`drive()` reads the bounded translation (after `bounds()` and `rubberBand()`)
+and clamps at its first and last points. `driveRaw()` takes the same
+arguments but reads the raw finger translation and extrapolates past its
+points, so the property keeps following the finger beyond the limits, for
+example a header that stretches while the sheet itself is pinned at 0.
+`driveUnbounded()` makes every `drive()` of the drag behave that way. After
+release the raw input follows the settling position.
+
+```php
+Drag::vertical()->bounds(0, 0)->rubberBand(0)
+    ->driveRaw('hero', 'scale', [0, 200], [1, 1.4]);
+```
+
 Bind `on:gestureBegin` / `on:gestureEnd` / `on:gestureCancel` for ownership and
 commit the domain value on end. A continuous release reports `snapIndex = -1`.
 Labels accept 2–8 corresponding points and up to eight label drivers per drag;

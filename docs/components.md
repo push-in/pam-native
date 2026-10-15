@@ -787,6 +787,20 @@ exceptions; actual picker/import failures still do.
 Camera cancellation follows the same contract and invokes the
 `MediaCapture::capture()` callback with `null`.
 
+## Accessibility selection
+
+`accessibilitySelected` (protocol property 537) tells TalkBack and VoiceOver
+that an element is selected without touching its visual `selected` state:
+Android sets `AccessibilityNodeInfo.isSelected`, iOS adds or removes the
+`.selected` accessibility trait. When present it wins over `selected` for
+assistive technology only; when absent, `selected` keeps announcing as before.
+
+```html
+<Pressable accessibilityRole="tab" :accessibilitySelected="$tab === 'feed'">...</Pressable>
+```
+
+PHP: `->accessibilitySelected(true)`.
+
 ## Format PAM components
 
 The Composer package installs an official formatter:

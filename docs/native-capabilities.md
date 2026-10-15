@@ -138,6 +138,39 @@ photo access. Call `Files::importUri()` only after selection to copy that
 single asset into the PAM sandbox for editing, upload or durable app-owned
 storage.
 
+Every `MediaAsset` carries `thumbnailUri`, the source to give a grid cell:
+Android reports the typed images/video MediaStore URI, which `Image` decodes
+at the view size from the platform thumbnail cache (videos draw a frame); iOS
+reports the `phasset://` source, which `Image` requests at the view size
+(videos draw their poster frame). Neither reads the full file.
+
+`MediaLibrary::thumbnail($assetId, $maxPx, $done, $failure)` writes a JPEG
+whose longer edge is at most `$maxPx` (clamped to 32-1024) and reports its
+`file://` URI, for uploads, previews outside an `Image`, or sharing. It is
+decoded at the requested size (Android 10+ `loadThumbnail`, a sampled decode
+or `MediaMetadataRetriever.getScaledFrameAtTime` before; PhotoKit
+`requestImage` on iOS), runs on the media worker and lands in a bounded disk
+cache (`pam-media-thumbnails` in the cache directory: 24 MiB / 600 files,
+least recently used first, trimmed to 75%). The key includes the asset's
+modification date, so an edited photo gets a new thumbnail. Repeated calls are
+cache hits that only touch the file.
+
+```php
+MediaLibrary::thumbnail($asset->id, 320,
+    fn (string $uri) => $this->preview = $uri,
+    fn (string $error) => $this->preview = null,
+);
+```
+
+`assets()` and `albums()` take an optional `failure` closure: a missing
+permission or a native error then reaches it as a message instead of throwing.
+
+With limited ("selected photos") access, `MediaLibrary::refreshLimitedSelection(fn (bool $limited) => ...)`
+shows the system selection again so the user can add or remove items; reload
+`assets()` afterwards. iOS 14+ presents `presentLimitedLibraryPicker`; Android
+14+ asks for the visual media permissions again, which reopens the selection.
+With full or no access it completes at once (`limited` false) without UI.
+
 On iOS, the same calls use PhotoKit. Pages return stable `phasset://asset/`
 sources that `Image` and `Video` resolve on demand without copying the library.
 `Files::importUri()` exports only the selected asset into the PAM sandbox and
@@ -150,7 +183,12 @@ photo permission.
 `MediaCapture::capture()`
 captures a full-resolution photo or video. `Files::read()` and `Files::write()`
 only accept sandbox-relative paths and bridge at most one MiB per call; imports
-are bounded to 64 MiB. `Files::stat()` returns typed metadata,
+are bounded to 64 MiB. `Files::stat()` returns typed metadata; a missing
+file is not an error: it calls the optional `missing` closure (or nothing) and
+only other failures reach `failure` or throw. `Files::find()` is the nullable
+form (`?FileReference`), and `Files::exists($path, fn (bool $exists) => ...)`
+answers on the file worker (directories report false; only paths outside the
+sandbox fail).
 `Files::list()` inventories regular files in a sandbox directory, and
 `Files::delete()` removes a single sandbox file. Directory deletion and paths
 escaping the application sandbox are rejected.
