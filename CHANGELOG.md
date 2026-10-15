@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.42.0 - Unreleased
+## 1.42.0 - 2026-10-14
 
 Protocol: property 537 (`accessibilitySelected`) and 538
 (`keyboardShouldPersistTaps`), append-only. New module methods need no
