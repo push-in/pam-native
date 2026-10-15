@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.43.1 - 2026-10-15
 
 - Android baseline profile covers Media3 (ExoPlayer, common, decoder,
   datasource, extractor): with `speed-profile` the playback loop no longer
