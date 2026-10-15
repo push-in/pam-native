@@ -79,7 +79,11 @@ struct Encoder {
     zval event_property;    // Closure(int): never (unknown event kinds)
     std::unordered_set<zend_long> refresh_kinds;
 
-    std::unordered_map<std::string, std::uint64_t, StringHash, std::equal_to<>> identity_ids;
+    struct KnownIdentity {
+        std::uint64_t id;
+        bool owner;  // id_identities[id] is this identity (no hash collision)
+    };
+    std::unordered_map<std::string, KnownIdentity, StringHash, std::equal_to<>> identity_ids;
     std::string identity;  // scratch buffer
     std::unordered_map<std::uint64_t, std::string> id_identities;
 
@@ -314,12 +318,22 @@ bool node_id(Encoder& encoder, std::string_view path, zend_string* dom, zend_lon
     identity.append(digits, static_cast<std::size_t>(written));
     auto known = encoder.identity_ids.find(std::string_view(identity));
     if (known != encoder.identity_ids.end()) {
-        id = known->second;
-    } else {
-        // Top 60 bits of the XXH3-64 digest, as TreeEncoder::nodeId().
-        id = (XXH3_64bits(identity.data(), identity.size()) >> 4) & 0x0FFFFFFFFFFFFFFFULL;
-        encoder.identity_ids.emplace(identity, id);
+        id = known->second.id;
+        if (known->second.owner) {
+            // Fast path: this identity owns its id, only a duplicate in this
+            // frame can collide.
+            if (id == 0 || !encoder.ids.insert(id).second) {
+                throw_logic("Element identity collision at " + std::string(path) + "; assign a unique key.");
+                return false;
+            }
+            return true;
+        }
+        return reserve_id(encoder, id, identity, path);
     }
+    // Top 60 bits of the XXH3-64 digest, as TreeEncoder::nodeId().
+    id = (XXH3_64bits(identity.data(), identity.size()) >> 4) & 0x0FFFFFFFFFFFFFFFULL;
+    auto owner = encoder.id_identities.find(id);
+    encoder.identity_ids.emplace(identity, Encoder::KnownIdentity{id, owner == encoder.id_identities.end() || owner->second == identity});
     return reserve_id(encoder, id, identity, path);
 }
 
