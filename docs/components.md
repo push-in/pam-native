@@ -776,6 +776,38 @@ instead; virtual lists then snap exactly onto the target once the glide
 settles, unless a finger took over. iOS lists now jump by default too
 (they used to animate every request).
 
+### Taps while the keyboard is open (`keyboardShouldPersistTaps`)
+
+`keyboardShouldPersistTaps` on `ScrollView`, `FlatList`, `SectionList` and
+`VirtualizedList` follows React Native. It decides what a tap inside the
+scroll view does while the soft keyboard is visible:
+
+| Value | Tap while the keyboard is visible |
+| --- | --- |
+| `never` / `false` | Dismisses the keyboard (clears focus) and is consumed: children do not get the press. |
+| `handled` | Reaches the children; if no child handles it (pressable, button, switch, input…), the keyboard is dismissed. |
+| `always` / `true` | Never dismisses the keyboard. |
+
+```html
+<FlatList :items="$results" keyboardShouldPersistTaps="handled">…</FlatList>
+```
+
+```php
+Scroll::make($form)->keyboardShouldPersistTaps(KeyboardPersistTaps::Handled);
+FlatList::make($items)->keyboardShouldPersistTaps(true); // always
+```
+
+Without the attribute, PAM keeps its historical behaviour: a tap never
+dismisses the keyboard, i.e. like `always` (React Native's default is
+`never`, so set `never` explicitly for that parity). A tap on a text input
+always passes through so it can move focus. Drags still scroll in every mode;
+`keyboardDismissMode` (`on-drag`) is independent. Nothing is installed when
+the attribute is absent or `always`: Android tracks the tap in the container's
+touch dispatch (in `never` the release reaches children as a cancel, so press
+feedback may flash but `on:press` does not fire); iOS adds a tap gesture
+recognizer to the `UIScrollView` and, in `never`, makes the scroll view the
+hit view while the keyboard is up. Protocol property `538`.
+
 Pull to refresh (`:refreshing`, `on:refresh`, `tintColor`, `refreshColors`,
 `progressViewOffset`, `refreshEnabled`) goes straight on `ScrollView` and the
 lists; see [Pull to refresh](pull-to-refresh.md).

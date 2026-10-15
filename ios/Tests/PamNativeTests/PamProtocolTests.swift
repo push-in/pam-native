@@ -88,6 +88,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.mediaClockFormat, 535)
         XCTAssertEqual(PamConstants.mediaProgress, 536)
         XCTAssertEqual(PamConstants.accessibilitySelected, 537)
+        XCTAssertEqual(PamConstants.scrollKeyboardPersistTaps, 538)
         XCTAssertEqual(EventKind.doubleTap.rawValue, 70)
         XCTAssertEqual(EventKind.textLayout.rawValue, 75)
         XCTAssertEqual(PamConstants.onClickOutside, 285)

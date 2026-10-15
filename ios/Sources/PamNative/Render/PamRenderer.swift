@@ -2745,6 +2745,8 @@ public final class PamRenderer {
             mediaBoundIds.insert(nodeId)
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = value.boolOrNil() ?? false
+        case PamConstants.scrollKeyboardPersistTaps:
+            applyKeyboardPersistTaps(view, Int(value.integerOrNil() ?? 0))
         case PamConstants.mediaCachePolicy,
              PamConstants.mediaCacheKey,
              PamConstants.mediaCacheMaxAgeMs,
@@ -2910,6 +2912,19 @@ public final class PamRenderer {
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
         default:
             break
+        }
+    }
+
+    /// RN `keyboardShouldPersistTaps` on a scroll view or list (property 538).
+    private func applyKeyboardPersistTaps(_ view: UIView, _ value: Int) {
+        if let scroll = view as? PamAnchoredScrollView {
+            scroll.pamKeyboardTaps = PamKeyboardTapController.install(
+                value, on: scroll, current: scroll.pamKeyboardTaps
+            )
+        } else if let list = view as? PamVirtualListView {
+            list.pamKeyboardTaps = PamKeyboardTapController.install(
+                value, on: list, current: list.pamKeyboardTaps
+            )
         }
     }
 
@@ -3185,6 +3200,8 @@ public final class PamRenderer {
             if state.properties[PamConstants.mediaClock] == nil { mediaBoundIds.remove(nodeId) }
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = false
+        case PamConstants.scrollKeyboardPersistTaps:
+            applyKeyboardPersistTaps(view, PamKeyboardPersistTaps.none)
         case PamConstants.mediaCachePolicy,
              PamConstants.mediaCacheKey,
              PamConstants.mediaCacheMaxAgeMs,

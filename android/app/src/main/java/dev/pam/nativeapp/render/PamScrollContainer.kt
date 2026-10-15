@@ -45,6 +45,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private var momentumLastY = 0
     private var decelerationRate = NORMAL_DECELERATION_RATE
     private var keyboardDismissMode = KEYBOARD_DISMISS_NONE
+    private var keyboardTaps: KeyboardTapTracker? = null
     private var requestedOffsetX = 0
     private var requestedOffsetY = 0
     private var hasRequestedOffsetX = false
@@ -707,7 +708,26 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (scrollPhase != null) observeScrollTouch(event)
+        if (keyboardTaps?.observe(event) == true) {
+            // keyboardShouldPersistTaps="never": the tap only dismissed the
+            // keyboard; children see the gesture cancelled, not clicked.
+            val action = event.action
+            event.action = MotionEvent.ACTION_CANCEL
+            try {
+                super.dispatchTouchEvent(event)
+            } finally {
+                event.action = action
+            }
+            return true
+        }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** RN `keyboardShouldPersistTaps`; no tracker for absent or `always`. */
+    fun setKeyboardPersistTaps(value: Int) {
+        val mode = KeyboardPersistTaps.normalize(value)
+        if (keyboardTaps?.mode == mode) return
+        keyboardTaps = if (KeyboardPersistTaps.tracks(mode)) KeyboardTapTracker(this, mode) else null
     }
 
     private fun observeScrollTouch(event: MotionEvent) {

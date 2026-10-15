@@ -325,3 +325,20 @@ Mac validation (not compiled on Linux):
   release it follows the settle.
 - VoiceOver reads "selected" for `accessibilitySelected="true"` without the
   visual selected style, and not for `selected` + `accessibilitySelected="false"`.
+
+## keyboardShouldPersistTaps (property 538)
+
+Swift sources (`PamKeyboardPersistTaps.swift`) and
+`PamKeyboardPersistTapsTests` are written but not compiled on Linux.
+
+Mac validation:
+
+- `swift build`, then `swift test --filter PamKeyboardPersistTapsTests` and
+  `swift test --filter PamProtocolTests` (properties 537-538).
+- With the keyboard open over a `ScrollView` and a `FlatList`:
+  `never` - tapping a pressable or empty space only dismisses the keyboard
+  (no `on:press`), tapping another input moves focus, dragging still scrolls;
+  `handled` - tapping a pressable fires it and keeps the keyboard, empty space
+  dismisses it; `always` and absent - the keyboard never closes on tap.
+- Without the attribute, `PamAnchoredScrollView` / `PamVirtualListView` have no
+  extra gesture recognizer (view debugger).

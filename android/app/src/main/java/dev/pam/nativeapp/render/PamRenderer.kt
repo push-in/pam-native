@@ -3464,6 +3464,10 @@ class PamRenderer(
                 scheduleRouteListenerSync()
             }
             PropKey.SCROLL_ANIMATED -> (view as? PamScrollContainer)?.setScrollAnimated(value.flag())
+            PropKey.SCROLL_KEYBOARD_PERSIST_TAPS -> when (view) {
+                is PamScrollContainer -> view.setKeyboardPersistTaps(value.integer().toInt())
+                is PamRecyclerList -> view.setKeyboardPersistTaps(value.integer().toInt())
+            }
             PropKey.MEDIA_CLOCK -> {
                 view.setTag(dev.pam.nativeapp.R.id.pam_media_clock, value.text(key))
                 mediaBoundIds.add(state.id)
@@ -4436,6 +4440,10 @@ class PamRenderer(
                 routeListeners.remove(state.id)
             }
             PropKey.SCROLL_ANIMATED -> (view as? PamScrollContainer)?.setScrollAnimated(false)
+            PropKey.SCROLL_KEYBOARD_PERSIST_TAPS -> when (view) {
+                is PamScrollContainer -> view.setKeyboardPersistTaps(KeyboardPersistTaps.NONE)
+                is PamRecyclerList -> view.setKeyboardPersistTaps(KeyboardPersistTaps.NONE)
+            }
             PropKey.MEDIA_CLOCK -> {
                 view.setTag(dev.pam.nativeapp.R.id.pam_media_clock, null)
                 if (state.properties[PropKey.MEDIA_PROGRESS] == null) mediaBoundIds.remove(state.id)

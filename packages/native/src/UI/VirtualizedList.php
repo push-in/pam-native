@@ -17,6 +17,7 @@ use Pam\Native\PropKey;
 use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\Renderable;
 
+use function is_bool;
 use function count;
 use function is_array;
 use function is_string;
@@ -85,6 +86,21 @@ final class VirtualizedList extends Element
     public function prefetch(int $items): self
     {
         return $this->withProperty(PropKey::ListPrefetch, min(32, max(1, $items)));
+    }
+
+    /**
+     * React Native `keyboardShouldPersistTaps`: what a tap inside this
+     * scroll view does while the soft keyboard is visible. `true` is
+     * `Always`, `false` is `Never`. Without it, taps never dismiss the
+     * keyboard (PAM's historical behaviour).
+     */
+    public function keyboardShouldPersistTaps(\Pam\Native\KeyboardPersistTaps|bool $mode): self
+    {
+        if (is_bool($mode)) {
+            $mode = \Pam\Native\KeyboardPersistTaps::fromBool($mode);
+        }
+
+        return $this->withProperty(PropKey::ScrollKeyboardPersistTaps, $mode->value);
     }
 
     public function horizontal(bool $horizontal = true): self

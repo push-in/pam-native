@@ -27,6 +27,7 @@ import kotlin.math.max
 
 internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var rowHeight = 48f
+    private var keyboardTaps: KeyboardTapTracker? = null
     private var horizontal = false
     private var columns = 1
     private var inverted = false
@@ -691,7 +692,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             // the first phase of the gesture inside a platform ScrollView.
             parent?.requestDisallowInterceptTouchEvent(canConsumeScrollGesture())
         }
+        if (keyboardTaps?.observe(event) == true) {
+            // keyboardShouldPersistTaps="never": the tap only dismissed the
+            // keyboard; rows see the gesture cancelled, not clicked.
+            val action = event.action
+            event.action = MotionEvent.ACTION_CANCEL
+            try {
+                super.dispatchTouchEvent(event)
+            } finally {
+                event.action = action
+            }
+            return true
+        }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** RN `keyboardShouldPersistTaps`; no tracker for absent or `always`. */
+    fun setKeyboardPersistTaps(value: Int) {
+        val mode = KeyboardPersistTaps.normalize(value)
+        if (keyboardTaps?.mode == mode) return
+        keyboardTaps = if (KeyboardPersistTaps.tracks(mode)) KeyboardTapTracker(this, mode) else null
     }
 
     private fun canConsumeScrollGesture(): Boolean {

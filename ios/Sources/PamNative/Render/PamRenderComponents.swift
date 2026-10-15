@@ -239,13 +239,18 @@ final class PamAnchoredScrollView: UIScrollView {
     /// Sticky header children (`stickyHeader`).
     let pamSticky = PamStickyRegistry()
 
+    /// RN `keyboardShouldPersistTaps`; nil when absent or `always`.
+    var pamKeyboardTaps: PamKeyboardTapController?
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if !pamSticky.isEmpty, isUserInteractionEnabled, !isHidden, alpha > 0.01,
            self.point(inside: point, with: event),
            let pinned = pamSticky.hitTest(point, in: self, with: event) {
-            return pinned
+            return pamKeyboardTaps?.capture(pinned, in: self) ?? pinned
         }
-        return super.hitTest(point, with: event)
+        let hit = super.hitTest(point, with: event)
+        guard let taps = pamKeyboardTaps else { return hit }
+        return taps.capture(hit, in: self)
     }
 
     var primaryPageExtent: CGFloat {
@@ -452,13 +457,18 @@ final class PamVirtualListView: UIScrollView {
     /// Sticky header cells (`stickyHeader`).
     let pamSticky = PamStickyRegistry()
 
+    /// RN `keyboardShouldPersistTaps`; nil when absent or `always`.
+    var pamKeyboardTaps: PamKeyboardTapController?
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if !pamSticky.isEmpty, isUserInteractionEnabled, !isHidden, alpha > 0.01,
            self.point(inside: point, with: event),
            let pinned = pamSticky.hitTest(point, in: self, with: event) {
-            return pinned
+            return pamKeyboardTaps?.capture(pinned, in: self) ?? pinned
         }
-        return super.hitTest(point, with: event)
+        let hit = super.hitTest(point, with: event)
+        guard let taps = pamKeyboardTaps else { return hit }
+        return taps.capture(hit, in: self)
     }
     private var anchorOffset: CGFloat = 0
     private var anchorMaximum: CGFloat = -1

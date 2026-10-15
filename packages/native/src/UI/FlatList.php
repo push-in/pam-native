@@ -15,6 +15,7 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function is_bool;
 use function is_string;
 
 final class FlatList extends Element
@@ -72,6 +73,21 @@ final class FlatList extends Element
             ->withProperty(PropKey::ScrollTargetAlignment, $targetAlignment->value)
             ->withProperty(PropKey::ScrollAnimated, $animated)
             ->withProperty(PropKey::ScrollRequest, max(0, $request));
+    }
+
+    /**
+     * React Native `keyboardShouldPersistTaps`: what a tap inside this
+     * scroll view does while the soft keyboard is visible. `true` is
+     * `Always`, `false` is `Never`. Without it, taps never dismiss the
+     * keyboard (PAM's historical behaviour).
+     */
+    public function keyboardShouldPersistTaps(\Pam\Native\KeyboardPersistTaps|bool $mode): self
+    {
+        if (is_bool($mode)) {
+            $mode = \Pam\Native\KeyboardPersistTaps::fromBool($mode);
+        }
+
+        return $this->withProperty(PropKey::ScrollKeyboardPersistTaps, $mode->value);
     }
 
     public function horizontal(bool $horizontal = true): self

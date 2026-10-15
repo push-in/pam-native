@@ -143,6 +143,21 @@ final class Scroll extends Element
         );
     }
 
+    /**
+     * React Native `keyboardShouldPersistTaps`: what a tap inside this
+     * scroll view does while the soft keyboard is visible. `true` is
+     * `Always`, `false` is `Never`. Without it, taps never dismiss the
+     * keyboard (PAM's historical behaviour).
+     */
+    public function keyboardShouldPersistTaps(\Pam\Native\KeyboardPersistTaps|bool $mode): self
+    {
+        if (is_bool($mode)) {
+            $mode = \Pam\Native\KeyboardPersistTaps::fromBool($mode);
+        }
+
+        return $this->withProperty(PropKey::ScrollKeyboardPersistTaps, $mode->value);
+    }
+
     public function keyboardDismissMode(ScrollKeyboardDismissMode $mode): self
     {
         return $this->withProperty(

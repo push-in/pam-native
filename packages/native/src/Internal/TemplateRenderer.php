@@ -48,6 +48,7 @@ use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputSyncMode;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardAvoidingBehavior;
+use Pam\Native\KeyboardPersistTaps;
 use Pam\Native\KeyboardType;
 use Pam\Native\LayoutDirection;
 use Pam\Native\ModalAnimationType;
@@ -433,6 +434,7 @@ final class TemplateRenderer
         'snapToInterval' => PropKey::ScrollSnapInterval,
         'decelerationRate' => PropKey::ScrollDecelerationRate,
         'keyboardDismissMode' => PropKey::ScrollKeyboardDismissMode,
+        'keyboardShouldPersistTaps' => PropKey::ScrollKeyboardPersistTaps,
         'animating' => PropKey::ActivityAnimating,
         'hidesWhenStopped' => PropKey::ActivityHidesWhenStopped,
         'indicatorSize' => PropKey::ActivitySize,
@@ -4177,6 +4179,7 @@ final class TemplateRenderer
             PropKey::ScrollTargetAlignment,
             PropKey::ScrollAnimated,
             PropKey::ScrollRequest,
+            PropKey::ScrollKeyboardPersistTaps,
             => in_array(
                 $kind,
                 [
@@ -4711,6 +4714,15 @@ final class TemplateRenderer
                 'on-drag' => ScrollKeyboardDismissMode::OnDrag->value,
                 'interactive' => ScrollKeyboardDismissMode::Interactive->value,
             ]),
+            PropKey::ScrollKeyboardPersistTaps => match (true) {
+                $value === true, $value === 'true' => KeyboardPersistTaps::Always->value,
+                $value === false, $value === 'false' => KeyboardPersistTaps::Never->value,
+                default => self::named($value, [
+                    'never' => KeyboardPersistTaps::Never->value,
+                    'always' => KeyboardPersistTaps::Always->value,
+                    'handled' => KeyboardPersistTaps::Handled->value,
+                ]),
+            },
             PropKey::ScrollTargetAlignment => self::named($value, [
                 'start' => ScrollTargetAlignment::Start->value,
                 'center' => ScrollTargetAlignment::Center->value,
