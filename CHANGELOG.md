@@ -55,7 +55,11 @@
   rows went from seconds of UI-thread work to milliseconds.
 - `Style::properties()` is read natively on Android/iOS (same result, 14x).
 - `NavigationContainer::linking()` routes the launch URL before the first
-  frame (Android/iOS export `PAM_NATIVE_LAUNCH_URL`).
+  frame (Android/iOS export `PAM_NATIVE_LAUNCH_URL`), without a transition
+  (no AnimationComplete round trip re-renders the stack after it), and the
+  Android navigation host lays out and shows the top route in the very first
+  frame when it is mounted with the host (it used to show the screen under
+  it first and the deep-linked one a frame later).
 - Native tree encoder (Android and iOS, transparent): the hosts register a
   C++ port of `Internal\TreeEncoder` and the runtime uses it automatically.
   Frames, patches, node ids, callbacks and errors are byte-for-byte those of

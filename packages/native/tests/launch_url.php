@@ -33,6 +33,32 @@ $assert(
         && Linking::takeLaunchUrl() === null,
     'linking() must open the launch URL before the first render, once per process.',
 );
+// The launch route is simply there: no transition to finish, so no
+// AnimationComplete round trip re-renders the stack after the first frame
+// (the screen under it stays mounted below, like native-stack).
+$launchHome = 0;
+$launchRendered = (static function () use (&$launchHome): string {
+    $navigator = Route::stack(
+        name: 'launch-url-idle',
+        initial: 'home',
+        routes: static function () use (&$launchHome): void {
+            Route::screen('home', static function () use (&$launchHome) {
+                $launchHome++;
+
+                return Screen::make(Text::make('Home'));
+            });
+            Route::screen('list', static fn () => Screen::make(Text::make('List')))->deepLink('/list');
+        },
+    );
+    $navigator->openInitial('bench://list');
+    $operation = new ReflectionProperty($navigator, 'operation');
+
+    return json_encode([$navigator->current()->name, $operation->getValue($navigator)->name, count($navigator->toElement()->children)]);
+})();
+$assert(
+    $launchRendered === json_encode(['list', 'Idle', 2]),
+    'openInitial() must show the launch route without a transition ('.$launchRendered.').',
+);
 $secondNavigator = $launchStack('launch-url-second');
 NavigationContainer::make($secondNavigator)->linking();
 $assert(

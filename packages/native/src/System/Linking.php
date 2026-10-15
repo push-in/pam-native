@@ -165,7 +165,7 @@ final class Linking
     public static function routeLaunchUrl(Navigator $navigator): void
     {
         $url = self::takeLaunchUrl();
-        if ($url !== null && $navigator->open($url)) {
+        if ($url !== null && $navigator->openInitial($url)) {
             self::$routedLaunchUrl = $url;
         }
     }
