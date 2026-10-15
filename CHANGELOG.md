@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.42.1 - 2026-10-14
+
+Android and iOS host fix; PHP SDK, protocol and engine are unchanged from
+1.42.0 (only the version moves).
+
+- A PHP error never ends the app process anymore. A fatal error PHP cannot
+  turn into an exception (memory limit, `E_USER_ERROR`, compile errors), an
+  exception escaping the runtime, or `exit()`/`die()` in an event handler,
+  render, cycle collection or shutdown reached `zend_bailout()` without a
+  bailout address: PHP called `exit(-1)`, the app died with code 255 and the
+  C++ static destructors ran under the live render thread
+  (`~EglManager() leaked an EGL context`, then FORTIFY
+  `pthread_mutex_lock called on a destroyed mutex`), as seen on Zé Chat
+  during pull to refresh.
+- The bridges now run every PHP entry point of the worker under a bailout
+  guard, report the abandoned request as a fatal error (`PHP Fatal error`,
+  `PHP Parse error` or `PHP exit`, phase `terminated`, with PHP's message,
+  file and line), drop the events queued for it and wait for the next
+  reload: debug builds open the error inspector, release builds retry with a
+  fresh request. Closing a failed runtime shuts PHP down cleanly.
+- A fatal error or `exit()` in the app entry is detected too
+  (`php_execute_script()` returns `bool`; the old `FAILURE` comparison never
+  matched). Optional `Runtime::checkpointHotReload()`/`shutdown()` are probed
+  before being called.
+- Tests: `PamPhpFatalRecoveryInstrumentedTest` (exit, memory exhaustion and an
+  escaping exception in an event; memory exhaustion and exit in the entry;
+  closing a failed runtime), `scripts/test_php_bailout_guard.py` (every PHP
+  call of the worker is guarded, Android and iOS share the guard) and an iOS
+  report-parsing XCTest.
+
 ## 1.42.0 - 2026-10-14
 
 Protocol: property 537 (`accessibilitySelected`) and 538
