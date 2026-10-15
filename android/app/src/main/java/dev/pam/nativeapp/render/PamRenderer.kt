@@ -2058,6 +2058,20 @@ class PamRenderer(
                 }
             }?.coerceAtLeast(0f) ?: fallbackExtent
         }
+        // Windowed list: rows are known by index; a placeholder run stands
+        // for LIST_PLACEHOLDER_ROWS rows. The row at the top stays put while
+        // runs split into rows around it.
+        val windowed = state.properties[PropKey.LIST_WINDOWED] != null
+        list.rowSpan = if (windowed) {
+            { item ->
+                nodes[item]?.let { row ->
+                    intArrayOf(row.index, row.integerOrNull(PropKey.LIST_PLACEHOLDER_ROWS)?.toInt() ?: 1)
+                }
+            }
+        } else {
+            null
+        }
+        val rowAnchor = if (windowed && list.isLaidOut) list.rowAnchor() else null
         list.setRichItems(
             ids = itemIds,
             extents = itemExtents,
@@ -2091,6 +2105,7 @@ class PamRenderer(
                 }
             }
         }
+        rowAnchor?.let(list::restoreRowAnchor)
         list.setFullSpanIds(
             itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
         )
@@ -3888,6 +3903,7 @@ class PamRenderer(
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
             PropKey.LIST_PLACEHOLDER,
+            PropKey.LIST_PLACEHOLDER_ROWS,
             -> Unit
             // A list that crosses the windowing threshold starts (or stops)
             // reporting its visible rows.
@@ -4607,6 +4623,7 @@ class PamRenderer(
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
             PropKey.LIST_PLACEHOLDER,
+            PropKey.LIST_PLACEHOLDER_ROWS,
             -> Unit
             // A list that crosses the windowing threshold starts (or stops)
             // reporting its visible rows.
@@ -6530,9 +6547,10 @@ class PamRenderer(
             }
         }
         if (!placeholderNear) return
-        val firstId = list.richIdAt(first) ?: return
-        val lastId = list.richIdAt(last) ?: firstId
-        val request = "$firstId,$lastId"
+        // Row indexes ("@first,last"): rows inside a placeholder run have no
+        // node of their own.
+        val rows = list.visibleRows() ?: return
+        val request = "@${rows[0]},${rows[1]}"
         val now = SystemClock.uptimeMillis()
         if (request == state.listWindowRequest && now - state.listWindowRequestedAt < LIST_WINDOW_RETRY_MS) return
         state.listWindowRequest = request

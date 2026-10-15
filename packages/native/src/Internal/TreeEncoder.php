@@ -195,6 +195,9 @@ final class TreeEncoder
                     self::WINDOW_INITIAL_ROWS,
                     self::WINDOW_MARGIN_ROWS,
                     NodeKind::View->value,
+                    PropKey::ListNumColumns->value,
+                    PropKey::ListPlaceholderRows->value,
+                    PropKey::ListSection->value,
                 ],
             );
         }
@@ -235,12 +238,31 @@ final class TreeEncoder
         if ($list === null) {
             return false;
         }
-        [$path, $indexes] = $list;
+        [, $indexes] = $list;
         $first = $indexes[$firstRowId] ?? null;
         $last = $indexes[$lastRowId] ?? $first;
         if ($first === null || $last === null) {
             return false;
         }
+
+        return $this->extendWindowRows($listId, $first, $last);
+    }
+
+    /**
+     * Grows the window of a list around the rows $first..$last (row indexes,
+     * as hosts report rows inside a placeholder run). True when the next
+     * encode materializes new rows.
+     */
+    public function extendWindowRows(int $listId, int $first, int $last): bool
+    {
+        if ($this->native !== null) {
+            return pam_native_encoder_extend_window_rows($this->native, $listId, $first, $last);
+        }
+        $list = $this->windowLists[$listId] ?? null;
+        if ($list === null || $first < 0 || $last < 0) {
+            return false;
+        }
+        $path = $list[0];
         if ($last < $first) {
             [$first, $last] = [$last, $first];
         }
@@ -389,6 +411,61 @@ final class TreeEncoder
             $this->placeholders[$row] = $entries;
         }
         $this->items[] = $node;
+    }
+
+    /**
+     * One placeholder node for the rows $start..$end of a windowed list (all
+     * outside the window): a childless View at index $start, keyed by that
+     * row index ("rows:<start>"), flagged ListPlaceholder, with
+     * ListPlaceholderRows when it stands for several rows (the engine sizes
+     * it rows x the list estimate).
+     *
+     * @param array<string, array<int, array{0: string, 1: string, 2: int}>> $placements
+     * @param array<int, int> $rowIndexes
+     */
+    private function encodeRun(
+        int $parent,
+        string $path,
+        int $start,
+        int $rows,
+        array &$placements,
+        bool &$learned,
+        array &$rowIndexes,
+    ): void {
+        $segment = 'rows:'.$start;
+        $kind = NodeKind::View->value;
+        $placement = $placements[$segment][$kind] ?? null;
+        if ($placement !== null) {
+            [$childPath, , $childId] = $placement;
+            if (isset($this->ids[$childId])) {
+                throw new LogicException("Element identity collision at {$childPath}; assign a unique key.");
+            }
+            $this->ids[$childId] = true;
+        } else {
+            $childPath = $path.'/'.$segment;
+            $identity = $childPath.'|'.$kind;
+            $childId = $this->identityIds[$identity] ?? null;
+            if ($childId === null) {
+                $childId = $this->nodeId($childPath, null, $kind);
+            } else {
+                if ($childId === 0 || isset($this->ids[$childId]) || ($this->idIdentities[$childId] ?? $identity) !== $identity) {
+                    throw new LogicException("Element identity collision at {$childPath}; assign a unique key.");
+                }
+                $this->idIdentities[$childId] = $identity;
+                $this->ids[$childId] = true;
+            }
+            $placements[$segment][$kind] = [$childPath, $identity, $childId];
+            $learned = true;
+        }
+        $rowIndexes[$childId] = $start;
+        if (++$this->nodeCount > self::MAX_NODES) {
+            throw new LogicException('Pam Native trees cannot exceed 100,000 nodes.');
+        }
+        $properties = [PropKey::ListPlaceholder->value => "\x04\x01"];
+        if ($rows > 1) {
+            $properties[PropKey::ListPlaceholderRows->value] = self::$encodedIntegers[$rows] ?? self::encodeInteger($rows);
+        }
+        $this->items[] = new EncodedNode($childId, $parent, $start, $kind, $properties);
     }
 
     /**
@@ -628,6 +705,10 @@ final class TreeEncoder
 
         // Subtrees worth caching collect their own items; the rest of the
         // nodes join the enclosing subtree.
+        // A single-column windowed list sends each run of rows outside the
+        // window as one placeholder node sized for its rows: memory and
+        // work stay O(window) in PHP, the engine and the host.
+        $runs = $window !== null && (int) ($element->properties[PropKey::ListNumColumns->value] ?? 1) <= 1;
         $lazy = $element->lazyRows;
         if ($lazy === null) {
             $children = $element->children;
@@ -637,7 +718,8 @@ final class TreeEncoder
             $children = [];
             for ($row = 0, $rows = $lazy->count(); $row < $rows; $row++) {
                 if ($window !== null && !self::inRanges($window, $row)) {
-                    $children[$row] = $lazy->placeholder($row);
+                    // Rows outside the window: runs of placeholders (below).
+                    $children[$row] = $runs ? false : $lazy->placeholder($row);
                 } else {
                     $built = $lazy->row($row);
                     if ($built !== null) {
@@ -661,7 +743,28 @@ final class TreeEncoder
             $learned = false;
             $rowIndexes = [];
 
+            $runStart = -1;
+            $runRows = 0;
             foreach ($children as $childIndex => $child) {
+                if ($runs && (
+                    $child === false
+                    || (
+                        !self::inRanges($window, $childIndex)
+                        && self::deferrable($child)
+                        && !isset($child->properties[PropKey::ListSection->value])
+                    )
+                )) {
+                    if ($runStart < 0) {
+                        $runStart = $childIndex;
+                        $runRows = 0;
+                    }
+                    ++$runRows;
+                    continue;
+                }
+                if ($runStart >= 0) {
+                    $this->encodeRun($id, $path, $runStart, $runRows, $placements, $learned, $rowIndexes);
+                    $runStart = -1;
+                }
                 $child = $this->refreshHosted($child);
                 $childKind = $child->kind->value;
                 $childKey = $child->elementKey;
@@ -713,6 +816,9 @@ final class TreeEncoder
                     }
                 }
                 $this->encodeNode($child, $childId, $id, $childIndex, $childPath);
+            }
+            if ($runStart >= 0) {
+                $this->encodeRun($id, $path, $runStart, $runRows, $placements, $learned, $rowIndexes);
             }
             if ($learned) {
                 $this->childPaths[$path] = $placements;

@@ -702,7 +702,8 @@ enum class PropKey(val value: Int) {
     GESTURE_NATIVE_BOUNDS(539),
     GESTURE_NATIVE_CONTENT_ASPECT(540),
     LIST_PLACEHOLDER(541),
-    LIST_WINDOWED(542);
+    LIST_WINDOWED(542),
+    LIST_PLACEHOLDER_ROWS(543);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

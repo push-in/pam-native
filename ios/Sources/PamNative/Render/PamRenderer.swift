@@ -947,8 +947,20 @@ public final class PamRenderer {
         let onScreen = localFrames
             .filter { $0.1.intersects(viewport) }
             .sorted { horizontal ? $0.1.minX < $1.1.minX : $0.1.minY < $1.1.minY }
-        guard let first = onScreen.first?.0, let last = onScreen.last?.0 else { return }
-        let request = "\(first),\(last)"
+        guard let first = onScreen.first, let last = onScreen.last else { return }
+        // Row indexes ("@first,last"): a placeholder run (ListPlaceholderRows)
+        // stands for several rows of equal height and has no node per row.
+        func row(_ entry: (Int64, CGRect), at edge: CGFloat) -> Int {
+            let start = nodes[entry.0]?.index ?? 0
+            let rows = max(1, Int(nodes[entry.0]?.properties[PamConstants.listPlaceholderRows]?.pamInteger ?? 1))
+            let extent = horizontal ? entry.1.width : entry.1.height
+            guard rows > 1, extent > 0 else { return start }
+            let into = edge - (horizontal ? entry.1.minX : entry.1.minY)
+            return start + min(rows - 1, max(0, Int(into / (extent / CGFloat(rows)))))
+        }
+        let firstRow = row(first, at: horizontal ? viewport.minX : viewport.minY)
+        let lastRow = row(last, at: (horizontal ? viewport.maxX : viewport.maxY) - 1)
+        let request = "@\(firstRow),\(lastRow)"
         let now = CACurrentMediaTime()
         if let previous = listWindowRequests[listId], previous.request == request, now - previous.at < 0.25 {
             return

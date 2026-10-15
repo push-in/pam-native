@@ -135,7 +135,7 @@ $lazyPlaceholders = static function () use ($nativeTree): array {
 };
 $tiles = $lazyTiles();
 $assert(
-    count($tiles) === 48 && count($lazyPlaceholders()) === 2_000 - 48
+    count($tiles) === 48 && count($lazyPlaceholders()) === 1
         && count($tileClass::$mounts) === 48 && isset($tileClass::$mounts['item-47'])
         && !isset($tileClass::$mounts['item-48']),
     'A template p-for in a long VirtualizedList must render only the window (got '.count($tiles).' tiles, '
@@ -169,7 +169,7 @@ $assert(
 // Native reports rows near placeholders: the window grows, new rows mount.
 $placeholders = $lazyPlaceholders();
 $listId = $nativeTree->nodes[$placeholders[0]]['parent'];
-Runtime::dispatchEvent($listId, EventKind::ListWindow->value, $placeholders[950].','.$placeholders[960]);
+Runtime::dispatchEvent($listId, EventKind::ListWindow->value, '@998,1008');
 $syncNative();
 $tiles = $lazyTiles();
 $assert(
@@ -181,8 +181,7 @@ $mountedAfterGrow = count($tileClass::$mounts);
 
 // Scrolling far away slides the window: rows left behind unmount (their
 // instances stay keyed while the owner is reused) and come back with state.
-$placeholders = $lazyPlaceholders();
-Runtime::dispatchEvent($listId, EventKind::ListWindow->value, $placeholders[count($placeholders) - 20].','.$placeholders[count($placeholders) - 10]);
+Runtime::dispatchEvent($listId, EventKind::ListWindow->value, '@1980,1990');
 $syncNative();
 $tiles = $lazyTiles();
 $assert(

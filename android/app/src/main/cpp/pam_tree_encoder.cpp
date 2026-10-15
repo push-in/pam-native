@@ -113,6 +113,9 @@ struct Encoder {
         std::size_t initial_rows = 48;
         std::size_t margin_rows = 64;
         zend_long view_kind = -1;
+        zend_long num_columns = -1;
+        zend_long placeholder_rows = -1;
+        zend_long section = -1;
     } window;
     std::unordered_map<std::string, std::vector<std::pair<zend_long, zend_long>>> window_ranges;
     struct WindowList {
@@ -424,6 +427,20 @@ inline bool property_is_true(zend_object* element, zend_long key) {
     return value != nullptr && Z_TYPE_P(value) == IS_TRUE;
 }
 
+inline bool has_property(zend_object* element, zend_long key) {
+    zval* properties = prop(element, layout.properties);
+    if (key < 0 || Z_TYPE_P(properties) != IS_ARRAY) return false;
+    return zend_hash_index_find(Z_ARRVAL_P(properties), static_cast<zend_ulong>(key)) != nullptr;
+}
+
+// (int) ($properties[ListNumColumns] ?? 1), as TreeEncoder::encodeNode().
+inline zend_long list_columns(Encoder& encoder, zend_object* list) {
+    zval* properties = prop(list, layout.properties);
+    if (encoder.window.num_columns < 0 || Z_TYPE_P(properties) != IS_ARRAY) return 1;
+    zval* value = zend_hash_index_find(Z_ARRVAL_P(properties), static_cast<zend_ulong>(encoder.window.num_columns));
+    return value == nullptr ? 1 : zval_get_long(value);
+}
+
 // TreeEncoder::windowFor(): the materialized ranges of a long vertical list.
 const Ranges* window_for(Encoder& encoder, zend_object* list, const std::string& path) {
     if (encoder.window.virtual_list < 0 || element_kind(list) != encoder.window.virtual_list) return nullptr;
@@ -660,14 +677,66 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
         return encoded;
     };
 
+    // TreeEncoder::encodeRun(): a single-column windowed list sends each
+    // run of rows outside the window as one View "rows:<start>" placeholder.
+    const bool runs = window != nullptr && list_columns(encoder, element) <= 1;
+    zend_long run_start = -1;
+    zend_long run_rows = 0;
+    auto flush_run = [&]() -> bool {
+        if (run_start < 0) return true;
+        char digits[32];
+        segment.assign("rows:", 5);
+        segment.append(digits, static_cast<std::size_t>(std::snprintf(digits, sizeof(digits), ZEND_LONG_FMT, run_start)));
+        path.push_back('/');
+        path.append(segment);
+        std::uint64_t child_id = 0;
+        const bool identified = node_id(encoder, path, nullptr, encoder.window.view_kind, child_id);
+        path.resize(mark);
+        if (!identified) return false;
+        row_indexes[child_id] = run_start;
+        if (++encoder.node_count > kMaxNodes) {
+            throw_logic("Pam Native trees cannot exceed 100,000 nodes.");
+            return false;
+        }
+        NodeRecord placeholder;
+        placeholder.id = child_id;
+        placeholder.parent = id;
+        placeholder.index = static_cast<std::uint32_t>(run_start);
+        placeholder.kind = static_cast<std::uint8_t>(encoder.window.view_kind);
+        placeholder.values.emplace_back(static_cast<std::uint16_t>(encoder.window.placeholder), std::string("\x04\x01", 2));
+        if (run_rows > 1) {
+            std::string rows("\x02", 1);
+            put_u64(rows, static_cast<std::uint64_t>(run_rows));
+            placeholder.values.emplace_back(static_cast<std::uint16_t>(encoder.window.placeholder_rows), std::move(rows));
+        }
+        encoder.nodes.push_back(std::move(placeholder));
+        run_start = -1;
+        return true;
+    };
+    auto join_run = [&](zend_long row) {
+        if (run_start < 0) {
+            run_start = row;
+            run_rows = 0;
+        }
+        ++run_rows;
+    };
+
     if (lazy == nullptr) {
         zend_ulong child_index;
         zend_string* string_key;
         zval* child_value;
         ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(children), child_index, string_key, child_value) {
             if (string_key != nullptr || Z_TYPE_P(child_value) != IS_OBJECT) continue;
-            if (!encode_child(Z_OBJ_P(child_value), child_index)) return false;
+            zend_object* child = Z_OBJ_P(child_value);
+            if (runs && !in_ranges(window_copy, static_cast<zend_long>(child_index)) && deferrable(encoder, child)
+                && !has_property(child, encoder.window.section)) {
+                join_run(static_cast<zend_long>(child_index));
+                continue;
+            }
+            if (!flush_run()) return false;
+            if (!encode_child(child, child_index)) return false;
         } ZEND_HASH_FOREACH_END();
+        if (!flush_run()) return false;
     } else {
         // VirtualizedList::of(): rows outside the window are keyed View
         // placeholders (LazyRows::placeholder()), written here without
@@ -679,6 +748,10 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
         zval* key;
         ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(keys), row, string_key, key) {
             if (string_key != nullptr || Z_TYPE_P(key) != IS_STRING) continue;
+            if (window != nullptr && !in_ranges(window_copy, static_cast<zend_long>(row)) && runs) {
+                join_run(static_cast<zend_long>(row));
+                continue;
+            }
             if (window != nullptr && !in_ranges(window_copy, static_cast<zend_long>(row))) {
                 segment.assign("key:", 4);
                 segment.append(Z_STRVAL_P(key), Z_STRLEN_P(key));
@@ -709,10 +782,11 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
                 zval_ptr_dtor(&built);
                 return false;
             }
-            const bool encoded = Z_TYPE(built) != IS_OBJECT || encode_child(Z_OBJ(built), row);
+            const bool encoded = Z_TYPE(built) != IS_OBJECT || (flush_run() && encode_child(Z_OBJ(built), row));
             zval_ptr_dtor(&built);
             if (!encoded) return false;
         } ZEND_HASH_FOREACH_END();
+        if (!flush_run()) return false;
         // Rows built before but outside this window are dropped (their
         // components unmount): LazyRows::settle().
         zval settled;
@@ -892,14 +966,15 @@ PHP_FUNCTION(pam_native_encoder_create) {
     if (window != nullptr) {
         // [virtualList kind, ListPlaceholder, ListWindowed, ListHorizontal,
         //  ListInitialScrollIndex, StickyHeader, ListFullSpan, min rows,
-        //  initial rows, margin rows]
-        zend_long values[11];
+        //  initial rows, margin rows, View kind, ListNumColumns,
+        //  ListPlaceholderRows, ListSection]
+        zend_long values[14];
         std::size_t count = 0;
         zval* value;
         ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(window), value) {
-            if (count < 11) values[count++] = Z_TYPE_P(value) == IS_LONG ? Z_LVAL_P(value) : -1;
+            if (count < 14) values[count++] = Z_TYPE_P(value) == IS_LONG ? Z_LVAL_P(value) : -1;
         } ZEND_HASH_FOREACH_END();
-        if (count == 11) {
+        if (count == 14) {
             auto& w = encoder->window;
             w.virtual_list = values[0];
             w.placeholder = values[1];
@@ -912,6 +987,9 @@ PHP_FUNCTION(pam_native_encoder_create) {
             w.initial_rows = static_cast<std::size_t>(values[8]);
             w.margin_rows = static_cast<std::size_t>(values[9]);
             w.view_kind = values[10];
+            w.num_columns = values[11];
+            w.placeholder_rows = values[12];
+            w.section = values[13];
         }
     }
     const zend_long handle = next_handle++;
@@ -1034,6 +1112,25 @@ PHP_FUNCTION(pam_native_encoder_encode) {
 }
 
 // TreeEncoder::extendWindow().
+// TreeEncoder::extendWindowRows(): grows the window around rows first..last.
+bool extend_rows(Encoder* encoder, const std::string& path, zend_long first, zend_long last) {
+    if (first < 0 || last < 0) return false;
+    if (last < first) std::swap(first, last);
+    const zend_long margin = std::max<zend_long>(static_cast<zend_long>(encoder->window.margin_rows), (last - first + 1) * 2);
+    Ranges& ranges = encoder->window_ranges[path];
+    if (covers(ranges, std::max<zend_long>(0, first - margin / 2), last + margin / 2 + 1)) return false;
+    // Sliding window (TreeEncoder::WINDOW_KEEP_MARGINS): rows farther than
+    // four margins from the visible ones go back to placeholders.
+    const zend_long keep = margin * 4;
+    // The head stays materialized (a filtered or reset list shows it at once).
+    ranges = add_range(
+        clip_ranges(add_range(ranges, std::max<zend_long>(0, first - margin), last + margin + 1), first - keep, last + keep + 1),
+        0,
+        static_cast<zend_long>(encoder->window.initial_rows));
+    ++encoder->window_generation;
+    return true;
+}
+
 PHP_FUNCTION(pam_native_encoder_extend_window) {
     zend_long handle, list_id, first_id, last_id;
     ZEND_PARSE_PARAMETERS_START(4, 4)
@@ -1052,20 +1149,22 @@ PHP_FUNCTION(pam_native_encoder_extend_window) {
     zend_long first = first_at->second;
     auto last_at = rows.find(static_cast<std::uint64_t>(last_id));
     zend_long last = last_at == rows.end() ? first : last_at->second;
-    if (last < first) std::swap(first, last);
-    const zend_long margin = std::max<zend_long>(static_cast<zend_long>(encoder->window.margin_rows), (last - first + 1) * 2);
-    Ranges& ranges = encoder->window_ranges[list->second.path];
-    if (covers(ranges, std::max<zend_long>(0, first - margin / 2), last + margin / 2 + 1)) RETURN_FALSE;
-    // Sliding window (TreeEncoder::WINDOW_KEEP_MARGINS): rows farther than
-    // four margins from the visible ones go back to placeholders.
-    const zend_long keep = margin * 4;
-    // The head stays materialized (a filtered or reset list shows it at once).
-    ranges = add_range(
-        clip_ranges(add_range(ranges, std::max<zend_long>(0, first - margin), last + margin + 1), first - keep, last + keep + 1),
-        0,
-        static_cast<zend_long>(encoder->window.initial_rows));
-    ++encoder->window_generation;
-    RETURN_TRUE;
+    RETURN_BOOL(extend_rows(encoder, list->second.path, first, last));
+}
+
+PHP_FUNCTION(pam_native_encoder_extend_window_rows) {
+    zend_long handle, list_id, first, last;
+    ZEND_PARSE_PARAMETERS_START(4, 4)
+        Z_PARAM_LONG(handle)
+        Z_PARAM_LONG(list_id)
+        Z_PARAM_LONG(first)
+        Z_PARAM_LONG(last)
+    ZEND_PARSE_PARAMETERS_END();
+    Encoder* encoder = find_encoder(handle);
+    if (encoder == nullptr) RETURN_THROWS();
+    auto list = encoder->window_lists.find(static_cast<std::uint64_t>(list_id));
+    if (list == encoder->window_lists.end()) RETURN_FALSE;
+    RETURN_BOOL(extend_rows(encoder, list->second.path, first, last));
 }
 
 PHP_FUNCTION(pam_native_encoder_nodes) {
@@ -1167,6 +1266,13 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_style_properties, 0, 
     ZEND_ARG_TYPE_INFO(0, keys, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_extend_window_rows, 0, 4, _IS_BOOL, 0)
+    ZEND_ARG_TYPE_INFO(0, handle, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, list, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, first, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, last, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_extend_window, 0, 4, _IS_BOOL, 0)
     ZEND_ARG_TYPE_INFO(0, handle, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO(0, listId, IS_LONG, 0)
@@ -1202,6 +1308,7 @@ const zend_function_entry pam_tree_encoder_functions[] = {
     ZEND_RAW_FENTRY("pam_native_encoder_reset", pam_tree_encoder_detail::zif_pam_native_encoder_reset, arginfo_pam_native_encoder_handle, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_encode", pam_tree_encoder_detail::zif_pam_native_encoder_encode, arginfo_pam_native_encoder_encode, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_extend_window", pam_tree_encoder_detail::zif_pam_native_encoder_extend_window, arginfo_pam_native_encoder_extend_window, 0, nullptr, nullptr)
+    ZEND_RAW_FENTRY("pam_native_encoder_extend_window_rows", pam_tree_encoder_detail::zif_pam_native_encoder_extend_window_rows, arginfo_pam_native_encoder_extend_window_rows, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_style_properties", pam_tree_encoder_detail::zif_pam_native_style_properties, arginfo_pam_native_style_properties, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_nodes", pam_tree_encoder_detail::zif_pam_native_encoder_nodes, arginfo_pam_native_encoder_nodes, 0, nullptr, nullptr)
     ZEND_FE_END

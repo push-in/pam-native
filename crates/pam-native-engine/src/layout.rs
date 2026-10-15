@@ -781,7 +781,16 @@ fn layout_node(
                         } else if mounted_empty {
                             0.0
                         } else {
-                            row_height.max(1.0)
+                            // A placeholder run stands for ListPlaceholderRows
+                            // rows of the estimate (single-column lists only).
+                            let rows = if row.len() == 1 {
+                                integer(row[0], PropKey::ListPlaceholderRows)
+                                    .unwrap_or(1)
+                                    .max(1)
+                            } else {
+                                1
+                            };
+                            row_height.max(1.0) * rows as f32
                         }
                     }
                 };
@@ -7435,6 +7444,57 @@ mod tests {
         assert_eq!(layout[&3].height, 72.0);
         assert_eq!(layout[&4].y, 136.0);
         assert_eq!(layout[&4].height, 30.0);
+    }
+
+    #[test]
+    fn windowed_virtual_list_placeholder_runs_take_their_rows_of_the_estimate() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListRowHeight, PropValue::Float(72.0)),
+                    (PropKey::ListWindowed, PropValue::Boolean(true)),
+                ],
+            ),
+        );
+        nodes.insert(2, node(2, 1, 0, NodeKind::Column, []));
+        nodes.insert(3, fixed_box(3, 2, 30.0));
+        nodes.insert(
+            4,
+            node(
+                4,
+                1,
+                1,
+                NodeKind::View,
+                [
+                    (PropKey::ListPlaceholder, PropValue::Boolean(true)),
+                    (PropKey::ListPlaceholderRows, PropValue::Integer(9_999)),
+                ],
+            ),
+        );
+        nodes.insert(
+            5,
+            node(5, 1, 10_000, NodeKind::View, [(PropKey::ListPlaceholder, PropValue::Boolean(true))]),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("placeholder runs");
+
+        assert_eq!(layout[&4].y, 30.0);
+        assert_eq!(layout[&4].height, 72.0 * 9_999.0);
+        assert_eq!(layout[&5].y, 30.0 + 72.0 * 9_999.0);
+        assert_eq!(layout[&5].height, 72.0);
     }
 
     #[test]

@@ -325,8 +325,14 @@ $big = $windowList(1000);
 $check('window#full', $wp, $wn, $big);
 foreach ([[500, 510], [505, 507], [20, 25], [990, 999], [700, 700], [120, 160]] as $step => [$from, $to]) {
     [$listId, $rowIds] = $listIds($wp);
-    $grewPhp = $wp->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
-    $grewNative = $wn->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
+    // Rows inside placeholder runs are reported by row index; materialized
+    // rows (the head) also by node id.
+    $grewPhp = $from < 40
+        ? $wp->extendWindow($listId, $rowIds[$from], $rowIds[$to])
+        : $wp->extendWindowRows($listId, $from, $to);
+    $grewNative = $from < 40
+        ? $wn->extendWindow($listId, $rowIds[$from], $rowIds[$to])
+        : $wn->extendWindowRows($listId, $from, $to);
     $checks++;
     if ($grewPhp !== $grewNative) {
         $fail("window#extend{$step}: PHP=".var_export($grewPhp, true).' native='.var_export($grewNative, true));
@@ -334,7 +340,10 @@ foreach ([[500, 510], [505, 507], [20, 25], [990, 999], [700, 700], [120, 160]] 
     $check("window#grown{$step}", $wp, $wn, $big);
 }
 $checks++;
-if ($wp->extendWindow(987_654_321, 1, 2) !== $wn->extendWindow(987_654_321, 1, 2)) {
+if (
+    $wp->extendWindow(987_654_321, 1, 2) !== $wn->extendWindow(987_654_321, 1, 2)
+    || $wp->extendWindowRows(987_654_321, 1, 2) !== $wn->extendWindowRows(987_654_321, 1, 2)
+) {
     $fail('window#unknown-list');
 }
 $check('window#rebuilt', $wp, $wn, $windowList(1000));
@@ -345,8 +354,8 @@ $check('window#back', $wp, $wn, $windowList(1000));
 $check('window#horizontal', $wp, $wn, $windowList(1000, ['horizontal' => true]));
 $check('window#initial', $wp, $wn, $windowList(5000, ['initial' => 3000]));
 [$listId, $rowIds] = $listIds($wp);
-$wp->extendWindow($listId, $rowIds[4000], $rowIds[4010]);
-$wn->extendWindow($listId, $rowIds[4000], $rowIds[4010]);
+$wp->extendWindowRows($listId, 4000, 4010);
+$wn->extendWindowRows($listId, 4000, 4010);
 $check('window#initial-grown', $wp, $wn, $windowList(5000, ['initial' => 3000]));
 
 // Data-driven lists (VirtualizedList::of): built window, keyed placeholders,
@@ -365,9 +374,8 @@ $lazyAll = $lazy(range(0, 4_999));
 $check('lazy#full', $lp, $ln, $lazyAll);
 foreach ([[2_000, 2_010], [2_003, 2_006], [4_990, 4_999], [100, 140]] as $step => [$from, $to]) {
     [$listId, $rowIds] = $listIds($lp);
-    $to = min($to, count($rowIds) - 1);
-    $grewPhp = $lp->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
-    $grewNative = $ln->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
+    $grewPhp = $lp->extendWindowRows($listId, $from, $to);
+    $grewNative = $ln->extendWindowRows($listId, $from, $to);
     $checks++;
     if ($grewPhp !== $grewNative) {
         $fail("lazy#extend{$step}");

@@ -79,6 +79,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(EventKind.listWindow.rawValue, 80)
         XCTAssertEqual(PamConstants.listPlaceholder, 541)
         XCTAssertEqual(PamConstants.listWindowed, 542)
+        XCTAssertEqual(PamConstants.listPlaceholderRows, 543)
         XCTAssertEqual(EventKind.pageChange.rawValue, 77)
         XCTAssertEqual(EventKind.routeCovered.rawValue, 78)
         XCTAssertEqual(EventKind.routeFocused.rawValue, 79)

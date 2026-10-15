@@ -548,4 +548,5 @@ enum PropKey: int
     case GestureNativeContentAspect = 540;
     case ListPlaceholder = 541;
     case ListWindowed = 542;
+    case ListPlaceholderRows = 543;
 }

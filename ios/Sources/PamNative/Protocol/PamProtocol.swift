@@ -554,6 +554,7 @@ public enum PamConstants {
     public static let gestureNativeContentAspect = 540
     public static let listPlaceholder = 541
     public static let listWindowed = 542
+    public static let listPlaceholderRows = 543
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

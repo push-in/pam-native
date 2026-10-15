@@ -456,10 +456,17 @@ final class Runtime
                 // Framework-owned: native shows rows near placeholders of a
                 // windowed list. Materialize ahead of them; no app callback
                 // and no component is invalidated.
-                $ids = explode(',', $payload, 2);
+                // "first,last": node ids of the visible rows; "@first,last":
+                // row indexes (rows inside a placeholder run have no node).
+                $rows = str_starts_with($payload, '@');
+                $ids = explode(',', $rows ? substr($payload, 1) : $payload, 2);
                 if (
                     count($ids) === 2
-                    && self::$encoder?->extendWindow($nodeId, (int) $ids[0], (int) $ids[1]) === true
+                    && (
+                        $rows
+                            ? self::$encoder?->extendWindowRows($nodeId, (int) $ids[0], (int) $ids[1])
+                            : self::$encoder?->extendWindow($nodeId, (int) $ids[0], (int) $ids[1])
+                    ) === true
                 ) {
                     self::$windowChanged = true;
                     self::afterDispatch();

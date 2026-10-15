@@ -21,9 +21,18 @@
   frame p99 unchanged at 16 ms; PHP encodes a 424 KB first frame instead of
   2 MB, 4x faster with 3.6x less memory. Flinging through placeholders costs
   ~20% more CPU (each window growth is still an O(rows) patch).
-- Protocol: properties 541 (`ListPlaceholder`) and 542 (`ListWindowed`) and
-  event 80 (`ListWindow`, consumed by the runtime) are appended. Android,
-  iOS, Rust and PHP tables stay in parity.
+- Rows outside the window cost O(1) per run, not per row: a single-column
+  list sends each run of them as one placeholder node sized rows x the
+  estimate (`ListPlaceholderRows`), so PHP, the engine and the host keep
+  O(window) nodes for any list length. Hosts report the visible rows by
+  index (also inside a run) and Android keeps the row at the top of the
+  screen in place while a run splits into rows. A 10,000-row list's first
+  frame drops from 270 KB / 10,051 nodes to ~3 KB / 50 nodes; encoding it
+  takes 1.2 ms natively (was 9.1 ms) and 5.1 ms in PHP (was 31.9 ms).
+- Protocol: properties 541 (`ListPlaceholder`), 542 (`ListWindowed`) and 543
+  (`ListPlaceholderRows`) and event 80 (`ListWindow`, consumed by the
+  runtime; payload `@first,last` row indexes or legacy node ids) are
+  appended. Android, iOS, Rust and PHP tables stay in parity.
 - Rows are rendered only when the window reaches them, with no app change:
   a `p-for` that is the only child of `<VirtualizedList>`/`<VirtualGrid>`
   (more than 96 items) renders each row when the encoder materializes it,
