@@ -38,6 +38,29 @@ final class PamErrorOverlayTests: XCTestCase {
         XCTAssertTrue(report.copyText().contains(">   42 | throw new X();"))
     }
 
+    /// The bridge reports PHP fatal errors and exit() (zend_bailout) itself
+    /// instead of letting PHP end the process: the payload must be fatal so
+    /// release builds recover and debug builds open the inspector.
+    func testBridgeBailoutReportsAreFatal() {
+        let exitReport = PamRuntimeErrorReport.parse(
+            "PAMERR1\n{\"type\":\"PHP exit\",\"message\":\"exit(7) ended the PHP request. (while running a Pam Native event)\","
+                + "\"file\":\"Native runtime\",\"line\":0,\"phase\":\"terminated\",\"fatal\":true,\"frames\":[]}"
+        )
+        XCTAssertEqual(exitReport.type, "PHP exit")
+        XCTAssertEqual(exitReport.phase, "terminated")
+        XCTAssertTrue(exitReport.fatal)
+        XCTAssertTrue(exitReport.message.contains("exit(7)"))
+
+        let fatal = PamRuntimeErrorReport.parse(
+            "PAMERR1\n{\"type\":\"PHP Fatal error\",\"message\":\"Allowed memory size of 16777216 bytes exhausted\\n\\u001b\","
+                + "\"file\":\"/x/pam/ota-releases/abc123/src/Feed.php\",\"line\":12,\"phase\":\"terminated\",\"fatal\":true,\"frames\":[]}"
+        )
+        XCTAssertTrue(fatal.fatal)
+        XCTAssertEqual(fatal.file, "src/Feed.php")
+        XCTAssertEqual(fatal.line, 12)
+        XCTAssertTrue(fatal.message.hasPrefix("Allowed memory size"))
+    }
+
     func testPlainTextAndLegacyTracesStillRender() {
         let native = PamRuntimeErrorReport.parse("Pam Native failed to start")
         XCTAssertEqual(native.type, "NativeRuntimeError")

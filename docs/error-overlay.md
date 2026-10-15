@@ -44,6 +44,20 @@ Stacks are never shown to end users.
   with a **Try again** button is shown. A frame committed afterwards hides
   it. Back from that screen closes the activity.
 
+## PHP fatal errors and exit()
+
+A PHP error never ends the app process. Fatal errors that PHP cannot turn
+into an exception (memory limit, `E_USER_ERROR`, compile errors), an
+exception that escapes the runtime and `exit()`/`die()` abort the current PHP
+request. The Android and iOS bridges run every entry, event, render, cycle
+collection and shutdown under a PHP bailout guard: the abandoned request is
+reported as a fatal error (`type` `PHP Fatal error`, `PHP Parse error` or
+`PHP exit`, `phase` `terminated`) and the worker ends that request, drops the
+events queued for it and waits for the next reload. Debug builds open the
+inspector (Reload starts a fresh request); release builds retry as for any
+fatal error. Calling `exit()` in a Pam Native app is always a bug: return
+from the handler instead.
+
 ## Configuration
 
 `pam-native.json`:

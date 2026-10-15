@@ -77,6 +77,7 @@ jobs:
           python3 -m unittest scripts/test_deterministic_zip.py
           python3 -m unittest scripts/test_sbom.py
           python3 -m unittest scripts/test_hot_reload_large_app.py
+          python3 -m unittest scripts/test_php_bailout_guard.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
           python3 -m json.tool benchmarks/ios/budgets.json >/dev/null
           python3 -m json.tool benchmarks/package/budgets.json >/dev/null

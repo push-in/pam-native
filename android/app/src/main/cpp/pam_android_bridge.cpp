@@ -877,22 +877,184 @@ bool enable_deferred_rendering() {
     return enabled;
 }
 
-bool run_php_request(RuntimeState* state) {
+// --- PHP bailout guard ------------------------------------------------------
+// A PHP fatal error (memory limit, uncaught exception reaching the worker,
+// E_USER_ERROR, compile errors) and exit()/die() end the request with
+// zend_bailout(). Outside php_execute_script() nothing installed a bailout
+// address, so PHP called exit(-1): the whole app died with code 255 and the
+// C++ static destructors ran on the PHP thread while the RenderThread still
+// drew ("~EglManager() leaked an EGL context", then FORTIFY
+// "pthread_mutex_lock called on a destroyed mutex"). Every PHP entry point of
+// the worker runs under this guard instead: the failed request is reported as
+// a fatal runtime error (debug overlay / release recovery) and the worker
+// waits for the next reload. A PHP error never ends the process.
+
+enum class RequestOutcome : std::uint8_t {
+    // close(): the worker stops.
+    Stop,
+    // Hot reload or error recovery: start the next request.
+    Reload,
+    // PHP bailed out (fatal error or exit()): the request is unusable.
+    Failed,
+};
+
+// Lets a bailout tell a fatal error from exit(): a fatal error replaces
+// PG(last_error_message), exit() does not. Holding a reference keeps the
+// previous string alive so a new message can never reuse its address.
+struct LastErrorMark {
+    zend_string* message = nullptr;
+};
+
+LastErrorMark mark_last_error() {
+    LastErrorMark mark;
+    if (PG(last_error_message) != nullptr) {
+        mark.message = zend_string_copy(PG(last_error_message));
+    }
+    EG(exit_status) = 0;
+    return mark;
+}
+
+void release_last_error(LastErrorMark& mark) {
+    if (mark.message != nullptr) {
+        zend_string_release(mark.message);
+        mark.message = nullptr;
+    }
+}
+
+std::string json_escape(const char* text, std::size_t length) {
+    std::string escaped;
+    escaped.reserve(length + 16);
+    for (std::size_t index = 0; index < length; ++index) {
+        const auto character = static_cast<unsigned char>(text[index]);
+        switch (character) {
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default:
+                if (character < 0x20) {
+                    static constexpr char kHex[] = "0123456789abcdef";
+                    escaped += "\\u00";
+                    escaped += kHex[character >> 4];
+                    escaped += kHex[character & 0x0f];
+                } else {
+                    escaped += static_cast<char>(character);
+                }
+        }
+    }
+    return escaped;
+}
+
+std::string json_escape(const std::string& text) {
+    return json_escape(text.data(), text.size());
+}
+
+// PAMERR1 payload (the PHP SDK's RuntimeError format) for a request PHP
+// abandoned. Always fatal: release builds recover, debug builds show it.
+void report_bailout(RuntimeState* state, const char* where, LastErrorMark& mark) {
+    zend_string* message = PG(last_error_message);
+    const bool fatal_error = message != nullptr && message != mark.message;
+    std::string type;
+    std::string text;
+    std::string file;
+    std::int64_t line = 0;
+    if (fatal_error) {
+        type = PG(last_error_type) == E_PARSE ? "PHP Parse error" : "PHP Fatal error";
+        text.assign(ZSTR_VAL(message), ZSTR_LEN(message));
+        if (PG(last_error_file) != nullptr) {
+            file.assign(ZSTR_VAL(PG(last_error_file)), ZSTR_LEN(PG(last_error_file)));
+        }
+        line = PG(last_error_lineno);
+    } else {
+        type = "PHP exit";
+        text = "exit(" + std::to_string(EG(exit_status))
+            + ") ended the PHP request. A Pam Native app keeps running: return "
+              "from the handler instead of calling exit() or die().";
+        file = "Native runtime";
+    }
+    release_last_error(mark);
+    text += std::string(" (while running ") + where + ")";
+    report_error(
+        state,
+        "PAMERR1\n{\"type\":\"" + json_escape(type)
+            + "\",\"message\":\"" + json_escape(text)
+            + "\",\"file\":\"" + json_escape(file)
+            + "\",\"line\":" + std::to_string(line)
+            + ",\"phase\":\"terminated\",\"fatal\":true,\"frames\":[]}"
+    );
+}
+
+// Runs `body` with a bailout address. Returns false (after reporting) when
+// PHP bailed out. Only trivially destructible locals may live in the frames
+// a bailout unwinds (call_runtime, dispatch_event, the PHP engine).
+template <typename Body>
+bool run_guarded(RuntimeState* state, const char* where, Body&& body) {
+    LastErrorMark mark = mark_last_error();
+    volatile bool completed = false;
+    zend_try {
+        body();
+        completed = true;
+    } zend_end_try();
+    if (!completed) {
+        report_bailout(state, where, mark);
+        return false;
+    }
+    release_last_error(mark);
+    return true;
+}
+
+// Waits on a failed request for the reload (release recovery or the debug
+// overlay's Reload). Everything else belongs to the abandoned request.
+bool await_reload(RuntimeState* state) {
+    while (true) {
+        std::unique_lock<std::mutex> lock(state->queue_mutex);
+        state->queue_ready.wait(lock, [&] {
+            return state->stopping.load(std::memory_order_acquire)
+                || !state->events.empty();
+        });
+        if (state->stopping.load(std::memory_order_acquire)) {
+            return false;
+        }
+        Event event = std::move(state->events.front());
+        state->events.pop_front();
+        if (event.type == EventType::Reload) {
+            if (!event.payload.empty()) {
+                state->entry = event.payload;
+            }
+            return true;
+        }
+    }
+}
+
+RequestOutcome run_php_request(RuntimeState* state) {
     // Shutdown can still invoke native cleanup. Its queued or delayed results
     // belong to the old PHP request, even when the new SDK starts IDs at one.
     state->module_requests.clear();
     zend_file_handle file_handle;
     zend_stream_init_filename(&file_handle, state->entry.c_str());
-    const int status = php_execute_script(&file_handle);
+    // php_execute_script() installs its own bailout address: a fatal error
+    // or exit() in the entry returns here with the request already over.
+    LastErrorMark entry_mark = mark_last_error();
+    CG(unclean_shutdown) = 0;
+    const bool executed = php_execute_script(&file_handle);
     log_debug("PHP entry execution returned.");
-    if (status == FAILURE || EG(exception)) {
+    if (CG(unclean_shutdown) || (!executed && !EG(exception))) {
+        report_bailout(state, "the app entry", entry_mark);
+        return RequestOutcome::Failed;
+    }
+    release_last_error(entry_mark);
+    if (EG(exception)) {
         report_error(state, "The Pam Native PHP entry failed during execution.");
-        if (EG(exception)) {
-            zend_clear_exception();
-        }
+        zend_clear_exception();
     }
 
-    const bool deferred = enable_deferred_rendering();
+    bool deferred = false;
+    if (!run_guarded(state, "Runtime::deferRendering", [&] {
+            deferred = enable_deferred_rendering();
+        })) {
+        return RequestOutcome::Failed;
+    }
     bool reload = false;
     bool draining = false;
     int events_since_gc = 0;
@@ -931,7 +1093,12 @@ bool run_php_request(RuntimeState* state) {
         } else if (event.type == EventType::Remount) {
             publish_remount(state);
         } else {
-            dispatch_event(state, event);
+            const Event* current = &event;
+            if (!run_guarded(state, "a Pam Native event", [&] {
+                    dispatch_event(state, *current);
+                })) {
+                return RequestOutcome::Failed;
+            }
         }
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
@@ -945,7 +1112,11 @@ bool run_php_request(RuntimeState* state) {
         }
         if (deferred) {
             // One render for everything drained since the last flush.
-            call_runtime("flush", 0, nullptr);
+            if (!run_guarded(state, "Runtime::flush", [&] {
+                    call_runtime("flush", 0, nullptr);
+                })) {
+                return RequestOutcome::Failed;
+            }
             if (EG(exception)) {
                 report_error(state, "Unhandled PHP exception while rendering.");
                 zend_clear_exception();
@@ -955,24 +1126,43 @@ bool run_php_request(RuntimeState* state) {
         const auto after = std::chrono::steady_clock::now();
         if (queue_empty
             && (events_since_gc >= kGcEventInterval || after - last_gc >= kGcIdleInterval)) {
-            gc_collect_cycles();
+            // Destructors run here: they can fail like any handler.
+            if (!run_guarded(state, "PHP cycle collection", [&] {
+                    gc_collect_cycles();
+                })) {
+                return RequestOutcome::Failed;
+            }
             events_since_gc = 0;
             last_gc = after;
         }
     }
 
-    zval result;
-    ZVAL_UNDEF(&result);
+    // Older SDKs and test entries may lack these methods: calling a missing
+    // method from the worker is an uncaught Error, i.e. a bailout.
     if (reload) {
         // Hot reload: let PHP record component state (Fast Refresh style)
         // while the old components are still mounted. Best effort only.
-        call_runtime("checkpointHotReload", 0, nullptr);
+        if (!run_guarded(state, "Runtime::checkpointHotReload", [&] {
+                if (runtime_has_method("checkpointhotreload")) {
+                    call_runtime("checkpointHotReload", 0, nullptr);
+                }
+                if (EG(exception)) {
+                    zend_clear_exception();
+                }
+            })) {
+            return RequestOutcome::Reload;
+        }
+    }
+    // A failing shutdown is reported; the request ends either way.
+    run_guarded(state, "Runtime::shutdown", [&] {
+        if (runtime_has_method("shutdown")) {
+            call_runtime("shutdown", 0, nullptr);
+        }
         if (EG(exception)) {
             zend_clear_exception();
         }
-    }
-    call_runtime("shutdown", 0, nullptr);
-    return reload;
+    });
+    return reload ? RequestOutcome::Reload : RequestOutcome::Stop;
 }
 
 // Embedded PHP (NTS) has process-wide state: only one PHP lifetime
@@ -996,12 +1186,26 @@ void runtime_loop(RuntimeState* state) {
         state->vm->GetEnv(reinterpret_cast<void**>(&worker_env), JNI_VERSION_1_6) != JNI_OK
         && state->vm->AttachCurrentThread(&worker_env, nullptr) == JNI_OK;
     if (initialize_php(state)) {
+        RequestOutcome outcome = run_php_request(state);
         while (
-            !state->stopping.load(std::memory_order_acquire)
-            && run_php_request(state)
+            outcome != RequestOutcome::Stop
+            && !state->stopping.load(std::memory_order_acquire)
         ) {
-            log_debug("Restarting PHP request for hot reload.");
+            // A failed request is ended right away so its memory (often the
+            // exhausted memory_limit) is not held while the error shows.
             php_request_shutdown(nullptr);
+            if (outcome == RequestOutcome::Failed) {
+                log_debug("PHP request failed; waiting for a reload.");
+                if (!await_reload(state)) {
+                    // php_embed_shutdown() ends a request itself.
+                    if (php_request_startup() == FAILURE) {
+                        log_error("PHP request could not restart before shutdown.");
+                    }
+                    break;
+                }
+            } else {
+                log_debug("Restarting PHP request for hot reload.");
+            }
             // Runtime::shutdown may autoload classes from the old bundle.
             // Only now may the reload client remove that request's files.
             if (worker_env != nullptr && state->on_request_released != nullptr) {
@@ -1025,6 +1229,7 @@ void runtime_loop(RuntimeState* state) {
             SG(headers_sent) = 1;
             SG(request_info).no_headers = 1;
             php_register_variable("PHP_SELF", "-", nullptr);
+            outcome = run_php_request(state);
         }
         php_embed_shutdown();
     }
