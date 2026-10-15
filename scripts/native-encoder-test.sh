@@ -11,6 +11,7 @@ cp "$root/android/app/src/main/cpp/pam_tree_encoder.cpp" "$root/android/app/src/
 php=${PHP:-php}
 "$php" -d extension="$work/modules/pam_tree_encoder.so" -d memory_limit=2G \
   "$root/packages/native/tests/native_encoder_equivalence.php"
+"$php" -d extension="$work/modules/pam_tree_encoder.so" "$root/packages/native/tests/native_style_equivalence.php"
 for test in encoder_patches; do
   PAM_NATIVE_ENCODER=native "$php" -d extension="$work/modules/pam_tree_encoder.so" -d memory_limit=1G \
     "$root/packages/native/tests/$test.php"

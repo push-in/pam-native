@@ -1395,6 +1395,100 @@ private class RichRecyclerAdapter(
         setHasStableIds(true)
     }
 
+    /**
+     * Keyed rows that kept their relative order (filtering, pages appended or
+     * prepended, rows inserted or removed anywhere): range updates from one
+     * O(N) walk, instead of DiffUtil's O(N + D^2) (a filter that dropped
+     * 8,000 of 10,000 rows took seconds on the UI thread). Returns false when
+     * rows moved relative to each other.
+     */
+    private fun submitKeyed(
+        previous: List<Long>,
+        previousExtents: Map<Long, Int>,
+        replacement: List<Long>,
+        replacementExtents: Map<Long, Int>,
+    ): Boolean {
+        val nextPositions = HashMap<Long, Int>(replacement.size * 2)
+        replacement.forEachIndexed { position, id -> nextPositions[id] = position }
+        val previousIds = HashSet<Long>(previous.size * 2)
+        var lastCommon = -1
+        for (id in previous) {
+            previousIds += id
+            val position = nextPositions[id] ?: continue
+            if (position < lastCommon) return false
+            lastCommon = position
+        }
+        // Count the runs first: too many scattered ranges rebind instead.
+        var runs = 0
+        run {
+            var i = 0
+            var j = 0
+            var inRun = 0 // 1 removed, 2 inserted, 3 changed
+            while (i < previous.size || j < replacement.size) {
+                val kind = when {
+                    i < previous.size && previous[i] !in nextPositions -> { i++; 1 }
+                    j < replacement.size && replacement[j] !in previousIds -> { j++; 2 }
+                    else -> {
+                        val id = replacement[j]
+                        i++
+                        j++
+                        if (previousExtents[id] != replacementExtents[id]) 3 else 0
+                    }
+                }
+                if (kind != 0 && kind != inRun) runs++
+                inRun = kind
+            }
+        }
+        ids = replacement
+        extents = replacementExtents
+        if (runs > MAX_RANGE_UPDATES) {
+            notifyDataSetChanged()
+            return true
+        }
+        var i = 0
+        var j = 0
+        var position = 0
+        while (i < previous.size || j < replacement.size) {
+            if (i < previous.size && previous[i] !in nextPositions) {
+                var count = 0
+                while (i < previous.size && previous[i] !in nextPositions) {
+                    i++
+                    count++
+                }
+                notifyItemRangeRemoved(position, count)
+            } else if (j < replacement.size && replacement[j] !in previousIds) {
+                var count = 0
+                while (j < replacement.size && replacement[j] !in previousIds) {
+                    j++
+                    count++
+                }
+                notifyItemRangeInserted(position, count)
+                position += count
+            } else {
+                var count = 0
+                val start = position
+                while (
+                    i < previous.size && j < replacement.size &&
+                    previous[i] == replacement[j] &&
+                    previousExtents[replacement[j]] != replacementExtents[replacement[j]]
+                ) {
+                    i++
+                    j++
+                    count++
+                }
+                if (count > 0) {
+                    notifyItemRangeChanged(start, count, PAYLOAD_LAYOUT)
+                    position += count
+                } else {
+                    i++
+                    j++
+                    position++
+                }
+            }
+        }
+        return true
+    }
+
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
         if (ids == next && extents == nextExtents) {
             remountEmptyHolders()
@@ -1415,6 +1509,15 @@ private class RichRecyclerAdapter(
                     applyLayout(holder.container, id)
                 }
             }
+            return
+        }
+        if (submitKeyed(previous, previousExtents, replacement, replacementExtents)) return
+        if (previous.size + replacement.size > LARGE_DIFF_ROWS) {
+            // Reordered rows in a long list: Myers with move detection is
+            // O(N + D^2); rebinding by stable id is cheaper.
+            ids = replacement
+            extents = replacementExtents
+            notifyDataSetChanged()
             return
         }
         val diff = DiffUtil.calculateDiff(
@@ -1626,6 +1729,10 @@ private class RichRecyclerAdapter(
 
     private companion object {
         val PAYLOAD_LAYOUT = Any()
+        /** More scattered range updates than this rebind by stable id instead. */
+        const val MAX_RANGE_UPDATES = 64
+        /** Reordered lists longer than this rebind instead of a Myers diff. */
+        const val LARGE_DIFF_ROWS = 2_000
         const val MOUNT_BUDGET_NANOS = 5_000_000L
         const val SHOWN_MOUNT_BUDGET_NANOS = 10_000_000L
     }

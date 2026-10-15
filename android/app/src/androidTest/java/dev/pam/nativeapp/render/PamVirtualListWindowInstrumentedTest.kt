@@ -120,6 +120,78 @@ class PamVirtualListWindowInstrumentedTest {
         }
     }
 
+    @Test
+    fun filteringMostRowsAndReorderingKeepsTheAdapterInChildOrder() {
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as PamTestActivity
+        lateinit var renderer: PamRenderer
+        lateinit var list: PamRecyclerList
+        try {
+            instrumentation.runOnMainSync {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val mutations = mutableListOf<Mutation>(
+                    create(1, 0, 0, NodeKind.SCREEN),
+                    create(LIST, 1, 0, NodeKind.VIRTUAL_LIST, mapOf(PropKey.LIST_ROW_HEIGHT to PropValue.Decimal(64.0))),
+                    Mutation.Layout(1, Frame(0f, 0f, 320f, 400f)),
+                    Mutation.Layout(LIST, Frame(0f, 0f, 320f, 400f)),
+                )
+                repeat(3_000) { index ->
+                    mutations += create(BIG_CELL + index, LIST, index, NodeKind.COLUMN)
+                    mutations += Mutation.Layout(BIG_CELL + index, Frame(0f, index * 64f, 320f, 64f))
+                    mutations += bigText(index)
+                }
+                renderer.commit(listOf(mutations + Mutation.SetRoot(1)))
+                list = views(renderer)[LIST] as PamRecyclerList
+            }
+            waitFrames(4)
+            // A filter keeps every 7th row: 2,572 removals and 428 moves in one commit.
+            val kept = (0 until 3_000).filter { it % 7 == 0 }
+            instrumentation.runOnMainSync {
+                val mutations = mutableListOf<Mutation>()
+                (0 until 3_000).filter { it % 7 != 0 }.forEach { index ->
+                    mutations += Mutation.Remove(BIG_TEXT + index)
+                    mutations += Mutation.Remove(BIG_CELL + index)
+                }
+                kept.forEachIndexed { position, index ->
+                    mutations += Mutation.Move(BIG_CELL + index, LIST, position)
+                    mutations += Mutation.Layout(BIG_CELL + index, Frame(0f, position * 64f, 320f, 64f))
+                    mutations += Mutation.Layout(BIG_TEXT + index, Frame(8f, position * 64f + 8f, 200f, 40f))
+                }
+                renderer.commit(listOf(mutations))
+            }
+            waitFrames(4)
+            instrumentation.runOnMainSync {
+                assertEquals(kept.size, list.adapter!!.itemCount)
+                assertEquals(kept.map { BIG_CELL + it }, (0 until kept.size).map { list.richIdAt(it) })
+                val shown = (0 until list.childCount).mapNotNull { firstText(list.getChildAt(it)) }
+                assertTrue("first rows show the kept items: $shown", shown.take(3) == listOf("Row 0", "Row 7", "Row 14"))
+            }
+            // Reversing the remaining rows (moves only) still lands in child order.
+            instrumentation.runOnMainSync {
+                val mutations = mutableListOf<Mutation>()
+                kept.reversed().forEachIndexed { position, index ->
+                    mutations += Mutation.Move(BIG_CELL + index, LIST, position)
+                    mutations += Mutation.Layout(BIG_CELL + index, Frame(0f, position * 64f, 320f, 64f))
+                    mutations += Mutation.Layout(BIG_TEXT + index, Frame(8f, position * 64f + 8f, 200f, 40f))
+                }
+                renderer.commit(listOf(mutations))
+            }
+            waitFrames(4)
+            instrumentation.runOnMainSync {
+                assertEquals(kept.reversed().map { BIG_CELL + it }, (0 until kept.size).map { list.richIdAt(it) })
+            }
+        } finally {
+            instrumentation.runOnMainSync { renderer.close(); activity.finish() }
+        }
+    }
+
+    private fun bigText(index: Int): List<Mutation> = listOf(
+        create(BIG_TEXT + index, BIG_CELL + index, 0, NodeKind.TEXT, mapOf(PropKey.TEXT to PropValue.Text("Row $index"))),
+        Mutation.Layout(BIG_TEXT + index, Frame(8f, index * 64f + 8f, 200f, 40f)),
+    )
+
     private fun text(index: Int): List<Mutation> = listOf(
         create(TEXT + index, CELL + index, 0, NodeKind.TEXT, mapOf(PropKey.TEXT to PropValue.Text("Row $index"))),
         Mutation.Layout(TEXT + index, Frame(8f, index * 64f + 8f, 200f, 40f)),
@@ -152,6 +224,8 @@ class PamVirtualListWindowInstrumentedTest {
         const val WINDOW = 48
         const val CELL = 100L
         const val TEXT = 1000L
+        const val BIG_CELL = 100_000L
+        const val BIG_TEXT = 200_000L
         val LIST_WINDOW_EVENT = EventKind.LIST_WINDOW.value
     }
 }

@@ -940,7 +940,9 @@ class PamRenderer(
             val parent = nodes[id]?.parent ?: return
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
+        deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
+            try {
             batches.forEach { batch ->
                 batch.forEach { mutation ->
                     when (mutation) {
@@ -1012,6 +1014,9 @@ class PamRenderer(
                         }
                     }
                 }
+            }
+            } finally {
+                flushRowOrder()
             }
         }
         val mutationsNanos = if (profileCommit) {
@@ -1790,6 +1795,11 @@ class PamRenderer(
             // loading header changes its adapter index. RecyclerView's diff
             // positions that holder; detaching here would cancel every image
             // and empty all visible rows before the adapter can reconcile.
+            if (deferRowOrder) {
+                state.index = index
+                pendingRowOrder += parent
+                return
+            }
             removeChild(parent, id)
             state.index = index
             addChild(parent, id)
@@ -1910,9 +1920,53 @@ class PamRenderer(
         return false
     }
 
+    /**
+     * Rows of virtual lists removed or reordered during the commit's mutation
+     * pass. Keeping a 10,000-row child list sorted after every Remove/Move
+     * (O(n) remove plus an O(n log n) sort with a node lookup per comparison)
+     * froze the UI thread for seconds when a filter changed most rows; the
+     * list is now rebuilt once per commit ([flushRowOrder]).
+     */
+    private val pendingRowRemovals = HashMap<Long, HashSet<Long>>()
+    private val pendingRowOrder = HashSet<Long>()
+    private var deferRowOrder = false
+
+    private fun defersRows(parent: Long): Boolean =
+        deferRowOrder && nodes[parent]?.kind == NodeKind.VIRTUAL_LIST
+
+    private fun flushRowOrder() {
+        deferRowOrder = false
+        if (pendingRowRemovals.isEmpty() && pendingRowOrder.isEmpty()) return
+        val parents = HashSet<Long>(pendingRowRemovals.keys).apply { addAll(pendingRowOrder) }
+        for (parent in parents) {
+            val siblings = children[parent] ?: continue
+            pendingRowRemovals[parent]?.let { removed -> siblings.removeAll(removed) }
+            if (parent !in pendingRowOrder || siblings.size < 2) continue
+            // One node lookup per row, then a primitive sort (stable by index).
+            val keyed = LongArray(siblings.size)
+            val order = IntArray(siblings.size)
+            for (position in siblings.indices) {
+                order[position] = nodes[siblings[position]]?.index ?: Int.MAX_VALUE
+                keyed[position] = (order[position].toLong() shl 32) or position.toLong()
+            }
+            keyed.sort()
+            val sorted = ArrayList<Long>(siblings.size)
+            for (entry in keyed) sorted += siblings[(entry and 0xFFFFFFFFL).toInt()]
+            siblings.clear()
+            siblings.addAll(sorted)
+        }
+        pendingRowRemovals.clear()
+        pendingRowOrder.clear()
+    }
+
     private fun addChild(parent: Long, id: Long, fresh: Boolean = false) {
         if (parent == 0L) return
         val siblings = children[parent] ?: ArrayList<Long>().also { children.put(parent, it) }
+        if (defersRows(parent) && (parent in pendingRowOrder || parent in pendingRowRemovals || !fresh)) {
+            if (fresh || !siblings.contains(id)) siblings += id
+            pendingRowOrder += parent
+            return
+        }
         val index = nodes[id]?.index ?: Int.MAX_VALUE
         if (fresh) {
             // Creation streams arrive in sibling order: append without the
@@ -1942,6 +1996,10 @@ class PamRenderer(
 
     private fun removeChild(parent: Long, id: Long) {
         if (parent == 0L) return
+        if (defersRows(parent)) {
+            pendingRowRemovals.getOrPut(parent, ::HashSet) += id
+            return
+        }
         children[parent]?.remove(id)
     }
 

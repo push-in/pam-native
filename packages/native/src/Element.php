@@ -133,10 +133,9 @@ abstract class Element implements Renderable
     final public function style(Style $style): static
     {
         $copy = clone $this;
-
-        foreach ($style->properties() as $key => $value) {
-            $copy->properties[$key] = $value;
-        }
+        // Same order as assigning each key: existing keys keep their place,
+        // new ones are appended in style order.
+        $copy->properties = array_replace($copy->properties, $style->properties());
 
         return $copy;
     }

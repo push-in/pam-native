@@ -30,6 +30,7 @@
 #include "php.h"
 #include "zend_enum.h"
 #include "zend_exceptions.h"
+#include "zend_interfaces.h"
 #include "ext/spl/spl_exceptions.h"
 #define XXH_INLINE_ALL 1
 #include "ext/hash/xxhash/xxhash.h"
@@ -992,7 +993,82 @@ PHP_FUNCTION(pam_native_encoder_nodes) {
     }
 }
 
+// Style::properties(): the non-null fields as wire properties, in KEYS
+// order (enums as their backing values, GridTemplate via toWire()).
+struct StyleLayout {
+    zend_class_entry* style = nullptr;
+    zend_class_entry* grid_template = nullptr;
+    std::vector<std::pair<std::uint32_t, zend_long>> fields;  // property offset, wire key
+    bool ready = false;
+};
+StyleLayout style_layout;
+
+bool resolve_style_layout(zend_object* style, zval* keys) {
+    if (style_layout.ready && style_layout.style == style->ce) return true;
+    style_layout = StyleLayout{};
+    style_layout.style = style->ce;
+    zend_string* grid = zend_string_init("Pam\\Native\\GridTemplate", sizeof("Pam\\Native\\GridTemplate") - 1, 0);
+    style_layout.grid_template = zend_lookup_class(grid);
+    zend_string_release(grid);
+    zend_string* field;
+    zval* key;
+    ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(keys), field, key) {
+        if (field == nullptr || Z_TYPE_P(key) != IS_LONG) return false;
+        auto* info = static_cast<zend_property_info*>(zend_hash_find_ptr(&style->ce->properties_info, field));
+        if (info == nullptr || (info->flags & ZEND_ACC_STATIC)) return false;
+        style_layout.fields.emplace_back(info->offset, Z_LVAL_P(key));
+    } ZEND_HASH_FOREACH_END();
+    style_layout.ready = true;
+    return true;
+}
+
+PHP_FUNCTION(pam_native_style_properties) {
+    zval* style_value;
+    zval* keys;
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_OBJECT(style_value)
+        Z_PARAM_ARRAY(keys)
+    ZEND_PARSE_PARAMETERS_END();
+    zend_object* style = Z_OBJ_P(style_value);
+    if (!resolve_style_layout(style, keys)) {
+        throw_logic("The native style reader cannot resolve the Style layout.");
+        RETURN_THROWS();
+    }
+    array_init(return_value);
+    for (const auto& [offset, key] : style_layout.fields) {
+        zval* value = OBJ_PROP(style, offset);
+        ZVAL_DEREF(value);
+        if (Z_TYPE_P(value) == IS_NULL || Z_TYPE_P(value) == IS_UNDEF) continue;
+        if (Z_TYPE_P(value) == IS_OBJECT) {
+            zend_object* object = Z_OBJ_P(value);
+            if (object->ce->ce_flags & ZEND_ACC_ENUM) {
+                zval* backing = zend_enum_fetch_case_value(object);
+                Z_TRY_ADDREF_P(backing);
+                zend_hash_index_update(Z_ARRVAL_P(return_value), static_cast<zend_ulong>(key), backing);
+                continue;
+            }
+            if (style_layout.grid_template != nullptr && object->ce == style_layout.grid_template) {
+                zval wire;
+                zend_call_method_with_0_params(object, object->ce, nullptr, "towire", &wire);
+                if (EG(exception)) {
+                    zval_ptr_dtor(&wire);
+                    RETURN_THROWS();
+                }
+                zend_hash_index_update(Z_ARRVAL_P(return_value), static_cast<zend_ulong>(key), &wire);
+                continue;
+            }
+        }
+        Z_TRY_ADDREF_P(value);
+        zend_hash_index_update(Z_ARRVAL_P(return_value), static_cast<zend_ulong>(key), value);
+    }
+}
+
 }  // namespace pam_tree_encoder_detail
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_style_properties, 0, 2, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, style, IS_OBJECT, 0)
+    ZEND_ARG_TYPE_INFO(0, keys, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_extend_window, 0, 4, _IS_BOOL, 0)
     ZEND_ARG_TYPE_INFO(0, handle, IS_LONG, 0)
@@ -1029,6 +1105,7 @@ const zend_function_entry pam_tree_encoder_functions[] = {
     ZEND_RAW_FENTRY("pam_native_encoder_reset", pam_tree_encoder_detail::zif_pam_native_encoder_reset, arginfo_pam_native_encoder_handle, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_encode", pam_tree_encoder_detail::zif_pam_native_encoder_encode, arginfo_pam_native_encoder_encode, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_extend_window", pam_tree_encoder_detail::zif_pam_native_encoder_extend_window, arginfo_pam_native_encoder_extend_window, 0, nullptr, nullptr)
+    ZEND_RAW_FENTRY("pam_native_style_properties", pam_tree_encoder_detail::zif_pam_native_style_properties, arginfo_pam_native_style_properties, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_nodes", pam_tree_encoder_detail::zif_pam_native_encoder_nodes, arginfo_pam_native_encoder_nodes, 0, nullptr, nullptr)
     ZEND_FE_END
 };
@@ -1038,4 +1115,5 @@ void pam_tree_encoder_shutdown() {
     for (auto& [handle, encoder] : encoders) release(*encoder);
     encoders.clear();
     layout = ElementLayout{};
+    style_layout = StyleLayout{};
 }
