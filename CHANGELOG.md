@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+### Protocol
+
 - Protocol: the core identifier tables are closed (properties `1`–`543`,
   events `1`–`80`), and new identifiers go to an extension table that starts
   at `1001`. Extension IDs use the existing `u16` property field, so frames
@@ -17,6 +19,62 @@
   their behaviour is not part of this change. The parity gate now checks the
   extension constants, both tables' sequences and the iOS contract ceilings.
   See `docs/protocol-extension-table.md`.
+
+### Safe area by default (sheet safe area)
+
+- **Safe area by default (engine, Android and iOS).** Every presentation
+  surface (the screen root, each navigation route, each `Modal` and
+  `BottomSheet`) keeps its text, inputs, buttons, pressables and the end of
+  its lists out of the status bar, display cutout, navigation bar (gesture
+  handle or three buttons) and home indicator without a `SafeAreaView`.
+  After layout the engine measures how far the content stays from each
+  inset and pads the surface's content container (the first node of its
+  single-child wrapper chain) by the missing part only, so the effective
+  padding is `max(inset, padding the app already has)`: screens and sheets
+  that clear the bars themselves do not move and nothing is applied twice.
+  Backgrounds and media keep reaching the edges (wrappers above the
+  container still span the surface; images and media are not content). The
+  padding is sticky per container, so a settled surface costs one layout
+  pass; inset changes (rotation, gesture/three-button switch, multi-window,
+  cutout) relayout immediately. A `SafeAreaView` in the wrapper chain keeps
+  explicit control; one with every edge disabled is the full-bleed opt-out.
+- **Bottom sheets lay out at their detent.** The engine places sheet content
+  at the snap height (window minus top inset, like the native sheets)
+  anchored to the screen bottom, so safe-area padding, flex and keyboard
+  avoidance see the real sheet. The content of a fixed detent ends above the
+  navigation bar; content that does not fit the detent is reported by the
+  lint.
+- **Dynamic sheet sizing.** `BottomSheet::make($content, [])`,
+  `->dynamicSizing()` or `snapPoints="content"` fits the sheet to its content
+  plus the bottom inset the content does not already clear, capped at the
+  available height (@gorhom `enableDynamicSizing`). Android and iOS hosts
+  take the detent from the engine frame. Requires this renderer (older
+  Android renderers reject an empty snap list).
+- **Floating content stays in the safe area.** An absolutely positioned
+  node anchored to one edge whose subtree holds text or controls (FAB,
+  toast, close button) and whose containing block reaches into an inset is
+  moved out of it by the covered part (`max(inset, offset)`). Stretched or
+  decorative overlays and nodes inside scrolling content are unchanged.
+- **Safe-area lint.** `Engine::safe_area_violations()`, the CLI
+  `pam-native safe-area-lint <frame>... [--insets l,t,r,b]... [--json] [--explicit-only]`
+  (default: three-button 48 and gesture 24 under a 24 pt status bar; exit 1
+  on violations) and the PHP helper `Pam\Native\Tooling\SafeAreaLint::check()`
+  for app validators and CI.
+- **Debug inspector and overlay.** Debuggable Android builds check the real
+  views of the activity and of every Modal/BottomSheet window after layout
+  and log each intrusion (`adb logcat -s PamSafeArea`; content in a scroll
+  counts only when it cannot scroll further toward that edge).
+  `adb shell setprop debug.pam.safearea.overlay 1` paints the insets and
+  outlines offenders; `debug.pam.safearea 0` disables it. iOS debug builds
+  log `PamSafeArea:` lines (`PAM_SAFE_AREA_OVERLAY=1` for the overlay).
+- Tests: engine `auto_safe_area_tests` (screens, routes, fitted/fixed/
+  scrolling sheets, FAB, opt-out, sticky padding and runtime inset changes
+  with three-button, gesture and landscape cutout insets), instrumented
+  `PamSheetSafeAreaInstrumentedTest` (three-button and gesture navigation
+  switched through the system overlays, tall display cutout), PHP SDK
+  contract (dynamic sizing, `SafeAreaLint`).
+
+### Integration
 
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the

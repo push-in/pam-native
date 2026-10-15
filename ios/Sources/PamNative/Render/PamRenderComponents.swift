@@ -2663,6 +2663,8 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private var transparent = false
     private var allowSwipeDismissal = false
     private var bottomSheetSnapPoints: [CGFloat] = [0.5, 0.9]
+    private var dynamicSheetSizing = false
+    private var dynamicSheetHeight: CGFloat = 0
     private var bottomSheetIndex = 0
     private var bottomSheetDismissible = true
     private var bottomSheetBackdropDismiss = true
@@ -2910,8 +2912,29 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         allowSwipeDismissal = value
     }
 
+    var usesDynamicSheetSizing: Bool {
+        presentation == Presentation.sheet && dynamicSheetSizing
+    }
+
+    /// Engine height of a dynamically sized sheet's content.
+    func setDynamicSheetContentHeight(_ height: CGFloat) {
+        guard usesDynamicSheetSizing, height > 0, abs(height - dynamicSheetHeight) > 0.5 else { return }
+        dynamicSheetHeight = height
+        let available = max(1, bounds.height - safeAreaInsets.top)
+        bottomSheetSnapPoints = [min(max(height / available, 0.05), 1)]
+        bottomSheetIndex = 0
+        setNeedsLayout()
+    }
+
     func setBottomSheetSnapPoints(_ values: [CGFloat]) {
-        guard !values.isEmpty else { return }
+        guard !values.isEmpty else {
+            dynamicSheetSizing = true
+            bottomSheetIndex = 0
+            setNeedsLayout()
+            return
+        }
+        dynamicSheetSizing = false
+        dynamicSheetHeight = 0
         bottomSheetSnapPoints = Array(values.map { min(max($0, 0.05), 1) }.sorted().prefix(16))
         bottomSheetIndex = min(bottomSheetIndex, bottomSheetSnapPoints.count - 1)
         updatePresentationLayout()
@@ -3112,6 +3135,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     /// minus the top safe-area inset (@gorhom/bottom-sheet).
     private var sheetHeight: CGFloat {
         let available = max(1, bounds.height - safeAreaInsets.top)
+        if dynamicSheetSizing, dynamicSheetHeight > 0 {
+            return min(dynamicSheetHeight, available)
+        }
         return available * bottomSheetSnapPoints[bottomSheetIndex]
     }
 

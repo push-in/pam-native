@@ -62,9 +62,69 @@ Honor MagicOS, Huawei EMUI and other Android-compatible system images. OEM
 validation checks the invariant above; it does not introduce manufacturer
 branches that would diverge over time.
 
+## Safe area by default
+
+Applications do not need a `SafeAreaView` to stay out of the system bars.
+Every presentation surface (the screen root, each navigation route, each
+`Modal` and `BottomSheet`) keeps its content (text, inputs, buttons,
+pressables, and the last row of a list scrolled to its end) out of the status
+bar, the display cutout, the navigation bar or gesture handle and the iOS home
+indicator:
+
+1. The engine finds the surface's content container: the first node of its
+   single-child wrapper chain (`Screen > View > Column`... until a node with
+   several children).
+2. After layout it measures how far the content stays from each window edge.
+3. Where content would end inside an inset, the container receives the
+   missing padding and the surface is laid out again. Padding the application
+   already authored counts: the effective padding is `max(inset, authored)`,
+   so a screen or a sheet that clears the bars itself does not move.
+4. The padding is kept between layouts (one pass once settled) and follows
+   inset changes immediately: rotation, three-button/gesture switch,
+   multi-window, cutout.
+
+Backgrounds and media still reach the screen edges: the wrappers above the
+container span the whole surface and images/media are not content. A bottom
+sheet's background reaches the screen bottom while its last card ends above
+the navigation bar.
+
+Absolutely positioned content anchored to one edge (a FAB, a toast, a close
+button) whose containing block reaches into an inset moves out of it by the
+covered part (`bottom: 16` becomes `max(16, inset)`). Stretched overlays
+(`top` and `bottom` both set), decorative ones without text or controls and
+nodes inside scrolling content keep their frames.
+
+Explicit control and opt-out:
+
+- A `SafeAreaView` in the wrapper chain means the application manages that
+  surface itself (for example `safeAreaEdgeBottom="false"` above a tab bar
+  that owns the bottom edge). Nothing is added on top of it.
+- `<SafeAreaView safeAreaEdgeTop="false" safeAreaEdgeRight="false"
+  safeAreaEdgeBottom="false" safeAreaEdgeLeft="false">` is the full-bleed
+  opt-out (camera, story or video viewers). Interactive content in it is
+  still reported by the lint: keep controls in the safe area.
+
+### Lint, inspector and overlay
+
+- `pam-native safe-area-lint <frame>... [--viewport 360x780]
+  [--insets 0,24,0,48]... [--json] [--explicit-only]` lays out captured frames with the real
+  engine and exits 1 when content ends inside an inset (default: three-button
+  48 and gesture 24 under a 24 pt status bar). From PHP:
+  `Pam\Native\Tooling\SafeAreaLint::check($renderable)` returns the
+  violations (`PAM_NATIVE_CLI` selects the CLI binary).
+- Debuggable Android builds inspect the real views of the activity and of
+  every Modal/BottomSheet window after each layout and log intrusions:
+  `adb logcat -s PamSafeArea`. Content inside a scroll counts only when the
+  scroll cannot move further toward that edge.
+- `adb shell setprop debug.pam.safearea.overlay 1` paints the inset areas and
+  outlines offending views; `adb shell setprop debug.pam.safearea 0` turns
+  the inspector off. iOS debug builds log `PamSafeArea:` lines;
+  `PAM_SAFE_AREA_OVERLAY=1` (scheme environment) shows the overlay.
+
 ## Application usage
 
-Wrap screen content in `SafeAreaView` and disable only edges already owned by a
+Most screens need nothing (see *Safe area by default*). Use `SafeAreaView`
+when a fixed sibling owns an edge, and disable only edges already owned by a
 fixed sibling. For example, a screen above a PAM bottom tab bar lets the tab
 bar own the safe bottom:
 

@@ -7460,6 +7460,42 @@ $assert(
         ] === BottomSheetKeyboardBehavior::Extend->value,
     'BottomSheet must be available from declarative templates.',
 );
+$snapBytes = static fn (\Pam\Native\Element $sheet): string => ($sheet->properties()[PropKey::BottomSheetSnapPoints->value] ?? null)?->bytes ?? '';
+$dynamicSheet = BottomSheet::make(Text::make('Fits its content'), []);
+$templateDynamicSheet = TemplateRenderer::render(
+    TemplateCompiler::compile('<BottomSheet snapPoints="content"><Text>Anexar</Text></BottomSheet>'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $snapBytes($dynamicSheet) === pack('v', 0)
+        && $snapBytes(BottomSheet::make(Text::make('x'), [0.5])->dynamicSizing()) === pack('v', 0)
+        && $snapBytes($templateDynamicSheet) === pack('v', 0)
+        && $dynamicSheet->properties()[PropKey::BottomSheetIndex->value] === 0,
+    'BottomSheet without snap points (snapPoints="content") must size itself to its content.',
+);
+$safeAreaCli = getenv('PAM_NATIVE_CLI');
+if (is_string($safeAreaCli) && $safeAreaCli !== '' && is_file($safeAreaCli)) {
+    // A sheet without any bottom padding: the engine pads it, so the lint
+    // finds nothing; a SafeAreaView opt-out with a button at the bottom is
+    // reported for both navigation modes.
+    $clean = \Pam\Native\Tooling\SafeAreaLint::check(
+        Column::make(Text::make('Screen'), BottomSheet::make(Column::make(Text::make('Anexar')), []))->property(PropKey::FlexGrow, 1.0),
+    );
+    $optOut = \Pam\Native\Tooling\SafeAreaLint::check(
+        SafeAreaView::make(
+            Column::make(\Pam\Native\UI\View::make()->property(PropKey::FlexGrow, 1.0), Button::make('Enviar'))
+                ->property(PropKey::FlexGrow, 1.0),
+        )
+            ->property(PropKey::FlexGrow, 1.0)
+            ->edges(false, false, false, false),
+    );
+    $assert(
+        $clean === [] && count($optOut) === 2 && $optOut[0]['edge'] === 'bottom',
+        'SafeAreaLint must lay out with the real engine and report content inside the insets.',
+    );
+}
 $containedSheet = TemplateRenderer::render(
     TemplateCompiler::compile('<BottomSheet keyboardBehavior="contain"><Text>Composer</Text></BottomSheet>'),
     new class {

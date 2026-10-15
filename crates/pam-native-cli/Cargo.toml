@@ -12,6 +12,8 @@ name = "pam-native"
 path = "src/main.rs"
 
 [dependencies]
+pam-native-engine = { path = "../pam-native-engine" }
+pam-native-protocol = { path = "../pam-native-protocol" }
 serde = { version = "1.0.229", features = ["derive"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 serde_json = "1.0.151"
