@@ -1,13 +1,21 @@
 import Contacts
+import ContactsUI
 import Foundation
+import UIKit
 
 final class ContactsModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
     private let store = CNContactStore()
     private let queue = DispatchQueue(label: "pam.native.contacts", qos: .userInitiated)
     private let lock = NSLock()
     private var closed = false
+    /// The open "new contact" form (main thread only); failed on close.
+    private var newContactForm: PamNewContactForm?
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        if method == "openNewContactForm" {
+            DispatchQueue.main.async { self.openNewContactForm(completion) }
+            return
+        }
         guard method == "list" else {
             completion(.failure, Data("Unknown contacts method \(method)".utf8))
             return
@@ -86,10 +94,50 @@ final class ContactsModule: NativeModule, ClosableNativeModule, @unchecked Senda
         ])
     }
 
+    /// Presents `CNContactViewController(forNewContact:)` in a navigation
+    /// controller from the top presenter; created = the delegate's contact != nil.
+    /// Needs no contacts permission.
+    private func openNewContactForm(_ completion: @escaping ModuleCompletion) {
+        lock.lock()
+        let isClosed = closed
+        lock.unlock()
+        if isClosed {
+            completion(.failure, Data("Contacts module is closed".utf8))
+            return
+        }
+        guard newContactForm == nil else {
+            completion(.failure, Data("A new contact form is already open".utf8))
+            return
+        }
+        guard let presenter = Self.presenter() else {
+            completion(.failure, Data("No view controller is available for the contact form".utf8))
+            return
+        }
+        let form = PamNewContactForm(completion: completion) { [weak self] in
+            self?.newContactForm = nil
+        }
+        newContactForm = form
+        presenter.present(form.navigation, animated: true)
+    }
+
+    private static func presenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var controller = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+            ?? scenes.flatMap(\.windows).first(where: { !$0.isHidden })?.rootViewController
+        while let presented = controller?.presentedViewController, !presented.isBeingDismissed {
+            controller = presented
+        }
+        return controller
+    }
+
     func close() {
         lock.lock()
         closed = true
         lock.unlock()
+        DispatchQueue.main.async {
+            self.newContactForm?.interrupt()
+            self.newContactForm = nil
+        }
     }
 
     private static var canReadContacts: Bool {
@@ -108,4 +156,40 @@ private struct ContactsModuleError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+/// Owns one "new contact" form: its delegate answers exactly once.
+private final class PamNewContactForm: NSObject, CNContactViewControllerDelegate {
+    let navigation: UINavigationController
+    private var completion: ModuleCompletion?
+    private let finished: () -> Void
+
+    init(completion: @escaping ModuleCompletion, finished: @escaping () -> Void) {
+        let editor = CNContactViewController(forNewContact: nil)
+        editor.contactStore = CNContactStore()
+        navigation = UINavigationController(rootViewController: editor)
+        // The editor's own Cancel/Done buttons must answer; a swipe-down would skip the delegate.
+        navigation.isModalInPresentation = true
+        self.completion = completion
+        self.finished = finished
+        super.init()
+        editor.delegate = self
+    }
+
+    func contactViewController(_ viewController: CNContactViewController, didCompleteWith contact: CNContact?) {
+        navigation.dismiss(animated: true)
+        answer(.success, (try? WireMap.encode(["created": .flag(contact != nil)])) ?? Data())
+    }
+
+    func interrupt() {
+        navigation.dismiss(animated: false)
+        answer(.failure, Data("The contact form was interrupted".utf8))
+    }
+
+    private func answer(_ status: ModuleResultStatus, _ payload: Data) {
+        guard let completion else { return }
+        self.completion = nil
+        completion(status, payload)
+        finished()
+    }
 }

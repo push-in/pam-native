@@ -334,6 +334,11 @@ The MIME type defaults to the narrowest type shared by every file. Copies are
 staged and published atomically; moves never replace a destination unless
 `overwrite: true`.
 
+`Share::text($text, $title, $opened, $failure)` fires `$opened` once the share
+sheet was presented; a native failure (no activity/presenter) goes to
+`$failure` with its message. Without `$failure` the failure is ignored as
+before (no exception).
+
 `MediaLibrary::save()` publishes an image or video into
 `Pictures/<album>` or `Movies/<album>` through MediaStore on Android 10+
 without any permission. Android 8–9 request `WRITE_EXTERNAL_STORAGE`, which
@@ -702,3 +707,44 @@ Settings) and `PhoneState` (9, `READ_PHONE_STATE`). `PermissionStatus::Unavailab
 (5) marks permissions that do not exist on the platform (`FullScreenIntent` and
 `PhoneState` on iOS). Declare the Android permissions in `pam-native.json`
 `android.permissions`; generation adds only declared permissions.
+
+`Permissions::status()` and `requestKind()` accept an optional
+`failure: fn (string $error) => ...`; with it a native failure is delivered
+there instead of thrown (without it they keep throwing).
+
+`Permissions::shouldShowRationale($kind, fn (bool $show) => ...)` exposes
+Android `shouldShowRequestPermissionRationale` for the kind's permissions
+(iOS always answers `false`). Pass a `PermissionRationale` to `requestKind()`
+to explain a re-request in a native alert first:
+
+```php
+use Pam\Native\PermissionRationale;
+
+Permissions::requestKind(
+    PermissionKind::Camera,
+    fn (PermissionDecision $decision) => ...,
+    failure: fn (string $error) => ...,
+    rationale: new PermissionRationale(
+        title: 'Câmera',
+        message: 'Usamos a câmera para fotos no chat.',
+        confirmLabel: 'Continuar',
+        cancelLabel: 'Agora não',
+    ),
+);
+```
+
+When the platform asks for a rationale, the alert is shown; confirming runs the
+system request, cancelling answers the current (denied) status without asking.
+Without a rationale (or when none is due) the request runs directly.
+
+## Alerts
+
+`Alert::show($title, $message, $dismissed)` keeps the single-OK alert.
+`Alert::choose($title, $message, $buttons, fn (int $index) => ..., $failure)`
+shows 1–3 `AlertButton`s (`AlertButton::make()`, `cancel()`,
+`destructive()`; `AlertButtonStyle` 1 default, 2 cancel, 3 destructive, at most
+one cancel) and answers the pressed index. Android maps the cancel button to the
+negative slot (back/outside tap answer it, or `Alert::DISMISSED` (-1) without
+one) and tints destructive labels red; iOS uses `UIAlertAction` styles. The
+buttons travel as optional keys of the existing `Alert` operation, so no
+protocol value was added; an older host answers `Alert::DISMISSED`.

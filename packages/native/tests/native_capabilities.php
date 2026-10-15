@@ -668,3 +668,115 @@ $assert(
         && $scroll->properties()[\Pam\Native\PropKey::EndReachedThreshold->value] === 0.25,
     'ScrollView must support on:endReached with a threshold.',
 );
+
+// Contacts form, share/alert failures, permission rationale and failure callbacks.
+$lastTyped = static function (): array {
+    $call = TestDiagnostics::$typedCall ?? throw new RuntimeException('No typed native call was recorded.');
+
+    return $call + ['values' => $call['payload'] === '' ? [] : Wire::decodeMap($call['payload'])];
+};
+$created = null;
+$contactFailure = null;
+\Pam\Native\System\Contacts::openNewContactForm(static function (bool $value) use (&$created): void { $created = $value; });
+$assert($lastCall()['module'] === 'contacts' && $lastCall()['method'] === 'openNewContactForm', 'Contacts::openNewContactForm must call the contacts module.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['created' => true]));
+$assert($created === true, 'A saved contact must answer created = true.');
+\Pam\Native\System\Contacts::openNewContactForm(
+    static function (bool $value) use (&$created): void { $created = $value; },
+    static function (string $error) use (&$contactFailure): void { $contactFailure = $error; },
+);
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['created' => false]));
+$assert($created === false && $contactFailure === null, 'A cancelled form must answer created = false.');
+\Pam\Native\System\Contacts::openNewContactForm(
+    static fn (bool $_) => null,
+    static function (string $error) use (&$contactFailure): void { $contactFailure = $error; },
+);
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'No contacts app can create a contact');
+$assert($contactFailure === 'No contacts app can create a contact', 'Contact form failures must reach $failure without throwing.');
+
+$textOpened = false;
+$textFailure = null;
+Share::text('Oi', 'Enviar', static function () use (&$textOpened): void { $textOpened = true; }, static function (string $error) use (&$textFailure): void { $textFailure = $error; });
+$assert($lastTyped()['operation'] === \Pam\Native\NativeOperation::Share->value && $lastTyped()['values'] == ['text' => 'Oi', 'title' => 'Enviar'], 'Share::text must keep its payload.');
+Runtime::dispatchModuleResult($lastTyped()['requestId'], ModuleResultStatus::Failure->value, 'no presenter');
+$assert(!$textOpened && $textFailure === 'no presenter', 'Share::text failures must reach $failure, not $opened.');
+Share::text('Oi', opened: static function () use (&$textOpened): void { $textOpened = true; });
+Runtime::dispatchModuleResult($lastTyped()['requestId'], ModuleResultStatus::Success->value, '');
+$assert($textOpened, 'Share::text must report the presented sheet.');
+
+$pressed = null;
+\Pam\Native\System\Alert::choose('Apagar?', 'Sem volta', [
+    \Pam\Native\System\AlertButton::cancel('Cancelar'),
+    \Pam\Native\System\AlertButton::destructive('Apagar'),
+], static function (int $index) use (&$pressed): void { $pressed = $index; });
+$alertCall = $lastTyped();
+$assert(
+    $alertCall['operation'] === \Pam\Native\NativeOperation::Alert->value
+        && $alertCall['values']['buttonCount'] === 2
+        && $alertCall['values']['button0Label'] === 'Cancelar' && $alertCall['values']['button0Style'] === 2
+        && $alertCall['values']['button1Label'] === 'Apagar' && $alertCall['values']['button1Style'] === 3,
+    'Alert::choose must bridge labelled, styled buttons on the alert operation.',
+);
+Runtime::dispatchModuleResult($alertCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['index' => 1]));
+$assert($pressed === 1, 'Alert::choose must report the pressed index.');
+\Pam\Native\System\Alert::choose('t', 'm', [\Pam\Native\System\AlertButton::make('Ok')], static function (int $index) use (&$pressed): void { $pressed = $index; });
+Runtime::dispatchModuleResult($lastTyped()['requestId'], ModuleResultStatus::Success->value, '');
+$assert($pressed === \Pam\Native\System\Alert::DISMISSED, 'A host without choice support must answer DISMISSED.');
+$assert(
+    $rejects(static fn () => \Pam\Native\System\Alert::choose('t', 'm', [], static fn (int $_) => null))
+        && $rejects(static fn () => \Pam\Native\System\Alert::choose('t', 'm', array_fill(0, 4, \Pam\Native\System\AlertButton::make('a')), static fn (int $_) => null))
+        && $rejects(static fn () => \Pam\Native\System\Alert::choose('t', 'm', [\Pam\Native\System\AlertButton::cancel('a'), \Pam\Native\System\AlertButton::cancel('b')], static fn (int $_) => null))
+        && $rejects(static fn () => \Pam\Native\System\AlertButton::make(' ')),
+    'Alert::choose must validate its buttons.',
+);
+$assert(\Pam\Native\System\AlertButtonStyle::Default->value === 1 && \Pam\Native\System\AlertButtonStyle::Destructive->value === 3, 'AlertButtonStyle must be sequential from 1.');
+
+$showRationale = null;
+Permissions::shouldShowRationale(PermissionKind::Camera, static function (bool $show) use (&$showRationale): void { $showRationale = $show; });
+$assert($lastCall()['method'] === 'shouldShowRationale' && $lastCall()['values'] == ['kind' => 1], 'shouldShowRationale must bridge the kind.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['show' => true]));
+$assert($showRationale === true, 'shouldShowRationale must report the platform flag.');
+
+$rationale = new \Pam\Native\PermissionRationale('Câmera', 'Para fotos', 'Continuar', 'Agora não');
+$decision = null;
+$onDecision = static function (PermissionDecision $value) use (&$decision): void { $decision = $value; };
+// No rationale needed: requests directly.
+Permissions::requestKind(PermissionKind::Camera, $onDecision, rationale: $rationale);
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['show' => false]));
+$assert($lastCall()['method'] === 'request', 'Without a platform rationale requestKind must request directly.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['status' => 1, 'canAskAgain' => false]));
+$assert($decision instanceof PermissionDecision && $decision->granted(), 'The direct request must answer its decision.');
+// Rationale shown and confirmed: requests.
+Permissions::requestKind(PermissionKind::Camera, $onDecision, rationale: $rationale);
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['show' => true]));
+$rationaleAlert = $lastTyped();
+$assert(
+    $rationaleAlert['operation'] === \Pam\Native\NativeOperation::Alert->value && $rationaleAlert['values']['title'] === 'Câmera'
+        && $rationaleAlert['values']['button0Label'] === 'Agora não' && $rationaleAlert['values']['button1Label'] === 'Continuar',
+    'The rationale must be explained in a native alert first.',
+);
+TestDiagnostics::$moduleCall = null;
+Runtime::dispatchModuleResult($rationaleAlert['requestId'], ModuleResultStatus::Success->value, Wire::map(['index' => 1]));
+$assert($lastCall()['method'] === 'request', 'A confirmed rationale must request the permission.');
+// Rationale cancelled: answers the current status without requesting.
+Permissions::requestKind(PermissionKind::Camera, $onDecision, rationale: $rationale);
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['show' => true]));
+Runtime::dispatchModuleResult($lastTyped()['requestId'], ModuleResultStatus::Success->value, Wire::map(['index' => 0]));
+$assert($lastCall()['method'] === 'status', 'A cancelled rationale must only read the current status.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['status' => 2, 'canAskAgain' => true]));
+$assert($decision->status === PermissionStatus::Denied, 'A cancelled rationale must answer the denied status.');
+
+$permissionFailure = null;
+Permissions::status(PermissionKind::Camera, $onDecision, static function (string $error) use (&$permissionFailure): void { $permissionFailure = $error; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'status failed');
+Permissions::requestKind(PermissionKind::Camera, $onDecision, static function (string $error) use (&$permissionFailure): void { $permissionFailure .= '|'.$error; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'request failed');
+$assert($permissionFailure === 'status failed|request failed', 'Permission failures must reach $failure without throwing.');
+
+$cacheFailure = '';
+\Pam\Native\System\Caches::usage(static fn ($_) => null, static function (string $error) use (&$cacheFailure): void { $cacheFailure .= $error; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'usage failed');
+\Pam\Native\System\Caches::clear(static fn ($_) => null, failure: static function (string $error) use (&$cacheFailure): void { $cacheFailure .= '|'.$error; });
+$assert($lastCall()['values'] == ['preserveOffline' => true], 'Caches::clear must keep preserving offline media by default.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'clear failed');
+$assert($cacheFailure === 'usage failed|clear failed', 'Cache failures must reach $failure without throwing.');

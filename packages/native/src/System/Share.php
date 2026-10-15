@@ -22,15 +22,34 @@ final class Share
     {
     }
 
-    public static function text(string $text, ?string $title = null, ?Closure $opened = null): int
-    {
+    /**
+     * Shares plain text through the platform share sheet.
+     *
+     * `$opened` fires once the sheet was presented. When the native side fails
+     * (no activity/presenter, no target), `$failure` receives its message;
+     * without `$failure` the failure is ignored as before (no exception).
+     *
+     * @param null|Closure(): void $opened
+     * @param null|Closure(string): void $failure
+     */
+    public static function text(
+        string $text,
+        ?string $title = null,
+        ?Closure $opened = null,
+        ?Closure $failure = null,
+    ): int {
         return Runtime::callNative(
             NativeOperation::Share,
             Wire::map([
                 'text' => $text,
                 'title' => $title ?? '',
             ]),
-            static function () use ($opened): void {
+            static function (ModuleResultStatus $status, string $payload) use ($opened, $failure): void {
+                if ($status === ModuleResultStatus::Failure) {
+                    $failure?->__invoke($payload);
+
+                    return;
+                }
                 $opened?->__invoke();
             },
         );

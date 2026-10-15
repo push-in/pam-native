@@ -16,39 +16,54 @@ final class Caches
     {
     }
 
-    /** @param Closure(CacheUsage): void $callback */
-    public static function usage(Closure $callback): int
+    /**
+     * @param Closure(CacheUsage): void $callback
+     * @param null|Closure(string): void $failure Receives the native error instead of an exception.
+     */
+    public static function usage(Closure $callback, ?Closure $failure = null): int
     {
-        return self::call('usage', [], $callback);
+        return self::call('usage', [], $callback, $failure);
     }
 
-    /** @param Closure(CacheUsage): void $callback */
+    /**
+     * @param Closure(CacheUsage): void $callback
+     * @param null|Closure(string): void $failure Receives the native error instead of an exception.
+     */
     public static function clear(
         Closure $callback,
         bool $preserveOffline = true,
+        ?Closure $failure = null,
     ): int {
         return self::call(
             'clear',
             ['preserveOffline' => $preserveOffline],
             $callback,
+            $failure,
         );
     }
 
     /**
      * @param array<string, bool> $values
      * @param Closure(CacheUsage): void $callback
+     * @param null|Closure(string): void $failure
      */
     private static function call(
         string $method,
         array $values,
         Closure $callback,
+        ?Closure $failure,
     ): int {
         return NativeModules::call(
             'cache',
             $method,
             $values,
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = $result->values();

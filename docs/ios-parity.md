@@ -88,6 +88,11 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.34.0 | PHP lifetimes serialized, `PamRuntime` init order, `Trace.isEnabled` | n/a | Android-only causes (JNI bridge worker threads, Kotlin initialisation order, API 29 call). |
 | 1.35.0 | `Location.lastKnown`, `servicesEnabled`, `requestServices`, `openSettings`, coded failures | ✅ (uncompiled) | `LocationModule`: `lastKnown` = `CLLocationManager.location`; `servicesEnabled` = `CLLocationManager.locationServicesEnabled()` (read off the main thread); `requestServices` resolves 1 (on) or 3 (off: no system dialog exists for apps); `openSettings` opens `UIApplication.openSettingsURLString`. Failures are `"<code>: <detail>"` (`LocationFailure`: permission, disabled, unavailable, timeout); with Location Services off iOS reports `.denied`, so the switch is checked before the permission. Android uses the Play Services fused provider and its settings dialog. XCTest `LocationModuleTests`. |
 | 1.35.0 | A hidden Modal never takes touches after the activity returns | n/a | Android-only cause (a hidden, still-mounted Dialog window re-shown as an input target after the activity is stopped and restarted). The iOS `PamModalHost` is a view in the host window and a closed one is `isHidden = true`, which UIKit already excludes from hit testing. |
+| 1.41.0 | `Contacts::openNewContactForm()` | ✅ (uncompiled) | `ContactsModule.openNewContactForm` presents `CNContactViewController(forNewContact:)` in a `UINavigationController` (`isModalInPresentation`, so only Cancel/Done answer) from the top presenter; `PamNewContactForm` answers `created = contact != nil` once and fails on module close. Android uses `ACTION_INSERT` through `PamActivity.launchForResult`. |
+| 1.41.0 | `Share::text()` `$opened`/`$failure` | ✅ (uncompiled) | `SystemModule.share` completes after `present` (popover anchored for iPad) and fails without a presenter; it used to answer success before presenting. |
+| 1.41.0 | `Alert::choose()` | ✅ (uncompiled) | `PamAlertButtons.decode` + `UIAlertController` actions with `.default`/`.cancel`/`.destructive`; the pressed index answers once; open choices are dismissed with -1 on close. XCTest `PamAlertButtonsTests`. |
+| 1.41.0 | `Permissions::shouldShowRationale()` / `PermissionRationale` | ✅ | iOS has no rationale: `shouldShowRationale` always answers `false`, so `requestKind(rationale:)` requests directly. |
+| 1.41.0 | `failure` callbacks on `Permissions::status/requestKind`, `Caches::usage/clear` | ✅ | PHP only. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -187,6 +192,14 @@ Visual checks that tests cannot fully cover:
   `keyboardBehavior="contain"` and a bottom composer inside a
   `KeyboardAvoidingView` must keep the sheet's top edge in place while the
   composer rises right above the keyboard.
+- Contacts form, share, choice alerts (1.41.0): `swift build` and
+  `swift test --filter PamAlertButtonsTests` must pass. Then in Zé Chat:
+  "add contact" must open the iOS new-contact editor full height (no
+  swipe-down dismiss); Done answers `created = true`, Cancel `false`, and a
+  second call while it is open fails. `Share::text()` must fire `$opened` only
+  after the sheet appears (iPad: centered popover, no crash). `Alert::choose()`
+  with Cancel + Destructive must show the red destructive action and answer
+  the pressed index; `Permissions::shouldShowRationale()` answers `false`.
 - Location services and coded failures (1.35.0): `swift build` and `swift test`
   (`LocationModuleTests`) must pass. Then in Zé Chat: with Location Services
   off (Settings → Privacy → Location Services), "send my location" must report

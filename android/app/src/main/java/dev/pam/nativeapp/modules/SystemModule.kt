@@ -39,6 +39,8 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     private val sensorListeners = Collections.synchronizedSet(
         mutableSetOf<SensorEventListener>(),
     )
+    /** Choice dialogs still on screen; dismissed (answering -1) when the module closes. Main thread only. */
+    private val openDialogs = mutableSetOf<AlertDialog>()
 
     fun invoke(
         operation: NativeOperation,
@@ -103,6 +105,11 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         val values = WireMap.decode(payload)
         val title = values.text("title")
         val message = values.text("message")
+        val buttons = PamAlertButtons.decode(values)
+        if (buttons.isNotEmpty()) {
+            main.post { choose(activity, title, message, buttons, completion) }
+            return
+        }
         main.post {
             AlertDialog.Builder(activity)
                 .setTitle(title)
@@ -110,6 +117,48 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 .setPositiveButton(android.R.string.ok) { dialog, _ -> dialog.dismiss() }
                 .setOnDismissListener { completion.success() }
                 .show()
+        }
+    }
+
+    /** `Alert::choose()`: reports the pressed button index, or -1 when dismissed otherwise. */
+    private fun choose(
+        activity: PamActivity,
+        title: String,
+        message: String,
+        buttons: List<PamAlertButton>,
+        completion: ModuleCompletion,
+    ) {
+        if (closed.get() || activity.isFinishing || activity.isDestroyed) {
+            completion.complete(ModuleResultStatus.FAILURE, "Alert requires an active PamActivity".toByteArray())
+            return
+        }
+        var pressed = PamAlertButtons.DISMISSED
+        val slots = PamAlertButtons.slots(buttons)
+        val builder = AlertDialog.Builder(activity).setTitle(title).setMessage(message)
+        slots.positive?.let { index -> builder.setPositiveButton(buttons[index].label) { _, _ -> pressed = index } }
+        slots.negative?.let { index -> builder.setNegativeButton(buttons[index].label) { _, _ -> pressed = index } }
+        slots.neutral?.let { index -> builder.setNeutralButton(buttons[index].label) { _, _ -> pressed = index } }
+        val cancelIndex = buttons.indexOfFirst { it.style == PamAlertButtons.STYLE_CANCEL }
+        builder.setCancelable(true)
+        builder.setOnCancelListener { if (cancelIndex >= 0) pressed = cancelIndex }
+        val dialog = builder.create()
+        dialog.setOnDismissListener {
+            openDialogs.remove(dialog)
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("index" to WireValue.Integer(pressed.toLong()))),
+            )
+        }
+        openDialogs += dialog
+        dialog.show()
+        listOf(
+            slots.positive to AlertDialog.BUTTON_POSITIVE,
+            slots.negative to AlertDialog.BUTTON_NEGATIVE,
+            slots.neutral to AlertDialog.BUTTON_NEUTRAL,
+        ).forEach { (index, which) ->
+            if (index != null && buttons[index].style == PamAlertButtons.STYLE_DESTRUCTIVE) {
+                dialog.getButton(which)?.setTextColor(DESTRUCTIVE_COLOR)
+            }
         }
     }
 
@@ -527,6 +576,10 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         sensorListeners.toList().forEach(manager::unregisterListener)
         sensorListeners.clear()
         main.removeCallbacksAndMessages(null)
+        main.post {
+            openDialogs.toList().forEach { runCatching { it.dismiss() } }
+            openDialogs.clear()
+        }
     }
 
     private companion object {
@@ -535,5 +588,6 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         const val APPEARANCE_DARK = 2
         const val APP_STATE_ACTIVE = 1
         const val APP_STATE_BACKGROUND = 3
+        const val DESTRUCTIVE_COLOR = 0xFFD32F2F.toInt()
     }
 }

@@ -18,6 +18,7 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
             when (method) {
                 "status" -> result(kind(payload), completion)
                 "request" -> request(kind(payload), completion)
+                "shouldShowRationale" -> shouldShowRationale(kind(payload), completion)
                 "openSettings" -> {
                     activity.startActivity(
                         Intent(
@@ -30,6 +31,16 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
                 else -> error("Unknown permissions method $method")
             }
         }.onFailure { completion.failure(it.message ?: "Permission operation failed") }
+    }
+
+    private fun shouldShowRationale(kind: Int, completion: ModuleCompletion) {
+        val permissions = PermissionRationalePermissions.forKind(kind, Build.VERSION.SDK_INT)
+        val show = permissions.any { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED } &&
+            permissions.any(activity::shouldShowRequestPermissionRationale)
+        completion.complete(
+            ModuleResultStatus.SUCCESS,
+            WireMap.encode(mapOf("show" to WireValue.Flag(show))),
+        )
     }
 
     private fun request(kind: Int, completion: ModuleCompletion) {

@@ -523,7 +523,12 @@ class PamActivity : FragmentActivity() {
     internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
-        startActivityForResult(intent, request)
+        try {
+            startActivityForResult(intent, request)
+        } catch (error: RuntimeException) {
+            activityResultCallbacks.remove(request)
+            throw error
+        }
     }
 
     /** Like launchForResult for a PendingIntent's sender (Play Services resolution dialogs). */
@@ -575,6 +580,9 @@ class PamActivity : FragmentActivity() {
         }
         runtimeStarted = false
         permissionCallbacks.clear()
+        // Results of activities started by this instance cannot reach these
+        // callbacks any more; modules fail their own pending requests on close.
+        activityResultCallbacks.clear()
         super.onDestroy()
     }
 

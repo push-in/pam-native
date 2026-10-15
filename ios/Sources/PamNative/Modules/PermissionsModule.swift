@@ -27,6 +27,13 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
                 status(try kind(payload), completion)
             case "request":
                 request(try kind(payload), completion)
+            case "shouldShowRationale":
+                // iOS has no rationale concept: the system dialog is shown once.
+                let requested = try kind(payload)
+                guard (1...9).contains(requested) else {
+                    throw PermissionModuleError("Unknown permission kind \(requested)")
+                }
+                completion(.success, try WireMap.encode(["show": .flag(false)]))
             case "openSettings":
                 DispatchQueue.main.async {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else {

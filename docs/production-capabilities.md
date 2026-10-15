@@ -67,6 +67,26 @@ Permissions::requestKind(PermissionKind::Contacts, function ($decision): void {
 `Contacts::all()` transparently reads bounded pages so a large address book
 does not exceed the native bridge payload limit.
 
+`Contacts::openNewContactForm(fn (bool $created) => ..., $failure)` opens the
+system "new contact" editor without any contacts permission: Android
+`ACTION_INSERT` on `ContactsContract.Contacts.CONTENT_URI` (created = the
+editor returned `RESULT_OK`), iOS `CNContactViewController(forNewContact:)` in a
+navigation controller over the top view controller (created = the delegate's
+contact is not nil). Failures (no activity/presenter, no contacts app, a form
+already open, or the host closing while the form is open) go to `$failure`;
+without it they throw.
+
+```php
+Contacts::openNewContactForm(
+    function (bool $created): void {
+        if ($created) {
+            Toast::show('Contato salvo');
+        }
+    },
+    fn (string $error) => Toast::show($error),
+);
+```
+
 ## Current location
 
 Request location permission first, then provide both success and failure

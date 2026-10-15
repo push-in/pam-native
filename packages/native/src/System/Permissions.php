@@ -12,6 +12,7 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NativeOperation;
 use Pam\Native\PermissionDecision;
 use Pam\Native\PermissionKind;
+use Pam\Native\PermissionRationale;
 use Pam\Native\PermissionStatus;
 use RuntimeException;
 
@@ -33,16 +34,80 @@ final class Permissions
         return self::call(NativeOperation::PermissionRequest, $permission, $callback);
     }
 
-    /** @param Closure(PermissionDecision): void $callback */
-    public static function status(PermissionKind $kind, Closure $callback): int
+    /**
+     * @param Closure(PermissionDecision): void $callback
+     * @param null|Closure(string): void $failure Receives the native error instead of an exception.
+     */
+    public static function status(PermissionKind $kind, Closure $callback, ?Closure $failure = null): int
     {
-        return self::typed('status', $kind, $callback);
+        return self::typed('status', $kind, $callback, $failure);
     }
 
-    /** @param Closure(PermissionDecision): void $callback */
-    public static function requestKind(PermissionKind $kind, Closure $callback): int
+    /**
+     * Requests the kind. With a `$rationale`, when the platform says one should
+     * be shown (Android after a denial), a native alert explains it first and
+     * the request runs only if confirmed; cancelling answers the current status.
+     *
+     * @param Closure(PermissionDecision): void $callback
+     * @param null|Closure(string): void $failure Receives the native error instead of an exception.
+     */
+    public static function requestKind(
+        PermissionKind $kind,
+        Closure $callback,
+        ?Closure $failure = null,
+        ?PermissionRationale $rationale = null,
+    ): int {
+        if ($rationale === null) {
+            return self::typed('request', $kind, $callback, $failure);
+        }
+
+        return self::shouldShowRationale(
+            $kind,
+            static function (bool $show) use ($kind, $callback, $failure, $rationale): void {
+                if (!$show) {
+                    self::typed('request', $kind, $callback, $failure);
+
+                    return;
+                }
+                Alert::choose(
+                    $rationale->title,
+                    $rationale->message,
+                    [AlertButton::cancel($rationale->cancelLabel), AlertButton::make($rationale->confirmLabel)],
+                    static function (int $pressed) use ($kind, $callback, $failure): void {
+                        self::typed($pressed === 1 ? 'request' : 'status', $kind, $callback, $failure);
+                    },
+                    $failure,
+                );
+            },
+            $failure,
+        );
+    }
+
+    /**
+     * Whether Android wants an explanation before asking again for the kind's
+     * permissions (`shouldShowRequestPermissionRationale`). iOS is always false.
+     *
+     * @param Closure(bool): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function shouldShowRationale(PermissionKind $kind, Closure $callback, ?Closure $failure = null): int
     {
-        return self::typed('request', $kind, $callback);
+        return NativeModules::call(
+            'permissions',
+            'shouldShowRationale',
+            ['kind' => $kind->value],
+            static function ($result) use ($callback, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
+                    throw new RuntimeException($result->payload);
+                }
+                $callback((bool) (Wire::decodeMap($result->payload)['show'] ?? false));
+            },
+        );
     }
 
     public static function openSettings(?Closure $callback = null): int
@@ -60,15 +125,23 @@ final class Permissions
         );
     }
 
-    /** @param Closure(PermissionDecision): void $callback */
-    private static function typed(string $method, PermissionKind $kind, Closure $callback): int
+    /**
+     * @param Closure(PermissionDecision): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    private static function typed(string $method, PermissionKind $kind, Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'permissions',
             $method,
             ['kind' => $kind->value],
-            static function ($result) use ($kind, $callback): void {
+            static function ($result) use ($kind, $callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);

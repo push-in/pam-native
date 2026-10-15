@@ -115,6 +115,10 @@ incoming-share files. Media explicitly marked `pinOffline()` is preserved by
 default. Pass `preserveOffline: false` only after explicit user confirmation to
 remove downloaded offline content as well.
 
+Both accept an optional `failure: fn (string $error) => ...` callback: when it
+is given a native failure is delivered there instead of being thrown
+asynchronously (without it, the exception is kept for compatibility).
+
 ## Runtime behavior
 
 - Memory and disk hits avoid a duplicate network request.

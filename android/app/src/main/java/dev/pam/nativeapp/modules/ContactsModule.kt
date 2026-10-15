@@ -1,10 +1,16 @@
 package dev.pam.nativeapp.modules
 
 import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.os.Handler
+import android.os.Looper
 import android.provider.ContactsContract
+import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.concurrent.Executors
@@ -18,8 +24,15 @@ internal class ContactsModule(private val context: Context) : NativeModule, Auto
         Thread(runnable, "pam-contacts").apply { isDaemon = true }
     }
     private val closed = AtomicBoolean()
+    private val main = Handler(Looper.getMainLooper())
+    /** The open "new contact" form's completion. Main thread only; failed on close. */
+    private var pendingForm: ModuleCompletion? = null
 
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
+        if (method == "openNewContactForm") {
+            main.post { openNewContactForm(completion) }
+            return
+        }
         if (method != "list") {
             completion.complete(ModuleResultStatus.FAILURE, "Unknown contacts method $method".toByteArray())
             return
@@ -127,8 +140,60 @@ internal class ContactsModule(private val context: Context) : NativeModule, Auto
         }
     }
 
+    /**
+     * Opens the system contacts editor (ACTION_INSERT) through the activity
+     * result plumbing; created = RESULT_OK. Needs no contacts permission.
+     */
+    private fun openNewContactForm(completion: ModuleCompletion) {
+        val activity = context as? PamActivity
+        val failure = when {
+            closed.get() -> "Contacts module is closed"
+            activity == null || activity.isFinishing || activity.isDestroyed ->
+                "Opening the contact form requires an active PamActivity"
+            pendingForm != null -> "A new contact form is already open"
+            else -> null
+        }
+        if (failure != null || activity == null) {
+            completion.complete(ModuleResultStatus.FAILURE, (failure ?: "Contacts unavailable").toByteArray())
+            return
+        }
+        val intent = Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI).apply {
+            // Return to the app after saving instead of showing the saved contact.
+            putExtra("finishActivityOnSaveCompleted", true)
+        }
+        pendingForm = completion
+        try {
+            activity.launchForResult(intent) { resultCode, _ ->
+                finishForm(resultCode == Activity.RESULT_OK)
+            }
+        } catch (_: ActivityNotFoundException) {
+            pendingForm = null
+            completion.complete(ModuleResultStatus.FAILURE, "No contacts app can create a contact".toByteArray())
+        } catch (error: RuntimeException) {
+            pendingForm = null
+            completion.complete(
+                ModuleResultStatus.FAILURE,
+                (error.message ?: "Cannot open the contact form").toByteArray(),
+            )
+        }
+    }
+
+    private fun finishForm(created: Boolean) {
+        val completion = pendingForm ?: return
+        pendingForm = null
+        completion.complete(
+            ModuleResultStatus.SUCCESS,
+            WireMap.encode(mapOf("created" to WireValue.Flag(created))),
+        )
+    }
+
     override fun close() {
         if (closed.compareAndSet(false, true)) executor.shutdownNow()
+        main.post {
+            val completion = pendingForm ?: return@post
+            pendingForm = null
+            completion.complete(ModuleResultStatus.FAILURE, "The contact form was interrupted".toByteArray())
+        }
     }
 
     private data class ContactRow(

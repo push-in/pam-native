@@ -61,6 +61,36 @@ final class Contacts
         return $lastRequest;
     }
 
+    /**
+     * Opens the system "new contact" editor (Android ACTION_INSERT, iOS
+     * CNContactViewController). No contacts permission is needed. `$done`
+     * receives whether the user saved a contact. Failures (no activity or
+     * presenter, no contacts app, form interrupted) go to `$failure`; without
+     * it they throw.
+     *
+     * @param Closure(bool): void $done
+     * @param null|Closure(string): void $failure
+     */
+    public static function openNewContactForm(Closure $done, ?Closure $failure = null): int
+    {
+        return NativeModules::call(
+            'contacts',
+            'openNewContactForm',
+            [],
+            static function ($result) use ($done, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
+                    throw new RuntimeException($result->payload);
+                }
+                $done((bool) (Wire::decodeMap($result->payload)['created'] ?? false));
+            },
+        );
+    }
+
     /** @return list<Contact> */
     private static function decodeItems(string $payload): array
     {

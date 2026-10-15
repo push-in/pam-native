@@ -8,6 +8,8 @@ import CoreMotion
 
 public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
     private let motion = CMMotionManager()
+    /// Choice alerts on screen (main thread only); dismissed with -1 on close.
+    private var openChoices: [ObjectIdentifier: (alert: UIAlertController, completion: ModuleCompletion)] = [:]
     public init() {}
 
     public func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
@@ -21,6 +23,11 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 let message = (values["message"] as? WireValue).flatMap { value in
                     if case let .text(value) = value { value } else { nil }
                 } ?? ""
+                let buttons = try PamAlertButtons.decode(values)
+                if !buttons.isEmpty {
+                    presentChoice(title: title, message: message, buttons: buttons, completion: completion)
+                    return
+                }
                 presentAlert(title: title, message: message)
                 completion(.success, Data())
             } catch {
@@ -37,8 +44,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 let text = (values["text"] as? WireValue).flatMap { value in
                     if case let .text(value) = value { value } else { nil }
                 } ?? ""
-                share(text: text)
-                completion(.success, Data())
+                share(text: text, completion: completion)
             } catch {
                 completion(.failure, (error.localizedDescription).data(using: .utf8) ?? Data())
             }
@@ -198,6 +204,16 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         motion.stopAccelerometerUpdates()
         motion.stopGyroUpdates()
         motion.stopMagnetometerUpdates()
+        DispatchQueue.main.async {
+            let open = self.openChoices
+            self.openChoices.removeAll()
+            for (_, entry) in open {
+                entry.alert.dismiss(animated: false)
+                if let payload = try? WireMap.encode(["index": .integer(Int64(PamAlertButtons.dismissed))]) {
+                    entry.completion(.success, payload)
+                }
+            }
+        }
     }
 
     public func invoke(operation: NativeOperation, payload: Data, completion: @escaping ModuleCompletion) {
@@ -436,15 +452,71 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         }
     }
 
-    private func share(text: String) {
+    /// `Alert::choose()`: answers the pressed button index once the alert is dismissed.
+    private func presentChoice(
+        title: String,
+        message: String,
+        buttons: [PamAlertButton],
+        completion: @escaping ModuleCompletion
+    ) {
         DispatchQueue.main.async {
-            guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first?.windows.first,
-                  let controller = window.rootViewController else {
+            guard let presenter = Self.topPresenter() else {
+                completion(.failure, Data("No view controller is available for the alert".utf8))
+                return
+            }
+            let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+            let token = ObjectIdentifier(alert)
+            for (index, button) in buttons.enumerated() {
+                let style: UIAlertAction.Style
+                switch button.style {
+                case PamAlertButtons.styleCancel: style = .cancel
+                case PamAlertButtons.styleDestructive: style = .destructive
+                default: style = .default
+                }
+                alert.addAction(UIAlertAction(title: button.label, style: style) { [weak self] _ in
+                    self?.finishChoice(token, index: index)
+                })
+            }
+            self.openChoices[token] = (alert, completion)
+            presenter.present(alert, animated: true)
+        }
+    }
+
+    private func finishChoice(_ token: ObjectIdentifier, index: Int) {
+        guard let entry = openChoices.removeValue(forKey: token) else { return }
+        do {
+            entry.completion(.success, try WireMap.encode(["index": .integer(Int64(index))]))
+        } catch {
+            entry.completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func share(text: String, completion: @escaping ModuleCompletion) {
+        DispatchQueue.main.async {
+            guard let controller = Self.topPresenter() else {
+                completion(.failure, Data("No view controller is available for sharing".utf8))
                 return
             }
             let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-            controller.present(activity, animated: true)
+            if let popover = activity.popoverPresentationController {
+                popover.sourceView = controller.view
+                popover.sourceRect = CGRect(x: controller.view.bounds.midX, y: controller.view.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            controller.present(activity, animated: true) {
+                completion(.success, Data())
+            }
         }
+    }
+
+    private static func topPresenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var controller = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+            ?? scenes.flatMap(\.windows).first(where: { !$0.isHidden })?.rootViewController
+        while let presented = controller?.presentedViewController, !presented.isBeingDismissed {
+            controller = presented
+        }
+        return controller
     }
 
     private func safeURL(from raw: String) -> URL? {
