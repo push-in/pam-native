@@ -325,6 +325,15 @@ class PamRuntime(
                     true,
                 )
             }
+            // A deep-linked cold start: PHP routes the launch URL before its
+            // first frame (Linking::routeLaunchUrl()).
+            runCatching {
+                android.system.Os.setenv(
+                    "PAM_NATIVE_LAUNCH_URL",
+                    dev.pam.nativeapp.modules.PamDeepLinks.launchUrl().orEmpty(),
+                    true,
+                )
+            }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }

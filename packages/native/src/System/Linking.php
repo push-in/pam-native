@@ -131,12 +131,57 @@ final class Linking
     }
 
     /** @param null|Closure(string, bool): void $callback */
+    /** The launch URL already routed by {@see routeLaunchUrl()} (initial() skips it once). */
+    private static ?string $routedLaunchUrl = null;
+    private static bool $launchUrlTaken = false;
+
+    /**
+     * The URL the app was launched with, as the host reported it at boot
+     * (`PAM_NATIVE_LAUNCH_URL`), once per process: later PHP requests (hot
+     * reload) start without it.
+     */
+    public static function takeLaunchUrl(): ?string
+    {
+        if (self::$launchUrlTaken) {
+            return null;
+        }
+        self::$launchUrlTaken = true;
+        $url = getenv('PAM_NATIVE_LAUNCH_URL');
+        if (!is_string($url) || trim($url) === '') {
+            return null;
+        }
+        putenv('PAM_NATIVE_LAUNCH_URL');
+
+        return trim($url);
+    }
+
+    /**
+     * Opens the launch URL on $navigator before the first frame, like React
+     * Navigation's linking resolves the initial state: a deep-linked cold
+     * start renders its screen first instead of the initial route followed
+     * by a navigation. The asynchronous initial-URL delivery of
+     * {@see listenAndRoute()} then reports it without opening it again.
+     */
+    public static function routeLaunchUrl(Navigator $navigator): void
+    {
+        $url = self::takeLaunchUrl();
+        if ($url !== null && $navigator->open($url)) {
+            self::$routedLaunchUrl = $url;
+        }
+    }
+
     public static function listenAndRoute(
         Navigator $navigator,
         ?Closure $callback = null,
     ): int {
         self::initial(static function (?string $url) use ($navigator, $callback): void {
             if ($url === null) {
+                return;
+            }
+            if (self::$routedLaunchUrl !== null && $url === self::$routedLaunchUrl) {
+                self::$routedLaunchUrl = null;
+                $callback?->__invoke($url, true);
+
                 return;
             }
             $handled = $navigator->open($url);

@@ -921,6 +921,9 @@ public final class PamRuntime {
         guard let data = try? JSONSerialization.data(withJSONObject: values),
               let json = String(data: data, encoding: .utf8) else { return }
         setenv("PAM_BOOT_METRICS", json, 1)
+        // A deep-linked cold start: PHP routes the launch URL before its
+        // first frame (Linking::routeLaunchUrl()).
+        setenv("PAM_NATIVE_LAUNCH_URL", PamLinking.launchURL() ?? "", 1)
     }
 
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {
