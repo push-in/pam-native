@@ -114,6 +114,9 @@ final class RouteRegistrar
                     $route->keepAlive instanceof Closure ? $route->keepAlive : null,
                 );
             }
+            if ($route->errorBoundary !== null) {
+                $router = $router->errorBoundary($route->name, $route->errorBoundary);
+            }
             $guard = self::composeGuards($route->groupGuards, $route->guard);
             if ($guard !== null) $router = $router->guard($route->name, $guard);
             foreach ($route->deepLinks as $pattern) {

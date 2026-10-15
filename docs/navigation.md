@@ -232,6 +232,46 @@ If another navigation interrupts the exit animation, the discarded outgoing
 screen is still released. Use this callback to cancel route-owned subscriptions
 and other work that must outlive a temporary blur.
 
+## Route error boundaries
+
+A route whose screen throws while it is created, mounted or rendered can show
+a fallback instead of taking the whole app down. Only that route is replaced;
+the other routes of the stack, tabs and navigators keep working:
+
+```php
+Route::errorBoundary(static fn (Throwable $error, RouteContext $route, Closure $retry): Renderable =>
+    new ErrorScreen($error->getMessage(), onRetry: $retry));
+
+Route::stack('main', AppRoute::Feed, static function (): void {
+    Route::screen(AppRoute::Feed, FeedScreen::class);
+    Route::screen(AppRoute::Post, PostScreen::class)
+        ->errorBoundary(static fn (Throwable $error, RouteContext $route, Closure $retry): Renderable =>
+            new PostUnavailable($route->integer('id'), $retry));
+});
+```
+
+- `PendingRoute::errorBoundary()` wins over the global `Route::errorBoundary()`;
+  `Router::errorBoundary($route, $boundary)` is the builder equivalent.
+  `Route::errorBoundary(null)` removes the global one. Without any boundary a
+  route error propagates exactly as before (fatal render error, error overlay
+  in development, release fallback).
+- The boundary is called once per error; its `Renderable` is kept (with its
+  component state) and rendered inside the route's own screen options, so the
+  header and back navigation still work. The route is not rendered again
+  until `$retry()`.
+- `$retry()` clears the error and renders the route again (the same route
+  instance; a route that failed in its constructor is created again).
+- Component-level `failed()` / `fallback()` still run first; the route
+  boundary only sees errors they do not recover.
+- A caught error is reported once as non-fatal (`RuntimeErrorPhase::Other`):
+  `App::onError()` listeners receive it and, in development, the error
+  overlay shows it as a toast instead of the full-screen inspector.
+- Boundaries apply to stack routes (`Route::screen()`, `modal()`,
+  `navigator()`, `Router::stack()`), including stacks nested in tabs and
+  drawers; a direct `Route::tab()` / `drawerScreen()` item has none.
+- Hot reload starts a fresh runtime: errors are cleared, the route renders
+  with the new code and the global boundary is declared again by the routes.
+
 ## Covered routes release native media
 
 A screen below another route keeps its native tree (its PHP element tree is

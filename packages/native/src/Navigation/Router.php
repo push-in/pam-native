@@ -36,6 +36,8 @@ final class Router
     private ?Closure $linkFilter = null;
     /** @var array<string, true|Closure(RouteContext): bool> */
     private array $keepAlive = [];
+    /** @var array<string, Closure> */
+    private array $errorBoundaries = [];
 
     private function __construct(string|BackedEnum $initialRoute)
     {
@@ -132,6 +134,20 @@ final class Router
         return $copy;
     }
 
+    /**
+     * Renders `$boundary($error, $route, $retry)` in place of this route when
+     * it throws while created, mounted or rendered; other routes keep
+     * working. `$retry()` clears the error and renders the route again.
+     *
+     * @param Closure(\Throwable, RouteContext, Closure(): void): \Pam\Native\Renderable $boundary
+     */
+    public function errorBoundary(string|BackedEnum $route, Closure $boundary): self
+    {
+        $copy = clone $this;
+        $copy->errorBoundaries[RouteName::value($route)] = $boundary;
+        return $copy;
+    }
+
     public function guardFallback(string|BackedEnum $route): self
     {
         $route = RouteName::value($route);
@@ -208,6 +224,7 @@ final class Router
             defaultOptions: $this->defaultOptions,
             optionGroups: $this->optionGroups,
             keepAliveRoutes: $this->keepAlive,
+            errorBoundaries: $this->errorBoundaries,
         );
     }
 }

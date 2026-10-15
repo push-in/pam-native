@@ -83,6 +83,21 @@ final class PendingRoute
         return $this;
     }
 
+    /**
+     * Error boundary for this route only: when the screen throws while it is
+     * created, mounted or rendered, `$boundary($error, $route, $retry)` is
+     * rendered in its place (other routes and tabs are unaffected) and the
+     * error is reported as non-fatal. `$retry()` clears the error and renders
+     * the route again. Wins over Route::errorBoundary().
+     *
+     * @param Closure(\Throwable, \Pam\Native\Navigation\RouteContext, Closure(): void): \Pam\Native\Renderable $boundary
+     */
+    public function errorBoundary(Closure $boundary): self
+    {
+        $this->definition->errorBoundary = $boundary;
+        return $this;
+    }
+
     public function guard(Closure $guard): self
     {
         $this->definition->guard = $guard;

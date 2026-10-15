@@ -812,6 +812,7 @@ final class Runtime
         ErrorReporter::reset();
         self::$renderFailure = null;
         Linking::resetRuntime();
+        \Pam\Native\Routing\Route::resetRuntime();
         \Pam\Native\Events\EventBus::resetRuntime();
         IncomingShares::resetRuntime();
         PushNotifications::resetRuntime();

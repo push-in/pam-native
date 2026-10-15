@@ -26,6 +26,7 @@ final class Route
     private static ?TabRegistrar $tabRegistrar = null;
     private static ?TopTabRegistrar $topTabRegistrar = null;
     private static ?DrawerRegistrar $drawerRegistrar = null;
+    private static ?Closure $errorBoundary = null;
 
     private function __construct()
     {
@@ -165,6 +166,31 @@ final class Route
         if (!$nested) Navigation::attach($navigator);
 
         return $navigator;
+    }
+
+    /**
+     * Default error boundary for every stack route without its own
+     * (PendingRoute::errorBoundary()): `$boundary($error, $route, $retry)`
+     * replaces only the failing route. null removes it, so a failing route
+     * propagates its error again (error overlay / release fallback).
+     *
+     * @param (Closure(\Throwable, \Pam\Native\Navigation\RouteContext, Closure(): void): Renderable)|null $boundary
+     */
+    public static function errorBoundary(?Closure $boundary): void
+    {
+        self::$errorBoundary = $boundary;
+    }
+
+    /** @internal */
+    public static function globalErrorBoundary(): ?Closure
+    {
+        return self::$errorBoundary;
+    }
+
+    /** @internal Runtime shutdown (and hot reload) starts without a global boundary. */
+    public static function resetRuntime(): void
+    {
+        self::$errorBoundary = null;
     }
 
     public static function preset(ScreenOptions|ScreenOptionsPatch|Closure $options): RoutePreset

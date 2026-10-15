@@ -12,6 +12,7 @@ use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 use Pam\Native\Routing\RouteName;
 use ReflectionFunction;
+use Throwable;
 
 use function array_key_exists;
 use function array_slice;
@@ -48,6 +49,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private array $routeContexts = [];
     /** @var array<string, array{element: \Pam\Native\Element, components: list<Component>, epoch: int}> */
     private array $frozenScreens = [];
+    /** @var array<string, Closure> Route name => error boundary (PendingRoute::errorBoundary). */
+    private array $errorBoundaries = [];
+    /** @var array<string, Throwable> Entry key => error caught by a boundary, until retry. */
+    private array $routeErrors = [];
+    /** @var array<string, Renderable> Entry key => boundary content for that error. */
+    private array $boundaryScreens = [];
     private int $nextListenerId = 1;
     private ?string $focusedEntryKey = null;
     /** @var array<string, NavigationSubscription> */
@@ -100,6 +107,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /**
      * @param array<array-key, mixed> $routes
      * @param array<array-key, string|true|Closure> $keepAliveRoutes route names, or name => true|Closure(RouteContext): bool
+     * @param array<array-key, Closure> $errorBoundaries route name => Closure(Throwable, RouteContext, Closure): Renderable
      */
     public function __construct(
         string|BackedEnum $initialRoute,
@@ -119,6 +127,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         ScreenOptions|Closure|null $defaultOptions = null,
         array $optionGroups = [],
         array $keepAliveRoutes = [],
+        array $errorBoundaries = [],
     )
     {
         $initialRoute = RouteName::value($initialRoute);
@@ -148,6 +157,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 throw new InvalidArgumentException('Keep-alive routes must be registered, with true or a RouteContext predicate.');
             }
             $this->keepAliveRoutes[$route] = $when;
+        }
+        foreach ($errorBoundaries as $route => $boundary) {
+            if (!is_string($route) || !isset($validated[$route]) || !$boundary instanceof Closure) {
+                throw new InvalidArgumentException('Error boundaries must target registered routes with a Closure.');
+            }
+            $this->errorBoundaries[$route] = $boundary;
         }
         $this->navigationKey = 'stack.'.$persistenceKey;
         foreach ($deepLinks as $link) {
@@ -450,6 +465,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $live[$this->entryKey($entry)] = true;
         }
         $this->frozenScreens = array_intersect_key($this->frozenScreens, $live);
+        if ($this->routeErrors !== []) {
+            foreach ($this->stack as $entry) {
+                $live[$this->entryKey($entry)] = true;
+            }
+            $this->routeErrors = array_intersect_key($this->routeErrors, $live);
+            $this->boundaryScreens = array_intersect_key($this->boundaryScreens, $live);
+        }
 
         $activeOptions = $this->currentOptions();
         \Pam\Native\System\Screen::claimForRoute($this->navigationKey, $activeOptions->secure);
@@ -1068,6 +1090,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function screenElement(array $entry, bool $active): \Pam\Native\Element
     {
         $key = $this->entryKey($entry);
+        if (isset($this->routeErrors[$key])) {
+            return $this->boundaryElement($entry, $key);
+        }
         $frozen = $this->frozenScreens[$key] ?? null;
         if (
             !$active
@@ -1079,11 +1104,15 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
             return $frozen['element'];
         }
-        [$element, $components] = \Pam\Native\Internal\ComponentLifecycle::capture(
-            fn (): \Pam\Native\Element => $this->decorateRoute($entry)
-                ->toElement()
-                ->key('navigation.'.$entry['id']),
-        );
+        try {
+            [$element, $components] = \Pam\Native\Internal\ComponentLifecycle::capture(
+                fn (): \Pam\Native\Element => $this->decorateRoute($entry)
+                    ->toElement()
+                    ->key('navigation.'.$entry['id']),
+            );
+        } catch (Throwable $error) {
+            return $this->failRoute($entry, $key, $error);
+        }
         $this->frozenScreens[$key] = [
             'element' => $element,
             'components' => $components,
@@ -1096,6 +1125,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /** @param array{name: string, id: int, routeId?: string|null, params: array<string, string|int|float|bool|null>} $entry */
     private function warmScreenElement(array $entry): \Pam\Native\Element
     {
+        $key = $this->entryKey($entry);
+        if (isset($this->routeErrors[$key])) {
+            return $this->boundaryElement($entry, $key);
+        }
         self::$prewarmDepth++;
         try {
             [$element] = \Pam\Native\Internal\ComponentLifecycle::capture(
@@ -1107,11 +1140,84 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                     fn (): bool => $this->pop(),
                 )->toElement()->key('navigation.'.$entry['id']),
             );
+        } catch (Throwable $error) {
+            return $this->failRoute($entry, $key, $error);
         } finally {
             self::$prewarmDepth--;
         }
 
         return $element;
+    }
+
+    /**
+     * A route that threw while it was created, mounted or rendered: with an
+     * error boundary (the route's own, else Route::errorBoundary()) only that
+     * route shows the boundary; without one the error propagates as before.
+     *
+     * @param array{name: string, id: int, routeId?: string|null, params: array<string, string|int|float|bool|null>} $entry
+     */
+    private function failRoute(array $entry, string $key, Throwable $error): \Pam\Native\Element
+    {
+        if ($this->errorBoundaryFor($entry['name']) === null) {
+            throw $error;
+        }
+        $this->routeErrors[$key] = $error;
+        unset($this->frozenScreens[$key], $this->boundaryScreens[$key]);
+        try {
+            // Non-fatal: the app keeps working, App::onError() listeners and
+            // the development overlay (toast) still see the error.
+            \Pam\Native\Internal\Runtime::reportError($error, \Pam\Native\Diagnostics\RuntimeErrorPhase::Other);
+        } catch (Throwable) {
+            // Reporting must never break the boundary.
+        }
+
+        return $this->boundaryElement($entry, $key);
+    }
+
+    /** @param array{name: string, id: int, routeId?: string|null, params: array<string, string|int|float|bool|null>} $entry */
+    private function boundaryElement(array $entry, string $key): \Pam\Native\Element
+    {
+        $error = $this->routeErrors[$key];
+        $content = $this->boundaryScreens[$key] ?? null;
+        if ($content === null) {
+            $boundary = $this->errorBoundaryFor($entry['name']);
+            if ($boundary === null) {
+                unset($this->routeErrors[$key]);
+                throw $error;
+            }
+            $content = $boundary(
+                $error,
+                $this->contextFor($entry),
+                function () use ($key): void {
+                    $this->retryRoute($key);
+                },
+            );
+            if (!$content instanceof Renderable) {
+                throw new \LogicException("The error boundary of route {$entry['name']} must return a Renderable.");
+            }
+            $this->boundaryScreens[$key] = $content;
+        }
+
+        return (new NavigationScreen(
+            $content,
+            $this->resolvedOptions($entry),
+            $this->theme,
+            count($this->stack) > 1,
+            fn (): bool => $this->pop(),
+        ))->toElement()->key('navigation.'.$entry['id']);
+    }
+
+    private function errorBoundaryFor(string $route): ?Closure
+    {
+        return $this->errorBoundaries[$route] ?? \Pam\Native\Routing\Route::globalErrorBoundary();
+    }
+
+    /** Clears a route's caught error so the next render tries the route again. */
+    private function retryRoute(string $key): void
+    {
+        if (!isset($this->routeErrors[$key])) return;
+        unset($this->routeErrors[$key], $this->boundaryScreens[$key], $this->frozenScreens[$key]);
+        \Pam\Native\Internal\Runtime::requestRender();
     }
 
     /**

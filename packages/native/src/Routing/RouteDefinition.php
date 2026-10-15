@@ -20,6 +20,7 @@ final class RouteDefinition
     public ?Closure $guard = null;
     public ?Closure $getId = null;
     public bool|Closure $keepAlive = false;
+    public ?Closure $errorBoundary = null;
     /** @var list<string> */
     public array $deepLinks = [];
 
