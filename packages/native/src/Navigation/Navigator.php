@@ -724,9 +724,15 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
      * kept at a time and it is released when unused for a few seconds or on
      * any other navigation.
      *
+     * `$releaseAfterMs` is that unused lifetime (4 s by default). `null` keeps
+     * the screen warm until another navigation, cancelPrewarm() or
+     * trimMemory(): a screen that keeps a route warm while it stays idle no
+     * longer renews it with a timer every few seconds (each renewal woke PHP
+     * and ran a render pass twice).
+     *
      * @param array<string, string|int|float|bool|null> $params
      */
-    public function prewarm(string|BackedEnum $route, array $params = []): bool
+    public function prewarm(string|BackedEnum $route, array $params = [], ?int $releaseAfterMs = self::WARM_TTL_MS): bool
     {
         $route = RouteName::value($route);
         if (!isset($this->routes[$route])) return false;
@@ -746,9 +752,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             ];
             $this->pruneRouteInstances();
         }
-        \Pam\Native\System\Timers::after(self::WARM_TTL_MS, function () use ($generation): void {
-            if ($generation === $this->warmGeneration) $this->cancelPrewarm();
-        });
+        if ($releaseAfterMs !== null) {
+            \Pam\Native\System\Timers::after(max(0, $releaseAfterMs), function () use ($generation): void {
+                if ($generation === $this->warmGeneration) $this->cancelPrewarm();
+            });
+        }
 
         return true;
     }

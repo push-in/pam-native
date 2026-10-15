@@ -6901,6 +6901,22 @@ $assert(
     !$prewarmNavigator->isPrewarmed('detail', ['id' => 10]),
     'cancelPrewarm() must unmount the prewarmed screen.',
 );
+$pendingModuleCalls = static fn (): int => count((new ReflectionProperty(Runtime::class, 'moduleCallbacks'))->getValue());
+$callsBeforeWarm = $pendingModuleCalls();
+$prewarmNavigator->prewarm('detail', ['id' => 11]);
+$callsAfterTimedWarm = $pendingModuleCalls();
+$prewarmNavigator->prewarm('detail', ['id' => 11], null);
+$prewarmNavigator->prewarm('detail', ['id' => 11], null);
+$assert(
+    $callsAfterTimedWarm === $callsBeforeWarm + 1 && $pendingModuleCalls() === $callsAfterTimedWarm
+        && $prewarmNavigator->isPrewarmed('detail', ['id' => 11]),
+    'prewarm(releaseAfterMs: null) must keep the screen warm without arming a release timer.',
+);
+$prewarmNavigator->trimMemory();
+$assert(
+    !$prewarmNavigator->isPrewarmed('detail', ['id' => 11]),
+    'trimMemory() must release a screen held warm without a timer.',
+);
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
 
@@ -7201,8 +7217,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.44.0',
-    'The runtime SDK contract must match the 1.44.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.45.0',
+    'The runtime SDK contract must match the 1.45.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

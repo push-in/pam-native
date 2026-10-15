@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.44.0 - 2026-10-15
+## 1.45.0 - 2026-10-15
 
 - Long lists are materialized by window, with no app change (Android and
   iOS): a vertical `VirtualizedList`/`VirtualGrid` (or `p-for` inside
@@ -20,6 +20,48 @@
 - Protocol: properties 541 (`ListPlaceholder`) and 542 (`ListWindowed`) and
   event 80 (`ListWindow`, consumed by the runtime) are appended. Android,
   iOS, Rust and PHP tables stay in parity.
+- Native tree encoder (Android and iOS, transparent): the hosts register a
+  C++ port of `Internal\TreeEncoder` and the runtime uses it automatically.
+  Frames, patches, node ids, callbacks and errors are byte-for-byte those of
+  the PHP encoder (`tests/native_encoder_equivalence.php`, run by
+  `scripts/native-encoder-test.sh`; `PAM_NATIVE_ENCODER=php` keeps the PHP
+  encoder). Re-encoding a rebuilt 43,000-node tree drops from ~257 ms to
+  ~35 ms on the host.
+
+## 1.43.1 - 2026-10-15
+
+- Android baseline profile covers Media3 (ExoPlayer, common, decoder,
+  datasource, extractor): with `speed-profile` the playback loop no longer
+  runs interpreted. A feed video on the S10 went from 66% to 56% process CPU
+  (ExoPlayer playback thread 13% → 9%, codec callbacks 9.5% → 6%).
+- Android `ScrollView`: a requested content offset (`contentOffsetX/Y`,
+  initial offsets, scroll requests) on a container that is not laid out yet
+  (GONE, never measured, or still without content) waits for its next layout.
+  It used to re-post itself to the UI thread on every looper iteration for as
+  long as the container stayed unlaid: on the Zé Chat feed, with a video
+  playing, the main thread sat at ~64% CPU. iOS applies offsets from layout
+  and has no such retry.
+- Android spinners stop ticking off screen. `ActivityIndicator` and the
+  `Button` loading arc started their infinite `ValueAnimator` as soon as the
+  renderer created them, before (or without ever) being attached: a spinner
+  in a prewarmed or hidden subtree drove Choreographer frames forever, also
+  with the app in the background (Zé Chat inbox on the S10: ~60 main-thread
+  wakeups/s, 4-5% CPU idle and in background). The loop now runs only while
+  its host is attached, shown and in a visible window, pauses when the host
+  leaves and resumes on its next draw. iOS spinners already animate only in a
+  window.
+- `DeviceStatus::watch()` delivers the first status and then only changes.
+  Android drops the per-interval main-thread poll (three binder calls and a
+  PHP callback every interval, in the background too) for the default
+  network callback and the battery/power-save broadcasts; changes closer
+  than the interval are coalesced. iOS keeps its timer and drops unchanged
+  samples. Mac checklist in `docs/ios-parity.md`.
+- `Navigator::prewarm($route, $params, releaseAfterMs: null)` keeps the warm
+  screen until another navigation, `cancelPrewarm()` or `trimMemory()`
+  instead of releasing it after 4 s unused. A screen that keeps its first
+  row warm while idle no longer renews it with a timer (every renewal woke
+  PHP and ran two render passes: ~40 wakeups/min on the Zé Chat inbox). The
+  default stays 4 s. PHP only.
 
 ## 1.43.0 - 2026-10-14
 

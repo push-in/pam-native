@@ -11,3 +11,13 @@ HSPLdev/pam/nativeapp/render/PamRenderer;->dematerializeSubtree(J)V
 HSPLdev/pam/nativeapp/render/PamRecyclerList;->setRichItems(Ljava/util/List;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;)V
 HSPLdev/pam/nativeapp/**;->**(**)**
 Ldev/pam/nativeapp/**;
+HSPLandroidx/media3/exoplayer/**;->**(**)**
+Landroidx/media3/exoplayer/**;
+HSPLandroidx/media3/common/**;->**(**)**
+Landroidx/media3/common/**;
+HSPLandroidx/media3/decoder/**;->**(**)**
+Landroidx/media3/decoder/**;
+HSPLandroidx/media3/datasource/**;->**(**)**
+Landroidx/media3/datasource/**;
+HSPLandroidx/media3/extractor/**;->**(**)**
+Landroidx/media3/extractor/**;

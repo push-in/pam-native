@@ -66,7 +66,7 @@ private fun themeProgressTint(context: Context): ColorStateList? {
     }
 }
 
-private class PamVuetifySpinnerDrawable(
+internal class PamVuetifySpinnerDrawable(
     private val context: Context,
 ) : Drawable(), Animatable {
     private val density = context.resources.displayMetrics.density
@@ -79,17 +79,21 @@ private class PamVuetifySpinnerDrawable(
     private val arcBounds = RectF()
     private var phase = 0f
     private var running = false
-    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+    private val animator: ValueAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
         duration = 1_400L
         interpolator = LinearInterpolator()
         repeatCount = ValueAnimator.INFINITE
         addUpdateListener {
+            if (!loop.tick()) return@addUpdateListener
             phase = it.animatedValue as Float
             invalidateSelf()
         }
     }
+    private val loop: PamHostedLoop = PamHostedLoop(this, animator)
 
     override fun draw(canvas: Canvas) {
+        // Drawn means shown: a host that came back on screen resumes the loop.
+        loop.resume()
         val inset = paint.strokeWidth / 2f
         arcBounds.set(
             bounds.left + inset,
@@ -129,26 +133,26 @@ private class PamVuetifySpinnerDrawable(
             invalidateSelf()
             return
         }
-        animator.start()
+        loop.request(true)
     }
 
     override fun stop() {
         if (!running) return
         running = false
-        animator.cancel()
+        loop.request(false)
         phase = 0f
         invalidateSelf()
     }
 
     override fun isRunning(): Boolean = running
 
+    /** Hidden, detached or backgrounded hosts pause the loop; shown again, it resumes. */
     override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
         val changed = super.setVisible(visible, restart)
-        if (!visible) {
-            stop()
-        } else if (restart || changed) {
-            start()
-        }
+        if (!visible) loop.suspend() else loop.resume()
         return changed
     }
+
+    /** Test seam: whether the animator drives frames right now. */
+    val isTicking: Boolean get() = loop.isTicking
 }

@@ -25,22 +25,26 @@ internal class PamButtonLoadingDrawable(
     }
     private var rotation = 0f
     private var running = false
-    private val animator = ValueAnimator.ofFloat(0f, 360f).apply {
+    private val animator: ValueAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
         duration = 800L
         interpolator = LinearInterpolator()
         repeatCount = ValueAnimator.INFINITE
         repeatMode = ValueAnimator.RESTART
         addUpdateListener {
+            if (!loop.tick()) return@addUpdateListener
             rotation = it.animatedValue as Float
             invalidateSelf()
         }
     }
+    private val loop: PamHostedLoop = PamHostedLoop(this, animator)
 
     init {
         setBounds(0, 0, sizePx, sizePx)
     }
 
     override fun draw(canvas: Canvas) {
+        // Drawn means shown: a host that came back on screen resumes the loop.
+        loop.resume()
         val inset = paint.strokeWidth / 2f
         arc.set(
             bounds.left + inset,
@@ -68,16 +72,26 @@ internal class PamButtonLoadingDrawable(
             invalidateSelf()
             return
         }
-        animator.start()
+        loop.request(true)
     }
 
     override fun stop() {
-        animator.cancel()
+        loop.request(false)
         running = false
         rotation = 0f
     }
 
     override fun isRunning(): Boolean = running
+
+    /** The button's aggregated visibility pauses and resumes the arc. */
+    override fun setVisible(visible: Boolean, restart: Boolean): Boolean {
+        val changed = super.setVisible(visible, restart)
+        if (!visible) loop.suspend() else loop.resume()
+        return changed
+    }
+
+    /** Test seam: whether the animator drives frames right now. */
+    val isTicking: Boolean get() = loop.isTicking
 
     override fun setAlpha(alpha: Int) {
         paint.alpha = alpha

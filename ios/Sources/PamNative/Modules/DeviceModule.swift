@@ -74,9 +74,12 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
         watches[id] = DeviceWatch(channel: channel, timer: timer)
         lock.unlock()
         timer.schedule(deadline: .now(), repeating: .milliseconds(Int(interval)))
+        // The first status, then only changes: an unchanged sample never
+        // wakes PHP (Android listens to system changes instead of a timer).
+        let changes = DeviceStatusChanges()
         timer.setEventHandler { [weak self, weak channel] in
             self?.snapshot { status, data in
-                if status == .success { channel?.offer(data) }
+                if status == .success, changes.accept(data) { channel?.offer(data) }
             }
         }
         timer.resume()
@@ -112,6 +115,20 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
         let ids = Array(watches.keys)
         lock.unlock()
         ids.forEach { stop($0) }
+    }
+}
+
+/// Passes the first status and then only statuses that differ from the last one passed.
+final class DeviceStatusChanges {
+    private let lock = NSLock()
+    private var last: Data?
+
+    func accept(_ status: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if last == status { return false }
+        last = status
+        return true
     }
 }
 
