@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\Internal\BinaryValue;
+use Pam\Native\Internal\LazyRows;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
@@ -55,6 +56,50 @@ final class VirtualizedList extends Element
 
         /** @var list<Renderable|false|null> $items */
         return (new self(NodeKind::VirtualList))->withChildren($items);
+    }
+
+    /**
+     * A list driven by data, like React Native's FlatList/FlashList `data` +
+     * `renderItem` + `keyExtractor`: `$row($item, $index)` is called only for
+     * the rows that are shown (and a margin around them), never for all of
+     * them up front. Keys default to the item's `key` or `id` (array key or
+     * public property), then to its index.
+     *
+     * @param iterable<mixed> $items
+     * @param Closure(mixed, int): (Renderable|false|null) $row
+     * @param (Closure(mixed, int): (string|int))|null $key
+     */
+    public static function of(iterable $items, Closure $row, ?Closure $key = null): self
+    {
+        $values = is_array($items) ? array_values($items) : iterator_to_array($items, false);
+        $keys = [];
+        foreach ($values as $index => $item) {
+            $value = $key !== null ? $key($item, $index) : self::defaultKey($item, $index);
+            $keys[] = (string) $value;
+        }
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = new LazyRows($values, $keys, $row);
+
+        return $list;
+    }
+
+    private static function defaultKey(mixed $item, int $index): string|int
+    {
+        if (is_array($item)) {
+            foreach (['key', 'id'] as $field) {
+                if (isset($item[$field]) && (is_string($item[$field]) || is_int($item[$field]))) {
+                    return $item[$field];
+                }
+            }
+        } elseif (is_object($item)) {
+            foreach (['key', 'id'] as $field) {
+                if (isset($item->{$field}) && (is_string($item->{$field}) || is_int($item->{$field}))) {
+                    return $item->{$field};
+                }
+            }
+        }
+
+        return $index;
     }
 
     public function rowHeight(float $height): self

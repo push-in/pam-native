@@ -67,6 +67,12 @@ abstract class Element implements Renderable
      */
     public private(set) ?array $encodedProperties = null;
 
+    /**
+     * @internal Rows of a data-driven list (VirtualizedList::of()), built on
+     * demand by the encoders instead of eagerly as children.
+     */
+    public protected(set) ?Internal\LazyRows $lazyRows = null;
+
     /** @var \WeakMap<Element, array<string, Element>>|null */
     private static ?\WeakMap $slottedCopies = null;
 
@@ -898,6 +904,11 @@ abstract class Element implements Renderable
             static fn (Element $child): Element => $child->withThemeDefaults($defaultsByKind, $memo),
             $copy->children,
         );
+        if ($copy->lazyRows !== null) {
+            $copy->lazyRows = $copy->lazyRows->mapped(
+                static fn (Element $row): Element => $row->withThemeDefaults($defaultsByKind, $memo),
+            );
+        }
         if ($memo !== null) {
             // Elements are immutable, so a reused (memoized) subtree reuses
             // its themed copy instead of being cloned again every render.

@@ -20,6 +20,19 @@
 - Protocol: properties 541 (`ListPlaceholder`) and 542 (`ListWindowed`) and
   event 80 (`ListWindow`, consumed by the runtime) are appended. Android,
   iOS, Rust and PHP tables stay in parity.
+- `VirtualizedList::of($items, $row, $key)` / `VirtualGrid::of()`: data-driven
+  lists (FlatList/FlashList `data` + `renderItem` + `keyExtractor`) whose rows
+  are built only when the window materializes them; the PHP and native
+  encoders send keyed placeholders for the rest.
+- Android renderer: node and frame maps are O(1) (`PamLongMap`; hashed node
+  ids made `LongSparseArray.put` O(n²)); virtual-list row removals/reorders
+  are applied once per commit and the adapter updates by ranges in one O(N)
+  walk instead of DiffUtil's O(N+D²); the answer to a press/text change/
+  submit/toggle commits in its first frame. A filter keystroke over 10,000
+  rows went from seconds of UI-thread work to milliseconds.
+- `Style::properties()` is read natively on Android/iOS (same result, 14x).
+- `NavigationContainer::linking()` routes the launch URL before the first
+  frame (Android/iOS export `PAM_NATIVE_LAUNCH_URL`).
 - Native tree encoder (Android and iOS, transparent): the hosts register a
   C++ port of `Internal\TreeEncoder` and the runtime uses it automatically.
   Frames, patches, node ids, callbacks and errors are byte-for-byte those of

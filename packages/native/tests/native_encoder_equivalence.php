@@ -349,6 +349,35 @@ $wp->extendWindow($listId, $rowIds[4000], $rowIds[4010]);
 $wn->extendWindow($listId, $rowIds[4000], $rowIds[4010]);
 $check('window#initial-grown', $wp, $wn, $windowList(5000, ['initial' => 3000]));
 
+// Data-driven lists (VirtualizedList::of): built window, keyed placeholders,
+// growth from placeholder ids, holes, short lists, filtering.
+$lp = new TreeEncoder(false);
+$ln = new TreeEncoder(true);
+$lazy = static fn (array $items) => Column::make(
+    Text::make('Lazy'),
+    VirtualizedList::of(
+        $items,
+        static fn (int $item, int $index) => $item % 97 === 13 ? null : $row($item),
+        static fn (int $item): string => "lazy-{$item}",
+    )->estimatedRowHeight(64),
+)->toElement();
+$lazyAll = $lazy(range(0, 4_999));
+$check('lazy#full', $lp, $ln, $lazyAll);
+foreach ([[2_000, 2_010], [2_003, 2_006], [4_990, 4_999], [100, 140]] as $step => [$from, $to]) {
+    [$listId, $rowIds] = $listIds($lp);
+    $to = min($to, count($rowIds) - 1);
+    $grewPhp = $lp->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
+    $grewNative = $ln->extendWindow($listId, $rowIds[$from], $rowIds[$to]);
+    $checks++;
+    if ($grewPhp !== $grewNative) {
+        $fail("lazy#extend{$step}");
+    }
+    $check("lazy#grown{$step}", $lp, $ln, $lazyAll);
+}
+$check('lazy#filtered', $lp, $ln, $lazy(array_values(array_filter(range(0, 4_999), static fn (int $i): bool => $i % 3 === 0))));
+$check('lazy#short', $lp, $ln, $lazy(range(0, 60)));
+$check('lazy#duplicate-keys', $lp, $ln, Column::make(VirtualizedList::of([1, 1], static fn (int $i) => Text::make((string) $i), static fn (int $i) => (string) $i))->toElement());
+
 printf(
     "NATIVE_ENCODER_EQUIVALENCE %s checks=%d failures=%d prebuilt=%d list: php=%.1fms native=%.1fms (%.1fx) fuzz: php=%.1fms native=%.1fms\n",
     $failures === 0 ? 'OK' : 'FAILED',

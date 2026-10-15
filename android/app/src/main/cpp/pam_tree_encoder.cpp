@@ -63,6 +63,9 @@ struct ElementLayout {
     std::uint32_t identity_slot = 0;
     std::uint32_t encoded_properties = 0;
     std::uint32_t binary_bytes = 0;
+    std::uint32_t lazy_rows = 0;
+    zend_class_entry* lazy = nullptr;
+    std::uint32_t lazy_keys = 0;
     bool ready = false;
 };
 
@@ -109,6 +112,7 @@ struct Encoder {
         std::size_t min_rows = 96;
         std::size_t initial_rows = 48;
         std::size_t margin_rows = 64;
+        zend_long view_kind = -1;
     } window;
     std::unordered_map<std::string, std::vector<std::pair<zend_long, zend_long>>> window_ranges;
     struct WindowList {
@@ -213,7 +217,15 @@ bool resolve_layout() {
         && offset(layout.element, "domIdentity", layout.dom_identity)
         && offset(layout.element, "identitySlot", layout.identity_slot)
         && offset(layout.element, "encodedProperties", layout.encoded_properties)
-        && offset(layout.binary, "bytes", layout.binary_bytes);
+        && offset(layout.binary, "bytes", layout.binary_bytes)
+        && offset(layout.element, "lazyRows", layout.lazy_rows);
+    if (layout.ready) {
+        zend_string* lazy_name =
+            zend_string_init("Pam\\Native\\Internal\\LazyRows", sizeof("Pam\\Native\\Internal\\LazyRows") - 1, 0);
+        layout.lazy = zend_lookup_class(lazy_name);
+        zend_string_release(lazy_name);
+        layout.ready = layout.lazy != nullptr && offset(layout.lazy, "keys", layout.lazy_keys);
+    }
     return layout.ready;
 }
 
@@ -405,10 +417,16 @@ inline bool property_is_true(zend_object* element, zend_long key) {
 // TreeEncoder::windowFor(): the materialized ranges of a long vertical list.
 const Ranges* window_for(Encoder& encoder, zend_object* list, const std::string& path) {
     if (encoder.window.virtual_list < 0 || element_kind(list) != encoder.window.virtual_list) return nullptr;
-    zval* children = prop(list, layout.children);
-    if (Z_TYPE_P(children) != IS_ARRAY || zend_hash_num_elements(Z_ARRVAL_P(children)) <= encoder.window.min_rows) {
-        return nullptr;
+    std::size_t rows = 0;
+    zval* lazy = prop(list, layout.lazy_rows);
+    if (Z_TYPE_P(lazy) == IS_OBJECT) {
+        zval* keys = prop(Z_OBJ_P(lazy), layout.lazy_keys);
+        rows = Z_TYPE_P(keys) == IS_ARRAY ? zend_hash_num_elements(Z_ARRVAL_P(keys)) : 0;
+    } else {
+        zval* children = prop(list, layout.children);
+        rows = Z_TYPE_P(children) == IS_ARRAY ? zend_hash_num_elements(Z_ARRVAL_P(children)) : 0;
     }
+    if (rows <= encoder.window.min_rows) return nullptr;
     if (property_is_true(list, encoder.window.horizontal)) return nullptr;
     auto at = encoder.window_ranges.find(path);
     if (at == encoder.window_ranges.end()) {
@@ -553,21 +571,22 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
     if (window != nullptr) window_copy = *window;
     std::unordered_map<std::uint64_t, zend_long> row_indexes;
 
+    zval* lazy_value = prop(element, layout.lazy_rows);
+    zend_object* lazy = Z_TYPE_P(lazy_value) == IS_OBJECT ? Z_OBJ_P(lazy_value) : nullptr;
     zval* children = prop(element, layout.children);
-    if (Z_TYPE_P(children) != IS_ARRAY || zend_hash_num_elements(Z_ARRVAL_P(children)) == 0) return true;
+    if (lazy == nullptr && (Z_TYPE_P(children) != IS_ARRAY || zend_hash_num_elements(Z_ARRVAL_P(children)) == 0)) {
+        return true;
+    }
 
     // Only positional (unkeyed, non-DOM) segments can repeat ("kind:slot").
     std::unordered_set<std::string, StringHash, std::equal_to<>> positional;
     const std::size_t mark = path.size();
     std::string segment;
-    zend_ulong child_index;
-    zend_string* string_key;
-    zval* child_value;
-    ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(children), child_index, string_key, child_value) {
-        if (string_key != nullptr || Z_TYPE_P(child_value) != IS_OBJECT) continue;
+
+    auto encode_child = [&](zend_object* child_object, zend_ulong child_index) -> bool {
         zval holder;
         ZVAL_UNDEF(&holder);
-        zend_object* child = refresh_hosted(encoder, Z_OBJ_P(child_value), &holder);
+        zend_object* child = refresh_hosted(encoder, child_object, &holder);
         if (child == nullptr) {
             zval_ptr_dtor(&holder);
             return false;
@@ -621,16 +640,70 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
                 }
                 path.resize(mark);
                 zval_ptr_dtor(&holder);
-                if (!encoded) return false;
-                continue;
+                return encoded;
             }
         }
         encoded = encoded
             && encode_node(encoder, child, child_id, id, static_cast<std::uint32_t>(child_index), path);
         path.resize(mark);
         zval_ptr_dtor(&holder);
-        if (!encoded) return false;
-    } ZEND_HASH_FOREACH_END();
+        return encoded;
+    };
+
+    if (lazy == nullptr) {
+        zend_ulong child_index;
+        zend_string* string_key;
+        zval* child_value;
+        ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(children), child_index, string_key, child_value) {
+            if (string_key != nullptr || Z_TYPE_P(child_value) != IS_OBJECT) continue;
+            if (!encode_child(Z_OBJ_P(child_value), child_index)) return false;
+        } ZEND_HASH_FOREACH_END();
+    } else {
+        // VirtualizedList::of(): rows outside the window are keyed View
+        // placeholders (LazyRows::placeholder()), written here without
+        // building them; rows inside it are built by LazyRows::row().
+        zval* keys = prop(lazy, layout.lazy_keys);
+        if (Z_TYPE_P(keys) != IS_ARRAY) return true;
+        zend_ulong row;
+        zend_string* string_key;
+        zval* key;
+        ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(keys), row, string_key, key) {
+            if (string_key != nullptr || Z_TYPE_P(key) != IS_STRING) continue;
+            if (window != nullptr && !in_ranges(window_copy, static_cast<zend_long>(row))) {
+                segment.assign("key:", 4);
+                segment.append(Z_STRVAL_P(key), Z_STRLEN_P(key));
+                path.push_back('/');
+                path.append(segment);
+                std::uint64_t child_id = 0;
+                bool encoded = node_id(encoder, path, nullptr, encoder.window.view_kind, child_id);
+                path.resize(mark);
+                if (!encoded) return false;
+                row_indexes[child_id] = static_cast<zend_long>(row);
+                if (++encoder.node_count > kMaxNodes) {
+                    throw_logic("Pam Native trees cannot exceed 100,000 nodes.");
+                    return false;
+                }
+                NodeRecord placeholder;
+                placeholder.id = child_id;
+                placeholder.parent = id;
+                placeholder.index = static_cast<std::uint32_t>(row);
+                placeholder.kind = static_cast<std::uint8_t>(encoder.window.view_kind);
+                placeholder.values.emplace_back(static_cast<std::uint16_t>(encoder.window.placeholder), std::string("\x04\x01", 2));
+                encoder.nodes.push_back(std::move(placeholder));
+                continue;
+            }
+            zval argument, built;
+            ZVAL_LONG(&argument, static_cast<zend_long>(row));
+            zend_call_method_with_1_params(lazy, lazy->ce, nullptr, "row", &built, &argument);
+            if (EG(exception)) {
+                zval_ptr_dtor(&built);
+                return false;
+            }
+            const bool encoded = Z_TYPE(built) != IS_OBJECT || encode_child(Z_OBJ(built), row);
+            zval_ptr_dtor(&built);
+            if (!encoded) return false;
+        } ZEND_HASH_FOREACH_END();
+    }
     if (window != nullptr) {
         path.resize(mark);
         auto& list = encoder.window_lists[id];
@@ -804,13 +877,13 @@ PHP_FUNCTION(pam_native_encoder_create) {
         // [virtualList kind, ListPlaceholder, ListWindowed, ListHorizontal,
         //  ListInitialScrollIndex, StickyHeader, ListFullSpan, min rows,
         //  initial rows, margin rows]
-        zend_long values[10];
+        zend_long values[11];
         std::size_t count = 0;
         zval* value;
         ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(window), value) {
-            if (count < 10) values[count++] = Z_TYPE_P(value) == IS_LONG ? Z_LVAL_P(value) : -1;
+            if (count < 11) values[count++] = Z_TYPE_P(value) == IS_LONG ? Z_LVAL_P(value) : -1;
         } ZEND_HASH_FOREACH_END();
-        if (count == 10) {
+        if (count == 11) {
             auto& w = encoder->window;
             w.virtual_list = values[0];
             w.placeholder = values[1];
@@ -822,6 +895,7 @@ PHP_FUNCTION(pam_native_encoder_create) {
             w.min_rows = static_cast<std::size_t>(values[7]);
             w.initial_rows = static_cast<std::size_t>(values[8]);
             w.margin_rows = static_cast<std::size_t>(values[9]);
+            w.view_kind = values[10];
         }
     }
     const zend_long handle = next_handle++;

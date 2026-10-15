@@ -68,6 +68,22 @@ completely as before. On a 10,000-row list this removes ~99% of the first
 frame's nodes from the PHP encoder, the engine's measure/layout pass and the
 native mount, so the list appears in the time of a short one.
 
+### Data-driven lists (`VirtualizedList::of`)
+
+The FlatList/FlashList shape: items, a row builder and a key.
+
+```php
+VirtualizedList::of($messages, fn (Message $m, int $i) => MessageRow::make($m), fn (Message $m) => $m->id)
+VirtualGrid::of(3, $photos, fn (Photo $p) => Thumb::make($p))
+```
+
+`$row` runs only for the rows the window materializes (and once per row per
+list instance); the other rows are keyed placeholders. A 10,000-item list
+builds about 48 rows on its first frame instead of 10,000 `Element` trees.
+Keys default to the item's `key`/`id` (array key or public property), then
+to its index. Theme defaults reach rows built later; a row builder may return
+`null` for a hole. Both the PHP and the native encoders handle these lists.
+
 ### Keyed sections (tabs over one list)
 
 Screens such as chat details render a header, a sticky tab rail and the

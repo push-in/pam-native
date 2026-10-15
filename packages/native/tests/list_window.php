@@ -131,3 +131,51 @@ $assert(
         && !$isPlaceholder($filteredRows[47]) && $isPlaceholder($filteredRows[48]),
     'A changed row set must keep the window and patch rows in place.',
 );
+
+// Data-driven lists (VirtualizedList::of): only the window is ever built.
+$built = [];
+$lazyList = VirtualizedList::of(
+    range(0, 9_999),
+    static function (int $item, int $index) use (&$built, $windowRow) {
+        $built[$index] = true;
+
+        return $windowRow($item);
+    },
+    static fn (int $item): string => "item-{$item}",
+)->estimatedRowHeight(64)->toElement();
+$lazyEncoder = new TreeEncoder();
+$lazyFrame = $lazyEncoder->encode($lazyList);
+$lazyNodes = $lazyEncoder->frameNodes();
+[$lazyListNode, $lazyRows] = $windowRows($lazyNodes);
+$lazyPlaceholders = array_values(array_filter($lazyRows, $isPlaceholder));
+$assert(
+    count($built) === 48
+        && count($lazyRows) === 10_000
+        && count($lazyPlaceholders) === 10_000 - 48
+        && $lazyPlaceholders[0]->kind === NodeKind::View->value
+        && $lazyPlaceholders[0]->properties === [PropKey::ListPlaceholder->value => "\x04\x01"]
+        && !$isPlaceholder($lazyRows[47]) && $childCount($lazyNodes, $lazyRows[47]) === 2
+        && count($lazyNodes) === 1 + 10_000 + 48 * 2,
+    'VirtualizedList::of must build only the window and send keyed placeholders for the rest.',
+);
+$lazyIds = array_map(static fn (EncodedNode $node): int => $node->id, $lazyRows);
+$assert(
+    $lazyEncoder->extendWindow($lazyListNode->id, $lazyIds[5_000], $lazyIds[5_010]) === true,
+    'A lazy window must grow from the placeholder ids native reports.',
+);
+$lazyPatch = $lazyEncoder->encode($lazyList);
+[, $lazyRows] = $windowRows($lazyEncoder->frameNodes());
+$assert(
+    $lazyPatch['frame'] !== null
+        && count($built) === 48 + (5_075 - 4_936)
+        && !$isPlaceholder($lazyRows[5_000]) && $isPlaceholder($lazyRows[4_935]) && $isPlaceholder($lazyRows[5_075])
+        && $lazyRows[5_000]->id !== $lazyIds[5_000],
+    'Growing a lazy window must build exactly the new rows (the placeholders are replaced).',
+);
+$shortLazy = new TreeEncoder();
+$shortLazy->encode(VirtualizedList::of([['id' => 'a'], ['id' => 'b']], static fn (array $item) => Text::make($item['id']))->toElement());
+[, $shortRows] = $windowRows($shortLazy->frameNodes());
+$assert(
+    count($shortRows) === 2 && array_filter($shortRows, $isPlaceholder) === [],
+    'Short lazy lists build every row (keys default to the item id).',
+);

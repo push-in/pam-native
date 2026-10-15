@@ -191,6 +191,7 @@ final class TreeEncoder
                     self::WINDOW_MIN_ROWS,
                     self::WINDOW_INITIAL_ROWS,
                     self::WINDOW_MARGIN_ROWS,
+                    NodeKind::View->value,
                 ],
             );
         }
@@ -303,7 +304,7 @@ final class TreeEncoder
     {
         if (
             $list->kind !== NodeKind::VirtualList
-            || count($list->children) <= self::WINDOW_MIN_ROWS
+            || ($list->lazyRows?->count() ?? count($list->children)) <= self::WINDOW_MIN_ROWS
             || ($list->properties[PropKey::ListHorizontal->value] ?? false) === true
         ) {
             return null;
@@ -597,7 +598,24 @@ final class TreeEncoder
 
         // Subtrees worth caching collect their own items; the rest of the
         // nodes join the enclosing subtree.
-        $children = $element->children;
+        $lazy = $element->lazyRows;
+        if ($lazy === null) {
+            $children = $element->children;
+        } else {
+            // Data-driven rows: only the window is built, the other rows
+            // are keyed placeholders (all rows when the list is not windowed).
+            $children = [];
+            for ($row = 0, $rows = $lazy->count(); $row < $rows; $row++) {
+                if ($window !== null && !self::inRanges($window, $row)) {
+                    $children[$row] = $lazy->placeholder($row);
+                } else {
+                    $built = $lazy->row($row);
+                    if ($built !== null) {
+                        $children[$row] = $built;
+                    }
+                }
+            }
+        }
         $candidate = $path === 'root' || ($cacheable && $children !== []);
         if ($candidate) {
             $outer = $this->items;
