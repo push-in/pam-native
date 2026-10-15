@@ -492,6 +492,25 @@ abstract class Component implements Renderable
     }
 
     /** @internal True when own properties changed since the last real render. */
+    /**
+     * @internal True when every property a subclass declares holds scalars,
+     * arrays of them or enums: the state snapshot then compares exactly
+     * (see Internal\HandlerPurity).
+     */
+    final public function __pamPlainState(): bool
+    {
+        foreach ((array) $this as $key => $value) {
+            if (str_starts_with($key, "\0".self::class."\0")) {
+                continue;
+            }
+            if ((is_object($value) || is_array($value)) && !Internal\HandlerPurity::plainValue($value)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     final public function __pamStateChanged(): bool
     {
         return $this->pamSnapshot !== null && $this->pamSnapshot !== $this->pamOwnState();
