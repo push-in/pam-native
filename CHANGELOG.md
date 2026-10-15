@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.44.1 - 2026-10-15
+
+PHP SDK fix (shared by Android and iOS); the hosts, protocol and native
+engines are unchanged from 1.44.0.
+
+- `Storage::get()` and `Storage::set()` now pass every key through
+  `Storage::safeKey()`, like `Cache\StoragePersistence` already did. Before,
+  only `BoundedStore` persistence mapped keys: a direct call with a key
+  outside `[A-Za-z0-9_.-]{1,128}` (for example `composer:emoji-recents:v1`)
+  reached the native store, which rejected it with "Invalid storage key";
+  without `onError` the failure was thrown from the module result and shown
+  as a runtime error on every read and write. Keys that already match
+  `Storage::KEY_PATTERN` are sent unchanged, so stored values keep their
+  keys. `safeKey()` is lossy (`a:b` and `a-b` share a key): hash owner ids
+  that must stay distinct.
+
 ## 1.44.0 - 2026-10-14
 
 Behaviour change in the PHP template renderer (shared by Android and iOS);

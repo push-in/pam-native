@@ -26,7 +26,8 @@ final class Storage
     /**
      * Maps any identifier to a key the native store accepts: unsupported
      * characters become '-', and keys longer than 128 bytes keep a readable
-     * prefix plus a hash.
+     * prefix plus a hash. Idempotent: a key that already matches KEY_PATTERN
+     * is returned unchanged. get() and set() apply it to every key.
      */
     public static function safeKey(string $key): string
     {
@@ -42,6 +43,10 @@ final class Storage
     }
 
     /**
+     * Reads `$key`. Every key passes through safeKey(), so any identifier
+     * (`composer:recents:v1`, `account/42`) reaches the native store in its
+     * accepted form; keys that already match KEY_PATTERN are unchanged.
+     *
      * @param Closure(?string): void $callback
      * @param (Closure(NativeModuleException): void)|null $onError
      */
@@ -49,7 +54,7 @@ final class Storage
     {
         return Runtime::callNative(
             operation: NativeOperation::StorageGet,
-            payload: Wire::map(['key' => $key]),
+            payload: Wire::map(['key' => self::safeKey($key)]),
             callback: static function (ModuleResultStatus $status, string $payload) use ($callback, $onError): void {
                 if ($status === ModuleResultStatus::Failure) {
                     $failure = new NativeModuleException('storage', 'get', $payload);
@@ -73,6 +78,8 @@ final class Storage
     }
 
     /**
+     * Writes `$key` (mapped with safeKey(), like get()).
+     *
      * @param Closure(): void|null $callback
      * @param (Closure(NativeModuleException): void)|null $onError
      */
@@ -80,7 +87,7 @@ final class Storage
     {
         return Runtime::callNative(
             operation: NativeOperation::StorageSet,
-            payload: Wire::map(['key' => $key, 'value' => $value]),
+            payload: Wire::map(['key' => self::safeKey($key), 'value' => $value]),
             callback: static function (ModuleResultStatus $status, string $payload) use ($callback, $onError): void {
                 if ($status === ModuleResultStatus::Failure) {
                     $failure = new NativeModuleException('storage', 'set', $payload);

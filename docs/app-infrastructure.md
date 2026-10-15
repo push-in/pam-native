@@ -248,6 +248,13 @@ Storage::set('profile.me', StorageBudget::encodeObject($profile));              
 $kept = StorageBudget::trimList($items, limit: 200, maxBytes: 64_000);
 ```
 
+Every key given to `Storage::get()`/`Storage::set()` passes through
+`Storage::safeKey()` (since 1.44.1): the native store only accepts
+`[A-Za-z0-9_.-]{1,128}`, so `composer:recents:v1` is stored as
+`composer-recents-v1` and longer keys keep a readable prefix plus a hash.
+Valid keys are unchanged. The mapping is lossy (`a:b` and `a-b` collide), so
+hash owner or account ids that must stay distinct.
+
 ## OptimisticOverlay
 
 One overlay per record type, shared by every screen that lists those records:
