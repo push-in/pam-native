@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Android baseline profile covers Media3 (ExoPlayer, common, decoder,
+  datasource, extractor): with `speed-profile` the playback loop no longer
+  runs interpreted. A feed video on the S10 went from 66% to 56% process CPU
+  (ExoPlayer playback thread 13% → 9%, codec callbacks 9.5% → 6%).
+- Android `ScrollView`: a requested content offset (`contentOffsetX/Y`,
+  initial offsets, scroll requests) on a container that is not laid out yet
+  (GONE, never measured, or still without content) waits for its next layout.
+  It used to re-post itself to the UI thread on every looper iteration for as
+  long as the container stayed unlaid: on the Zé Chat feed, with a video
+  playing, the main thread sat at ~64% CPU. iOS applies offsets from layout
+  and has no such retry.
 - Android spinners stop ticking off screen. `ActivityIndicator` and the
   `Button` loading arc started their infinite `ValueAnimator` as soon as the
   renderer created them, before (or without ever) being attached: a spinner

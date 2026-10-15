@@ -51,6 +51,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private var hasRequestedOffsetX = false
     private var hasRequestedOffsetY = false
     private var offsetScheduled = false
+    private var offsetAwaitsLayout = false
     private var previousPrimaryMaxOffset = 0
     private var primaryMaxOffsetBeforeLastLayout = 0
     private var anchorToEnd = false
@@ -572,6 +573,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val newMax = primaryMaxOffset()
         primaryMaxOffsetBeforeLastLayout = previousMax
         previousPrimaryMaxOffset = newMax
+        if (offsetAwaitsLayout) scheduleRequestedOffset()
         when {
             anchorToEnd && !initialEndAnchorApplied -> {
                 initialEndAnchorApplied = true
@@ -643,9 +645,13 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     private fun applyRequestedOffset() {
         if (!isLaidOut || activeScroll.childCount == 0) {
-            scheduleRequestedOffset()
+            // Retried from the next layout. Re-posting itself here spun the
+            // UI thread for as long as the container stayed unlaid (a GONE or
+            // never-measured scroll view): ~60% CPU on the S10.
+            offsetAwaitsLayout = true
             return
         }
+        offsetAwaitsLayout = false
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
         activeScroll.scrollTo(x, y)
