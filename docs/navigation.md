@@ -62,6 +62,13 @@ $navigator->reset(AppRoute::Home);
 $navigator->preload(AppRoute::Product);
 ```
 
+`prewarm($route, $params)` mounts a route hidden under the current screen so
+the next push of the same route and params starts at once; it is released
+after 4 s unused or on any other navigation. `prewarm($route, $params,
+releaseAfterMs: null)` holds it until another navigation, `cancelPrewarm()` or
+`trimMemory()`, with no timer: keep a row warm while a list stays idle
+without renewing it every few seconds.
+
 An individual navigation can override the route or stack animation. This is
 useful for peer destinations such as a bottom navigation bar, without changing
 how the same screen animates when it is pushed from elsewhere:
