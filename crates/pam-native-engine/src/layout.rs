@@ -45,6 +45,9 @@ struct LayoutContext<'a> {
     /// Window of the surface being laid out (root window, or a modal's own
     /// presentation surface).
     viewport: Cell<Layout>,
+    /// Top window inset while a modal surface is laid out: bottom-sheet snap
+    /// points resolve against the window minus it.
+    window_top_inset: Cell<f32>,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +103,7 @@ pub fn calculate_with_text_metrics(
             width: viewport.width,
             height: viewport.height,
         }),
+        window_top_inset: Cell::new(0.0),
     };
     let mut result = BTreeMap::new();
     layout_node(
@@ -116,6 +120,7 @@ pub fn calculate_with_text_metrics(
         &mut result,
     )?;
     layout_modal_surfaces(&context, &mut result)?;
+    settle_auto_safe_area(&context, &mut result)?;
     Ok(result)
 }
 
@@ -167,6 +172,7 @@ pub fn calculate_incremental_with_text_metrics(
             width: viewport.width,
             height: viewport.height,
         }),
+        window_top_inset: Cell::new(0.0),
     };
     let mut result = previous.clone();
     let mut pending = dirty_nodes.iter().copied().collect::<Vec<_>>();
@@ -190,6 +196,7 @@ pub fn calculate_incremental_with_text_metrics(
         &mut result,
     )?;
     layout_modal_surfaces(&context, &mut result)?;
+    settle_auto_safe_area(&context, &mut result)?;
     Ok((result, context.visited_nodes.get()))
 }
 
@@ -208,16 +215,339 @@ fn layout_modal_surfaces(
     for modal in context.tree.nodes.values().filter(|node| {
         node.kind == NodeKind::Modal && visible(node) && node.id != context.tree.root
     }) {
-        let surface = crate::surface::modal_surface(modal, window, window_insets, policy);
-        let _insets = crate::text_measure::SurfaceInsetsScope::enter(surface.insets);
-        let _keyboard =
-            crate::text_measure::SurfaceKeyboardScope::enter(modal.id, window.y + window.height);
-        context.viewport.set(surface.viewport);
-        let laid_out = layout_node(context, modal.id, surface.viewport, false, 0, output);
-        context.viewport.set(window);
-        laid_out?;
+        layout_modal_surface(context, modal, window, window_insets, policy, output)?;
     }
     Ok(())
+}
+
+fn layout_modal_surface(
+    context: &LayoutContext<'_>,
+    modal: &Node,
+    window: Layout,
+    window_insets: Option<[f32; 4]>,
+    policy: crate::surface::SurfacePolicy,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    let surface = crate::surface::modal_surface(modal, window, window_insets, policy);
+    let _insets = crate::text_measure::SurfaceInsetsScope::enter(surface.insets);
+    let _keyboard =
+        crate::text_measure::SurfaceKeyboardScope::enter(modal.id, window.y + window.height);
+    context.viewport.set(surface.viewport);
+    context
+        .window_top_inset
+        .set(window_insets.map_or(0.0, |insets| insets[1]));
+    let laid_out = layout_node(context, modal.id, surface.viewport, false, 0, output);
+    context.viewport.set(window);
+    context.window_top_inset.set(0.0);
+    laid_out
+}
+
+/// Automatic safe area (see [`crate::auto_safe_area`]): measures how far each
+/// surface's content stays from the window insets and pads its content
+/// container where content would end inside an inset, then lays the surface
+/// out again. The padding is sticky, so a settled surface costs one pass.
+fn settle_auto_safe_area(
+    context: &LayoutContext<'_>,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    let Some(window_insets) = crate::text_measure::safe_area() else {
+        return Ok(());
+    };
+    if !crate::auto_safe_area::enabled() {
+        return Ok(());
+    }
+    let surfaces = crate::auto_safe_area::surfaces(context.tree, context.children);
+    let containers = surfaces
+        .iter()
+        .filter_map(|surface| surface.container)
+        .collect::<Vec<_>>();
+    crate::auto_safe_area::retain(&containers);
+    if containers.is_empty() {
+        return Ok(());
+    }
+    let window = context.viewport.get();
+    let policy = crate::text_measure::surface_policy();
+    // Relayouts start from scratch: no incremental reuse of stale frames.
+    let full = LayoutContext {
+        tree: context.tree,
+        children: context.children,
+        text_scale: context.text_scale,
+        text_metrics: context.text_metrics,
+        previous: None,
+        dirty_path: None,
+        visited_nodes: Cell::new(0),
+        viewport: Cell::new(window),
+        window_top_inset: Cell::new(0.0),
+    };
+    let mut rects = Vec::new();
+    for _ in 0..3 {
+        let mut changed = Vec::new();
+        for surface in &surfaces {
+            let Some(container) = surface.container else {
+                continue;
+            };
+            let Some((viewport, insets)) =
+                auto_surface_geometry(context.tree, surface, window, window_insets, policy)
+            else {
+                continue;
+            };
+            rects.clear();
+            crate::auto_safe_area::content(
+                context.tree,
+                context.children,
+                surface,
+                output,
+                viewport,
+                false,
+                &mut rects,
+            );
+            let current = crate::auto_safe_area::padding(container);
+            let clearance = crate::auto_safe_area::clearance(&rects, viewport);
+            let next =
+                crate::auto_safe_area::settle_padding(current, insets, clearance, surface.edges);
+            if next
+                .iter()
+                .zip(current.iter())
+                .any(|(next, current)| (next - current).abs() > 0.5)
+            {
+                crate::auto_safe_area::set_padding(container, next);
+                changed.push(surface);
+            }
+        }
+        if changed.is_empty() {
+            break;
+        }
+        for surface in changed {
+            relayout_auto_surface(&full, surface, window, window_insets, policy, output)?;
+        }
+    }
+    context
+        .visited_nodes
+        .set(context.visited_nodes.get() + full.visited_nodes.get());
+    Ok(())
+}
+
+/// Viewport and insets a surface's content must clear.
+fn auto_surface_geometry(
+    tree: &Tree,
+    surface: &crate::auto_safe_area::AutoSurface,
+    window: Layout,
+    window_insets: [f32; 4],
+    policy: crate::surface::SurfacePolicy,
+) -> Option<(Layout, [f32; 4])> {
+    use crate::auto_safe_area::SurfaceKind;
+    match surface.kind {
+        SurfaceKind::Root => Some((window, window_insets)),
+        SurfaceKind::Modal(id) => {
+            let modal = tree.nodes.get(&id)?;
+            let surface = crate::surface::modal_surface(modal, window, Some(window_insets), policy);
+            Some((surface.viewport, surface.insets.unwrap_or([0.0; 4])))
+        }
+        SurfaceKind::Route { host, .. } => {
+            let host_node = tree.nodes.get(&host)?;
+            let (viewport, insets) = match enclosing_modal(tree, host_node)
+                .and_then(|id| tree.nodes.get(&id))
+            {
+                Some(modal) => {
+                    let surface =
+                        crate::surface::modal_surface(modal, window, Some(window_insets), policy);
+                    (surface.viewport, surface.insets.unwrap_or([0.0; 4]))
+                }
+                None => (window, window_insets),
+            };
+            let insets = crate::surface::navigation_route_insets(host_node, Some(insets), policy)
+                .flatten()
+                .unwrap_or(insets);
+            Some((viewport, insets))
+        }
+    }
+}
+
+fn relayout_auto_surface(
+    context: &LayoutContext<'_>,
+    surface: &crate::auto_safe_area::AutoSurface,
+    window: Layout,
+    window_insets: [f32; 4],
+    policy: crate::surface::SurfacePolicy,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    use crate::auto_safe_area::SurfaceKind;
+    match surface.kind {
+        SurfaceKind::Root => {
+            layout_node(context, context.tree.root, window, true, 0, output)?;
+        }
+        SurfaceKind::Modal(id) => {
+            if let Some(modal) = context.tree.nodes.get(&id) {
+                layout_modal_surface(context, modal, window, Some(window_insets), policy, output)?;
+            }
+        }
+        SurfaceKind::Route { host, route } => {
+            let Some(frame) = output.get(&route).copied() else {
+                return Ok(());
+            };
+            let Some(host_node) = context.tree.nodes.get(&host) else {
+                return Ok(());
+            };
+            let modal =
+                enclosing_modal(context.tree, host_node).and_then(|id| context.tree.nodes.get(&id));
+            let surface_geometry = modal.map(|modal| {
+                crate::surface::modal_surface(modal, window, Some(window_insets), policy)
+            });
+            let scope_insets =
+                surface_geometry.map_or(Some(window_insets), |surface| surface.insets);
+            let route_insets =
+                crate::surface::navigation_route_insets(host_node, scope_insets, policy)
+                    .flatten()
+                    .or(scope_insets);
+            let _insets = crate::text_measure::SurfaceInsetsScope::enter(route_insets);
+            let _keyboard = modal.map(|modal| {
+                crate::text_measure::SurfaceKeyboardScope::enter(modal.id, window.y + window.height)
+            });
+            context
+                .viewport
+                .set(surface_geometry.map_or(window, |surface| surface.viewport));
+            context.window_top_inset.set(if modal.is_some() {
+                window_insets[1]
+            } else {
+                0.0
+            });
+            let depth = node_depth(context.tree, route);
+            let laid_out = layout_node(context, route, frame, false, depth, output);
+            context.viewport.set(window);
+            context.window_top_inset.set(0.0);
+            laid_out?;
+        }
+    }
+    Ok(())
+}
+
+/// Snap points (fractions) of a bottom sheet; empty means dynamic sizing
+/// (the sheet fits its content, @gorhom `enableDynamicSizing`).
+pub(crate) fn sheet_snap_points(node: &Node) -> Vec<f32> {
+    let Some(pam_native_protocol::PropValue::Bytes(bytes)) =
+        node.properties.get(&PropKey::BottomSheetSnapPoints)
+    else {
+        return vec![0.5, 0.9];
+    };
+    if bytes.len() < 2 {
+        return vec![0.5, 0.9];
+    }
+    let count = usize::from(u16::from_le_bytes([bytes[0], bytes[1]]));
+    if count > 16 || bytes.len() != 2 + count * 8 {
+        return vec![0.5, 0.9];
+    }
+    let mut points = (0..count)
+        .map(|index| {
+            let start = 2 + index * 8;
+            let mut raw = [0_u8; 8];
+            raw.copy_from_slice(&bytes[start..start + 8]);
+            (f64::from_le_bytes(raw) as f32).clamp(0.05, 1.0)
+        })
+        .collect::<Vec<_>>();
+    points.sort_by(f32::total_cmp);
+    points.dedup();
+    points
+}
+
+/// Frame of a bottom sheet's content: its detent, anchored to the bottom of
+/// the surface. Fractions resolve against the window minus its top inset
+/// (the native sheets' base); a dynamic sheet fits its content up to it.
+fn sheet_content_frame(
+    context: &LayoutContext<'_>,
+    sheet: &Node,
+    child: &Node,
+    inner: Layout,
+    depth: usize,
+) -> Result<Layout, LayoutError> {
+    let base = (inner.height - context.window_top_inset.get()).max(1.0);
+    let points = sheet_snap_points(sheet);
+    let height = if points.is_empty() {
+        intrinsic_extent(
+            context.children,
+            child,
+            Axis::Vertical,
+            inner.width,
+            base,
+            context.text_scale,
+            context.text_metrics,
+            depth + 1,
+        )?
+        .min(base)
+    } else {
+        let index = integer(sheet, PropKey::BottomSheetIndex)
+            .unwrap_or(0)
+            .clamp(0, points.len() as i64 - 1) as usize;
+        base * points[index]
+    }
+    .max(1.0);
+    Ok(Layout {
+        x: inner.x,
+        y: inner.y + inner.height - height,
+        width: inner.width,
+        height,
+    })
+}
+
+/// Text, inputs, buttons, pressables and list ends that end inside a window
+/// inset (the safe-area lint). Every surface is checked, including the ones
+/// the application manages explicitly or opted out of.
+pub fn safe_area_violations(
+    tree: &Tree,
+    layouts: &BTreeMap<u64, Layout>,
+    viewport: Size,
+    insets: [f32; 4],
+    policy: crate::surface::SurfacePolicy,
+) -> Vec<crate::auto_safe_area::SafeAreaViolation> {
+    let children = child_index(tree);
+    let window = Layout {
+        x: 0.0,
+        y: 0.0,
+        width: viewport.width,
+        height: viewport.height,
+    };
+    let mut rects = Vec::new();
+    let mut violations = Vec::new();
+    for surface in crate::auto_safe_area::surfaces(tree, &children) {
+        let Some((surface_viewport, surface_insets)) =
+            auto_surface_geometry(tree, &surface, window, insets, policy)
+        else {
+            continue;
+        };
+        rects.clear();
+        crate::auto_safe_area::content(
+            tree,
+            &children,
+            &surface,
+            layouts,
+            surface_viewport,
+            true,
+            &mut rects,
+        );
+        crate::auto_safe_area::violations_of(
+            tree,
+            &rects,
+            surface_viewport,
+            surface_insets,
+            surface.edges,
+            &mut violations,
+        );
+    }
+    violations.sort_by(|a, b| a.id.cmp(&b.id).then(a.edge.cmp(&b.edge)));
+    violations.dedup_by(|a, b| a.id == b.id && a.edge == b.edge);
+    violations
+}
+
+fn node_depth(tree: &Tree, id: u64) -> usize {
+    let mut depth = 0;
+    let mut current = tree.nodes.get(&id);
+    while let Some(node) = current {
+        if node.id == tree.root || depth > MAX_LAYOUT_DEPTH {
+            break;
+        }
+        depth += 1;
+        current = tree.nodes.get(&node.parent);
+    }
+    depth
 }
 
 fn layout_node(
@@ -359,11 +689,13 @@ fn layout_node(
     let padding_bottom = padding_bottom + border_bottom;
     let (safe_left, safe_top, safe_right, safe_bottom) =
         safe_area_padding(node, frame, context.viewport.get());
-    let padding_left = padding_left + safe_left;
-    let padding_top = padding_top + safe_top;
-    let padding_right = padding_right + safe_right;
+    let [auto_left, auto_top, auto_right, auto_bottom] = crate::auto_safe_area::padding(id);
+    let padding_left = padding_left + safe_left + auto_left;
+    let padding_top = padding_top + safe_top + auto_top;
+    let padding_right = padding_right + safe_right + auto_right;
     let padding_bottom = padding_bottom
         + safe_bottom
+        + auto_bottom
         + match keyboard {
             Some(SurfaceKeyboardAvoidance::Padding(overlap)) => overlap,
             _ => 0.0,
@@ -429,9 +761,18 @@ fn layout_node(
         return Ok(());
     }
     if node.kind == NodeKind::Modal {
-        let dialog = integer(node, PropKey::ModalPresentation).unwrap_or(2) == 2;
+        let presentation = integer(node, PropKey::ModalPresentation).unwrap_or(2);
+        let dialog = presentation == 2;
         for child in node_children {
             if !visible(child) {
+                continue;
+            }
+            if presentation == 3 && node.id != context.tree.root {
+                // A bottom sheet's content occupies its detent at the bottom
+                // of the surface, like the native sheet: safe-area padding,
+                // keyboard avoidance and flex all see the real sheet height.
+                let frame = sheet_content_frame(context, node, child, inner, depth)?;
+                layout_node(context, child.id, frame, true, depth + 1, output)?;
                 continue;
             }
             if !dialog {
@@ -1159,9 +1500,91 @@ fn layout_node(
             width,
             height,
         };
+        let child_frame = absolute_safe_frame(
+            context,
+            child,
+            child_frame,
+            containing,
+            [
+                left.is_some(),
+                top.is_some(),
+                right.is_some(),
+                bottom.is_some(),
+            ],
+        );
         layout_node(context, child.id, child_frame, false, depth + 1, output)?;
     }
     Ok(())
+}
+
+/// Absolutely positioned content anchored to one edge (a FAB, a toast, a
+/// close button) stays out of the window insets: it moves by the part of
+/// the inset it would cover, so an authored offset that already clears the
+/// bar is kept (`max(inset, offset)`). Stretched or decorative overlays
+/// (scrims, gradients, media) and nodes inside scrolling content keep their
+/// frames.
+fn absolute_safe_frame(
+    context: &LayoutContext<'_>,
+    child: &Node,
+    frame: Layout,
+    containing: Layout,
+    anchored: [bool; 4],
+) -> Layout {
+    let Some(insets) = crate::text_measure::safe_area() else {
+        return frame;
+    };
+    if insets.iter().all(|inset| *inset <= 0.0) || !crate::auto_safe_area::enabled() {
+        return frame;
+    }
+    let vertical = anchored[1] != anchored[3];
+    let horizontal = anchored[0] != anchored[2];
+    if !vertical && !horizontal {
+        return frame;
+    }
+    if !crate::auto_safe_area::absolute_holds_content(context.children, child)
+        || crate::auto_safe_area::exempt_from_absolute_insets(context.tree, child)
+    {
+        return frame;
+    }
+    let viewport = context.viewport.get();
+    // Only a containing block that itself reaches into an inset positions
+    // its children there (a badge offset over an avatar keeps its place).
+    let reaches = [
+        containing.x - viewport.x < insets[0],
+        containing.y - viewport.y < insets[1],
+        viewport.x + viewport.width - (containing.x + containing.width) < insets[2],
+        viewport.y + viewport.height - (containing.y + containing.height) < insets[3],
+    ];
+    let vertical = vertical && (if anchored[3] { reaches[3] } else { reaches[1] });
+    let horizontal = horizontal && (if anchored[2] { reaches[2] } else { reaches[0] });
+    let mut result = frame;
+    if vertical {
+        if anchored[3] {
+            let distance = viewport.y + viewport.height - (frame.y + frame.height);
+            if distance < insets[3] {
+                result.y -= insets[3] - distance;
+            }
+        } else {
+            let distance = frame.y - viewport.y;
+            if distance < insets[1] {
+                result.y += insets[1] - distance;
+            }
+        }
+    }
+    if horizontal {
+        if anchored[2] {
+            let distance = viewport.x + viewport.width - (frame.x + frame.width);
+            if distance < insets[2] {
+                result.x -= insets[2] - distance;
+            }
+        } else {
+            let distance = frame.x - viewport.x;
+            if distance < insets[0] {
+                result.x += insets[0] - distance;
+            }
+        }
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1990,6 +2413,13 @@ fn intrinsic_extent(
         ),
         None => (padding_left, padding_top, padding_right, padding_bottom),
     };
+    let [auto_left, auto_top, auto_right, auto_bottom] = crate::auto_safe_area::padding(node.id);
+    let (padding_left, padding_top, padding_right, padding_bottom) = (
+        padding_left + auto_left,
+        padding_top + auto_top,
+        padding_right + auto_right,
+        padding_bottom + auto_bottom,
+    );
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
     if horizontal_scroll_height {
@@ -9313,14 +9743,18 @@ mod css_flex_tests {
             &modal_safe_area_tree(sheet.clone()),
             crate::surface::SurfacePolicy::InWindow,
         );
-        assert_eq!(layouts[&12].y, 0.0);
+        // The content occupies the first detent (0.5 of the window minus the
+        // status bar) at the bottom of the surface.
+        let sheet_top = 800.0 - (800.0 - 24.0) * 0.5;
+        assert_eq!(layouts[&11].y, sheet_top);
+        assert_eq!(layouts[&12].y, sheet_top);
         assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
 
         let fitted = surface_layout(
             &modal_safe_area_tree(sheet.clone()),
             crate::surface::SurfacePolicy::SystemWindows,
         );
-        assert_eq!(fitted[&12].y, fitted[&10].y);
+        assert_eq!(fitted[&12].y, sheet_top);
         assert_eq!(fitted[&14].y + fitted[&14].height, 752.0);
 
         let mut edge_to_edge = sheet;
@@ -9332,7 +9766,7 @@ mod css_flex_tests {
             &modal_safe_area_tree(edge_to_edge),
             crate::surface::SurfacePolicy::SystemWindows,
         );
-        assert_eq!(layouts[&12].y, 0.0);
+        assert_eq!(layouts[&12].y, sheet_top);
         assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
     }
 
@@ -9422,5 +9856,474 @@ mod css_flex_tests {
             // The bottom inset still applies where the route reaches it.
             assert_eq!(layouts[&4].height, 800.0, "{presentation} {policy:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod auto_safe_area_tests {
+    use pam_native_protocol::PropValue;
+
+    use super::*;
+    use crate::surface::SurfacePolicy;
+
+    const WINDOW: Size = Size {
+        width: 360.0,
+        height: 800.0,
+    };
+    /// Status bar 24 dp and a three-button navigation bar 48 dp.
+    const BUTTONS: [f32; 4] = [0.0, 24.0, 0.0, 48.0];
+    /// Gesture navigation: a 24 dp handle.
+    const GESTURES: [f32; 4] = [0.0, 24.0, 0.0, 24.0];
+
+    fn f(value: f32) -> PropValue {
+        PropValue::Float(f64::from(value))
+    }
+
+    fn n(
+        id: u64,
+        parent: u64,
+        index: u32,
+        kind: NodeKind,
+        props: &[(PropKey, PropValue)],
+    ) -> (u64, Node) {
+        (
+            id,
+            Node {
+                id,
+                parent,
+                index,
+                kind,
+                properties: props.iter().cloned().collect(),
+            },
+        )
+    }
+
+    fn layout_with(tree: &Tree, insets: [f32; 4]) -> BTreeMap<u64, Layout> {
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, Some(insets), 0.0)
+            .with_surface_policy(SurfacePolicy::EdgeToEdgeWindows);
+        let auto = crate::auto_safe_area::Scope::enter(BTreeMap::new());
+        let layouts = calculate(tree, WINDOW).expect("layout");
+        auto.finish();
+        layouts
+    }
+
+    fn violations(tree: &Tree, layouts: &BTreeMap<u64, Layout>, insets: [f32; 4]) -> Vec<u64> {
+        safe_area_violations(
+            tree,
+            layouts,
+            WINDOW,
+            insets,
+            SurfacePolicy::EdgeToEdgeWindows,
+        )
+        .into_iter()
+        .map(|violation| violation.id)
+        .collect()
+    }
+
+    fn bottom(layout: Layout) -> f32 {
+        layout.y + layout.height
+    }
+
+    /// Screen without SafeAreaView: background column, a 52 dp header with a
+    /// title, a flexible body and a composer button at the bottom.
+    fn plain_screen(header_padding: f32) -> Tree {
+        Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                n(1, 0, 0, NodeKind::Screen, &[]),
+                n(2, 1, 0, NodeKind::Column, &[(PropKey::FlexGrow, f(1.0))]),
+                n(
+                    3,
+                    2,
+                    0,
+                    NodeKind::View,
+                    &[
+                        (PropKey::Height, f(52.0 + header_padding)),
+                        (PropKey::PaddingTop, f(header_padding)),
+                    ],
+                ),
+                n(4, 3, 0, NodeKind::Text, &[(PropKey::Height, f(20.0))]),
+                n(5, 2, 1, NodeKind::View, &[(PropKey::FlexGrow, f(1.0))]),
+                n(6, 2, 2, NodeKind::Pressable, &[(PropKey::Height, f(56.0))]),
+            ]),
+        }
+    }
+
+    #[test]
+    fn screen_content_clears_the_status_and_navigation_bars_by_default() {
+        for insets in [BUTTONS, GESTURES] {
+            let tree = plain_screen(0.0);
+            let layouts = layout_with(&tree, insets);
+            // The background still covers the whole window.
+            assert_eq!(layouts[&2].y, 0.0);
+            assert_eq!(bottom(layouts[&2]), 800.0);
+            assert_eq!(layouts[&4].y, insets[1], "title below the status bar");
+            assert_eq!(
+                bottom(layouts[&6]),
+                800.0 - insets[3],
+                "button above the bar"
+            );
+            assert!(violations(&tree, &layouts, insets).is_empty());
+        }
+    }
+
+    #[test]
+    fn padding_the_application_already_authored_is_not_applied_twice() {
+        // The header pads 30 dp itself: max(24, 30) keeps it where it is.
+        let tree = plain_screen(30.0);
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(layouts[&4].y, 30.0);
+        assert_eq!(bottom(layouts[&6]), 752.0);
+    }
+
+    #[test]
+    fn a_safe_area_view_in_the_wrapper_chain_keeps_explicit_control() {
+        // A root SafeAreaView with the bottom edge disabled (a tab bar owns
+        // it): nothing is added on top of the application's choice.
+        let mut tree = plain_screen(0.0);
+        tree.nodes.insert(
+            2,
+            Node {
+                kind: NodeKind::SafeAreaView,
+                properties: [
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::SafeAreaBottomEdge, PropValue::Boolean(false)),
+                ]
+                .into_iter()
+                .collect(),
+                ..tree.nodes[&2].clone()
+            },
+        );
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(layouts[&4].y, 24.0);
+        assert_eq!(bottom(layouts[&6]), 800.0);
+        // The lint still reports the button behind the navigation bar.
+        assert_eq!(violations(&tree, &layouts, BUTTONS), vec![6]);
+    }
+
+    /// RN-like "Anexar" sheet: content column without any bottom padding,
+    /// a strip, a grid and a last card, in a sheet sized to fit (or fixed).
+    fn sheet(snap: Option<f64>, content_padding_bottom: f32, extra_rows: usize) -> Tree {
+        let mut snap_bytes = Vec::new();
+        match snap {
+            Some(point) => {
+                snap_bytes.extend_from_slice(&1_u16.to_le_bytes());
+                snap_bytes.extend_from_slice(&point.to_le_bytes());
+            }
+            None => snap_bytes.extend_from_slice(&0_u16.to_le_bytes()),
+        }
+        let mut nodes = BTreeMap::from([
+            n(1, 0, 0, NodeKind::Screen, &[]),
+            n(2, 1, 0, NodeKind::View, &[(PropKey::FlexGrow, f(1.0))]),
+            n(
+                10,
+                1,
+                1,
+                NodeKind::Modal,
+                &[
+                    (PropKey::ModalPresentation, PropValue::Integer(3)),
+                    (PropKey::BottomSheetSnapPoints, PropValue::Bytes(snap_bytes)),
+                ],
+            ),
+            n(11, 10, 0, NodeKind::Column, &[(PropKey::FlexGrow, f(1.0))]),
+            n(
+                12,
+                11,
+                0,
+                NodeKind::Column,
+                &[
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::PaddingTop, f(8.0)),
+                    (PropKey::PaddingBottom, f(content_padding_bottom)),
+                ],
+            ),
+            n(13, 12, 0, NodeKind::Text, &[(PropKey::Height, f(26.0))]),
+            n(
+                14,
+                12,
+                1,
+                NodeKind::Pressable,
+                &[(PropKey::Height, f(98.0))],
+            ),
+            n(
+                15,
+                12,
+                2,
+                NodeKind::Pressable,
+                &[(PropKey::Height, f(192.0))],
+            ),
+            n(
+                16,
+                12,
+                3,
+                NodeKind::Pressable,
+                &[(PropKey::Height, f(64.0))],
+            ),
+        ]);
+        for row in 0..extra_rows {
+            let id = 100 + row as u64;
+            nodes.insert(
+                id,
+                n(
+                    id,
+                    12,
+                    4 + row as u32,
+                    NodeKind::Pressable,
+                    &[(PropKey::Height, f(40.0))],
+                )
+                .1,
+            );
+        }
+        Tree { root: 1, nodes }
+    }
+
+    #[test]
+    fn dynamic_sheet_fits_its_content_and_ends_above_the_bar() {
+        for insets in [BUTTONS, GESTURES] {
+            let tree = sheet(None, 0.0, 0);
+            let layouts = layout_with(&tree, insets);
+            let content = 8.0 + 26.0 + 98.0 + 192.0 + 64.0;
+            assert_eq!(layouts[&11].height, content + insets[3]);
+            assert_eq!(
+                bottom(layouts[&11]),
+                800.0,
+                "the sheet reaches the screen bottom"
+            );
+            assert_eq!(
+                bottom(layouts[&16]),
+                800.0 - insets[3],
+                "last card above the bar"
+            );
+            assert!(violations(&tree, &layouts, insets).is_empty());
+        }
+    }
+
+    #[test]
+    fn sheet_padding_is_max_of_the_inset_and_the_application_padding() {
+        // The application already pads inset + 18: nothing is added.
+        let tree = sheet(None, 48.0 + 18.0, 0);
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(bottom(layouts[&16]), 800.0 - 66.0);
+        // A smaller authored padding (12 dp) is topped up to the inset.
+        let tree = sheet(None, 12.0, 0);
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(bottom(layouts[&16]), 800.0 - 48.0);
+    }
+
+    #[test]
+    fn fixed_detent_sheet_content_stays_above_the_bar() {
+        let tree = sheet(Some(0.6), 0.0, 0);
+        let layouts = layout_with(&tree, BUTTONS);
+        let height = (800.0 - 24.0) * 0.6;
+        assert!((layouts[&11].height - height).abs() < 0.01);
+        assert!(bottom(layouts[&16]) <= 752.0 + 0.01);
+        assert!(violations(&tree, &layouts, BUTTONS).is_empty());
+    }
+
+    #[test]
+    fn content_that_overflows_a_fixed_detent_is_reported() {
+        let tree = sheet(Some(0.3), 0.0, 4);
+        let layouts = layout_with(&tree, BUTTONS);
+        assert!(!violations(&tree, &layouts, BUTTONS).is_empty());
+    }
+
+    #[test]
+    fn scrolling_sheet_ends_its_last_row_above_the_bar() {
+        let mut snap = Vec::new();
+        snap.extend_from_slice(&1_u16.to_le_bytes());
+        snap.extend_from_slice(&0.5_f64.to_le_bytes());
+        let mut nodes = BTreeMap::from([
+            n(1, 0, 0, NodeKind::Screen, &[]),
+            n(
+                10,
+                1,
+                0,
+                NodeKind::Modal,
+                &[
+                    (PropKey::ModalPresentation, PropValue::Integer(3)),
+                    (PropKey::BottomSheetSnapPoints, PropValue::Bytes(snap)),
+                ],
+            ),
+            n(11, 10, 0, NodeKind::Column, &[(PropKey::FlexGrow, f(1.0))]),
+            n(12, 11, 0, NodeKind::Text, &[(PropKey::Height, f(40.0))]),
+            n(
+                13,
+                11,
+                1,
+                NodeKind::Scroll,
+                &[(PropKey::FlexGrow, f(1.0)), (PropKey::MinHeight, f(0.0))],
+            ),
+            n(14, 13, 0, NodeKind::Column, &[]),
+        ]);
+        for row in 0..30_u64 {
+            nodes.insert(
+                200 + row,
+                n(
+                    200 + row,
+                    14,
+                    row as u32,
+                    NodeKind::Pressable,
+                    &[(PropKey::Height, f(48.0))],
+                )
+                .1,
+            );
+        }
+        let tree = Tree { root: 1, nodes };
+        for insets in [BUTTONS, GESTURES] {
+            let layouts = layout_with(&tree, insets);
+            assert_eq!(
+                bottom(layouts[&13]),
+                800.0 - insets[3],
+                "the list ends above the bar"
+            );
+            assert!(violations(&tree, &layouts, insets).is_empty());
+        }
+    }
+
+    #[test]
+    fn floating_buttons_stay_out_of_the_navigation_bar() {
+        let mut tree = plain_screen(0.0);
+        tree.nodes.insert(
+            7,
+            n(
+                7,
+                2,
+                3,
+                NodeKind::Pressable,
+                &[
+                    (PropKey::PositionType, PropValue::Integer(2)),
+                    (PropKey::Right, f(16.0)),
+                    (PropKey::Bottom, f(16.0)),
+                    (PropKey::Width, f(56.0)),
+                    (PropKey::Height, f(56.0)),
+                ],
+            )
+            .1,
+        );
+        // A decorative scrim stretched over the screen keeps bleeding.
+        tree.nodes.insert(
+            8,
+            n(
+                8,
+                2,
+                4,
+                NodeKind::View,
+                &[
+                    (PropKey::PositionType, PropValue::Integer(2)),
+                    (PropKey::Left, f(0.0)),
+                    (PropKey::Right, f(0.0)),
+                    (PropKey::Bottom, f(0.0)),
+                    (PropKey::Height, f(120.0)),
+                ],
+            )
+            .1,
+        );
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(bottom(layouts[&7]), 752.0, "max(inset, offset)");
+        assert_eq!(bottom(layouts[&8]), 800.0);
+        let layouts = layout_with(&tree, [0.0, 24.0, 0.0, 0.0]);
+        assert_eq!(
+            bottom(layouts[&7]),
+            784.0,
+            "authored offset kept without a bar"
+        );
+    }
+
+    #[test]
+    fn full_bleed_opt_out_keeps_the_layout_and_the_lint_still_reports_controls() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                n(1, 0, 0, NodeKind::Screen, &[]),
+                n(
+                    2,
+                    1,
+                    0,
+                    NodeKind::SafeAreaView,
+                    &[
+                        (PropKey::FlexGrow, f(1.0)),
+                        (PropKey::SafeAreaLeft, PropValue::Boolean(false)),
+                        (PropKey::SafeAreaTop, PropValue::Boolean(false)),
+                        (PropKey::SafeAreaRight, PropValue::Boolean(false)),
+                        (PropKey::SafeAreaBottomEdge, PropValue::Boolean(false)),
+                    ],
+                ),
+                n(3, 2, 0, NodeKind::Image, &[(PropKey::FlexGrow, f(1.0))]),
+                n(4, 2, 1, NodeKind::Pressable, &[(PropKey::Height, f(40.0))]),
+            ]),
+        };
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(layouts[&3].y, 0.0);
+        assert_eq!(bottom(layouts[&4]), 800.0);
+        assert_eq!(violations(&tree, &layouts, BUTTONS), vec![4]);
+    }
+
+    #[test]
+    fn navigation_routes_are_surfaces_of_their_own() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                n(1, 0, 0, NodeKind::Screen, &[]),
+                n(2, 1, 0, NodeKind::Column, &[(PropKey::FlexGrow, f(1.0))]),
+                n(
+                    3,
+                    2,
+                    0,
+                    NodeKind::NavigationHost,
+                    &[(PropKey::FlexGrow, f(1.0))],
+                ),
+                n(4, 3, 0, NodeKind::Column, &[(PropKey::FlexGrow, f(1.0))]),
+                n(5, 4, 0, NodeKind::Text, &[(PropKey::Height, f(20.0))]),
+                n(6, 4, 1, NodeKind::View, &[(PropKey::FlexGrow, f(1.0))]),
+                // Tab bar below the navigator.
+                n(7, 2, 1, NodeKind::Row, &[(PropKey::Height, f(56.0))]),
+                n(8, 7, 0, NodeKind::Pressable, &[(PropKey::FlexGrow, f(1.0))]),
+            ]),
+        };
+        let layouts = layout_with(&tree, BUTTONS);
+        assert_eq!(layouts[&5].y, 24.0, "route title below the status bar");
+        assert_eq!(
+            bottom(layouts[&7]),
+            752.0,
+            "tab bar above the navigation bar"
+        );
+        assert_eq!(layouts[&3].y, 0.0, "the navigator itself is not shifted");
+        assert!(violations(&tree, &layouts, BUTTONS).is_empty());
+    }
+
+    #[test]
+    fn engine_keeps_the_padding_across_commits_and_follows_inset_changes() {
+        let tree = plain_screen(0.0);
+        let frame = tree.encode().expect("encode");
+        let mut engine = crate::Engine::new();
+        engine.set_viewport(360.0, 800.0).unwrap();
+        engine.set_surface_policy(SurfacePolicy::EdgeToEdgeWindows);
+        engine.set_safe_area_insets(0.0, 24.0, 0.0, 48.0).unwrap();
+        let frames = |batch: Vec<u8>| {
+            pam_native_protocol::decode_batch(&batch)
+                .unwrap()
+                .into_iter()
+                .filter_map(|mutation| match mutation {
+                    pam_native_protocol::Mutation::Layout { id, frame } => Some((id, frame)),
+                    _ => None,
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        let first = frames(engine.commit(&frame).unwrap());
+        assert_eq!(bottom(first[&6]), 752.0);
+        // Same tree again: settled, nothing moves.
+        let again = frames(engine.commit(&frame).unwrap());
+        assert!(!again.contains_key(&6));
+        assert!(engine.safe_area_violations().is_empty());
+        // Switching to gesture navigation at runtime.
+        engine.set_safe_area_insets(0.0, 24.0, 0.0, 24.0).unwrap();
+        let switched = frames(engine.relayout(360.0, 800.0).unwrap());
+        assert_eq!(bottom(switched[&6]), 776.0);
+        // Landscape with a side navigation bar and a cutout.
+        engine.set_safe_area_insets(32.0, 0.0, 48.0, 0.0).unwrap();
+        let landscape = frames(engine.relayout(800.0, 360.0).unwrap());
+        assert_eq!(landscape[&4].x, 32.0);
+        assert_eq!(landscape[&6].x + landscape[&6].width, 800.0 - 48.0);
+        assert!(engine.safe_area_violations().is_empty());
     }
 }

@@ -2742,6 +2742,8 @@ class PamRenderer(
         // relayouts (SafeArea/KAV/focus) still describe the activity viewport;
         // applying those frames here would replace BOTTOM with TOP and stretch
         // the sheet behind the status bar. Descendants use this reduced viewport.
+        (parentView as? PamModalHost)?.takeIf { it.usesDynamicSheetSizing() }
+            ?.setDynamicSheetContentHeight(vertical.extent)
         (parentView as? PamModalHost)?.sheetChildLayoutParams()?.let { placement ->
             width = placement.width
             height = placement.height
@@ -4958,7 +4960,8 @@ class PamRenderer(
         source.order(ByteOrder.LITTLE_ENDIAN)
         require(source.remaining() >= 2) { "Invalid Bottom Sheet snap points" }
         val count = source.short.toInt() and 0xffff
-        require(count in 1..16 && source.remaining() == count * 8) {
+        // count 0: dynamic sizing (the sheet fits its content).
+        require(count in 0..16 && source.remaining() == count * 8) {
             "Invalid Bottom Sheet snap points"
         }
         return List(count) { source.double.toFloat() }

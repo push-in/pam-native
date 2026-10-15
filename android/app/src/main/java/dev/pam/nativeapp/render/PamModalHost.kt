@@ -260,6 +260,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private var slideFadeAnimator: ValueAnimator? = null
     private var updateScheduled = false
     private var bottomSheetSnapPoints = listOf(0.5f, 0.9f)
+    private var dynamicSheetSizing = false
+    private var dynamicSheetHeight = 0
     private var bottomSheetIndex = 0
     private var bottomSheetDismissible = true
     private var bottomSheetBackdropDismiss = true
@@ -442,13 +444,38 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     fun setBottomSheetSnapPoints(points: List<Float>) {
-        if (points.isEmpty()) return
+        if (points.isEmpty()) {
+            // Dynamic sizing: the engine lays the content out at its fitted
+            // height (safe-area inset included); the sheet follows it.
+            if (!dynamicSheetSizing) {
+                dynamicSheetSizing = true
+                bottomSheetIndex = 0
+                dialog?.let(::applyWindowLayout)
+            }
+            return
+        }
+        dynamicSheetSizing = false
+        dynamicSheetHeight = 0
         bottomSheetSnapPoints = points
             .map { it.coerceIn(0.05f, 1f) }
             .distinct()
             .sorted()
             .take(16)
         bottomSheetIndex = bottomSheetIndex.coerceIn(0, bottomSheetSnapPoints.lastIndex)
+        dialog?.let(::applyWindowLayout)
+    }
+
+    internal fun usesDynamicSheetSizing(): Boolean =
+        presentation == PRESENTATION_SHEET && dynamicSheetSizing
+
+    /** Engine height (px) of a dynamically sized sheet's content. */
+    internal fun setDynamicSheetContentHeight(height: Int) {
+        if (!usesDynamicSheetSizing() || height <= 0 || kotlin.math.abs(height - dynamicSheetHeight) <= 1) return
+        dynamicSheetHeight = height
+        // Drag and dismissal resolve the single detent as a fraction.
+        val available = sheetAvailableViewportHeight.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        bottomSheetSnapPoints = listOf((height.toFloat() / available).coerceIn(0.05f, 1f))
+        bottomSheetIndex = 0
         dialog?.let(::applyWindowLayout)
     }
 
@@ -757,6 +784,9 @@ internal class PamModalHost @JvmOverloads constructor(
                 return@also
             }
             registerDialogBackCallback(modal)
+            modal.window?.let {
+                PamSafeAreaInspector.attach(it, if (presentation == PRESENTATION_SHEET) "BottomSheet" else "Modal")
+            }
             applyWindowConfiguration(modal)
             applyWindowLayout(modal)
             animateEntrance()
@@ -1096,8 +1126,11 @@ internal class PamModalHost @JvmOverloads constructor(
             resources.displayMetrics.heightPixels
         }
         sheetAvailableViewportHeight = availableHeight
-        val baseSheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
-            .toInt()
+        val baseSheetHeight = if (dynamicSheetSizing && dynamicSheetHeight > 0) {
+            dynamicSheetHeight.coerceIn(1, availableHeight)
+        } else {
+            (availableHeight * bottomSheetSnapPoints[bottomSheetIndex]).toInt()
+        }
             .coerceAtLeast(1)
         val (sheetHeight, keyboardTranslation) = if (
             presentation == PRESENTATION_SHEET &&
@@ -1580,6 +1613,7 @@ internal class PamModalHost @JvmOverloads constructor(
             modal.window?.decorView?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener)
         }
         keyboardWindowFocusListener = null
+        modal.window?.let(PamSafeAreaInspector::detach)
         modal.dismiss()
         dialog = null
         lastOrientation = null

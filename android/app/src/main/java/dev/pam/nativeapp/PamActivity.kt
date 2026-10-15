@@ -262,6 +262,7 @@ class PamActivity : FragmentActivity() {
         errorOverlayParent = root
         errorOverlay?.let(root::addView)
         setContentView(root)
+        dev.pam.nativeapp.render.PamSafeAreaInspector.attach(window, "Activity")
         holdSplash(root)
         val (windowWidth, windowHeight) = resolvedViewportSize()
         viewportWidth = windowWidth
@@ -555,6 +556,7 @@ class PamActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        dev.pam.nativeapp.render.PamSafeAreaInspector.detach(window)
         releaseSplash()
         recoveryRunnable?.let(window.decorView::removeCallbacks)
         recoveryRunnable = null

@@ -293,6 +293,7 @@ public final class PamRenderer {
             // A modal made visible in this commit presents on the next turn.
             scheduleStatusBarResolve()
         }
+        PamSafeAreaInspector.scheduleScan(of: host)
     }
 
     private func scheduleStatusBarResolve() {
@@ -1078,6 +1079,11 @@ public final class PamRenderer {
             }
         }
 
+        if let sheet = views[effectiveParent] as? PamModalHost, sheet.usesDynamicSheetSizing {
+            // Dynamic sizing: the engine fitted the content (bottom safe-area
+            // inset included); the sheet's detent follows that height.
+            sheet.setDynamicSheetContentHeight(CGFloat(max(0, frame.height)))
+        }
         let sheetViewport = (views[effectiveParent] as? PamModalHost)?.sheetContentBounds
         let nextFrame = sheetViewport ?? CGRect(
             x: left,
@@ -3808,11 +3814,14 @@ public final class PamRenderer {
     }
 
     private func decodeBottomSheetSnapPoints(_ value: PropValue) -> [CGFloat] {
-        guard let data = value.bytesOrNil(), data.count >= 10 else {
+        guard let data = value.bytesOrNil(), data.count >= 2 else {
             return [0.5, 0.9]
         }
         let bytes = [UInt8](data)
         let count = Int(bytes[0]) | Int(bytes[1]) << 8
+        if count == 0, bytes.count == 2 {
+            return []  // Dynamic sizing: the sheet fits its content.
+        }
         guard count >= 1, count <= 16, bytes.count == 2 + count * 8 else {
             return [0.5, 0.9]
         }

@@ -60,6 +60,31 @@ IME while the list above it shrinks (React Native @gorhom sheet with
 
 On Android the sheet window is always edge to edge (1.34), like the @gorhom
 sheet inside React Native's edge-to-edge root: the backdrop covers the status
-and navigation bars and the sheet reaches the bottom of the screen. Wrap
-bottom content in a `SafeAreaView` (or pad it with the bottom inset) so it
-stays above the navigation bar, as on Android 15+ and iOS.
+and navigation bars and the sheet reaches the bottom of the screen. The
+sheet's content stays above the navigation bar, the gesture handle and the
+iOS home indicator by default: the engine pads the sheet's content container
+by `max(bottom inset, the padding it already has)` (see
+`docs/android-safe-area.md`, *Safe area by default*). No `SafeAreaView` or
+`windowMetrics()->safeAreaBottom` padding is needed; existing manual padding
+keeps working and is not doubled.
+
+## Dynamic sizing
+
+A sheet without snap points fits its content (@gorhom
+`enableDynamicSizing`): the engine measures the content, adds the part of the
+bottom inset the content does not already clear and caps it at the available
+height (window minus the status bar).
+
+```php
+BottomSheet::make($content, []);            // or ->dynamicSizing()
+```
+
+```html
+<BottomSheet snapPoints="content"> ... </BottomSheet>
+```
+
+Prefer it over a fixed detent for menus and pickers whose content grows (a
+row of recent photos, a new option): a fixed detent that is too short clips
+the last rows, and `pam-native safe-area-lint` reports them. Content taller
+than the available height must scroll (`ScrollView` / `VirtualizedList` with
+`flexGrow` inside the sheet).

@@ -967,6 +967,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             clean_android_dev_artifacts(&options.project)?;
             dev(options)
         }
+        "safe-area-lint" => crate::safe_area_lint::run(arguments),
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
@@ -8954,7 +8955,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 
