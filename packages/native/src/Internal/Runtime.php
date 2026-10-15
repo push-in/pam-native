@@ -316,6 +316,45 @@ final class Runtime
         if (self::$cycleCollection && gc_status()['roots'] >= self::$cycleRootBudget) {
             gc_collect_cycles();
         }
+        self::watchMemory();
+    }
+
+    private static ?int $memoryLimit = null;
+    private static bool $memoryWarned = false;
+
+    /**
+     * Above 75% of memory_limit between frames: collect cycles now (the frame
+     * collector may still be under its root budget) and, if the heap stays
+     * high, say so once in the log. It never raises the limit: a growing heap
+     * is a leak to fix, not to hide.
+     */
+    private static function watchMemory(): void
+    {
+        if (self::$memoryLimit === null) {
+            $limit = trim((string) ini_get('memory_limit'));
+            $bytes = (int) $limit;
+            $bytes *= match (strtoupper(substr($limit, -1))) {
+                'G' => 1 << 30,
+                'M' => 1 << 20,
+                'K' => 1 << 10,
+                default => 1,
+            };
+            self::$memoryLimit = $bytes > 0 ? $bytes : 0;
+        }
+        if (self::$memoryLimit === 0 || memory_get_usage() < self::$memoryLimit * 0.75) {
+            return;
+        }
+        gc_collect_cycles();
+        $usage = memory_get_usage();
+        if ($usage >= self::$memoryLimit * 0.75 && !self::$memoryWarned) {
+            self::$memoryWarned = true;
+            error_log(sprintf(
+                'Pam Native: PHP heap at %d of %d bytes after a frame (%d nodes). A growing heap is a leak.',
+                $usage,
+                self::$memoryLimit,
+                count(self::$encoder?->frameNodes() ?? []),
+            ));
+        }
     }
 
     /**

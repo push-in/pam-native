@@ -26,6 +26,9 @@ final class TreeEncoder
 {
     private const MAX_NODES = 100_000;
 
+    /** Encoded subtrees kept per element (one per path it was last shown at). */
+    private const SUBTREE_PATHS_PER_ELEMENT = 2;
+
     private const EVENT_PROPERTIES = EventProperties::MAP;
 
     /** @var array<int, true> ids of the frame being encoded (outside reused subtrees) */
@@ -91,6 +94,16 @@ final class TreeEncoder
      * @var array<string, array<string, array{0: string, 1: string, 2: int}>>
      */
     private array $childPaths = [];
+
+    /**
+     * Where each learned child placement lives ([parent path, segment, kind]),
+     * so a removed node also leaves $childPaths. Without it every route,
+     * keyed row or sheet ever mounted stayed in $identityIds, $idIdentities
+     * and $childPaths for the life of the process (OOM after ~45 min).
+     *
+     * @var array<int, array{0: string, 1: string, 2: int}>
+     */
+    private array $placementOwners = [];
 
     /** @var \WeakMap<Element, Element> scrollables lowered to a RefreshControl host */
     private \WeakMap $refreshHosts;
@@ -176,13 +189,24 @@ final class TreeEncoder
                 $this->collision($tree);
             }
             $frame = $this->fullFrame($rootId, $nodes);
+            if (count($this->idIdentities) > count($nodes)) {
+                // A full frame after a remount: drop identities of nodes it no longer has.
+                $this->forget(array_diff_key($this->idIdentities, $nodes));
+            }
         } else {
             [$frame, $nodes] = $this->patchFrame($rootId, $tree);
         }
 
         foreach ($this->built as [$element, $path, $subtree]) {
             $entries = $this->subtreeCache[$element] ?? [];
+            unset($entries[$path]);
             $entries[$path] = $subtree;
+            if (count($entries) > self::SUBTREE_PATHS_PER_ELEMENT) {
+                // A retained element (a remembered screen, a memoized row)
+                // shown again under a new path (a new route instance) kept
+                // every older path's encoded subtree alive: keep the newest.
+                $entries = array_slice($entries, -self::SUBTREE_PATHS_PER_ELEMENT, null, true);
+            }
             $this->subtreeCache[$element] = $entries;
         }
         $this->built = [];
@@ -370,6 +394,7 @@ final class TreeEncoder
                         $this->ids[$childId] = true;
                     }
                     $placements[$segment][$childKind] = [$childPath, $identity, $childId];
+                    $this->placementOwners[$childId] = [$path, $segment, $childKind];
                     $learned = true;
                 }
                 $this->encodeNode($child, $childId, $id, $childIndex, $childPath);
@@ -466,6 +491,7 @@ final class TreeEncoder
         foreach ($removals as $id => $_) {
             unset($committed[$id]);
         }
+        $this->forget($removals);
         foreach ($diff->changed as $id => $node) {
             $committed[$id] = $node;
         }
@@ -592,6 +618,52 @@ final class TreeEncoder
         $path = substr($identity, 0, (int) strrpos($identity, '|'));
 
         throw new LogicException("Element identity collision at {$path}; assign a unique key.");
+    }
+
+    /**
+     * Forgets the identity memo of removed nodes. Ids are a pure function of
+     * the identity (XXH3), so a node that comes back (a cached subtree, the
+     * same route again) gets the same id; only memory is released.
+     *
+     * @param array<int, mixed> $ids
+     */
+    private function forget(array $ids): void
+    {
+        foreach ($ids as $id => $_) {
+            $identity = $this->idIdentities[$id] ?? null;
+            if ($identity !== null) {
+                unset($this->idIdentities[$id]);
+                if (($this->identityIds[$identity] ?? null) === $id) {
+                    unset($this->identityIds[$identity]);
+                }
+            }
+            $owner = $this->placementOwners[$id] ?? null;
+            if ($owner === null) {
+                continue;
+            }
+            unset($this->placementOwners[$id]);
+            [$parentPath, $segment, $kind] = $owner;
+            if (($this->childPaths[$parentPath][$segment][$kind][2] ?? null) !== $id) {
+                continue;
+            }
+            unset($this->childPaths[$parentPath][$segment][$kind]);
+            if ($this->childPaths[$parentPath][$segment] === []) {
+                unset($this->childPaths[$parentPath][$segment]);
+                if ($this->childPaths[$parentPath] === []) {
+                    unset($this->childPaths[$parentPath]);
+                }
+            }
+        }
+    }
+
+    /** @internal Sizes of the identity memo (leak validators). @return array{identities: int, paths: int, placements: int} */
+    public function identityMemoSizes(): array
+    {
+        return [
+            'identities' => count($this->idIdentities),
+            'paths' => count($this->childPaths),
+            'placements' => count($this->placementOwners),
+        ];
     }
 
     private function nodeId(string $path, ?string $domIdentity, int $kind): int

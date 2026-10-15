@@ -109,6 +109,53 @@ class PamRefreshControlInstrumentedTest {
         }
     }
 
+    @Test
+    fun progressBackgroundColorIsAnArgbValueNotAResourceId() {
+        withRefresh(contentHeight = 120f) { refresh, _, renderer ->
+            val errors = Collections.synchronizedList(mutableListOf<String>())
+            onMain {
+                renderer.onPropertyError = { errors += it }
+                // Zé Chat dark card: threw "Resource ID #0xff1d231e" and took the whole tree down.
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Update(2, PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR, PropValue.Integer(0xff1d231e)),
+                            Mutation.Update(2, PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR, PropValue.Integer(0xffffffff)),
+                            Mutation.Update(2, PropKey.REFRESHING, PropValue.Flag(true)),
+                        ),
+                    ),
+                )
+            }
+            waitUntil(2_000) { refresh.isRefreshing }
+            onMain { assertTrue(refresh.isRefreshing) }
+            assertTrue(errors.toString(), errors.isEmpty())
+        }
+    }
+
+    @Test
+    fun invalidPropIsReportedAndSkippedWithoutAbortingTheBatch() {
+        withRefresh(contentHeight = 120f) { refresh, _, renderer ->
+            val errors = Collections.synchronizedList(mutableListOf<String>())
+            onMain {
+                renderer.onPropertyError = { errors += it }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            // Wrong value type: the native setter throws.
+                            Mutation.Update(2, PropKey.REFRESH_COLORS, PropValue.Integer(0xff1d231e)),
+                            Mutation.Update(2, PropKey.REFRESH_COLORS, PropValue.Integer(0xff1d231e)),
+                            Mutation.Update(2, PropKey.REFRESHING, PropValue.Flag(true)),
+                        ),
+                    ),
+                )
+            }
+            waitUntil(2_000) { refresh.isRefreshing }
+            onMain { assertTrue(refresh.isRefreshing) }
+            assertEquals(errors.toString(), 1, errors.size)
+            assertTrue(errors[0], errors[0].contains("REFRESH_COLORS"))
+        }
+    }
+
     private fun withRefresh(
         contentHeight: Float,
         enabled: Boolean = true,

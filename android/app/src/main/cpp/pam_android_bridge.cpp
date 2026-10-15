@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <android/log.h>
 
 #include <sapi/embed/php_embed.h>
@@ -762,7 +763,26 @@ void set_ini(HashTable* configuration, const char* name, const std::string& valu
     zend_hash_str_update(configuration, name, std::strlen(name), &entry);
 }
 
+// Safety net only: the PHP heap of a long session must stay flat (leak
+// validators gate that). Devices with more RAM get more headroom so a burst
+// (a huge first frame, an image-heavy screen) does not kill the runtime;
+// PAM_NATIVE_MEMORY_LIMIT overrides it.
+std::string php_memory_limit() {
+    if (const char* forced = std::getenv("PAM_NATIVE_MEMORY_LIMIT"); forced != nullptr && *forced != '\0') {
+        return forced;
+    }
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const uint64_t ram_mb = pages > 0 && page_size > 0
+        ? static_cast<uint64_t>(pages) * static_cast<uint64_t>(page_size) / (1024u * 1024u)
+        : 0;
+    if (ram_mb >= 6u * 1024u) return "256M";
+    if (ram_mb >= 3u * 1024u + 512u) return "192M";
+    return "128M";
+}
+
 void apply_php_ini_defaults(HashTable* configuration) {
+    set_ini(configuration, "memory_limit", php_memory_limit());
     // OPcache keeps compiled scripts in shared memory for the life of the
     // process and in a file cache under the app state directory, so a cold
     // start reuses the opcodes compiled by the previous launch instead of

@@ -228,6 +228,7 @@ internal class NativeImageLoader(
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
             value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
     }
+    private val smallAssets = ConcurrentHashMap<String, Boolean>()
     private val inFlight = InFlightImageLoads<NativeImageResult>()
     private val active = WeakHashMap<PamImageView, ActiveRequest>()
     private val generation = AtomicLong()
@@ -365,6 +366,8 @@ internal class NativeImageLoader(
         )
         if (pending.decodedKey == key) return
         pending.decodedKey = key
+        // Classifies a packaged file before the cache lookup (inline cache or photos).
+        val assetBytes = if (smallAssets[source] == null) smallAssetBytes(source) else null
         val memory = memoryCacheFor(source)
 
         if (
@@ -391,13 +394,17 @@ internal class NativeImageLoader(
             }
         }
 
-        if (isSynchronousInlineSource(source)) {
+        if (isSynchronousInlineSource(source) || smallAssets[source] == true) {
             // A bundled glyph (tens of bytes to a few KiB) decodes in well
             // under a millisecond: paint it in the frame that lays the view
             // out, like a font glyph, instead of a frame later.
             val decoded = runCatching {
                 decode(
-                    loadDataUri(source),
+                    if (isInlineImageSource(source)) {
+                        loadDataUri(source)
+                    } else {
+                        assetBytes ?: requireNotNull(smallAssetBytes(source)) { "Image asset changed size." }
+                    },
                     measuredWidth,
                     measuredHeight,
                     pending.request.resizeMethod,
@@ -476,7 +483,7 @@ internal class NativeImageLoader(
                                         pending.request.resizeMethod,
                                         pending.request.resizeMultiplier,
                                         repeat = pending.request.repeat,
-                                        inline = isInlineImageSource(source),
+                                        inline = isInline(source),
                                     )
                                 }.getOrNull()?.bitmap ?: return@partial
                                 main.post {
@@ -491,7 +498,7 @@ internal class NativeImageLoader(
                             pending.request.resizeMethod,
                             pending.request.resizeMultiplier,
                             repeat = pending.request.repeat,
-                            inline = isInlineImageSource(source),
+                            inline = isInline(source),
                         )
                         if (
                             !closed.get() &&
@@ -569,7 +576,7 @@ internal class NativeImageLoader(
                         IMAGE_RESIZE_AUTO,
                         1f,
                         repeat = pending.request.repeat,
-                        inline = isInlineImageSource(source),
+                        inline = isInline(source),
                     ).bitmap
                 }.getOrNull()
             },
@@ -626,7 +633,7 @@ internal class NativeImageLoader(
     }
 
     private fun isReleasable(request: NativeImageRequest): Boolean =
-        !isInlineImageSource(request.source) &&
+        !isInline(request.source) &&
             request.cachePolicy != IMAGE_CACHE_RELOAD &&
             request.cachePolicy != IMAGE_CACHE_NONE &&
             request.mediaCachePolicy != MEDIA_CACHE_NONE &&
@@ -641,10 +648,39 @@ internal class NativeImageLoader(
     }
 
     private fun imageExecutor(source: String) =
-        if (isInlineImageSource(source)) inlineExecutor else executor
+        if (isInline(source)) inlineExecutor else executor
 
     private fun memoryCacheFor(source: String) =
-        if (isInlineImageSource(source)) inlineCache else cache
+        if (isInline(source)) inlineCache else cache
+
+    /** data: glyphs and packaged files of at most [INLINE_SYNC_MAX_CHARS] bytes (icon masks). */
+    private fun isInline(source: String): Boolean =
+        isInlineImageSource(source) || smallAssets[source] == true
+
+    /**
+     * Bytes of a packaged `asset://` file small enough to decode in the frame
+     * (icon masks shipped as files instead of data: URIs, which cost ~2 KB of
+     * wire per node); null for larger files, which load like photos.
+     */
+    private fun smallAssetBytes(source: String): ByteArray? {
+        if (!source.regionMatches(0, "asset://", 0, 8, ignoreCase = true)) return null
+        if (smallAssets[source] == false) return null
+        val path = normalizedPamAssetPath(source) ?: return null
+        val bytes = runCatching {
+            context.assets.open(path).use { input ->
+                val buffer = ByteArray(INLINE_SYNC_MAX_CHARS + 1)
+                var length = 0
+                while (length < buffer.size) {
+                    val read = input.read(buffer, length, buffer.size - length)
+                    if (read < 0) break
+                    length += read
+                }
+                if (length > INLINE_SYNC_MAX_CHARS) null else buffer.copyOf(length)
+            }
+        }.getOrNull()
+        if (smallAssets.size < MAX_SMALL_ASSETS) smallAssets[source] = bytes != null
+        return bytes
+    }
 
     private fun finishSuccess(
         view: PamImageView,
@@ -1456,8 +1492,11 @@ internal class NativeImageLoader(
         /** Shared by every loader instance so prefetch and rendering never race on one file. */
         val DISK_LOCK = Any()
         const val INLINE_MEMORY_CACHE_BYTES = 4 * 1024 * 1024
+        const val MAX_SMALL_ASSETS = 4_096
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
-        const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
+        // RN (expo-image/Glide) keeps 250 MB of images on disk; a per-image
+        // `cacheMaxBytes` can no longer grow the shared directory past this.
+        const val MAX_DISK_CACHE_BYTES = 256L * 1024 * 1024
         const val DISK_DIRECTORY = "pam-images-v1"
         const val MAX_IMAGE_BYTES = 16 * 1024 * 1024
         const val DEFAULT_IMAGE_CAPACITY = 64 * 1024

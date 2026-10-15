@@ -147,7 +147,7 @@ internal class PamMediaView(
     private val progress = object : Runnable {
         override fun run() {
             // A covered player has nothing to report; restoring restarts the loop.
-            if (covered) return
+            if (covered || hiddenRelease) return
             val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
@@ -216,8 +216,8 @@ internal class PamMediaView(
         }
         showPoster()
         sourceGeneration++
-        if (value.isEmpty() || covered) {
-            // A covered route prepares its player when it is visible again.
+        if (value.isEmpty() || covered || hiddenRelease) {
+            // A covered (or hidden) route prepares its player when it is visible again.
             releasePlayer()
         } else {
             val uri = Uri.parse(value)
@@ -251,7 +251,7 @@ internal class PamMediaView(
                     error = { onError?.invoke(it) },
                 ),
             ) { cached ->
-                if (generation == sourceGeneration && !covered) {
+                if (generation == sourceGeneration && !covered && !hiddenRelease) {
                     prepareMedia(
                         if (shouldUseResolvedMediaUri(cached == Uri.EMPTY, cached.scheme)) {
                             resolved
@@ -370,16 +370,51 @@ internal class PamMediaView(
     }
 
     private fun syncVisibility() {
-        playback.visibility(isAttachedToWindow, isShown && windowVisibility == VISIBLE)
+        val shown = isShown && windowVisibility == VISIBLE
+        playback.visibility(isAttachedToWindow, shown)
         syncCoverage()
+        syncHiddenRelease(shown)
         syncPlayback()
+    }
+
+    /**
+     * A player hidden without being covered (an inactive tab kept attached,
+     * a GONE subtree, the app window hidden) kept its MediaCodec, surface and
+     * worker busy: after [HIDDEN_RELEASE_MS] it is released like a covered
+     * route and comes back at the same position when shown again.
+     */
+    private var hiddenRelease = false
+    private val releaseHidden = Runnable {
+        if (isAttachedToWindow && !covered && !keepAliveWhenCovered && !(isShown && windowVisibility == VISIBLE)) {
+            hiddenRelease = true
+            releaseForCover()
+        }
+    }
+
+    private fun syncHiddenRelease(shown: Boolean) {
+        if (!isAttachedToWindow || keepAliveWhenCovered || shown) {
+            removeCallbacks(releaseHidden)
+            if (hiddenRelease && isAttachedToWindow && shown) {
+                hiddenRelease = false
+                if (!covered) restoreAfterCover()
+            }
+            return
+        }
+        if (!hiddenRelease) {
+            removeCallbacks(releaseHidden)
+            postDelayed(releaseHidden, HIDDEN_RELEASE_MS)
+        }
     }
 
     private fun syncCoverage() {
         val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
         if (nowCovered == covered) return
         covered = nowCovered
-        if (nowCovered) releaseForCover() else restoreAfterCover()
+        if (nowCovered) {
+            releaseForCover()
+        } else if (!hiddenRelease) {
+            restoreAfterCover()
+        }
     }
 
     /** Frees the decoder, player and video surface of a covered route, keeping its position. */
@@ -841,7 +876,7 @@ internal class PamMediaView(
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered) {
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !hiddenRelease) {
             val current = source
             source = ""
             setSource(current)
@@ -861,6 +896,8 @@ internal class PamMediaView(
     override fun onDetachedFromWindow() {
         playback.visibility(false, false)
         covered = false
+        hiddenRelease = false
+        removeCallbacks(releaseHidden)
         viewLifecycle?.removeObserver(viewLifecycleObserver)
         viewLifecycle = null
         main.removeCallbacks(progress)
@@ -886,9 +923,21 @@ private fun applyRate(player: MediaPlayer, rate: Float) {
 private val linear = LinearInterpolator()
 
 /** Player setup/teardown thread (no Looper: callbacks stay on the main thread). */
-private val mediaExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+private val mediaExecutor = java.util.concurrent.ThreadPoolExecutor(
+    1,
+    1,
+    10L,
+    java.util.concurrent.TimeUnit.SECONDS,
+    java.util.concurrent.LinkedBlockingQueue(),
+) { runnable ->
     Thread(runnable, "PamMediaPlayer").apply { isDaemon = true }
+}.apply {
+    // Nothing playing: the worker thread ends 10 s after its last command.
+    allowCoreThreadTimeOut(true)
 }
+
+/** A hidden (not covered) player keeps its decoder this long before it is released. */
+private const val HIDDEN_RELEASE_MS = 5_000L
 
 internal fun mediaDataSourceUsesNetworkString(scheme: String?): Boolean =
     scheme.equals("http", ignoreCase = true) ||

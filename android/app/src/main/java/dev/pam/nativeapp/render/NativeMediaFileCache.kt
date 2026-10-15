@@ -170,10 +170,12 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
             ?.sortedByDescending(File::lastModified)
             ?: return
         var size = 0L
-        files.forEach { file ->
+        val budget = limit.coerceIn(MIN_DISK_BYTES, MAX_DISK_BYTES)
+        files.forEachIndexed { index, file ->
             size += file.length()
             val pinned = File(root, "${file.nameWithoutExtension}.pin").isFile
-            if (size > limit.coerceIn(MIN_DISK_BYTES, MAX_DISK_BYTES) && !pinned) {
+            // The newest file is the one being handed to a player: never trim it.
+            if (index > 0 && size > budget && !pinned) {
                 file.delete()
             }
         }
@@ -197,8 +199,10 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
 
     private companion object {
         const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
-        const val DEFAULT_DISK_BYTES = 512L * 1024 * 1024
+        // `cacheMaxBytes` also bounds one file (up to 2 GB); the directory
+        // keeps at most 256 MB (the RN app's media/image disk budget).
+        const val DEFAULT_DISK_BYTES = 256L * 1024 * 1024
         const val MIN_DISK_BYTES = 16L * 1024 * 1024
-        const val MAX_DISK_BYTES = 4L * 1024 * 1024 * 1024
+        const val MAX_DISK_BYTES = 256L * 1024 * 1024
     }
 }
