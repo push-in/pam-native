@@ -1465,6 +1465,11 @@ public final class PamRenderer: @unchecked Sendable {
         case .text:
             return PamTextView()
         case .input:
+            // The host class is fixed at creation: `multiline` picks the
+            // UITextView-based field (Android reconfigures one EditText).
+            if spec.properties[PamConstants.multiline]?.boolOrNil() == true {
+                return PamMultilineInputField()
+            }
             let field = PamInputField()
             field.borderStyle = .none
             return field
@@ -1653,7 +1658,7 @@ public final class PamRenderer: @unchecked Sendable {
             eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
 
-        let inputField = view as? PamInputField
+        let inputField = view as? (any PamTextInputHost)
         let hasDoubleTap = eventProperties.contains(PamConstants.onDoubleTap)
         let doubleTapDelayMs = state.properties[PamConstants.pressDoubleTapDelayMs]?.integerOrNil() ?? 250
         let pressInDelayMs = state.properties[PamMotionKeys.pressDelayInMs]?.integerOrNil() ?? 0
@@ -1753,13 +1758,17 @@ public final class PamRenderer: @unchecked Sendable {
 
         if eventProperties.contains(PamConstants.onChange), let field = inputField {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.change.rawValue, dispatchEvent: dispatchEvent)
-            bridge.attachTextField(field)
+            bridge.attachTextChange(field)
+            bridge.configureInputSync(
+                mode: state.properties[PamConstants.inputSyncMode]?.integerOrNil() ?? 2,
+                debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48
+            )
             eventBridges[nodeId]?[EventKind.change.rawValue] = bridge
         }
 
         if eventProperties.contains(PamConstants.onSubmit), let field = inputField {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.submit.rawValue, dispatchEvent: dispatchEvent)
-            bridge.attachSubmit(field)
+            bridge.attachInputSubmit(field)
             eventBridges[nodeId]?[EventKind.submit.rawValue] = bridge
         }
 
@@ -2228,9 +2237,9 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyInputSelection(view: UIView, nodeId: Int64) {
-        guard let field = view as? UITextField, let state = nodes[nodeId],
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId],
               let requested = state.properties[PamConstants.inputSelectionStart]?.integerOrNil() else { return }
-        let length = (field.text ?? "").utf16.count
+        let length = field.inputText.utf16.count
         let start = min(length, max(0, Int(clamping: requested)))
         let end = min(length, max(start, Int(clamping:
             state.properties[PamConstants.inputSelectionEnd]?.integerOrNil() ?? Int64(start))))
@@ -2240,7 +2249,7 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyInputCompletion(view: UIView, nodeId: Int64) {
-        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId] else { return }
         let hint = state.properties[PamConstants.autoComplete]?.textOrNil()?.lowercased()
         let content: UITextContentType?
         switch hint {
@@ -2270,14 +2279,16 @@ public final class PamRenderer: @unchecked Sendable {
         // UIKit has no previous/none return-key glyph equivalents.
         case .standard, .none, .previous: action = .default
         }
-        let changed = field.textContentType != content || field.returnKeyType != action
-        field.textContentType = content
+        let currentContent = (field as? UITextField)?.textContentType ?? (field as? UITextView)?.textContentType
+        let changed = currentContent != content || field.returnKeyType != action
+        (field as? UITextField)?.textContentType = content
+        (field as? UITextView)?.textContentType = content
         field.returnKeyType = action
         if changed && field.isFirstResponder { field.reloadInputViews() }
     }
 
     private func applyInputTextTraits(view: UIView, nodeId: Int64) {
-        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId] else { return }
         let autoCorrect = state.properties[PamConstants.inputAutoCorrect]?.boolOrNil()
         // A mask or currency format rewrites the text on every keystroke;
         // autocorrection over it can replace a formatted value (Android
@@ -2303,8 +2314,10 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyInputSecurity(view: UIView, nodeId: Int64) {
-        guard let field = view as? UITextField else { return }
-        let secure = nodes[nodeId]?.properties[PamConstants.secure]?.boolOrNil() ?? false
+        guard let field = view as? (any PamTextInputHost) else { return }
+        // Android: a multiline box never masks (`secure && !multiline`).
+        let secure = (nodes[nodeId]?.properties[PamConstants.secure]?.boolOrNil() ?? false)
+            && !(field is PamMultilineInputField)
         guard field.isSecureTextEntry != secure else { return }
         let selection = field.selectedTextRange.map {
             (field.offset(from: field.beginningOfDocument, to: $0.start),
@@ -2319,7 +2332,7 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyInputKeyboard(view: UIView, nodeId: Int64) {
-        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId] else { return }
         let mode = (state.properties[PamConstants.inputMode]?.integerOrNil()).flatMap(PamInputModeKind.init(rawValue:))
         let keyboard = (state.properties[PamConstants.keyboardType]?.integerOrNil()).flatMap(PamKeyboardKind.init(rawValue:)) ?? .text
         let type: UIKeyboardType
@@ -2345,7 +2358,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
         let editable = state.properties[PamConstants.inputEditable]?.boolOrNil() ?? true
-        (field as? PamInputField)?.isInputEditable = editable
+        field.isInputEditable = editable
         let hideKeyboard = mode == PamInputModeKind.none || !editable
             || state.properties[PamConstants.inputShowSoftInputOnFocus]?.boolOrNil() == false
         let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
@@ -2356,6 +2369,36 @@ public final class PamRenderer: @unchecked Sendable {
             field.inputView = nil
         }
         if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
+    /// `cursorColor` (Android `setCursorColor`) with `selectionColor` as the
+    /// fallback: both map to UIKit's tint (caret + selection handles).
+    private func applyInputTint(view: UIView, nodeId: Int64) {
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId] else { return }
+        let color = state.properties[PamConstants.inputCursorColor]?.integerOrNil()
+            ?? state.properties[PamConstants.selectionColor]?.integerOrNil()
+        field.tintColor = color.map { UIColor(argb: $0) }
+    }
+
+    /// `minLines`, `textAlignVertical`, `scrollEnabled` and content growth
+    /// (Android `applyInputConfiguration`).
+    private func applyInputLayoutTraits(view: UIView, nodeId: Int64) {
+        guard let field = view as? (any PamTextInputHost), let state = nodes[nodeId] else { return }
+        field.verticalAlignment = (state.properties[PamConstants.inputTextAlignVertical]?.integerOrNil())
+            .flatMap(PamInputVerticalAlignment.init(rawValue:)) ?? .auto
+        guard let multiline = field as? PamMultilineInputField else { return }
+        multiline.minimumLines = Int(clamping: max(1, state.properties[PamConstants.inputMinLines]?.integerOrNil() ?? 1))
+        multiline.isScrollEnabled = state.properties[PamConstants.inputScrollEnabled]?.boolOrNil() ?? true
+        multiline.growsWithContent = state.properties[PamConstants.height] == nil
+    }
+
+    private func applyInputSync(nodeId: Int64) {
+        guard let state = nodes[nodeId],
+              let bridge = eventBridges[nodeId]?[EventKind.change.rawValue] else { return }
+        bridge.configureInputSync(
+            mode: state.properties[PamConstants.inputSyncMode]?.integerOrNil() ?? 2,
+            debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48
+        )
     }
 
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
@@ -2369,7 +2412,7 @@ public final class PamRenderer: @unchecked Sendable {
                     label.text = textValue
                 } else if let button = view as? UIButton {
                     button.setTitle(textValue, for: .normal)
-                } else if let field = view as? PamInputField {
+                } else if let field = view as? (any PamTextInputHost) {
                     field.setFormattedTextFromRenderer(textValue)
                 } else if let field = view as? UITextField {
                     field.text = textValue
@@ -2379,14 +2422,36 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.inputShowSoftInputOnFocus:
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.autoFocus:
-            (view as? PamInputField)?.autoFocusRequested = value.boolOrNil() ?? false
+            (view as? (any PamTextInputHost))?.autoFocusRequested = value.boolOrNil() ?? false
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
-            (view as? PamInputField)?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
+            (view as? (any PamTextInputHost))?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
         case PamConstants.inputSubmitBehavior:
-            (view as? PamInputField)?.submitBehavior = value.integerOrNil()
-                .flatMap(PamInputSubmitBehavior.init(rawValue:)) ?? .blurAndSubmit
+            (view as? (any PamTextInputHost))?.submitBehavior = value.integerOrNil()
+                .flatMap(PamInputSubmitBehavior.init(rawValue:)) ?? defaultSubmitBehavior(view)
+        case PamConstants.placeholderColor:
+            (view as? (any PamTextInputHost))?.placeholderColor = value.integerOrNil().map { UIColor(argb: $0) }
+        case PamConstants.inputCursorColor, PamConstants.selectionColor:
+            applyInputTint(view: view, nodeId: nodeId)
+            if let text = view as? PamTextView, key == PamConstants.selectionColor {
+                text.tintColor = value.integerOrNil().map { UIColor(argb: $0) }
+            }
+        case PamConstants.inputCaretHidden:
+            (view as? (any PamTextInputHost))?.caretHidden = value.boolOrNil() ?? false
+        case PamConstants.inputContextMenuHidden:
+            (view as? (any PamTextInputHost))?.contextMenuHidden = value.boolOrNil() ?? false
+        case PamConstants.inputSelectTextOnFocus:
+            (view as? (any PamTextInputHost))?.selectTextOnFocus = value.boolOrNil() ?? false
+        case PamConstants.multiline, PamConstants.inputMinLines, PamConstants.inputTextAlignVertical,
+             PamConstants.inputScrollEnabled:
+            applyInputLayoutTraits(view: view, nodeId: nodeId)
+        case PamConstants.inputDebounceMs, PamConstants.inputSyncMode:
+            applyInputSync(nodeId: nodeId)
+        case PamConstants.textSelectable:
+            (view as? PamTextView)?.isSelectable = value.boolOrNil() ?? false
+        case PamConstants.textDataDetectorType:
+            (view as? PamTextView)?.dataDetectorType = Int(clamping: value.integerOrNil() ?? 1)
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:
@@ -2396,7 +2461,7 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
-            } else if let textValue = value.textOrNil(), let field = view as? PamInputField {
+            } else if let textValue = value.textOrNil(), let field = view as? (any PamTextInputHost) {
                 field.setFormattedTextFromRenderer(textValue)
             } else if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.text = textValue
@@ -2407,7 +2472,9 @@ public final class PamRenderer: @unchecked Sendable {
                 view.accessibilityIdentifier = textValue
             }
         case PamConstants.placeholder:
-            if let textValue = value.textOrNil(), let field = view as? UITextField {
+            if let field = view as? (any PamTextInputHost) {
+                field.placeholderText = value.textOrNil()
+            } else if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.placeholder = textValue
             }
         case PamConstants.inputFormat,
@@ -2418,7 +2485,7 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.inputFormatDecimalDigits,
              PamConstants.inputFormatLocale:
             applyInputTextTraits(view: view, nodeId: nodeId)
-            if let field = view as? PamInputField, let state = nodes[nodeId] {
+            if let field = view as? (any PamTextInputHost), let state = nodes[nodeId] {
                 field.configureInputFormat(
                     format: Int(state.properties[PamConstants.inputFormat]?.integerOrNil() ?? 1),
                     pattern: state.properties[PamConstants.inputFormatPattern]?.textOrNil() ?? "",
@@ -2462,6 +2529,7 @@ public final class PamRenderer: @unchecked Sendable {
                 frame.size.height = CGFloat(height)
                 view.frame = frame
             }
+            (view as? PamMultilineInputField)?.growsWithContent = false
         case PamConstants.zIndex:
             view.layer.zPosition = CGFloat(value.decimalOrZero())
             if let parent = nodes[nodeId]?.parent { dirtyStackingParents.insert(parent) }
@@ -3146,13 +3214,37 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.inputShowSoftInputOnFocus:
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.autoFocus:
-            (view as? PamInputField)?.autoFocusRequested = false
+            (view as? (any PamTextInputHost))?.autoFocusRequested = false
+        case PamConstants.height:
+            (view as? PamMultilineInputField)?.growsWithContent = true
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
-            (view as? PamInputField)?.maximumLength = nil
+            (view as? (any PamTextInputHost))?.maximumLength = nil
         case PamConstants.inputSubmitBehavior:
-            (view as? PamInputField)?.submitBehavior = .blurAndSubmit
+            (view as? (any PamTextInputHost))?.submitBehavior = defaultSubmitBehavior(view)
+        case PamConstants.placeholder:
+            (view as? (any PamTextInputHost))?.placeholderText = nil
+        case PamConstants.placeholderColor:
+            (view as? (any PamTextInputHost))?.placeholderColor = nil
+        case PamConstants.inputCursorColor, PamConstants.selectionColor:
+            applyInputTint(view: view, nodeId: nodeId)
+            (view as? PamTextView)?.tintColor = nil
+        case PamConstants.inputCaretHidden:
+            (view as? (any PamTextInputHost))?.caretHidden = false
+        case PamConstants.inputContextMenuHidden:
+            (view as? (any PamTextInputHost))?.contextMenuHidden = false
+        case PamConstants.inputSelectTextOnFocus:
+            (view as? (any PamTextInputHost))?.selectTextOnFocus = false
+        case PamConstants.multiline, PamConstants.inputMinLines, PamConstants.inputTextAlignVertical,
+             PamConstants.inputScrollEnabled:
+            applyInputLayoutTraits(view: view, nodeId: nodeId)
+        case PamConstants.inputDebounceMs, PamConstants.inputSyncMode:
+            applyInputSync(nodeId: nodeId)
+        case PamConstants.textSelectable:
+            (view as? PamTextView)?.isSelectable = false
+        case PamConstants.textDataDetectorType:
+            (view as? PamTextView)?.dataDetectorType = 1
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:
@@ -3598,16 +3690,21 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyTextAlignment(view: UIView, nodeId: Int64) {
-        guard let label = view as? UILabel, let state = nodes[nodeId] else { return }
-        if label is PamTextView {
-            applyTextContent(view: label, nodeId: nodeId)
+        guard let state = nodes[nodeId] else { return }
+        if let text = view as? PamTextView {
+            applyTextContent(view: text, nodeId: nodeId)
             return
         }
-        label.textAlignment = switch textAlignmentValue(state) {
+        let alignment: NSTextAlignment = switch textAlignmentValue(state) {
         case 2, 5: .center
         case 3, 6: .right
         case 4: .justified
         default: .left
+        }
+        if let label = view as? UILabel {
+            label.textAlignment = alignment
+        } else if let field = view as? (any PamTextInputHost) {
+            field.textAlignment = alignment
         }
     }
 
@@ -3790,7 +3887,16 @@ public final class PamRenderer: @unchecked Sendable {
             field.adjustsFontForContentSizeCategory = allowsScaling
             field.adjustsFontSizeToFitWidth = adjustsToFit
             field.minimumFontSize = adjustsToFit ? baseSize * minimumScale : 0
+        } else if let textView = view as? UITextView {
+            textView.font = font
+            textView.adjustsFontForContentSizeCategory = allowsScaling
         }
+    }
+
+    /// Android `inputSubmitBehavior`: a multiline box inserts a newline
+    /// unless authored otherwise.
+    private func defaultSubmitBehavior(_ view: UIView) -> PamInputSubmitBehavior {
+        view is PamMultilineInputField ? .newline : .blurAndSubmit
     }
 
     private func applyAccessibility(view: UIView, state: NodeState?) {
@@ -5178,9 +5284,13 @@ public final class PamRenderer: @unchecked Sendable {
         private var emitsTouchMove = false
         private var emitsTouchEnd = false
         private var lastIntersection: Bool?
-        private weak var textField: PamInputField?
-        private weak var submitField: UITextField?
-        private var focusField: PamInputField?
+        private weak var textField: (any PamTextInputHost)?
+        private weak var submitField: (any PamTextInputHost)?
+        private var focusField: (any PamTextInputHost)?
+        private var inputSyncMode: Int64 = 2
+        private var inputDebounce: TimeInterval = 0.048
+        private var pendingChange: DispatchWorkItem?
+        private var pendingChangeValue: String?
         private weak var control: UIControl?
         private weak var scrollView: UIScrollView?
         private weak var refreshControl: PamRefreshContainer?
@@ -5265,10 +5375,18 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         func attachSubmit(_ control: UIControl) {
-            self.submitField = control as? UITextField
             control.addTarget(self, action: #selector(onSubmit), for: .touchUpInside)
             control.addTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
             self.control = control
+        }
+
+        func attachInputSubmit(_ field: any PamTextInputHost) {
+            submitField = field
+            if let control = field as? UIControl {
+                attachSubmit(control)
+            } else if let multiline = field as? PamMultilineInputField {
+                multiline.onSubmit = { [weak self] in self?.onSubmit() }
+            }
         }
 
         func attachPress(to view: UIView) {
@@ -5489,27 +5607,47 @@ public final class PamRenderer: @unchecked Sendable {
             semanticGesture = recognizer
         }
 
-        func attachTextField(_ field: PamInputField) {
-            field.addTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
+        func attachTextChange(_ field: any PamTextInputHost) {
             textField = field
-        }
-
-        func attachFocus(_ field: UITextField) {
-            field.addTarget(self, action: #selector(onFocus), for: .editingDidBegin)
-            if let inputField = field as? PamInputField {
-                focusField = inputField
+            if let control = field as? PamInputField {
+                control.addTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
+                control.addTarget(self, action: #selector(onInputSyncFlush), for: .editingDidEnd)
+                control.addTarget(self, action: #selector(onInputSyncFlush), for: .primaryActionTriggered)
+            } else if let multiline = field as? PamMultilineInputField {
+                multiline.onTextChanged = { [weak self] value in self?.handleTextChange(value) }
+                multiline.onSyncFlush = { [weak self] in self?.onInputSyncFlush() }
             }
         }
 
-        func attachBlur(_ field: UITextField) {
-            field.addTarget(self, action: #selector(onBlur), for: .editingDidEnd)
-            if let inputField = field as? PamInputField {
-                focusField = inputField
+        /// Android `inputSyncMode` / `inputDebounceMs`: immediate (3) sends
+        /// every edit, debounced (2) coalesces edits within the window, and
+        /// native/blur/submit (1/4/5) hold the value until blur or submit.
+        func configureInputSync(mode: Int64, debounceMs: Int64) {
+            inputSyncMode = (1...5).contains(mode) ? mode : 2
+            inputDebounce = TimeInterval(min(max(debounceMs, 0), 5_000)) / 1_000
+            if inputSyncMode == 3 { onInputSyncFlush() }
+        }
+
+        func attachFocus(_ field: any PamTextInputHost) {
+            focusField = field
+            if let control = field as? PamInputField {
+                control.addTarget(self, action: #selector(onFocus), for: .editingDidBegin)
+            } else if let multiline = field as? PamMultilineInputField {
+                multiline.onEditingBegan = { [weak self] in self?.onFocus() }
+            }
+        }
+
+        func attachBlur(_ field: any PamTextInputHost) {
+            focusField = field
+            if let control = field as? PamInputField {
+                control.addTarget(self, action: #selector(onBlur), for: .editingDidEnd)
+            } else if let multiline = field as? PamMultilineInputField {
+                multiline.onEditingEnded = { [weak self] in self?.onBlur() }
             }
         }
 
         func attachInputCallbacks(
-            field: PamInputField,
+            field: any PamTextInputHost,
             hasSelection: Bool,
             hasContentSize: Bool,
             hasKey: Bool,
@@ -5699,15 +5837,33 @@ public final class PamRenderer: @unchecked Sendable {
             rippleOverlay?.removeFromSuperview()
             frameObservation?.invalidate()
             frameObservation = nil
+            pendingChange?.cancel()
+            pendingChange = nil
+            pendingChangeValue = nil
             if let textField {
                 textField.setInputCallbacks()
                 textField.onInputEndEditing = nil
-                textField.removeTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
-                textField.removeTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
+                if let control = textField as? PamInputField {
+                    control.removeTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
+                    control.removeTarget(self, action: #selector(onInputSyncFlush), for: .editingDidEnd)
+                    control.removeTarget(self, action: #selector(onInputSyncFlush), for: .primaryActionTriggered)
+                    control.removeTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
+                } else if let multiline = textField as? PamMultilineInputField {
+                    multiline.onTextChanged = nil
+                    multiline.onSyncFlush = nil
+                }
+            }
+            if let multiline = submitField as? PamMultilineInputField {
+                multiline.onSubmit = nil
             }
             if let focusField {
-                focusField.removeTarget(self, action: #selector(onFocus), for: .editingDidBegin)
-                focusField.removeTarget(self, action: #selector(onBlur), for: .editingDidEnd)
+                if let control = focusField as? PamInputField {
+                    control.removeTarget(self, action: #selector(onFocus), for: .editingDidBegin)
+                    control.removeTarget(self, action: #selector(onBlur), for: .editingDidEnd)
+                } else if let multiline = focusField as? PamMultilineInputField {
+                    multiline.onEditingBegan = nil
+                    multiline.onEditingEnded = nil
+                }
             }
             self.focusField = nil
             pendingSingleTap?.cancel()
@@ -6540,7 +6696,7 @@ public final class PamRenderer: @unchecked Sendable {
 
         @objc private func onSubmit() {
             let payload = (try? WireMap.encode([
-                "value": .text(submitField?.text ?? ""),
+                "value": .text(submitField?.inputText ?? ""),
             ])) ?? Data()
             dispatchEvent(nodeId, EventKind.submit.rawValue, payload)
         }
@@ -6610,8 +6766,43 @@ public final class PamRenderer: @unchecked Sendable {
             if field.suppressTextChangeEvents {
                 return
             }
-            let value = sender.text ?? ""
-            field.recordDispatchedValue(value)
+            handleTextChange(field.inputText)
+        }
+
+        private func handleTextChange(_ value: String) {
+            switch inputSyncMode {
+            case 3:
+                pendingChange?.cancel()
+                pendingChange = nil
+                pendingChangeValue = nil
+                dispatchTextChange(value)
+            case 2:
+                pendingChange?.cancel()
+                pendingChangeValue = value
+                guard inputDebounce > 0 else {
+                    pendingChange = nil
+                    onInputSyncFlush()
+                    return
+                }
+                let work = DispatchWorkItem { [weak self] in self?.onInputSyncFlush() }
+                pendingChange = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + inputDebounce, execute: work)
+            default:
+                pendingChangeValue = value
+            }
+        }
+
+        /// Sends the coalesced value (debounce window elapsed, blur or submit).
+        @objc private func onInputSyncFlush() {
+            pendingChange?.cancel()
+            pendingChange = nil
+            guard let value = pendingChangeValue else { return }
+            pendingChangeValue = nil
+            dispatchTextChange(value)
+        }
+
+        private func dispatchTextChange(_ value: String) {
+            textField?.recordDispatchedValue(value)
             let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
             dispatchEvent(nodeId, EventKind.change.rawValue, payload)
         }
