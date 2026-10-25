@@ -422,7 +422,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
 
     /// URL of the detected run under `point` (nil when none).
     func detectedURL(at point: CGPoint) -> URL? {
-        guard let content = pamContent else { return nil }
+        guard let content = pamContent, let detector = detector() else { return nil }
         let result = currentLayout(content)
         let attributed = attributed(content)
         let string = attributed.string
