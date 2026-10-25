@@ -109,17 +109,36 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
         }
-        runtime.start(
-            entry: entry.path,
-            widthDp: Float(controller.view.bounds.width),
-            heightDp: Float(controller.view.bounds.height),
-            textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
-            darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
-        )
+        // Under UIScene the cold-start URL and user activity only arrive in
+        // `scene(_:willConnectTo:)`, after this method returns. PHP must not
+        // boot before Linking::initial() is captured, so the scene delegate
+        // starts the runtime; the dispatch below is the fallback for hosts
+        // without a scene delegate and runs after the scene connection.
+        pendingRuntimeStart = { [weak runtime, weak controller] in
+            guard let runtime, let controller else { return }
+            runtime.start(
+                entry: entry.path,
+                widthDp: Float(controller.view.bounds.width),
+                heightDp: Float(controller.view.bounds.height),
+                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
+            )
 #if DEBUG
-        runtime.startHotReload()
+            runtime.startHotReload()
 #endif
+        }
+        DispatchQueue.main.async { [weak self] in self?.startRuntimeIfNeeded() }
         return true
+    }
+
+    private var pendingRuntimeStart: (() -> Void)?
+
+    /// Boots PHP exactly once; safe to call from the scene delegate and from
+    /// the launch fallback.
+    fileprivate func startRuntimeIfNeeded() {
+        guard let start = pendingRuntimeStart else { return }
+        pendingRuntimeStart = nil
+        start()
     }
 
     /// `appearance.splash`: keeps the launch screen (its background and, when
@@ -379,6 +398,7 @@ final class PamSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 break
             }
         }
+        appDelegate.startRuntimeIfNeeded()
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
