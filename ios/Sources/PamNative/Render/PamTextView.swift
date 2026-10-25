@@ -43,6 +43,37 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate {
         }
     }
 
+    /// `Text::selectable()`: a long press offers Copy (iOS 16+ edit menu;
+    /// no-op before).
+    var isSelectable = false {
+        didSet { if isSelectable != oldValue { updateInteraction() } }
+    }
+
+    /// `Text::dataDetector()`: 1 none, 2 phone, 3 link, 4 email, 5 all. A tap
+    /// on a detected run opens it (Android `Linkify`).
+    var dataDetectorType = 1 {
+        didSet {
+            if dataDetectorType != oldValue {
+                dataDetector = nil
+                updateInteraction()
+            }
+        }
+    }
+    private var dataDetector: NSDataDetector?
+    private var editMenuInteraction: UIInteraction?
+    private lazy var copyPress: UILongPressGestureRecognizer = {
+        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(onCopyPress(_:)))
+        recognizer.delegate = self
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }()
+    private lazy var linkTap: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(onLinkTap(_:)))
+        recognizer.delegate = self
+        recognizer.cancelsTouchesInView = true
+        return recognizer
+    }()
+
     private var cachedAttributed: NSAttributedString?
     private var cachedLayout: (width: CGFloat, scale: CGFloat, result: PamTextLayoutResult)?
     private var fitScale: CGFloat = 1
@@ -293,10 +324,109 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate {
         let enabled = onSpanPress != nil && hasPressableSpans
         if enabled {
             if spanTap.view == nil { addGestureRecognizer(spanTap) }
-            isUserInteractionEnabled = true
         } else if spanTap.view != nil {
             removeGestureRecognizer(spanTap)
         }
+        let detects = dataDetectorType > 1
+        if detects {
+            if linkTap.view == nil { addGestureRecognizer(linkTap) }
+        } else if linkTap.view != nil {
+            removeGestureRecognizer(linkTap)
+        }
+        let selectable: Bool
+        if #available(iOS 16.0, *) {
+            selectable = isSelectable
+        } else {
+            selectable = false
+        }
+        if selectable {
+            if copyPress.view == nil { addGestureRecognizer(copyPress) }
+        } else if copyPress.view != nil {
+            removeGestureRecognizer(copyPress)
+        }
+        if enabled || detects || selectable {
+            isUserInteractionEnabled = true
+        }
+    }
+
+    // MARK: Selectable (copy) + data detectors
+
+    @objc private func onCopyPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        if #available(iOS 16.0, *) {
+            let interaction: UIEditMenuInteraction
+            if let existing = editMenuInteraction as? UIEditMenuInteraction {
+                interaction = existing
+            } else {
+                let created = UIEditMenuInteraction(delegate: self)
+                addInteraction(created)
+                editMenuInteraction = created
+                interaction = created
+            }
+            let configuration = UIEditMenuConfiguration(
+                identifier: nil,
+                sourcePoint: recognizer.location(in: self)
+            )
+            interaction.presentEditMenu(with: configuration)
+        }
+    }
+
+    private func copyTextToPasteboard() {
+        let value = pamContent?.text ?? text ?? ""
+        guard !value.isEmpty else { return }
+        UIPasteboard.general.string = value
+    }
+
+    private func detector() -> NSDataDetector? {
+        if let dataDetector { return dataDetector }
+        let types: NSTextCheckingResult.CheckingType
+        switch dataDetectorType {
+        case 2: types = .phoneNumber
+        case 3, 4: types = .link
+        case 5: types = [.link, .phoneNumber]
+        default: return nil
+        }
+        dataDetector = try? NSDataDetector(types: types.rawValue)
+        return dataDetector
+    }
+
+    private func detectedURL(for match: NSTextCheckingResult, in string: String) -> URL? {
+        if let number = match.phoneNumber {
+            let digits = number.filter { $0.isNumber || $0 == "+" }
+            return digits.isEmpty ? nil : URL(string: "tel:\(digits)")
+        }
+        guard let url = match.url else { return nil }
+        let mail = url.scheme?.lowercased() == "mailto"
+        switch dataDetectorType {
+        case 3: return mail ? nil : url
+        case 4: return mail ? url : nil
+        default: return url
+        }
+    }
+
+    /// URL of the detected run under `point` (nil when none).
+    func detectedURL(at point: CGPoint) -> URL? {
+        guard let content = pamContent, let detector = detector() else { return nil }
+        let attributed = attributed(content)
+        let string = attributed.string
+        guard !string.isEmpty, let index = PamTextLayout.characterIndex(
+            at: point,
+            in: currentLayout(content),
+            boxWidth: bounds.width,
+            alignment: content.options.alignment
+        ) else { return nil }
+        let range = NSRange(location: 0, length: (string as NSString).length)
+        for match in detector.matches(in: string, options: [], range: range)
+        where NSLocationInRange(index, match.range) {
+            return detectedURL(for: match, in: string)
+        }
+        return nil
+    }
+
+    @objc private func onLinkTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended,
+              let url = detectedURL(at: recognizer.location(in: self)) else { return }
+        UIApplication.shared.open(url)
     }
 
     func spanSlot(at point: CGPoint) -> Int? {
@@ -322,18 +452,21 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate {
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === spanTap else {
-            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        if gestureRecognizer === spanTap {
+            return spanSlot(at: gestureRecognizer.location(in: self)) != nil
         }
-        return spanSlot(at: gestureRecognizer.location(in: self)) != nil
+        if gestureRecognizer === linkTap {
+            return detectedURL(at: gestureRecognizer.location(in: self)) != nil
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        // A node-level press waits until the span tap fails.
-        gestureRecognizer === spanTap && otherGestureRecognizer.view === self
+        // A node-level press waits until the span/link tap fails.
+        (gestureRecognizer === spanTap || gestureRecognizer === linkTap) && otherGestureRecognizer.view === self
     }
 
     @objc private func onSpanTap(_ recognizer: UITapGestureRecognizer) {
@@ -357,5 +490,19 @@ private final class PamTextMarqueeTicker: NSObject {
             return
         }
         view.advanceMarquee(link.timestamp)
+    }
+}
+
+@available(iOS 16.0, *)
+extension PamTextView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+            self?.copyTextToPasteboard()
+        }
+        return UIMenu(children: [copy])
     }
 }

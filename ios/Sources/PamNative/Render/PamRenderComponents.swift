@@ -823,7 +823,7 @@ private extension UIView {
     /// Retries `autoFocus` on the first input under this view that asked for it.
     @discardableResult
     func pamRequestAutomaticFocus() -> Bool {
-        if let input = self as? PamInputField, input.autoFocusRequested {
+        if let input = self as? (any PamTextInputHost), input.autoFocusRequested {
             input.requestAutomaticFocus()
             return true
         }
@@ -886,10 +886,140 @@ enum PamInputSubmitBehavior: Int64 {
     case submit = 1, blurAndSubmit, newline
 }
 
-final class PamInputField: UITextField, UITextFieldDelegate {
+/// Vertical text placement inside an Input (`InputTextAlignVertical`).
+enum PamInputVerticalAlignment: Int64 {
+    case auto = 1, top, center, bottom
+}
+
+/// Everything the renderer configures on an Input host, whether it is the
+/// single-line `PamInputField` (UITextField) or the multiline
+/// `PamMultilineInputField` (UITextView). The UIKit members listed here are
+/// satisfied by the superclasses; the rest is implemented by both hosts.
+protocol PamTextInputHost: UIView {
+    var submitBehavior: PamInputSubmitBehavior { get set }
+    var maximumLength: Int? { get set }
+    var isInputEditable: Bool { get set }
+    var autoFocusRequested: Bool { get set }
+    var placeholderText: String? { get set }
+    var placeholderColor: UIColor? { get set }
+    var caretHidden: Bool { get set }
+    var contextMenuHidden: Bool { get set }
+    var selectTextOnFocus: Bool { get set }
+    var verticalAlignment: PamInputVerticalAlignment { get set }
+    var onInputEndEditing: ((String) -> Void)? { get set }
+    var suppressTextChangeEvents: Bool { get }
+    var inputText: String { get }
+
+    func requestAutomaticFocus()
+    func setTextFromRenderer(_ value: String)
+    func setFormattedTextFromRenderer(_ value: String)
+    func recordDispatchedValue(_ value: String)
+    func setInputCallbacks(
+        selection: ((Int, Int) -> Void)?,
+        contentSize: ((Int, Int) -> Void)?,
+        key: ((String) -> Void)?
+    )
+    func configureInputFormat(
+        format: Int,
+        pattern: String,
+        placeholder: String,
+        prefix: String,
+        suffix: String,
+        decimalDigits: Int,
+        locale: String
+    )
+    func syncFontCache()
+    func scheduleContentSizeUpdate()
+
+    // UIKit (UITextField / UITextView)
+    var font: UIFont? { get set }
+    var textAlignment: NSTextAlignment { get set }
+    var adjustsFontForContentSizeCategory: Bool { get set }
+    var keyboardType: UIKeyboardType { get set }
+    var returnKeyType: UIReturnKeyType { get set }
+    var autocorrectionType: UITextAutocorrectionType { get set }
+    var autocapitalizationType: UITextAutocapitalizationType { get set }
+    var spellCheckingType: UITextSpellCheckingType { get set }
+    var isSecureTextEntry: Bool { get set }
+    var inputView: UIView? { get set }
+    var selectedTextRange: UITextRange? { get set }
+    var markedTextRange: UITextRange? { get }
+    var beginningOfDocument: UITextPosition { get }
+    var endOfDocument: UITextPosition { get }
+    func position(from position: UITextPosition, offset: Int) -> UITextPosition?
+    func textRange(from fromPosition: UITextPosition, to toPosition: UITextPosition) -> UITextRange?
+    func offset(from: UITextPosition, to toPosition: UITextPosition) -> Int
+}
+
+extension PamTextInputHost {
+    func setInputCallbacks() {
+        setInputCallbacks(selection: nil, contentSize: nil, key: nil)
+    }
+}
+
+final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
     var submitBehavior: PamInputSubmitBehavior = .blurAndSubmit
     var maximumLength: Int?
     var isInputEditable = true
+    var inputText: String { text ?? "" }
+    var caretHidden = false {
+        didSet { if caretHidden != oldValue { setNeedsLayout() } }
+    }
+    var contextMenuHidden = false
+    var selectTextOnFocus = false
+    var verticalAlignment: PamInputVerticalAlignment = .auto {
+        didSet {
+            contentVerticalAlignment = switch verticalAlignment {
+            case .top: .top
+            case .bottom: .bottom
+            case .auto, .center: .center
+            }
+        }
+    }
+    /// `placeholder` + `placeholderColor` rendered through
+    /// `attributedPlaceholder` (the theme authors a muted color per scheme;
+    /// UIKit's default ignores it).
+    var placeholderText: String? {
+        didSet { refreshPlaceholder() }
+    }
+    var placeholderColor: UIColor? {
+        didSet { refreshPlaceholder() }
+    }
+
+    override var font: UIFont? {
+        didSet { if placeholderColor != nil { refreshPlaceholder() } }
+    }
+
+    private func refreshPlaceholder() {
+        guard let placeholderText, !placeholderText.isEmpty else {
+            attributedPlaceholder = nil
+            placeholder = nil
+            return
+        }
+        guard let placeholderColor else {
+            placeholder = placeholderText
+            return
+        }
+        var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: placeholderColor]
+        if let font { attributes[.font] = font }
+        attributedPlaceholder = NSAttributedString(string: placeholderText, attributes: attributes)
+    }
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        caretHidden ? .zero : super.caretRect(for: position)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        contextMenuHidden ? false : super.canPerformAction(action, withSender: sender)
+    }
+
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        guard selectTextOnFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isFirstResponder else { return }
+            self.selectedTextRange = self.textRange(from: self.beginningOfDocument, to: self.endOfDocument)
+        }
+    }
     var autoFocusRequested = false {
         didSet {
             if !autoFocusRequested { automaticFocusApplied = false }
@@ -1011,9 +1141,9 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func setInputCallbacks(
-        selection: ((Int, Int) -> Void)? = nil,
-        contentSize: ((Int, Int) -> Void)? = nil,
-        key: ((String) -> Void)? = nil,
+        selection: ((Int, Int) -> Void)?,
+        contentSize: ((Int, Int) -> Void)?,
+        key: ((String) -> Void)?
     ) {
         onSelectionChange = selection
         onContentSizeChange = contentSize
@@ -1275,6 +1405,447 @@ final class PamInputField: UITextField, UITextFieldDelegate {
             self.lastContentHeight = max(0, height)
             self.onContentSizeChange?(self.lastContentWidth, self.lastContentHeight)
         }
+    }
+}
+
+/// `Input::multiline()` host: a UITextView with the same renderer contract
+/// as `PamInputField` (controlled value, echo reconciliation, `maxLength`,
+/// key/selection/content-size callbacks, `autoFocus`) plus the multiline
+/// traits (`minLines`, `textAlignVertical`, `scrollEnabled`). Without an
+/// authored height it grows with its content like a React Native
+/// multiline TextInput.
+final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInputHost {
+    var submitBehavior: PamInputSubmitBehavior = .newline
+    var maximumLength: Int?
+    var isInputEditable = true
+    var inputText: String { text ?? "" }
+    var caretHidden = false {
+        didSet { if caretHidden != oldValue { setNeedsLayout() } }
+    }
+    var contextMenuHidden = false
+    var selectTextOnFocus = false
+    var verticalAlignment: PamInputVerticalAlignment = .auto {
+        didSet { if verticalAlignment != oldValue { setNeedsLayout() } }
+    }
+    /// `minLines`: the smallest number of text lines the box keeps room for.
+    var minimumLines = 1 {
+        didSet { if minimumLines != oldValue { setNeedsLayout() } }
+    }
+    /// No authored `height`: the frame follows the content height.
+    var growsWithContent = true {
+        didSet { if growsWithContent != oldValue { setNeedsLayout() } }
+    }
+    var autoFocusRequested = false {
+        didSet {
+            if !autoFocusRequested { automaticFocusApplied = false }
+            scheduleAutomaticFocus()
+        }
+    }
+    var placeholderText: String? {
+        didSet {
+            placeholderLabel.text = placeholderText
+            refreshPlaceholder()
+        }
+    }
+    var placeholderColor: UIColor? {
+        didSet { refreshPlaceholder() }
+    }
+
+    /// Event hooks consumed by the renderer's `EventBridge`.
+    var onTextChanged: ((String) -> Void)?
+    var onEditingBegan: (() -> Void)?
+    var onEditingEnded: (() -> Void)?
+    var onSubmit: (() -> Void)?
+    /// Blur or submit: a coalesced change (`syncMode`) must be flushed first.
+    var onSyncFlush: (() -> Void)?
+    var onSelectionChange: ((Int, Int) -> Void)?
+    var onContentSizeChange: ((Int, Int) -> Void)?
+    var onKeyPress: ((String) -> Void)?
+    var onInputEndEditing: ((String) -> Void)?
+
+    let placeholderLabel = UILabel()
+
+    private static let maxKeyBytes = 64
+    private var automaticFocusApplied = false
+    private var automaticFocusScheduled = false
+    private var contentSizeScheduled = false
+    private var lastContentWidth = -1
+    private var lastContentHeight = -1
+    private var syncingText = false
+    private var growing = false
+    private var cachedFont: UIFont = .systemFont(ofSize: UIFont.systemFontSize)
+    private var inFlightValues: [(String, TimeInterval)] = []
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        configure()
+    }
+
+    convenience init() {
+        self.init(frame: .zero, textContainer: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        delegate = self
+        backgroundColor = .clear
+        // Same text origin as the single-line field (no UIKit padding).
+        textContainerInset = .zero
+        textContainer.lineFragmentPadding = 0
+        isScrollEnabled = true
+        alwaysBounceVertical = false
+        showsHorizontalScrollIndicator = false
+        translatesAutoresizingMaskIntoConstraints = true
+        font = .systemFont(ofSize: UIFont.systemFontSize)
+        placeholderLabel.numberOfLines = 0
+        placeholderLabel.isUserInteractionEnabled = false
+        placeholderLabel.backgroundColor = .clear
+        placeholderLabel.isHidden = true
+        addSubview(placeholderLabel)
+        syncFontCache()
+        refreshPlaceholder()
+    }
+
+    // MARK: Automatic focus
+
+    func requestAutomaticFocus() {
+        scheduleAutomaticFocus()
+    }
+
+    private func scheduleAutomaticFocus() {
+        guard autoFocusRequested, !automaticFocusApplied, !automaticFocusScheduled else { return }
+        automaticFocusScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.automaticFocusScheduled = false
+            guard self.autoFocusRequested, !self.automaticFocusApplied,
+                  self.window != nil, self.isEditable else { return }
+            var ancestor: UIView? = self
+            while let view = ancestor {
+                guard !view.isHidden, view.alpha > 0.01, view.isUserInteractionEnabled else { return }
+                ancestor = view.superview
+            }
+            self.automaticFocusApplied = self.becomeFirstResponder()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        scheduleAutomaticFocus()
+    }
+
+    // MARK: Controlled value
+
+    override var text: String! {
+        didSet {
+            if !syncingText { syncFontCache() }
+            refreshPlaceholder()
+            scheduleContentSizeUpdate()
+            setNeedsLayout()
+        }
+    }
+
+    override var font: UIFont? {
+        didSet {
+            syncFontCache()
+            placeholderLabel.font = font
+            setNeedsLayout()
+        }
+    }
+
+    override var textAlignment: NSTextAlignment {
+        didSet { placeholderLabel.textAlignment = textAlignment }
+    }
+
+    func setTextFromRenderer(_ value: String) {
+        syncingText = true
+        text = value
+        syncingText = false
+        syncFontCache()
+        scheduleContentSizeUpdate()
+    }
+
+    func setFormattedTextFromRenderer(_ value: String) {
+        let current = text ?? ""
+        // A controlled value rendered from an older change event must not
+        // overwrite newer keyboard text (React Native's mostRecentEventCount).
+        if isFirstResponder && PamInputEcho.isStale(
+            &inFlightValues,
+            value: value,
+            current: current,
+            now: ProcessInfo.processInfo.systemUptime
+        ) {
+            return
+        }
+        if value == current { return }
+        setTextFromRenderer(value)
+    }
+
+    func recordDispatchedValue(_ value: String) {
+        PamInputEcho.record(&inFlightValues, value: value, now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Masks and currency formats are single-line concerns (Android applies
+    /// them to any EditText but the engine only authors them on one-line
+    /// inputs); a multiline box keeps the raw text.
+    func configureInputFormat(
+        format: Int,
+        pattern: String,
+        placeholder: String,
+        prefix: String,
+        suffix: String,
+        decimalDigits: Int,
+        locale: String
+    ) {}
+
+    func setInputCallbacks(
+        selection: ((Int, Int) -> Void)?,
+        contentSize: ((Int, Int) -> Void)?,
+        key: ((String) -> Void)?
+    ) {
+        onSelectionChange = selection
+        onContentSizeChange = contentSize
+        onKeyPress = key
+        if contentSize != nil {
+            scheduleContentSizeUpdate()
+        }
+    }
+
+    var suppressTextChangeEvents: Bool {
+        syncingText
+    }
+
+    func syncFontCache() {
+        cachedFont = font ?? .systemFont(ofSize: UIFont.systemFontSize)
+    }
+
+    // MARK: Placeholder
+
+    private func refreshPlaceholder() {
+        placeholderLabel.textColor = placeholderColor ?? .placeholderText
+        placeholderLabel.font = font ?? cachedFont
+        placeholderLabel.textAlignment = textAlignment
+        let empty = (text ?? "").isEmpty
+        placeholderLabel.isHidden = !empty || (placeholderText ?? "").isEmpty
+        if !placeholderLabel.isHidden { setNeedsLayout() }
+    }
+
+    private func layoutPlaceholder() {
+        guard !placeholderLabel.isHidden else { return }
+        let inset = textContainerInset
+        let width = max(0, bounds.width - inset.left - inset.right)
+        let height = placeholderLabel.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        placeholderLabel.frame = CGRect(x: inset.left, y: inset.top, width: width, height: height)
+    }
+
+    // MARK: Layout (growth, minLines, vertical alignment)
+
+    /// Text height for the current width, without the container insets.
+    private func textHeight() -> CGFloat {
+        let width = bounds.width > 0 ? bounds.width : (window?.bounds.width ?? 320)
+        let fitted = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        return max(0, fitted - textContainerInset.top - textContainerInset.bottom)
+    }
+
+    /// Height the box wants: `max(minLines, content)` lines (RN auto-grow).
+    func preferredHeight() -> CGFloat {
+        let minimum = CGFloat(max(1, minimumLines)) * cachedFont.lineHeight
+        return max(minimum, textHeight()).rounded(.up)
+    }
+
+    private func applyVerticalAlignment() {
+        let free = max(0, bounds.height - textHeight())
+        let top: CGFloat = switch verticalAlignment {
+        case .center: (free / 2).rounded(.down)
+        case .bottom: free.rounded(.down)
+        case .auto, .top: 0
+        }
+        let inset = UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+        if textContainerInset != inset { textContainerInset = inset }
+    }
+
+    private func growIfNeeded() {
+        guard growsWithContent, !growing, bounds.width > 0 else { return }
+        let target = preferredHeight()
+        guard target > bounds.height + 0.5 else { return }
+        growing = true
+        var frame = self.frame
+        frame.size.height = target
+        self.frame = frame
+        growing = false
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        syncFontCache()
+        growIfNeeded()
+        applyVerticalAlignment()
+        layoutPlaceholder()
+        scheduleContentSizeUpdate()
+        scheduleAutomaticFocus()
+    }
+
+    func scheduleContentSizeUpdate() {
+        guard !contentSizeScheduled else { return }
+        contentSizeScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.contentSizeScheduled = false
+            let width = Int(self.bounds.width.rounded())
+            let height = Int(self.preferredHeight().rounded())
+            if width == self.lastContentWidth && height == self.lastContentHeight {
+                return
+            }
+            self.lastContentWidth = max(0, width)
+            self.lastContentHeight = max(0, height)
+            self.onContentSizeChange?(self.lastContentWidth, self.lastContentHeight)
+        }
+    }
+
+    // MARK: Caret / context menu
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        caretHidden ? .zero : super.caretRect(for: position)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        contextMenuHidden ? false : super.canPerformAction(action, withSender: sender)
+    }
+
+    // MARK: Editing
+
+    override func deleteBackward() {
+        guard isInputEditable else { return }
+        onKeyPress?("Backspace")
+        super.deleteBackward()
+    }
+
+    override func insertText(_ text: String) {
+        guard isInputEditable else { return }
+        super.insertText(text)
+    }
+
+    override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        guard isInputEditable else { return }
+        super.setMarkedText(markedText, selectedRange: selectedRange)
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        enforceCommittedLength()
+    }
+
+    private func enforceCommittedLength() {
+        guard isInputEditable, markedTextRange == nil, let limit = maximumLength,
+              let current = text, current.utf16.count > limit else { return }
+        var bounded = ""
+        var remaining = limit
+        for character in current {
+            let length = String(character).utf16.count
+            guard length <= remaining else { break }
+            bounded.append(character)
+            remaining -= length
+        }
+        let cursor = selectedTextRange.map { offset(from: beginningOfDocument, to: $0.start) }
+        setTextFromRenderer(bounded)
+        if let position = position(from: beginningOfDocument, offset: min(cursor ?? bounded.utf16.count, bounded.utf16.count)) {
+            selectedTextRange = textRange(from: position, to: position)
+        }
+        notifyTextChanged()
+    }
+
+    private func notifyTextChanged() {
+        refreshPlaceholder()
+        scheduleContentSizeUpdate()
+        setNeedsLayout()
+        guard !syncingText else { return }
+        onTextChanged?(text ?? "")
+    }
+
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText replacement: String) -> Bool {
+        guard isInputEditable else { return false }
+        if replacement == "\n", submitBehavior != .newline {
+            onKeyPress?("Enter")
+            enforceCommittedLength()
+            onSyncFlush?()
+            onSubmit?()
+            if submitBehavior == .blurAndSubmit { resignFirstResponder() }
+            return false
+        }
+        if let limit = maximumLength, textView.markedTextRange == nil,
+           let current = textView.text, let editRange = Range(range, in: current) {
+            let retainedLength = current.utf16.count - range.length
+            let available = max(0, limit - retainedLength)
+            if replacement.utf16.count > available {
+                var accepted = ""
+                var remaining = available
+                for character in replacement {
+                    let length = String(character).utf16.count
+                    guard length <= remaining else { break }
+                    accepted.append(character)
+                    remaining -= length
+                }
+                guard !accepted.isEmpty else { return false }
+                setTextFromRenderer(current.replacingCharacters(in: editRange, with: accepted))
+                if let cursor = position(from: beginningOfDocument, offset: range.location + accepted.utf16.count) {
+                    selectedTextRange = textRange(from: cursor, to: cursor)
+                }
+                notifyTextChanged()
+                return false
+            }
+        }
+        if replacement.isEmpty && range.length > 0 {
+            onKeyPress?("Backspace")
+        } else if !replacement.isEmpty {
+            if replacement == "\n" {
+                onKeyPress?("Enter")
+            } else {
+                let key = String(replacement.prefix(Self.maxKeyBytes))
+                if !key.isEmpty {
+                    onKeyPress?(key)
+                }
+            }
+        }
+        return true
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        guard textView === self else { return }
+        if markedTextRange == nil, let limit = maximumLength, (text ?? "").utf16.count > limit {
+            // `enforceCommittedLength` re-dispatches the bounded text.
+            enforceCommittedLength()
+            return
+        }
+        notifyTextChanged()
+    }
+
+    func textViewDidChangeSelection(_ textView: UITextView) {
+        guard textView === self else { return }
+        let rangeStart = offset(from: beginningOfDocument, to: selectedTextRange?.start ?? beginningOfDocument)
+        let rangeEnd = offset(from: beginningOfDocument, to: selectedTextRange?.end ?? beginningOfDocument)
+        onSelectionChange?(rangeStart, rangeEnd)
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        guard textView === self else { return }
+        onEditingBegan?()
+        guard selectTextOnFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isFirstResponder else { return }
+            self.selectedTextRange = self.textRange(from: self.beginningOfDocument, to: self.endOfDocument)
+        }
+    }
+
+    func textViewDidEndEditing(_ textView: UITextView) {
+        guard textView === self else { return }
+        enforceCommittedLength()
+        onSyncFlush?()
+        onInputEndEditing?(text ?? "")
+        onEditingEnded?()
     }
 }
 

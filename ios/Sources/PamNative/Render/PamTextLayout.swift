@@ -584,6 +584,25 @@ enum PamTextLayout {
     }
 
     /// Pressable span slot under `point` (box coordinates), if any.
+    /// Character index (into the laid out string) under `point`, or nil
+    /// outside the text.
+    static func characterIndex(
+        at point: CGPoint,
+        in result: PamTextLayoutResult,
+        boxWidth: CGFloat,
+        alignment: Int
+    ) -> Int? {
+        guard let line = result.lines.first(where: { point.y >= $0.top && point.y < $0.top + $0.height }) else {
+            return nil
+        }
+        let x = point.x - horizontalOffset(line, boxWidth: boxWidth, alignment: alignment, widest: result.size.width)
+        guard x >= 0, x <= line.width else { return nil }
+        let index = CTLineGetStringIndexForPosition(line.line, CGPoint(x: x, y: 0))
+        guard index != kCFNotFound else { return nil }
+        let last = max(line.range.location, line.range.location + line.range.length - 1)
+        return min(max(index, line.range.location), last)
+    }
+
     static func pressSlot(
         at point: CGPoint,
         in result: PamTextLayoutResult,
