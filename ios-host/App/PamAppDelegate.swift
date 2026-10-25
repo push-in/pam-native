@@ -240,12 +240,12 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         return true
     }
 
-    private func isWebURL(_ url: URL) -> Bool {
+    fileprivate func isWebURL(_ url: URL) -> Bool {
         return ["https", "http"].contains(url.scheme?.lowercased() ?? "")
             && url.host != nil && url.absoluteString.utf8.count <= 8_192
     }
 
-    private func acceptsApplicationURL(_ url: URL) -> Bool {
+    fileprivate func acceptsApplicationURL(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(),
               scheme != "__PAM_DIAGNOSTICS_SCHEME__",
               url.absoluteString.utf8.count <= 8_192 else { return false }
@@ -337,5 +337,63 @@ final class PamHostViewController: UIViewController {
         if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle {
             onAppearanceChange?()
         }
+    }
+}
+
+/// UIScene entry points. `UIApplicationSceneManifest` in Info.plist makes UIKit
+/// deliver URLs and user activities to the scene delegate only, so the
+/// `UIApplicationDelegate` callbacks above never run for them. The application
+/// delegate keeps building the window and starting PHP; this delegate attaches
+/// that window to the scene and forwards every URL and activity.
+final class PamSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    private var appDelegate: PamAppDelegate? {
+        UIApplication.shared.delegate as? PamAppDelegate
+    }
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene, let appDelegate else { return }
+        if let window = appDelegate.window {
+            window.windowScene = windowScene
+            self.window = window
+            window.makeKeyAndVisible()
+        }
+        // Cold start: launchOptions[.url] / userActivityDictionary are empty
+        // under UIScene, so Linking::initial() is captured here instead.
+        for context in connectionOptions.urlContexts {
+            if appDelegate.acceptsApplicationURL(context.url) {
+                PamLinking.captureInitial(context.url)
+            } else {
+                _ = appDelegate.application(UIApplication.shared, open: context.url, options: [:])
+            }
+        }
+        for activity in connectionOptions.userActivities
+        where activity.activityType == NSUserActivityTypeBrowsingWeb {
+            if let url = activity.webpageURL, appDelegate.isWebURL(url) {
+                PamLinking.captureInitial(url)
+                break
+            }
+        }
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let appDelegate else { return }
+        for context in URLContexts {
+            _ = appDelegate.application(UIApplication.shared, open: context.url, options: [:])
+        }
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        guard let appDelegate else { return }
+        _ = appDelegate.application(
+            UIApplication.shared,
+            continue: userActivity,
+            restorationHandler: { _ in }
+        )
     }
 }

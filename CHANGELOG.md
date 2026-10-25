@@ -8,6 +8,14 @@
   case-insensitive filesystems (macOS APFS, exFAT, Windows) one of the two files
   silently replaced the other and `mb_*` calls or the `Mbstring` class went
   missing on device. Composer `autoload.files` now points at the new name.
+- iOS host: a `PamSceneDelegate` now receives URL opens, cold-start URLs and
+  `NSUserActivity` continuations. Since the `UIApplicationSceneManifest` was
+  added in 1.30.0, UIKit delivered those only to a scene delegate, so custom
+  scheme deep links, universal links and `pam mobile ios:diagnostics` /
+  `ios:devtools` never reached the application delegate on iOS.
+- CLI launcher: Intel macOS hosts (`Darwin/x86_64`) resolve the
+  `macos-x86_64` Native CLI instead of failing with "unsupported host"; the
+  release workflow now also packages that target.
 - Runtime catalog: PHP 8.4.27 and 8.5.12 (security releases) replace 8.4.23 and
   8.5.8 on Android and iOS.
 

@@ -9,7 +9,11 @@ use Pam\Native\Protocol;
 
 $platform = match (PHP_OS_FAMILY) {
     'Linux' => php_uname('m') === 'x86_64' ? 'linux-x86_64' : null,
-    'Darwin' => in_array(php_uname('m'), ['arm64', 'aarch64'], true) ? 'macos-aarch64' : null,
+    'Darwin' => match (php_uname('m')) {
+        'arm64', 'aarch64' => 'macos-aarch64',
+        'x86_64' => 'macos-x86_64',
+        default => null,
+    },
     'Windows' => php_uname('m') === 'AMD64' ? 'windows-x86_64' : null,
     default => null,
 };
