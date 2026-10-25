@@ -104,8 +104,13 @@ final class PamTextParityTests: XCTestCase {
         let layout = text.currentLayout(content)
         let line = try XCTUnwrap(layout.lines.first)
         let mentionX = CTLineGetOffsetForStringIndex(line.line, 8, nil)
-        XCTAssertEqual(text.spanSlot(at: CGPoint(x: mentionX + 1, y: line.top + line.baseline - 2)), 3)
-        XCTAssertNil(text.spanSlot(at: CGPoint(x: 2, y: line.top + line.baseline - 2)))
+        // The 40 pt box is taller than one line: the paragraph is centred
+        // vertically (Android gravity), so view points carry that offset.
+        let lineY = text.textBox(for: layout).minY + line.top + line.baseline - 2
+        XCTAssertGreaterThan(text.textBox(for: layout).minY, 0)
+        XCTAssertEqual(text.spanSlot(at: CGPoint(x: mentionX + 1, y: lineY)), 3)
+        XCTAssertNil(text.spanSlot(at: CGPoint(x: 2, y: lineY)))
+        XCTAssertNil(text.spanSlot(at: CGPoint(x: mentionX + 1, y: 1)), "above the centred paragraph")
         XCTAssertNotNil(text.onSpanPress)
         text.onSpanPress?(3)
         XCTAssertEqual(events.last?.1, EventKind.spanPress.rawValue)
