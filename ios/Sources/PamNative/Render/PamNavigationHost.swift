@@ -243,9 +243,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         let atLeadingEdge = pan === screenEdgeGesture || fullScreenGestureEnabled || gestureDirection == 2 || (rtl
             ? point.x >= bounds.width - gestureEdgeWidth
             : point.x <= gestureEdgeWidth)
+        // Direction from the motion so far: velocity when UIKit has one,
+        // otherwise the translation (slow or synthesized drags report ~0).
         let velocity = pan.velocity(in: self)
-        let towardBack = gestureDirection == 2 ? velocity.y > 0 : (rtl ? velocity.x < 0 : velocity.x > 0)
-        let dominant = gestureDirection == 2 ? abs(velocity.y) > abs(velocity.x) : abs(velocity.x) > abs(velocity.y)
+        let translation = pan.translation(in: self)
+        let motion = (abs(velocity.x) + abs(velocity.y)) > 1 ? velocity : translation
+        let towardBack = gestureDirection == 2 ? motion.y > 0 : (rtl ? motion.x < 0 : motion.x > 0)
+        let dominant = gestureDirection == 2 ? abs(motion.y) >= abs(motion.x) : abs(motion.x) >= abs(motion.y)
         return atLeadingEdge && towardBack && dominant
     }
 
