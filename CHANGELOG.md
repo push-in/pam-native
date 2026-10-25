@@ -13,6 +13,13 @@
   added in 1.30.0, UIKit delivered those only to a scene delegate, so custom
   scheme deep links, universal links and `pam mobile ios:diagnostics` /
   `ios:devtools` never reached the application delegate on iOS.
+- iOS host: a `PamNativeUITests` target (`ios-host/UITests/PamUIDriverTests.swift`)
+  drives the installed application from a JSON step list
+  (`TEST_RUNNER_PAM_UI_SCRIPT`: tap by label/identifier/coordinates, swipe,
+  edge-swipe back, type, system alerts, open URL, wait, screenshot to
+  `TEST_RUNNER_PAM_UI_SHOT_DIR`). It is the installed-app Simulator gate the
+  headless XCTest host cannot provide (safe-area geometry, navigation, sheets)
+  and needs no GUI session on the build host.
 - CLI launcher: Intel macOS hosts (`Darwin/x86_64`) resolve the
   `macos-x86_64` Native CLI instead of failing with "unsupported host"; the
   release workflow now also packages that target.
