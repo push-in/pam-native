@@ -107,12 +107,45 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         action: #selector(handleEdgePan(_:))
     )
 
+    /// Edge pops use a screen-edge recognizer like UIKit's own
+    /// `interactivePopGestureRecognizer`: scroll views let it win, while a
+    /// plain pan inside scrollable content never gets the touch. The plain
+    /// pan stays for `fullScreenGestureEnabled` and vertical (direction 2).
+    private(set) lazy var screenEdgeGesture: UIScreenEdgePanGestureRecognizer = {
+        let recognizer = UIScreenEdgePanGestureRecognizer(
+            target: self,
+            action: #selector(handleEdgePan(_:))
+        )
+        recognizer.edges = .left
+        return recognizer
+    }()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
         edgeGesture.delegate = self
         edgeGesture.maximumNumberOfTouches = 1
+        edgeGesture.isEnabled = false
         addGestureRecognizer(edgeGesture)
+        screenEdgeGesture.delegate = self
+        screenEdgeGesture.maximumNumberOfTouches = 1
+        addGestureRecognizer(screenEdgeGesture)
+    }
+
+    /// Which recognizer handles the pop for the current configuration.
+    private var usesScreenEdgeGesture: Bool {
+        gestureDirection == 1 && !fullScreenGestureEnabled
+    }
+
+    private func syncGestureRecognizers() {
+        screenEdgeGesture.edges = effectiveUserInterfaceLayoutDirection == .rightToLeft ? .right : .left
+        screenEdgeGesture.isEnabled = gestureEnabled && usesScreenEdgeGesture
+        edgeGesture.isEnabled = gestureEnabled && !usesScreenEdgeGesture
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        syncGestureRecognizers()
     }
 
     required init?(coder: NSCoder) {
@@ -197,7 +230,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         self.onGestureStart = onGestureStart
         self.onGestureEnd = onGestureEnd
         self.onGestureCancel = onGestureCancel
-        edgeGesture.isEnabled = enabled
+        syncGestureRecognizers()
     }
 
     override func gestureRecognizerShouldBegin(
@@ -207,13 +240,23 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let atLeadingEdge = fullScreenGestureEnabled || gestureDirection == 2 || (rtl
+        let atLeadingEdge = pan === screenEdgeGesture || fullScreenGestureEnabled || gestureDirection == 2 || (rtl
             ? point.x >= bounds.width - gestureEdgeWidth
             : point.x <= gestureEdgeWidth)
         let velocity = pan.velocity(in: self)
         let towardBack = gestureDirection == 2 ? velocity.y > 0 : (rtl ? velocity.x < 0 : velocity.x > 0)
         let dominant = gestureDirection == 2 ? abs(velocity.y) > abs(velocity.x) : abs(velocity.x) > abs(velocity.y)
         return atLeadingEdge && towardBack && dominant
+    }
+
+    /// Scrollable content under the route waits for the pop gesture, as
+    /// UIKit does for its own screen-edge recognizer.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard gestureRecognizer === screenEdgeGesture || gestureRecognizer === edgeGesture else { return false }
+        return otherGestureRecognizer.view is UIScrollView
     }
 
     private func runTransition() {

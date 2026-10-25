@@ -30,6 +30,10 @@
   containers without handlers of their own are now touch-transparent like an
   Android `View` without listeners; a container with its own `onPress`/gesture
   still receives the touch. XCTest `testPressableContentContainersAreTouchTransparent`.
+- iOS: the back gesture is a screen-edge recognizer that scroll views wait
+  for (UIKit's own interactive-pop rule). The previous plain pan never
+  received the touch on screens with a `ScrollView`/list, so edge-swipe back
+  did not work on most screens.
 - iOS: `Text` boxes taller than their content centre the lines vertically,
   like Android's `gravity = CENTER_VERTICAL` (fixed-height badges and pills
   such as `DB`, `CALL` and `LAB` were pinned to the top). Span presses and

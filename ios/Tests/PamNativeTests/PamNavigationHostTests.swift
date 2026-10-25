@@ -315,6 +315,30 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertFalse(second.isHidden)
     }
 
+    func testEdgePopUsesAScreenEdgeRecognizerThatScrollViewsWaitFor() {
+        let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        host.setGestureNavigation(
+            enabled: true, edgeWidth: 24, threshold: 0.35, direction: 1, fullScreen: false,
+            onPop: nil, onTransitionEnd: nil, onGestureStart: nil, onGestureEnd: nil, onGestureCancel: nil
+        )
+        XCTAssertTrue(host.screenEdgeGesture.isEnabled)
+        XCTAssertEqual(host.screenEdgeGesture.edges, .left)
+        let scroll = UIScrollView()
+        XCTAssertTrue(host.gestureRecognizer(host.screenEdgeGesture, shouldBeRequiredToFailBy: scroll.panGestureRecognizer))
+        XCTAssertFalse(host.gestureRecognizer(scroll.panGestureRecognizer, shouldBeRequiredToFailBy: host.screenEdgeGesture))
+        // Full-screen and vertical gestures fall back to the plain pan.
+        host.setGestureNavigation(
+            enabled: true, edgeWidth: 24, threshold: 0.35, direction: 1, fullScreen: true,
+            onPop: nil, onTransitionEnd: nil, onGestureStart: nil, onGestureEnd: nil, onGestureCancel: nil
+        )
+        XCTAssertFalse(host.screenEdgeGesture.isEnabled)
+        host.setGestureNavigation(
+            enabled: false, edgeWidth: 24, threshold: 0.35, direction: 1, fullScreen: false,
+            onPop: nil, onTransitionEnd: nil, onGestureStart: nil, onGestureEnd: nil, onGestureCancel: nil
+        )
+        XCTAssertFalse(host.screenEdgeGesture.isEnabled)
+    }
+
     func testCommittedInteractivePopSkipsASecondTransition() {
         let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         host.operation = 2
