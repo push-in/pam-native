@@ -30,6 +30,12 @@
   containers without handlers of their own are now touch-transparent like an
   Android `View` without listeners; a container with its own `onPress`/gesture
   still receives the touch. XCTest `testPressableContentContainersAreTouchTransparent`.
+- iOS: `Text` boxes taller than their content centre the lines vertically,
+  like Android's `gravity = CENTER_VERTICAL` (fixed-height badges and pills
+  such as `DB`, `CALL` and `LAB` were pinned to the top). Span presses and
+  data-detector taps use the same offset.
+- Showcase: the chat and marketplace screens declare dark status-bar icons on
+  their light bars, and the LAB/details screens use `SafeAreaView`.
 - iOS: `StatusBar` `backgroundColor` paints the band behind the status bar like
   Android (`translucent` keeps it off), so light-on-dark bars stay readable on
   light screens.
