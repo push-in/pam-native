@@ -46,6 +46,18 @@ final class PamContainerView: UIView, PamPointerEventsHost {
     /// keep claiming touches so empty screen areas behave as before.
     var pamTouchTransparentWhenIdle = false
 
+    /// Only content inside a Pressable/Button needs to let the touch through:
+    /// everywhere else a container stays the hit view (z-order, sticky
+    /// headers and overlays rely on that).
+    private var hasControlAncestor: Bool {
+        var view = superview
+        while let current = view {
+            if current is UIControl { return true }
+            view = current.superview
+        }
+        return false
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         PamPointerEvents.hitTest(self, mode: pamPointerEvents) {
             let hit = super.hitTest(point, with: event)
@@ -54,7 +66,8 @@ final class PamContainerView: UIView, PamPointerEventsHost {
             // touch reaches the Pressable above it. UIControl only tracks a
             // touch whose hit view is the control itself, so a container that
             // claimed the touch would swallow every press on its content.
-            if hit === self, pamTouchTransparentWhenIdle, (gestureRecognizers ?? []).isEmpty {
+            if hit === self, pamTouchTransparentWhenIdle, (gestureRecognizers ?? []).isEmpty,
+               hasControlAncestor {
                 return nil
             }
             return hit

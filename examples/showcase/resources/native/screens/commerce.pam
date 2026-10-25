@@ -1,5 +1,5 @@
 <Screen>
-    <StatusBar backgroundColor="#FFFFF8F2" appearance="light" />
+    <StatusBar backgroundColor="#FFFFF8F2" appearance="dark" />
     <SafeAreaView class="flex-1" backgroundColor="#FFFFF8F2">
         <Column class="flex-1" backgroundColor="#FFFFF8F2">
             <Row height="76" paddingHorizontal="18" paddingTop="12" paddingBottom="12" gap="12" alignItems="center" backgroundColor="#FFFFF8F2" zIndex="10">

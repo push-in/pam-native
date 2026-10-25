@@ -140,6 +140,14 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         pamContent == nil ? super.intrinsicContentSize : sizeThatFits(CGSize(width: CGFloat.infinity, height: .infinity))
     }
 
+    /// Android `gravity = CENTER_VERTICAL`: a box taller than its text
+    /// centres the lines instead of pinning them to the top.
+    func textBox(for result: PamTextLayoutResult) -> CGRect {
+        let extra = bounds.height - result.size.height
+        guard extra > 0.5 else { return bounds }
+        return CGRect(x: bounds.minX, y: bounds.minY + extra / 2, width: bounds.width, height: result.size.height)
+    }
+
     override func draw(_ rect: CGRect) {
         guard let content = pamContent else {
             super.draw(rect)
@@ -154,7 +162,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         PamTextLayout.draw(
             result,
             in: context,
-            bounds: bounds,
+            bounds: textBox(for: result),
             color: textColor ?? .label,
             options: content.options,
             traits: traitCollection
@@ -414,12 +422,13 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
 
     /// URL of the detected run under `point` (nil when none).
     func detectedURL(at point: CGPoint) -> URL? {
-        guard let content = pamContent, let detector = detector() else { return nil }
+        guard let content = pamContent else { return nil }
+        let result = currentLayout(content)
         let attributed = attributed(content)
         let string = attributed.string
         guard !string.isEmpty, let index = PamTextLayout.characterIndex(
-            at: point,
-            in: currentLayout(content),
+            at: centredPoint(point, for: result),
+            in: result,
             boxWidth: bounds.width,
             alignment: content.options.alignment
         ) else { return nil }
@@ -437,11 +446,17 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         UIApplication.shared.open(url)
     }
 
+    /// Maps a view point into the (vertically centred) text box.
+    private func centredPoint(_ point: CGPoint, for result: PamTextLayoutResult) -> CGPoint {
+        let box = textBox(for: result)
+        return CGPoint(x: point.x - (box.minX - bounds.minX), y: point.y - (box.minY - bounds.minY))
+    }
+
     func spanSlot(at point: CGPoint) -> Int? {
         guard let content = pamContent else { return nil }
         let result = currentLayout(content)
         return PamTextLayout.pressSlot(
-            at: point,
+            at: centredPoint(point, for: result),
             in: result,
             content: attributed(content),
             boxWidth: bounds.width,

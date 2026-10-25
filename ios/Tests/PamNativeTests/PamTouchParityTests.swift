@@ -117,9 +117,12 @@ final class PamTouchParityTests: XCTestCase {
         XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 100), with: nil)?.tag, 2, "column")
         XCTAssertEqual(host.hitTest(CGPoint(x: 260, y: 100), with: nil)?.tag, 2, "row")
         XCTAssertEqual(host.hitTest(CGPoint(x: 290, y: 130), with: nil)?.tag, 2, "padding")
-        // A container with its own press handler still receives the touch.
-        renderer.commit([[.update(id: 4, key: PamConstants.onPress, value: .flag(true))]])
-        XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 100), with: nil)?.tag, 4, "column with onPress")
+        // Outside a control the container is still the hit view.
+        renderer.commit([[
+            .create(NodeSpec(id: 6, parent: 1, index: 1, kind: .column, properties: [:])),
+            .layout(id: 6, frame: Frame(x: 20, y: 200, width: 280, height: 60)),
+        ]])
+        XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 230), with: nil)?.tag, 6, "root column")
     }
 
     // MARK: ActivityIndicator
