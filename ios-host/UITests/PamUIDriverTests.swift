@@ -120,7 +120,9 @@ final class PamUIDriverTests: XCTestCase {
             let window = app.windows.firstMatch
             let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
             let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // A slow, held drag so pan recognizers see the full progress
+            // instead of one synthesized jump.
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.15)
             return
         }
         if step["home"] as? Bool == true {
