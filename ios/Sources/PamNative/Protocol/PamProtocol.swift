@@ -386,7 +386,17 @@ public enum PamConstants {
     public static let switchTrackColorFalse = 192
     public static let switchTrackColorTrue = 193
     public static let switchThumbColor = 194
+    public static let scrollEnabled = 64
+    public static let showsScrollIndicator = 65
+    public static let listPrefetch = 82
+    public static let listHorizontal = 172
+    public static let listInverted = 174
+    public static let listInitialScrollIndex = 175
+    public static let listRemoveClippedSubviews = 176
     public static let scrollHorizontal = 177
+    public static let scrollContentOffsetX = 178
+    public static let scrollContentOffsetY = 179
+    public static let scrollKeyboardDismissMode = 188
     public static let scrollPagingEnabled = 185
     public static let scrollSnapInterval = 186
     public static let scrollDecelerationRate = 187

@@ -233,6 +233,18 @@ final class PamAnchoredScrollView: UIScrollView {
     var scrollTargetTestId = ""
     var scrollTargetOffset: CGFloat = -1
     var scrollTargetAlignment = 1
+    /// RN `showsVerticalScrollIndicator` / `showsHorizontalScrollIndicator`
+    /// (one flag, resolved against the axis like Android).
+    var pamShowsScrollIndicator = true
+    /// RN `contentOffset`: requested per axis and applied once the content
+    /// is measured (Android `requestOffsetApplication`), so an offset set in
+    /// the same commit as the content is not clamped to an empty view.
+    var pamRequestedContentOffsetX: CGFloat? {
+        didSet { if pamRequestedContentOffsetX != nil { setNeedsLayout() } }
+    }
+    var pamRequestedContentOffsetY: CGFloat? {
+        didSet { if pamRequestedContentOffsetY != nil { setNeedsLayout() } }
+    }
 
     private var initialEndAnchorApplied = false
     private var previousMaxOffset: CGFloat = 0
@@ -306,9 +318,33 @@ final class PamAnchoredScrollView: UIScrollView {
         } else if maintainVisibleContentPosition, newMax > oldMax {
             setPrimaryOffset(previousOffset + newMax - oldMax)
         }
+        applyRequestedContentOffset()
         if !horizontal {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
         }
+    }
+
+    /// Applies a requested `contentOffset` once the content extent along
+    /// that axis is known; a request before measurement waits for layout.
+    private func applyRequestedContentOffset() {
+        guard bounds.width > 0, bounds.height > 0, !isTracking, !isDragging else { return }
+        var target = contentOffset
+        var changed = false
+        if let x = pamRequestedContentOffsetX, contentSize.width > 0 {
+            let maximum = max(0, contentSize.width - bounds.width + adjustedContentInset.right)
+            target.x = min(maximum, max(-adjustedContentInset.left, x))
+            pamRequestedContentOffsetX = nil
+            changed = true
+        }
+        if let y = pamRequestedContentOffsetY, contentSize.height > 0 {
+            let maximum = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+            target.y = min(maximum, max(-adjustedContentInset.top, y))
+            pamRequestedContentOffsetY = nil
+            changed = true
+        }
+        guard changed, target != contentOffset else { return }
+        pamStopDeceleration()
+        setContentOffset(target, animated: false)
     }
 
     private var primaryOffset: CGFloat {
@@ -479,6 +515,41 @@ final class PamVirtualListView: UIScrollView {
 
     var horizontal = false
 
+    /// RN `showsVerticalScrollIndicator` / `showsHorizontalScrollIndicator`
+    /// (one flag, resolved against the axis like Android).
+    var pamShowsScrollIndicator = true
+
+    /// RN `inverted`: the list is mirrored along its axis and every cell is
+    /// mirrored back (the React Native approach), so the engine keeps laying
+    /// the rows out from the start while the first row sits at the end.
+    var pamInverted = false {
+        didSet {
+            guard pamInverted != oldValue || transform != pamInvertedTransform else { return }
+            transform = pamInvertedTransform
+        }
+    }
+
+    /// Mirror transform for the list and its cells along the list axis.
+    var pamInvertedTransform: CGAffineTransform {
+        guard pamInverted else { return .identity }
+        return horizontal ? CGAffineTransform(scaleX: -1, y: 1) : CGAffineTransform(scaleX: 1, y: -1)
+    }
+
+    /// RN `initialScrollIndex`: applied once, on the first sync that knows
+    /// the item starts (Android `applyInitialPosition`); an explicit scroll
+    /// request of the same commit wins.
+    var pamInitialScrollIndex = 0
+    var pamInitialScrollIndexApplied = false
+
+    /// RN `windowSize`-like item prefetch (`ListPrefetch`): minimum number of
+    /// items kept mounted beyond the viewport on each side. The windowing
+    /// floors the velocity-driven overscan at this many average items.
+    var pamPrefetchItems = 0
+    /// RN `removeClippedSubviews`: the windowing always unmounts cells that
+    /// leave the overscan (engine-driven); the flag is kept for parity and
+    /// only widens the retained window when false, like Android's cache.
+    var pamRemoveClippedSubviews = true
+
     /// Lands exactly on the target: deceleration in progress is stopped
     /// first (it otherwise kept moving after the jump). `animated` glides.
     func scrollToLogicalOffset(_ value: CGFloat, animated: Bool = false) {
@@ -511,7 +582,13 @@ final class PamVirtualListView: UIScrollView {
     var adaptiveOverscan: CGFloat {
         let viewport = horizontal ? bounds.width : bounds.height
         let velocityPages = abs(scrollVelocity) / max(viewport, 1)
-        return viewport * min(max(1.5 + velocityPages * 0.35, 1.5), 6)
+        let overscan = viewport * min(max(1.5 + velocityPages * 0.35, 1.5), 6)
+        guard pamPrefetchItems > 0, pamItemStarts.count > 1 else { return overscan }
+        let averageExtent = (pamItemStarts[pamItemStarts.count - 1] - pamItemStarts[0])
+            / CGFloat(pamItemStarts.count - 1)
+        let prefetch = CGFloat(pamPrefetchItems) * max(1, averageExtent)
+        let retained = pamRemoveClippedSubviews ? prefetch : prefetch * 2
+        return min(max(overscan, retained), viewport * 6)
     }
 
     var primaryMaximumOffset: CGFloat {

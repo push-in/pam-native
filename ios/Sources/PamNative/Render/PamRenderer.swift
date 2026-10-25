@@ -22,6 +22,8 @@ private enum PamReturnKey: Int64 {
 public final class PamRenderer: @unchecked Sendable {
     static let hiddenCellMountBudget: CFTimeInterval = 0.005
     private var deferredVirtualListSyncs = Set<Int64>()
+    /// Lists whose mounted cells carry the inverted mirror transform.
+    private var invertedListsWithMirroredCells = Set<Int64>()
 
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     /// Keyboard overlap (points from the PAM root view's bottom) over the
@@ -608,6 +610,7 @@ public final class PamRenderer: @unchecked Sendable {
 
         if isEventProperty(key) ||
             key == PamConstants.scrollHorizontal ||
+            key == PamConstants.listHorizontal ||
             key == PamConstants.endReachedThreshold ||
             PamRenderer.motionEventKeys.contains(key) {
             installEvents(for: id)
@@ -757,6 +760,8 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func requestVirtualListScroll(_ list: PamVirtualListView, nodeId: Int64) {
+        // An explicit scroll request supersedes a pending `initialScrollIndex`.
+        list.pamInitialScrollIndexApplied = true
         DispatchQueue.main.async { [weak self, weak list] in
             guard let self, let list, let state = self.nodes[nodeId] else { return }
             let targetTestId = state.properties[PamConstants.scrollTargetTestId]?.textOrNil() ?? ""
@@ -818,9 +823,13 @@ public final class PamRenderer: @unchecked Sendable {
               let listFrame = frames[id],
               list.bounds.width > 0,
               list.bounds.height > 0 else { return }
-        let horizontal = nodes[id]?
-            .properties[PamConstants.scrollHorizontal]?.boolOrNil() ?? false
-        list.horizontal = horizontal
+        let horizontal = listIsHorizontal(nodes[id])
+        if list.horizontal != horizontal {
+            configureScrollView(list, horizontal: horizontal)
+        }
+        list.pamPrefetchItems = Int(nodes[id]?.properties[PamConstants.listPrefetch]?.integerOrNil() ?? 0)
+        list.pamRemoveClippedSubviews =
+            nodes[id]?.properties[PamConstants.listRemoveClippedSubviews]?.boolOrNil() ?? true
         let allCellIds = children[id] ?? []
         // Keyed sections: only shared rows and the active section's rows are
         // listed; the others keep their views parked out of the list.
@@ -868,6 +877,16 @@ public final class PamRenderer: @unchecked Sendable {
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
+        // `initialScrollIndex`: the first sync that knows the item starts
+        // lands on the index (Android `applyInitialPosition`); a scroll
+        // request applied earlier in the same commit already marked it.
+        if !list.pamInitialScrollIndexApplied, !list.pamItemStarts.isEmpty {
+            list.pamInitialScrollIndexApplied = true
+            if list.pamInitialScrollIndex > 0 {
+                let index = min(list.pamInitialScrollIndex, list.pamItemStarts.count - 1)
+                list.scrollToLogicalOffset(list.pamItemStarts[index])
+            }
+        }
         if let previousSection, previousSection != activeSection {
             switchListSection(
                 list,
@@ -921,6 +940,16 @@ public final class PamRenderer: @unchecked Sendable {
                 guard let self else { return }
                 self.deferredVirtualListSyncs.remove(id)
                 self.syncVirtualList(id)
+            }
+        }
+        // Mounted cells of an inverted list are mirrored back; a list that
+        // stopped being inverted restores them once.
+        if list.pamInverted || invertedListsWithMirroredCells.contains(id) {
+            syncInvertedCells(list, cellIds: cellIds)
+            if list.pamInverted {
+                invertedListsWithMirroredCells.insert(id)
+            } else {
+                invertedListsWithMirroredCells.remove(id)
             }
         }
     }
@@ -1253,7 +1282,11 @@ public final class PamRenderer: @unchecked Sendable {
         spec.rotationDegrees = CGFloat(properties[PamConstants.rotation]?.pamNumber ?? 0)
         spec.originXPercent = CGFloat(properties[PamConstants.transformOriginX]?.pamNumber ?? 50)
         spec.originYPercent = CGFloat(properties[PamConstants.transformOriginY]?.pamNumber ?? 50)
-        let next = spec.affine(size: view.bounds.size)
+        var next = spec.affine(size: view.bounds.size)
+            .concatenating(invertedCellTransform(parent: state.parent))
+        if let list = view as? PamVirtualListView, list.pamInverted {
+            next = next.concatenating(list.pamInvertedTransform)
+        }
         if view.transform != next {
             view.transform = next
         }
@@ -1783,7 +1816,7 @@ public final class PamRenderer: @unchecked Sendable {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.scroll.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachScrollEvents(
                 scroll,
-                isHorizontal: state.properties[PamConstants.scrollHorizontal]?.boolOrNil() ?? false,
+                isHorizontal: listIsHorizontal(state),
                 emitScroll: hasScroll,
                 emitEndReached: hasEndReached,
                 endReachedThreshold: max(
@@ -2805,6 +2838,49 @@ public final class PamRenderer: @unchecked Sendable {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: value.boolOrNil() ?? false)
             }
+        case PamConstants.listHorizontal:
+            if let list = view as? PamVirtualListView {
+                configureScrollView(list, horizontal: value.boolOrNil() ?? false)
+            }
+        case PamConstants.listInverted:
+            (view as? PamVirtualListView)?.pamInverted = value.boolOrNil() ?? false
+        case PamConstants.listInitialScrollIndex:
+            if let list = view as? PamVirtualListView {
+                let index = max(0, Int(value.integerOrNil() ?? 0))
+                if list.pamInitialScrollIndex != index || !list.pamInitialScrollIndexApplied {
+                    list.pamInitialScrollIndex = index
+                    list.pamInitialScrollIndexApplied = false
+                }
+            }
+        case PamConstants.listPrefetch:
+            (view as? PamVirtualListView)?.pamPrefetchItems = max(0, Int(value.integerOrNil() ?? 0))
+        case PamConstants.listRemoveClippedSubviews:
+            (view as? PamVirtualListView)?.pamRemoveClippedSubviews = value.boolOrNil() ?? true
+        case PamConstants.scrollEnabled:
+            if let scroll = view as? UIScrollView {
+                let enabled = value.boolOrNil() ?? true
+                scroll.isScrollEnabled = enabled
+                if !enabled { scroll.pamStopDeceleration() }
+            }
+        case PamConstants.showsScrollIndicator:
+            if let scroll = view as? UIScrollView {
+                let shows = value.boolOrNil() ?? true
+                (scroll as? PamAnchoredScrollView)?.pamShowsScrollIndicator = shows
+                (scroll as? PamVirtualListView)?.pamShowsScrollIndicator = shows
+                let horizontal = (scroll as? PamAnchoredScrollView)?.horizontal
+                    ?? (scroll as? PamVirtualListView)?.horizontal
+                    ?? false
+                applyScrollIndicators(scroll, horizontal: horizontal)
+            }
+        case PamConstants.scrollContentOffsetX:
+            (view as? PamAnchoredScrollView)?.pamRequestedContentOffsetX =
+                max(0, CGFloat(value.decimalOrZero()))
+        case PamConstants.scrollContentOffsetY:
+            (view as? PamAnchoredScrollView)?.pamRequestedContentOffsetY =
+                max(0, CGFloat(value.decimalOrZero()))
+        case PamConstants.scrollKeyboardDismissMode:
+            (view as? UIScrollView)?.keyboardDismissMode =
+                keyboardDismissMode(Int(value.integerOrNil() ?? 1))
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = value.boolOrNil() ?? false
             (view as? PamVirtualListView)?.pamPagingEnabled = value.boolOrNil() ?? false
@@ -3258,6 +3334,35 @@ public final class PamRenderer: @unchecked Sendable {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: false)
             }
+        case PamConstants.listHorizontal:
+            if let list = view as? PamVirtualListView {
+                configureScrollView(list, horizontal: false)
+            }
+        case PamConstants.listInverted:
+            (view as? PamVirtualListView)?.pamInverted = false
+        case PamConstants.listInitialScrollIndex:
+            (view as? PamVirtualListView)?.pamInitialScrollIndex = 0
+        case PamConstants.listPrefetch:
+            (view as? PamVirtualListView)?.pamPrefetchItems = 0
+        case PamConstants.listRemoveClippedSubviews:
+            (view as? PamVirtualListView)?.pamRemoveClippedSubviews = true
+        case PamConstants.scrollEnabled:
+            (view as? UIScrollView)?.isScrollEnabled = true
+        case PamConstants.showsScrollIndicator:
+            if let scroll = view as? UIScrollView {
+                (scroll as? PamAnchoredScrollView)?.pamShowsScrollIndicator = true
+                (scroll as? PamVirtualListView)?.pamShowsScrollIndicator = true
+                let horizontal = (scroll as? PamAnchoredScrollView)?.horizontal
+                    ?? (scroll as? PamVirtualListView)?.horizontal
+                    ?? false
+                applyScrollIndicators(scroll, horizontal: horizontal)
+            }
+        case PamConstants.scrollContentOffsetX:
+            (view as? PamAnchoredScrollView)?.pamRequestedContentOffsetX = nil
+        case PamConstants.scrollContentOffsetY:
+            (view as? PamAnchoredScrollView)?.pamRequestedContentOffsetY = nil
+        case PamConstants.scrollKeyboardDismissMode:
+            (view as? UIScrollView)?.keyboardDismissMode = .none
         case PamConstants.scrollIndicatorStyle:
             (view as? UIScrollView)?.indicatorStyle = PamScrollIndicatorStyle.auto.native
         case PamConstants.scrollPagingEnabled:
@@ -3799,12 +3904,68 @@ public final class PamRenderer: @unchecked Sendable {
 
     private func configureScrollView(_ scroll: UIScrollView, horizontal: Bool) {
         (scroll as? PamAnchoredScrollView)?.horizontal = horizontal
-        (scroll as? PamVirtualListView)?.horizontal = horizontal
+        if let list = scroll as? PamVirtualListView {
+            list.horizontal = horizontal
+            if list.pamInverted { list.transform = list.pamInvertedTransform }
+        }
         scroll.alwaysBounceVertical = !horizontal
         scroll.alwaysBounceHorizontal = horizontal
-        scroll.showsHorizontalScrollIndicator = horizontal
-        scroll.showsVerticalScrollIndicator = !horizontal
+        applyScrollIndicators(scroll, horizontal: horizontal)
         scroll.isDirectionalLockEnabled = true
+    }
+
+    /// `showsScrollIndicator` resolved against the axis (Android
+    /// `setShowsScrollIndicator`): only the primary axis ever shows one.
+    private func applyScrollIndicators(_ scroll: UIScrollView, horizontal: Bool) {
+        let shows = (scroll as? PamAnchoredScrollView)?.pamShowsScrollIndicator
+            ?? (scroll as? PamVirtualListView)?.pamShowsScrollIndicator
+            ?? true
+        scroll.showsHorizontalScrollIndicator = shows && horizontal
+        scroll.showsVerticalScrollIndicator = shows && !horizontal
+    }
+
+    /// Lists take their axis from `ListHorizontal`; `ScrollHorizontal` is
+    /// still honoured for older bundles.
+    private func listIsHorizontal(_ state: NodeState?) -> Bool {
+        guard let properties = state?.properties else { return false }
+        return properties[PamConstants.listHorizontal]?.boolOrNil()
+            ?? properties[PamConstants.scrollHorizontal]?.boolOrNil()
+            ?? false
+    }
+
+    /// RN `keyboardDismissMode` wire values (Android `KEYBOARD_DISMISS_*`):
+    /// 1 none, 2 on-drag, 3 interactive.
+    private func keyboardDismissMode(_ value: Int) -> UIScrollView.KeyboardDismissMode {
+        switch value {
+        case 2: return .onDrag
+        case 3: return .interactive
+        default: return .none
+        }
+    }
+
+    /// Inverted lists mirror every cell back (`pamInverted`), composed with
+    /// the cell's own transform so a flipped list still animates its rows.
+    private func invertedCellTransform(parent: Int64) -> CGAffineTransform {
+        guard let list = views[parent] as? PamVirtualListView, list.pamInverted else { return .identity }
+        return list.pamInvertedTransform
+    }
+
+    private func syncInvertedCells(_ list: PamVirtualListView, cellIds: [Int64]) {
+        let flip = list.pamInvertedTransform
+        for cellId in cellIds {
+            guard let view = views[cellId], view.superview === list,
+                  let state = nodes[cellId] else { continue }
+            if state.properties[PamConstants.translationX] != nil
+                || state.properties[PamConstants.translationY] != nil
+                || state.properties[PamConstants.scaleX] != nil
+                || state.properties[PamConstants.scaleY] != nil
+                || state.properties[PamConstants.rotation] != nil
+                || hasSizeDependentTransform(state) {
+                applyTransform(view: view, nodeId: cellId)
+            } else if view.transform != flip {
+                view.transform = flip
+            }
+        }
     }
 
     private func decodeBottomSheetSnapPoints(_ value: PropValue) -> [CGFloat] {
