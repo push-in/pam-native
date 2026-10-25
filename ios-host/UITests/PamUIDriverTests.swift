@@ -10,6 +10,7 @@ import XCTest
 ///
 ///     {"launch": true}                 cold start (default: activate)
 ///     {"tap": "Local marketplace"}     first element whose label matches
+///     {"tapIfExists": "Back"}         tap when present, otherwise continue
 ///     {"tapId": "composer.send"}       accessibility identifier
 ///     {"tapXY": [0.5, 0.9]}            normalized window coordinates
 ///     {"longPress": "label", "seconds": 1.0}
@@ -22,6 +23,7 @@ import XCTest
 ///     {"wait": 1.5}                    seconds
 ///     {"waitFor": "label", "timeout": 10}
 ///     {"shot": "marketplace"}          PNG in PAM_UI_SHOT_DIR + attachment
+///     {"dump": "tree"}                accessibility tree (.txt) + attachment
 final class PamUIDriverTests: XCTestCase {
     private var app: XCUIApplication!
     private var shotDirectory: URL?
@@ -74,6 +76,12 @@ final class PamUIDriverTests: XCTestCase {
         if let label = step["tap"] as? String {
             let element = try element(labelled: label, timeout: timeout, step: index)
             element.tap()
+            return
+        }
+        if let label = step["tapIfExists"] as? String {
+            let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
+            let element = app.descendants(matching: .any).matching(predicate).firstMatch
+            if element.waitForExistence(timeout: step["timeout"] as? Double ?? 2) { element.tap() }
             return
         }
         if let identifier = step["tapId"] as? String {
@@ -144,6 +152,17 @@ final class PamUIDriverTests: XCTestCase {
         }
         if let name = step["shot"] as? String {
             try screenshot(named: name)
+            return
+        }
+        if let name = step["dump"] as? String {
+            let tree = app.debugDescription
+            let attachment = XCTAttachment(string: tree)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            if let directory = shotDirectory {
+                try tree.write(to: directory.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            }
             return
         }
         XCTFail("step \(index): unknown step \(step)")
