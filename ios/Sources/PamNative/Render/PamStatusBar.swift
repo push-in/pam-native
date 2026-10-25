@@ -2,16 +2,39 @@ import UIKit
 
 /// The status bar a screen declares with `StatusBar` nodes (RN `StatusBar`
 /// on iOS): `barStyle`, `hidden` and `animated`. `backgroundColor` and
-/// `translucent` are Android-only, as in React Native.
+/// `translucent` are Android-only in React Native; PAM paints the colour as
+/// a band behind the status bar (`PamStatusBarBand`) so both platforms show
+/// the same opaque bar.
 public struct PamStatusBarConfig: Equatable {
     public var style: UIStatusBarStyle
     public var hidden: Bool
     public var animated: Bool
+    /// `backgroundColor`, ARGB; `nil` when no active node declared one.
+    public var backgroundColor: Int64?
+    /// `translucent`: the content shows through the status bar, no band.
+    public var translucent: Bool
 
-    public init(style: UIStatusBarStyle = .default, hidden: Bool = false, animated: Bool = false) {
+    public init(
+        style: UIStatusBarStyle = .default,
+        hidden: Bool = false,
+        animated: Bool = false,
+        backgroundColor: Int64? = nil,
+        translucent: Bool = false
+    ) {
         self.style = style
         self.hidden = hidden
         self.animated = animated
+        self.backgroundColor = backgroundColor
+        self.translucent = translucent
+    }
+
+    /// The colour of the band painted behind the status bar; `nil` paints
+    /// none (no colour, a fully transparent colour, or translucent).
+    public var bandColor: UIColor? {
+        guard !translucent, let backgroundColor else { return nil }
+        let alpha = (UInt64(truncatingIfNeeded: backgroundColor) >> 24) & 0xFF
+        guard alpha != 0 else { return nil }
+        return UIColor(argb: backgroundColor)
     }
 
     /// No `StatusBar` mounted: the system default (RN's initial stack entry).
@@ -30,6 +53,53 @@ struct PamStatusBarDeclaration: Equatable {
     var appearance: Int?
     var hidden: Bool?
     var animated: Bool?
+    var backgroundColor: Int64?
+    var translucent: Bool?
+}
+
+/// The band behind the status bar. Android paints the window's status bar
+/// with `StatusBar.backgroundColor`; iOS has no such surface, so the renderer
+/// pins this view to the top safe-area inset of its host, above the content
+/// (which `SafeAreaView` already starts below the inset). Auto Layout follows
+/// the inset through rotation, notch, split view and bar visibility changes.
+final class PamStatusBarBand: UIView {
+    static let animationDuration: TimeInterval = 0.25
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        isOpaque = false
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is unavailable")
+    }
+
+    /// Mounts the band on top of `host`, spanning its width from the top
+    /// edge down to the safe-area top.
+    func mount(on host: UIView) {
+        host.addSubview(self)
+        NSLayoutConstraint.activate([
+            leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            topAnchor.constraint(equalTo: host.topAnchor),
+            bottomAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor),
+        ])
+    }
+
+    /// Applies `color`, cross-fading when `animated` (Android animates the
+    /// status bar colour the same way).
+    func setColor(_ color: UIColor, animated: Bool) {
+        guard backgroundColor != color else { return }
+        if animated && !PamMotionPolicy.isReduced {
+            UIView.animate(withDuration: Self.animationDuration) { self.backgroundColor = color }
+        } else {
+            backgroundColor = color
+        }
+    }
 }
 
 /// Resolves the `StatusBar` stack and drives the iOS status bar.
@@ -96,15 +166,21 @@ public final class PamStatusBarCoordinator {
         var appearance: Int?
         var hidden = false
         var animated = false
+        var backgroundColor: Int64?
+        var translucent = false
         for declaration in declarations {
             if let value = declaration.appearance { appearance = value }
             if let value = declaration.hidden { hidden = value }
             if let value = declaration.animated { animated = value }
+            if let value = declaration.backgroundColor { backgroundColor = value }
+            if let value = declaration.translucent { translucent = value }
         }
         return PamStatusBarConfig(
             style: style(forAppearance: appearance),
             hidden: hidden,
-            animated: animated
+            animated: animated,
+            backgroundColor: backgroundColor,
+            translucent: translucent
         )
     }
 

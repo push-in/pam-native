@@ -126,6 +126,9 @@ public final class PamRenderer: @unchecked Sendable {
     private var statusBarDirty = false
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
+    /// The band behind the status bar, mounted on the host while the
+    /// resolved `StatusBar` config paints one (`backgroundColor`, opaque).
+    private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
     /// Nodes with `on:routeCovered`/`on:routeFocused` and their last coverage.
     private var routeListeners: [Int64: PamRouteFocusTracker] = [:]
@@ -319,10 +322,37 @@ public final class PamRenderer: @unchecked Sendable {
                     appearance: state.properties[PamConstants.statusBarStyle]?
                         .integerOrNil().map { Int($0) },
                     hidden: state.properties[PamConstants.statusBarHidden]?.boolOrNil(),
-                    animated: state.properties[PamConstants.statusBarAnimated]?.boolOrNil()
+                    animated: state.properties[PamConstants.statusBarAnimated]?.boolOrNil(),
+                    backgroundColor: state.properties[PamConstants.statusBarColor]?.integerOrNil(),
+                    translucent: state.properties[PamConstants.statusBarTranslucent]?.boolOrNil()
                 )
             }
-        PamStatusBarCoordinator.shared.apply(PamStatusBarCoordinator.merge(declarations))
+        let config = PamStatusBarCoordinator.merge(declarations)
+        PamStatusBarCoordinator.shared.apply(config)
+        syncStatusBarBand(config)
+    }
+
+    /// Mounts, recolours or removes the band behind the status bar for
+    /// `config`. The band stays the host's topmost subview: like Android's
+    /// window status bar (and a modal's own window there), it covers the
+    /// screen and any in-tree modal alike, with the colour the stack resolved.
+    private func syncStatusBarBand(_ config: PamStatusBarConfig) {
+        guard let color = config.bandColor else {
+            statusBarBand?.removeFromSuperview()
+            statusBarBand = nil
+            return
+        }
+        let band: PamStatusBarBand
+        if let mounted = statusBarBand {
+            band = mounted
+            if band.superview !== host { band.mount(on: host) }
+        } else {
+            band = PamStatusBarBand()
+            band.mount(on: host)
+            statusBarBand = band
+        }
+        if host.subviews.last !== band { host.bringSubviewToFront(band) }
+        band.setColor(color, animated: config.animated)
     }
 
     /// In a window, in no hidden ancestor (an inactive route) and in no
@@ -428,6 +458,7 @@ public final class PamRenderer: @unchecked Sendable {
         children.removeAll()
         dirtyStackingParents.removeAll()
         stackingParents.removeAll()
+        statusBarBand = nil
         host.subviews.forEach { $0.removeFromSuperview() }
         host.layoutIfNeeded()
         nativeViews.close()
@@ -1376,6 +1407,9 @@ public final class PamRenderer: @unchecked Sendable {
                 host.addSubview(view)
             } else {
                 host.insertSubview(view, at: target)
+            }
+            if let band = statusBarBand, host.subviews.last !== band {
+                host.bringSubviewToFront(band)
             }
             return
         }
