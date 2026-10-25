@@ -97,6 +97,9 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.41.0 | `failure` callbacks on `Permissions::status/requestKind`, `Caches::usage/clear` | ✅ | PHP only. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
+| 1.44.0 | Prop parity audit (Input multiline/caret/placeholder/debounce, Text selectable/dataDetector, list `horizontal`/`inverted`/`initialScrollIndex`/`prefetch`, scroll `scrollEnabled`/indicators/`contentOffset`/`keyboardDismissMode`, `pointerEvents`, ActivityIndicator props, `Element::animate()`, `pressRetentionOffset`) | ✅ | Keys Android applied and iOS silently ignored; XCTest `PamListScrollPropParityTests`, `PamInputParityTests`, `PamTouchParityTests`. Toggling `multiline` after creation keeps the first host; `inputFormat` masks are single-line only. |
+| 1.44.0 | UIScene URL delivery + `PamNativeUITests` driver | ✅ | `PamSceneDelegate` forwards URLs/activities and starts PHP after the scene connects; `xcodebuild test -scheme PamNativeUITests` drives the installed app headlessly. |
+
 ## Validation on a Mac
 
 Run `swift test` (or the `PamNativeTests` scheme on an iOS simulator) for

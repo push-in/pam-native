@@ -8,6 +8,21 @@
   case-insensitive filesystems (macOS APFS, exFAT, Windows) one of the two files
   silently replaced the other and `mb_*` calls or the `Mbstring` class went
   missing on device. Composer `autoload.files` now points at the new name.
+- iOS renderer parity (props Android applied and iOS ignored): `Input`
+  `multiline`, `minLines`, `textAlignVertical`, `scrollEnabled` (a
+  `UITextView` host that grows with content), `placeholderColor`,
+  `cursorColor`/`selectionColor`, `caretHidden`, `contextMenuHidden`,
+  `selectTextOnFocus`, `debounceMs`/`syncMode`; `Text::selectable()` (copy
+  menu) and `dataDetectorType` (tel/mailto/http taps); FlatList/SectionList
+  `horizontal`, `inverted`, `initialScrollIndex`, `prefetch`; scroll views and
+  lists `scrollEnabled`, `showsScrollIndicator`, `contentOffset` (applied after
+  layout) and `keyboardDismissMode`; `pointerEvents` (`none`, `box-none`,
+  `box-only`) on views, pressables, images and text; `ActivityIndicator`
+  `animating`, `hidesWhenStopped`, `size` and `color`; `Element::animate()`
+  without a transition spec now animates property changes with the authored
+  duration/easing; `Pressable` `pressRetentionOffset`. Each group ships XCTest
+  coverage (`PamListScrollPropParityTests`, `PamInputParityTests`,
+  `PamTouchParityTests`).
 - iOS host: a `PamSceneDelegate` now receives URL opens, cold-start URLs and
   `NSUserActivity` continuations. Since the `UIApplicationSceneManifest` was
   added in 1.30.0, UIKit delivered those only to a scene delegate, so custom
