@@ -1199,6 +1199,7 @@ public final class PamRenderer: @unchecked Sendable {
         view.transform = .identity
         view.alpha = 1
         view.isHidden = false
+        (view as? PamPointerEventsHost)?.pamPointerEvents = PamPointerEvents.auto
         if let image = view as? PamImageView {
             image.pamFilter = PamImageFilter()
             image.pamTintColor = nil
@@ -1212,6 +1213,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let button = view as? PamPressButton {
             button.isHighlighted = false
+            button.pamPressRetention = PamPressButton.defaultPressRetention
             button.removeTarget(nil, action: nil, for: .allEvents)
             // Local modal triggers are UIActions keyed by the old node.
             button.enumerateEventHandlers { action, _, event, _ in
@@ -1422,7 +1424,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
             return view
         case .screen, .column, .row, .view, .keyboardAvoidingView, .inputAccessoryView:
-            return UIView()
+            return PamContainerView()
         case .pressable:
             return PamPressButton(type: .system)
         case .button:
@@ -1444,11 +1446,9 @@ public final class PamRenderer: @unchecked Sendable {
             }
             return list
         case .spacer:
-            return UIView()
+            return PamContainerView()
         case .activityIndicator:
-            let indicator = PamVuetifySpinner()
-            indicator.startAnimating()
-            return indicator
+            return PamVuetifySpinner()
         case .toggle:
             return PamVuetifySwitch()
         case .modal:
@@ -2174,6 +2174,26 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
+    /// RN `pressRetentionOffset` (properties 237-240; defaults 20/20/20/30).
+    private func configurePressRetention(_ button: PamPressButton?, state: NodeState?) {
+        guard let button, let state else { return }
+        let defaults = PamPressButton.defaultPressRetention
+        func edge(_ key: Int, _ fallback: CGFloat) -> CGFloat {
+            max(0, CGFloat(state.properties[key]?.decimalOrNil() ?? Double(fallback)))
+        }
+        button.pamPressRetention = UIEdgeInsets(
+            top: edge(PamMotionKeys.pressRetentionTop, defaults.top),
+            left: edge(PamMotionKeys.pressRetentionLeft, defaults.left),
+            bottom: edge(PamMotionKeys.pressRetentionBottom, defaults.bottom),
+            right: edge(PamMotionKeys.pressRetentionRight, defaults.right)
+        )
+    }
+
+    /// RN `pointerEvents` (property 133) on the hit-testing PAM views.
+    private func applyPointerEvents(_ view: UIView, mode: Int) {
+        (view as? PamPointerEventsHost)?.pamPointerEvents = PamPointerEvents.clamp(mode)
+    }
+
     private func applyInputSelection(view: UIView, nodeId: Int64) {
         guard let field = view as? UITextField, let state = nodes[nodeId],
               let requested = state.properties[PamConstants.inputSelectionStart]?.integerOrNil() else { return }
@@ -2600,11 +2620,7 @@ public final class PamRenderer: @unchecked Sendable {
             if let modal = view as? PamModalHost {
                 modal.setVisible(value.boolOrNil() ?? true)
             } else if let indicator = view as? PamVuetifySpinner {
-                if value.boolOrNil() ?? true {
-                    indicator.startAnimating()
-                } else {
-                    indicator.stopAnimating()
-                }
+                indicator.setRequestedVisible(value.boolOrNil() ?? true)
             } else {
                 let hidden = !(value.boolOrNil() ?? true)
                 // A retained ordinary subtree has the same editor lifecycle
@@ -2916,6 +2932,25 @@ public final class PamRenderer: @unchecked Sendable {
             installEvents(for: nodeId)
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
+        case PamConstants.pointerEvents:
+            applyPointerEvents(view, mode: Int(value.integerOrNil() ?? Int64(PamPointerEvents.auto)))
+        case PamConstants.activityAnimating:
+            (view as? PamVuetifySpinner)?.setAnimating(value.boolOrNil() ?? true)
+        case PamConstants.activityHidesWhenStopped:
+            (view as? PamVuetifySpinner)?.setHidesWhenStopped(value.boolOrNil() ?? true)
+        case PamConstants.activitySize:
+            (view as? PamVuetifySpinner)?.setSize(
+                CGFloat(value.decimalOrNil() ?? value.integerOrNil().map { Double($0) } ?? Double(PamVuetifySpinner.defaultSize))
+            )
+        case PamConstants.progressColor:
+            if let color = value.integerOrNil() {
+                (view as? PamVuetifySpinner)?.setColor(UIColor(argb: color))
+            }
+        case PamMotionKeys.pressRetentionLeft,
+             PamMotionKeys.pressRetentionTop,
+             PamMotionKeys.pressRetentionRight,
+             PamMotionKeys.pressRetentionBottom:
+            configurePressRetention(view as? PamPressButton, state: nodes[nodeId])
         default:
             break
         }
@@ -3119,7 +3154,7 @@ public final class PamRenderer: @unchecked Sendable {
             if let modal = view as? PamModalHost {
                 modal.setVisible(true)
             } else if let indicator = view as? PamVuetifySpinner {
-                indicator.startAnimating()
+                indicator.setRequestedVisible(true)
             } else {
                 view.isHidden = false
             }
@@ -3303,6 +3338,21 @@ public final class PamRenderer: @unchecked Sendable {
             break
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(false, animated: true)
+        case PamConstants.pointerEvents:
+            applyPointerEvents(view, mode: PamPointerEvents.auto)
+        case PamConstants.activityAnimating:
+            (view as? PamVuetifySpinner)?.setAnimating(true)
+        case PamConstants.activityHidesWhenStopped:
+            (view as? PamVuetifySpinner)?.setHidesWhenStopped(true)
+        case PamConstants.activitySize:
+            (view as? PamVuetifySpinner)?.setSize(PamVuetifySpinner.defaultSize)
+        case PamConstants.progressColor:
+            (view as? PamVuetifySpinner)?.setColor(nil)
+        case PamMotionKeys.pressRetentionLeft,
+             PamMotionKeys.pressRetentionTop,
+             PamMotionKeys.pressRetentionRight,
+             PamMotionKeys.pressRetentionBottom:
+            configurePressRetention(view as? PamPressButton, state: state)
         default:
             break
         }
@@ -4076,6 +4126,7 @@ public final class PamRenderer: @unchecked Sendable {
     private static let motionPropertyOrder = [
         PamConstants.nativeRef,
         PamConstants.transitionSpec,
+        PamConstants.animateChanges,
         PamConstants.gestureDrag,
         PamConstants.gestureDragSnapIndex,
         PamConstants.animationRestartKey,
@@ -4107,6 +4158,17 @@ public final class PamRenderer: @unchecked Sendable {
             view.pamNativeRef = value?.textOrNil()
         case PamConstants.transitionSpec:
             motion.setTransitionSpec(nodeId: nodeId, source: value?.textOrNil())
+        case PamConstants.animateChanges,
+             PamConstants.animationDurationMs,
+             PamConstants.animationEasing:
+            // `Element::animate()`: no CSS transition, only duration/easing.
+            let properties = nodes[nodeId]?.properties ?? [:]
+            motion.setImplicitTransition(
+                nodeId: nodeId,
+                enabled: properties[PamConstants.animateChanges]?.boolOrNil() ?? false,
+                durationMs: properties[PamConstants.animationDurationMs]?.integerOrNil() ?? 180,
+                easing: properties[PamConstants.animationEasing]?.integerOrNil() ?? 4
+            )
         case PamConstants.gestureDrag:
             _ = motion.configureDrag(nodeId: nodeId, host: view, source: value?.textOrNil())
         case PamConstants.gestureDragSnapIndex:

@@ -27,12 +27,19 @@ enum PamMaterialElevation {
     }
 }
 
-final class PamPressButton: UIButton {
+final class PamPressButton: UIButton, PamPointerEventsHost {
     static let minimumTouchTarget: CGFloat = 44
+    /// RN `pressRetentionOffset` default (top/left/right 20, bottom 30).
+    static let defaultPressRetention = UIEdgeInsets(top: 20, left: 20, bottom: 30, right: 20)
 
     var pamPressedOpacity: CGFloat = 0.72
     var pamPressedScale: CGFloat = 1
     var pamHitSlop = UIEdgeInsets.zero
+    /// Extra distance the finger may travel outside the touch target before
+    /// the press is cancelled (properties 237-240). Only grows the bounds
+    /// while a touch is already tracking, so hit testing is unaffected.
+    var pamPressRetention = PamPressButton.defaultPressRetention
+    var pamPointerEvents = PamPointerEvents.auto
     var pamStateStyles: [Int: [Int: Any]] = [:]
 
     private var restingAlpha: CGFloat?
@@ -66,15 +73,40 @@ final class PamPressButton: UIButton {
         guard isEnabled, isUserInteractionEnabled, !isHidden, alpha > 0.01 else {
             return false
         }
+        return touchBounds(retaining: isTracking).contains(point)
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        PamPointerEvents.hitTest(self, mode: pamPointerEvents) {
+            super.hitTest(point, with: event)
+        }
+    }
+
+    /// Touch target: bounds grown to 44pt / hitSlop, plus the press retention
+    /// offset while a press is in flight (RN `pressRetentionOffset`).
+    func touchBounds(retaining: Bool) -> CGRect {
         let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2
         let vertical = max(0, Self.minimumTouchTarget - bounds.height) / 2
+        let retention = retaining ? pamPressRetention : .zero
         let insets = UIEdgeInsets(
-            top: -max(vertical, pamHitSlop.top),
-            left: -max(horizontal, pamHitSlop.left),
-            bottom: -max(vertical, pamHitSlop.bottom),
-            right: -max(horizontal, pamHitSlop.right)
+            top: -(max(vertical, pamHitSlop.top) + max(0, retention.top)),
+            left: -(max(horizontal, pamHitSlop.left) + max(0, retention.left)),
+            bottom: -(max(vertical, pamHitSlop.bottom) + max(0, retention.bottom)),
+            right: -(max(horizontal, pamHitSlop.right) + max(0, retention.right))
         )
-        return bounds.inset(by: insets).contains(point)
+        return bounds.inset(by: insets)
+    }
+
+    override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+        let keep = super.continueTracking(touch, with: event)
+        // UIControl keeps tracking with its own ~70pt tolerance; a press that
+        // leaves the retention bounds is cancelled, like RN/Android.
+        guard touchBounds(retaining: true).contains(touch.location(in: self)) else {
+            cancelTracking(with: event)
+            isHighlighted = false
+            return false
+        }
+        return keep
     }
 
     override var isHighlighted: Bool {
@@ -718,12 +750,28 @@ final class PamVuetifySwitch: UIControl {
 }
 
 final class PamVuetifySpinner: UIView {
+    static let defaultSize: CGFloat = 20
+
     private let arcLayer = CAShapeLayer()
-    private var animating = false
+    /// True while the indeterminate animations are (or should be) installed.
+    private var running = false
+    private var requestedVisible = true
+    private var animating = true
+    private var hidesWhenStopped = true
+    private var size = PamVuetifySpinner.defaultSize
+    private var customColor: UIColor?
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: 32, height: 32)
+        CGSize(width: size, height: size)
     }
+
+    /// Mirrors Android `PamActivityIndicator`: stroke colour, 20/36pt size
+    /// variants and the `animating` / `hidesWhenStopped` pair.
+    var pamIsAnimating: Bool { animating }
+    var pamHidesWhenStopped: Bool { hidesWhenStopped }
+    var pamSize: CGFloat { size }
+    var pamStrokeColor: CGColor? { arcLayer.strokeColor }
+    var pamIsRunning: Bool { running }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -735,6 +783,7 @@ final class PamVuetifySpinner: UIView {
         arcLayer.lineCap = .round
         arcLayer.lineWidth = 3
         layer.addSublayer(arcLayer)
+        applyState()
     }
 
     required init?(coder: NSCoder) {
@@ -745,44 +794,89 @@ final class PamVuetifySpinner: UIView {
         super.layoutSubviews()
         arcLayer.frame = bounds
         let inset = max(2, arcLayer.lineWidth / 2)
+        let rect = CGRect(
+            x: (bounds.width - size) / 2,
+            y: (bounds.height - size) / 2,
+            width: size,
+            height: size
+        )
         arcLayer.path = UIBezierPath(
-            ovalIn: bounds.insetBy(dx: inset, dy: inset)
+            ovalIn: rect.insetBy(dx: inset, dy: inset)
         ).cgPath
     }
 
     override func tintColorDidChange() {
         super.tintColorDidChange()
+        guard customColor == nil else { return }
         arcLayer.strokeColor = tintColor.cgColor
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        // Off-screen spinners never keep Core Animation busy.
         if window == nil {
             arcLayer.removeAllAnimations()
-        } else if animating {
+        } else if running {
             installAnimations()
         }
     }
 
-    func startAnimating() {
-        guard !animating else { return }
-        animating = true
-        isHidden = false
-        installAnimations()
+    /// `visible` (property 57).
+    func setRequestedVisible(_ value: Bool) {
+        requestedVisible = value
+        applyState()
     }
 
-    func stopAnimating() {
-        animating = false
-        arcLayer.removeAllAnimations()
-        isHidden = true
+    /// `animating` (property 189).
+    func setAnimating(_ value: Bool) {
+        animating = value
+        applyState()
+    }
+
+    /// `hidesWhenStopped` (property 190).
+    func setHidesWhenStopped(_ value: Bool) {
+        hidesWhenStopped = value
+        applyState()
+    }
+
+    /// `size` in points (property 191): 20 (small) / 36 (large) or custom.
+    func setSize(_ value: CGFloat) {
+        size = max(1, value)
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    /// `color` (property 53); nil restores the tint colour.
+    func setColor(_ color: UIColor?) {
+        customColor = color
+        arcLayer.strokeColor = (color ?? tintColor).cgColor
+    }
+
+    private func applyState() {
+        let shouldRun = animating && requestedVisible
+        if shouldRun {
+            if !running {
+                running = true
+                installAnimations()
+            }
+        } else if running || arcLayer.animationKeys()?.isEmpty == false {
+            running = false
+            arcLayer.removeAllAnimations()
+            showStaticArc()
+        }
+        isHidden = !(requestedVisible && (animating || !hidesWhenStopped))
+    }
+
+    private func showStaticArc() {
+        arcLayer.strokeStart = 0.08
+        arcLayer.strokeEnd = 0.82
     }
 
     private func installAnimations() {
         guard window != nil else { return }
         arcLayer.removeAllAnimations()
         if PamMotionPolicy.isReduced {
-            arcLayer.strokeStart = 0.08
-            arcLayer.strokeEnd = 0.82
+            showStaticArc()
             return
         }
 

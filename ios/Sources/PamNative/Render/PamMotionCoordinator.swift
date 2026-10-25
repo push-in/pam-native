@@ -25,6 +25,8 @@ final class PamNodeMotion {
     var completedProgramId: Int64 = .min
     var restartKey: Int64 = .min
     var transitionRules: [String: PamTransitionRule] = [:]
+    /// `Element::animate()` rule used for every property without a CSS rule.
+    var implicitRule: PamTransitionRule?
     var transitionRunners: [PamMotionProperty: PamMotionRunner] = [:]
     var drag: PamDragController?
     var dragSnapRequest: Int64 = .min
@@ -189,11 +191,42 @@ final class PamMotionCoordinator {
         motion.transitionRules = source.map(PamTransitionSpec.parse) ?? [:]
     }
 
-    /// Animates one property with its CSS transition rule. Returns false when
-    /// no rule applies (the caller sets the value directly).
+    /// `animateChanges` (79) without a transition spec: every animatable
+    /// property follows `animationDurationMs` / `animationEasing`, like the
+    /// Android `animateOrSet` fallback.
+    func setImplicitTransition(nodeId: Int64, enabled: Bool, durationMs: Int64, easing: Int64) {
+        let motion = state(nodeId)
+        guard enabled else {
+            motion.implicitRule = nil
+            return
+        }
+        motion.implicitRule = PamTransitionRule(
+            durationMs: min(max(durationMs, 1), 10_000),
+            delayMs: 0,
+            easing: Self.implicitEasing(easing),
+            spring: nil
+        )
+    }
+
+    /// PHP `AnimationEasing` ids -> motion easing tokens (5 = spring is the
+    /// overshoot curve, matching Android's OvershootInterpolator).
+    static func implicitEasing(_ id: Int64) -> String {
+        switch id {
+        case 1: return "linear"
+        case 2: return "ease-in"
+        case 3: return "ease-out"
+        case 5: return "ease-out-back"
+        default: return "ease-in-out"
+        }
+    }
+
+    /// Animates one property with its CSS transition rule (or the implicit
+    /// `animate()` rule). Returns false when no rule applies (the caller
+    /// sets the value directly).
     func animateTransition(nodeId: Int64, view: UIView, property: PamMotionProperty, target: Double) -> Bool {
-        guard let motion = nodes[nodeId], !motion.transitionRules.isEmpty,
-              let rule = PamTransitionSpec.rule(motion.transitionRules, for: property) else { return false }
+        guard let motion = nodes[nodeId],
+              let rule = PamTransitionSpec.rule(motion.transitionRules, for: property) ?? motion.implicitRule
+        else { return false }
         motion.transitionRunners.removeValue(forKey: property)?.cancel()
         // Mount and recycled views take the value immediately, like CSS.
         guard view.window != nil, !PamMotionPolicy.isReduced,

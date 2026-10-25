@@ -371,6 +371,11 @@ public enum PamConstants {
     public static let onDrawerOpen = 87
     public static let onDrawerClose = 88
     public static let visible = 57
+    public static let progressColor = 53
+    public static let pointerEvents = 133
+    public static let activityAnimating = 189
+    public static let activityHidesWhenStopped = 190
+    public static let activitySize = 191
     public static let refreshing = 63
     public static let checked = 51
     public static let loading = 52
