@@ -22,7 +22,15 @@ struct PamTextLayoutReport: Equatable {
 /// `Text` host. Draws with `PamTextLayout`, the same CoreText pipeline that
 /// measures the box for the engine; still a `UILabel` so accessibility, color
 /// policies and existing callers keep working.
-final class PamTextView: UILabel, UIGestureRecognizerDelegate {
+final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsHost {
+    var pamPointerEvents = PamPointerEvents.auto
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        PamPointerEvents.hitTest(self, mode: pamPointerEvents) {
+            super.hitTest(point, with: event)
+        }
+    }
+
     var pamContent: PamTextContent? {
         didSet {
             guard pamContent != oldValue else { return }

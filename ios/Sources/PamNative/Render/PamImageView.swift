@@ -53,8 +53,15 @@ struct PamImageFilter: Equatable {
 /// Image host that keeps the original bitmap and displays it filtered and,
 /// with `tintColor`, as a template mask in that color (Android
 /// `ImageView.imageTintList`, SRC_IN): one decoded icon serves every color.
-final class PamImageView: UIImageView {
+final class PamImageView: UIImageView, PamPointerEventsHost {
     private var original: UIImage?
+    var pamPointerEvents = PamPointerEvents.auto
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        PamPointerEvents.hitTest(self, mode: pamPointerEvents) {
+            super.hitTest(point, with: event)
+        }
+    }
 
     var pamFilter = PamImageFilter() {
         didSet {
