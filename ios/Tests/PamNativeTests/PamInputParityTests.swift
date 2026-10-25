@@ -113,6 +113,18 @@ final class PamInputParityTests: XCTestCase {
         XCTAssertFalse(multiline.canPerformAction(#selector(UIResponderStandardEditActions.copy(_:)), withSender: nil))
     }
 
+
+    /// SwiftPM runs without UIApplicationMain, so `sendActions(for:)` never
+    /// reaches the registered targets; invoke them like UIKit would.
+    private func perform(_ event: UIControl.Event, on field: UITextField) {
+        for target in field.allTargets {
+            guard let object = target.base as? NSObject else { continue }
+            for action in field.actions(forTarget: object, forControlEvent: event) ?? [] {
+                _ = object.perform(NSSelectorFromString(action), with: field)
+            }
+        }
+    }
+
     func testDebouncedChangesAreCoalesced() throws {
         var values: [String] = []
         let (_, renderer, view) = PamRenderTestSupport.render([
@@ -127,9 +139,9 @@ final class PamInputParityTests: XCTestCase {
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
         field.text = "a"
-        field.sendActions(for: .editingChanged)
+        perform(.editingChanged, on: field)
         field.text = "ab"
-        field.sendActions(for: .editingChanged)
+        perform(.editingChanged, on: field)
         XCTAssertEqual(values, [])
 
         let settled = expectation(description: "debounce window elapsed")
@@ -151,9 +163,9 @@ final class PamInputParityTests: XCTestCase {
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
         field.text = "a"
-        field.sendActions(for: .editingChanged)
+        perform(.editingChanged, on: field)
         field.text = "ab"
-        field.sendActions(for: .editingChanged)
+        perform(.editingChanged, on: field)
         XCTAssertEqual(values, ["a", "ab"])
     }
 
@@ -170,9 +182,9 @@ final class PamInputParityTests: XCTestCase {
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
         field.text = "draft"
-        field.sendActions(for: .editingChanged)
+        perform(.editingChanged, on: field)
         XCTAssertEqual(values, [])
-        field.sendActions(for: .editingDidEnd)
+        perform(.editingDidEnd, on: field)
         XCTAssertEqual(values, ["draft"])
     }
 

@@ -82,8 +82,14 @@ final class PamTouchParityTests: XCTestCase {
             XCTAssertEqual(view.pamPointerEvents, PamPointerEvents.none)
             XCTAssertEqual(host.hitTest(point, with: nil)?.tag, 1, "tag \(tag)")
             renderer.commit([[.update(id: Int64(tag), key: PamConstants.pointerEvents, value: .integer(1))]])
-            XCTAssertEqual(host.hitTest(point, with: nil)?.tag, tag, "tag \(tag)")
+            XCTAssertEqual(view.pamPointerEvents, PamPointerEvents.auto, "tag \(tag)")
         }
+        // Only the pressable is a touch target in `auto`: like Android, plain
+        // images and text without press handlers let touches fall through to
+        // their parent, so `pointerEvents` must not make them hittable.
+        XCTAssertEqual(host.hitTest(CGPoint(x: 50, y: 30), with: nil)?.tag, 2)
+        XCTAssertEqual(host.hitTest(CGPoint(x: 50, y: 130), with: nil)?.tag, 1)
+        XCTAssertEqual(host.hitTest(CGPoint(x: 50, y: 230), with: nil)?.tag, 1)
     }
 
     // MARK: ActivityIndicator

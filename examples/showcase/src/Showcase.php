@@ -21,6 +21,7 @@ use Pam\Native\UI\Image;
 use Pam\Native\UI\Input;
 use Pam\Native\UI\NativeList;
 use Pam\Native\UI\Row;
+use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
 use Pam\Native\UI\Scroll;
 use Pam\Native\UI\StatusBar;
@@ -53,7 +54,7 @@ final class Showcase
     {
         return Screen::make(
             StatusBar::make(0xFF0F172A, StatusBarAppearance::Light),
-            Scroll::make(
+            SafeAreaView::make(Scroll::make(
                 Column::make(
                     Text::make('PAM NATIVE LAB')
                         ->key('eyebrow')
@@ -217,7 +218,8 @@ final class Showcase
                     gap: 10,
                     backgroundColor: 0xFF0F172A,
                 )),
-            )->style(new Style(flexGrow: 1, backgroundColor: 0xFF0F172A)),
+            )->style(new Style(flexGrow: 1, backgroundColor: 0xFF0F172A)))
+                ->style(new Style(flexGrow: 1, backgroundColor: 0xFF0F172A)),
         );
     }
 
@@ -229,7 +231,7 @@ final class Showcase
         );
 
         return Screen::make(
-            Column::make(
+            SafeAreaView::make(Column::make(
                 Row::make(
                     Button::make('Back')
                         ->key('back')
@@ -257,7 +259,7 @@ final class Showcase
                 padding: 16,
                 gap: 8,
                 backgroundColor: 0xFFFFFFFF,
-            )),
+            )))->style(new Style(flexGrow: 1, backgroundColor: 0xFFFFFFFF)),
         );
     }
 }
