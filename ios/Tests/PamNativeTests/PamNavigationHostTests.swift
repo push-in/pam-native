@@ -2,12 +2,14 @@ import XCTest
 import UIKit
 @testable import PamNative
 
+@MainActor
 final class PamNavigationHostTests: XCTestCase {
     func testRetainedRouteReleasesFirstResponderAndPreservesDraft() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         defer { window.isHidden = true }
         let host = PamNavigationHost(frame: window.bounds)
         controller.view.addSubview(host)
@@ -19,24 +21,24 @@ final class PamNavigationHostTests: XCTestCase {
         input.text = "retained draft"
         source.addSubview(input)
         host.insert(source, index: 0)
-        host.insert(destination, index: 1)
-        source.isHidden = false
-        destination.isHidden = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(input.becomeFirstResponder())
+        host.insert(destination, index: 1)
         host.navigate(1)
-        XCTAssertTrue(source.isHidden)
         XCTAssertFalse(input.isFirstResponder)
         XCTAssertEqual(input.text, "retained draft")
-        source.isHidden = false
+        host.reorderRoute(source, index: 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(input.becomeFirstResponder())
         XCTAssertEqual(input.text, "retained draft")
     }
 
     func testHidingOldRouteDoesNotResignDestinationInput() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         defer { window.isHidden = true }
         let host = PamNavigationHost(frame: window.bounds)
         controller.view.addSubview(host)
@@ -49,10 +51,10 @@ final class PamNavigationHostTests: XCTestCase {
         source.addSubview(first)
         destination.addSubview(next)
         host.insert(source, index: 0)
-        host.insert(destination, index: 1)
-        source.isHidden = false
-        destination.isHidden = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(first.becomeFirstResponder())
+        host.insert(destination, index: 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(next.becomeFirstResponder())
         host.navigate(1)
         XCTAssertFalse(first.isFirstResponder)
@@ -60,10 +62,11 @@ final class PamNavigationHostTests: XCTestCase {
     }
 
     func testLateAutomaticFocusRespectsHiddenAncestors() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         defer { window.isHidden = true }
         let source = UIView(frame: window.bounds)
         let input = PamInputField(frame: CGRect(x: 0, y: 100, width: 300, height: 44))
@@ -71,17 +74,15 @@ final class PamNavigationHostTests: XCTestCase {
         source.addSubview(input)
         input.autoFocusRequested = true
         source.isHidden = true
-        let completed = expectation(description: "hidden focus ignored and visible focus works")
-        DispatchQueue.main.async {
-            XCTAssertFalse(input.isFirstResponder)
-            source.isHidden = false
-            input.requestAutomaticFocus()
-            DispatchQueue.main.async {
-                XCTAssertTrue(input.isFirstResponder)
-                completed.fulfill()
-            }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertFalse(input.isFirstResponder)
+        source.isHidden = false
+        input.requestAutomaticFocus()
+        let deadline = Date().addingTimeInterval(2)
+        while !input.isFirstResponder, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
-        wait(for: [completed], timeout: 1)
+        XCTAssertTrue(input.isFirstResponder)
     }
 
     override func tearDown() {

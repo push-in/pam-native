@@ -6,6 +6,8 @@ uint64_t pam_native_runtime_start(void) {
 
 void pam_native_runtime_relayout(void) {}
 
+void pam_native_runtime_set_keyboard_inset(void) {}
+void pam_native_runtime_set_surface_keyboard_inset(void) {}
 void pam_native_runtime_set_refresh_rate(void) {}
 void pam_native_runtime_set_child_visibility(void) {}
 
@@ -14,6 +16,21 @@ void pam_native_runtime_dispatch_event(void) {}
 void pam_native_runtime_dispatch_module_result(void) {}
 
 void pam_native_runtime_reload(void) {}
+
+typedef void (*PamNativeReloadPrepareCallback)(void* context);
+
+void pam_native_runtime_reload_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+) {
+    (void)handle;
+    (void)entry;
+    if (prepare != 0) {
+        prepare(context);
+    }
+}
 
 void pam_native_runtime_remount(void) {}
 

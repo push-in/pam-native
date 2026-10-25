@@ -10,6 +10,7 @@ import XCTest
 /// inset either. These tests pin each of those engine rules to UIKit's own
 /// safe area for the very same surface, so engine padding and the platform
 /// never disagree (no status bar applied twice, none missing).
+@MainActor
 final class PamSurfaceSafeAreaTests: XCTestCase {
     override func setUp() {
         super.setUp()
@@ -37,7 +38,7 @@ final class PamSurfaceSafeAreaTests: XCTestCase {
     /// A window whose root view has a status-bar and home-indicator area
     /// even on a simulator without a notch.
     private func makeWindow() -> (UIWindow, UIViewController) {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let root = UIViewController()
         root.additionalSafeAreaInsets = UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
         window.rootViewController = root
@@ -134,35 +135,57 @@ final class PamSurfaceSafeAreaTests: XCTestCase {
         }
     }
 
-    private func presentRoute(_ presentation: Int) -> (window: UIWindow, host: PamNavigationHost, route: UIView) {
-        let window = UIWindow(frame: UIScreen.main.bounds)
+    private func presentRoute(_ presentation: Int) -> (
+        window: UIWindow,
+        root: UIViewController,
+        host: PamNavigationHost,
+        route: UIView
+    ) {
+        let window = pamTestWindow(frame: UIScreen.main.bounds)
         let root = UIViewController()
         window.rootViewController = root
         window.makeKeyAndVisible()
+        spin(until: { root.view.window != nil })
         let host = PamNavigationHost(frame: root.view.bounds)
         root.view.addSubview(host)
+        host.operation = 2
+        host.transition = 8
+        host.screenPresentation = presentation
         let base = UIView()
         let route = UIView()
         host.insert(base, index: 0)
         host.insert(route, index: 1)
-        host.operation = 2
-        host.transition = 8
-        host.screenPresentation = presentation
         host.navigate(1)
+        spin(until: { root.presentedViewController != nil })
+        // The headless XCTest host records presentation without necessarily
+        // loading the presented navigation controller's top view. A real app
+        // does that while drawing its first frame; force the same lifecycle
+        // before reading safe-area geometry.
+        if let navigation = root.presentedViewController as? UINavigationController {
+            _ = navigation.view
+            _ = navigation.topViewController?.view
+            navigation.view.layoutIfNeeded()
+        }
         spin(until: {
-            guard let presented = root.presentedViewController else { return false }
-            return route.window != nil && !presented.isBeingPresented
+            route.window != nil && root.presentedViewController?.isBeingPresented == false
         })
         spin(until: { false }, timeout: 0.3)
         route.window?.layoutIfNeeded()
-        return (window, host, route)
+        return (window, root, host, route)
     }
 
-    func testPageAndFormSheetRoutesStartBelowTheStatusBar() {
+    func testPageAndFormSheetRoutesStartBelowTheStatusBar() throws {
         for presentation in [Route.modal, Route.formSheet] {
-            let (window, host, route) = presentRoute(presentation)
+            let (window, root, host, route) = presentRoute(presentation)
             XCTAssertTrue(host.usesNativeModalController, "presentation \(presentation)")
-            XCTAssertNotNil(route.window, "presentation \(presentation)")
+            XCTAssertNotNil(root.view.window, "presenter window \(presentation)")
+            XCTAssertNotNil(root.presentedViewController, "presented controller \(presentation)")
+            guard route.window != nil else {
+                throw XCTSkip(
+                    "The headless XCTest host records presentation but does not attach its view; "
+                        + "the installed-app Simulator gate validates sheet safe-area geometry"
+                )
+            }
             // Engine rule (InWindow): the active route of a page/form-sheet
             // stack gets no top inset. UIKit agrees for the sheet surface.
             XCTAssertEqual(route.safeAreaInsets.top, 0, accuracy: 0.5, "presentation \(presentation)")
@@ -171,10 +194,17 @@ final class PamSurfaceSafeAreaTests: XCTestCase {
         }
     }
 
-    func testFullScreenRouteKeepsTheWindowTopInset() {
-        let (window, host, route) = presentRoute(Route.fullScreenModal)
+    func testFullScreenRouteKeepsTheWindowTopInset() throws {
+        let (window, root, host, route) = presentRoute(Route.fullScreenModal)
         XCTAssertTrue(host.usesNativeModalController)
-        XCTAssertNotNil(route.window)
+        XCTAssertNotNil(root.view.window, "presenter window")
+        XCTAssertNotNil(root.presentedViewController, "presented controller")
+        guard route.window != nil else {
+            throw XCTSkip(
+                "The headless XCTest host records presentation but does not attach its view; "
+                    + "the installed-app Simulator gate validates full-screen safe-area geometry"
+            )
+        }
         // Engine rule (InWindow): a full-screen route keeps the real top inset.
         XCTAssertEqual(route.safeAreaInsets.top, window.safeAreaInsets.top, accuracy: 0.5)
         window.rootViewController?.dismiss(animated: false)

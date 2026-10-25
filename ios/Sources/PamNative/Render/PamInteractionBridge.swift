@@ -77,9 +77,15 @@ final class PamInteractionBridge: NSObject,
         return [UIDragItem(itemProvider: NSItemProvider(object: dragData as NSString))]
     }
 
-    func dragInteraction(_ interaction: UIDragInteraction, sessionDidEnd session: UIDragSession) {
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        session: UIDragSession,
+        didEndWith operation: UIDropOperation
+    ) {
         onDragEnd?()
     }
+
+    func dropInteraction(_ interaction: UIDropInteraction, sessionDidEnd session: UIDropSession) {}
 
     func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
         dropEnabled && session.hasItemsConforming(toTypeIdentifiers: [UTType.text.identifier])

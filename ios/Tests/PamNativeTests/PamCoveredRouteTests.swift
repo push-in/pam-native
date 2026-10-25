@@ -5,9 +5,10 @@ import UIKit
 /// Covered-route policy, native media clock and exact scroll requests
 /// (1.41.0). Mirrors PamCoveredRouteMediaInstrumentedTest,
 /// PamScrollRequestFlingInstrumentedTest and PamMediaClockTest on Android.
+@MainActor
 final class PamCoveredRouteTests: XCTestCase {
     private func window() -> (UIWindow, UIViewController) {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
@@ -38,10 +39,13 @@ final class PamCoveredRouteTests: XCTestCase {
         let route = UIView(frame: window.bounds)
         route.addSubview(leaf)
         host.insert(route, index: 0)
+        drainMainQueue()
         XCTAssertFalse(PamRouteCoverage.isCovered(leaf))
         tabs.selectForTesting(2)
+        drainMainQueue()
         XCTAssertTrue(PamRouteCoverage.isCovered(leaf), "An inactive tab scene covers its routes")
         tabs.selectForTesting(1)
+        drainMainQueue()
         XCTAssertFalse(PamRouteCoverage.isCovered(leaf))
         route.isHidden = true
         XCTAssertTrue(PamRouteCoverage.isCovered(leaf), "A hidden route covers its descendants")
@@ -73,8 +77,8 @@ final class PamCoveredRouteTests: XCTestCase {
         drainMainQueue()
         XCTAssertTrue(media.releasedForCover, "A covered route releases its player")
         XCTAssertFalse(kept.releasedForCover, "keepAliveWhenCovered opts out")
-        route.isHidden = false
-        PamRouteCoverage.notifyChanged()
+        host.operation = 3
+        host.navigate(2)
         drainMainQueue()
         XCTAssertFalse(media.releasedForCover, "The route visible again recreates the player")
     }
@@ -106,14 +110,20 @@ final class PamCoveredRouteTests: XCTestCase {
         defer { window.isHidden = true }
         let list = PamVirtualListView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
         controller.view.addSubview(list)
+        controller.view.layoutIfNeeded()
+        list.layoutIfNeeded()
         list.contentSize = CGSize(width: 390, height: 20_000)
+        XCTAssertGreaterThan(list.primaryMaximumOffset, 1_000)
         list.setContentOffset(CGPoint(x: 0, y: 6_000), animated: true)
         list.scrollToLogicalOffset(0)
         XCTAssertEqual(list.contentOffset.y, 0, "A non-animated request lands exactly at once")
         drainMainQueue()
         XCTAssertEqual(list.contentOffset.y, 0, "Nothing keeps moving after the jump")
         list.scrollToLogicalOffset(1_000, animated: true)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        let deadline = Date().addingTimeInterval(3)
+        while abs(list.contentOffset.y - 1_000) > 0.5, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
         XCTAssertEqual(list.contentOffset.y, 1_000, accuracy: 0.5)
     }
 }

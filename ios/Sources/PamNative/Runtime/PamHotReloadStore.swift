@@ -349,6 +349,10 @@ final class PamHotReloadStore {
         } else {
             try manager.moveItem(at: temporary, to: target)
         }
+        // `replaceItemAt` may preserve metadata from the replaced inode on
+        // APFS. Set the final path as well so OPcache always observes the
+        // strictly increasing whole-second timestamp promised by the store.
+        try manager.setAttributes([.modificationDate: stamp], ofItemAtPath: target.path)
     }
 
     /// Whole seconds (OPcache compares seconds), strictly increasing per apply.

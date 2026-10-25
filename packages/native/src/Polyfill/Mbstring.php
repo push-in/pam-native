@@ -24,7 +24,7 @@ use function strlen;
  * ext-mbstring in plain PHP for the mobile runtimes.
  *
  * PAM's Android and iOS PHP builds do not compile ext-mbstring, so
- * src/Polyfill/mbstring.php (autoloaded by Composer before any application
+ * src/Polyfill/mbstring_functions.php (autoloaded by Composer before any application
  * code) defines every function listed in FUNCTIONS through this class whenever
  * the extension is missing. Behaviour follows PHP 8.5's mbstring: invalid
  * byte sequences are counted and substituted the same way, case mapping uses
@@ -40,7 +40,7 @@ use function strlen;
  */
 final class Mbstring
 {
-    /** Functions defined by src/Polyfill/mbstring.php when ext-mbstring is absent. */
+    /** Functions defined by src/Polyfill/mbstring_functions.php when ext-mbstring is absent. */
     public const array FUNCTIONS = [
         'mb_check_encoding', 'mb_chr', 'mb_convert_case', 'mb_convert_encoding',
         'mb_convert_variables', 'mb_decode_numericentity', 'mb_detect_encoding',

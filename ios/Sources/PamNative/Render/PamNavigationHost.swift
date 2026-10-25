@@ -56,7 +56,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     var headerSearchEnabled = false { didSet { applyControllerChrome() } }
     var headerSearchPlaceholder = "Search" { didSet { applyControllerChrome() } }
     var onSearchChange: ((String) -> Void)? { didSet { applyControllerChrome() } }
-    var screenPresentation = 1
+    var screenPresentation = 1 {
+        didSet { syncControllerStack() }
+    }
     var sheetDetents: [CGFloat] = [1]
     var sheetInitialDetentIndex = 1
     var sheetGrabberVisible = false
@@ -140,6 +142,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         showOnlyTop()
+        syncControllerStack()
     }
 
     /// Moves a route without removing it from the window, so touches in
@@ -155,16 +158,15 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         if navigationController == nil, view.superview === self {
             insertSubview(view, at: min(max(index, 0), max(subviews.count - 1, 0)))
         }
+        showOnlyTop()
+        syncControllerStack()
     }
 
     func removeRoute(_ view: UIView) {
         routeViews.removeAll { $0 === view }
         routeControllers.removeValue(forKey: ObjectIdentifier(view))
         view.removeFromSuperview()
-        if let navigationController {
-            let controllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
-            navigationController.setViewControllers(controllers, animated: false)
-        }
+        syncControllerStack()
     }
 
     func navigate(_ value: Int64) {
@@ -624,8 +626,23 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         navigation.didMove(toParent: parent)
         containerController = parent
         navigationController = navigation
-        let controllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
-        navigation.setViewControllers(controllers, animated: false)
+        syncControllerStack()
+    }
+
+    private func controllerStack() -> [UIViewController] {
+        routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+    }
+
+    /// Route mutations can arrive after this host is already attached. Keep
+    /// UIKit's stack in lockstep immediately; waiting for a later navigation
+    /// revision leaves the initial or prewarmed route outside any window.
+    private func syncControllerStack() {
+        guard let navigationController else { return }
+        let controllers = controllerStack()
+        let baseControllers = screenPresentation == 1 || controllers.count <= 1
+            ? controllers
+            : Array(controllers.dropLast())
+        navigationController.setViewControllers(baseControllers, animated: false)
         applyControllerChrome()
     }
 
@@ -666,7 +683,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             configurePresentation(modal)
             presentedNavigationController = modal
             applyControllerChrome()
-            navigation.present(modal, animated: !PamMotionPolicy.isReduced) { [weak self] in
+            // Present from the host's owning controller. The embedded
+            // navigation controller is a child used only for route stacking;
+            // asking that child to present can be ignored by UIKit when its
+            // containment transition has only just completed.
+            let presenter = containerController ?? navigation
+            presenter.present(modal, animated: !PamMotionPolicy.isReduced) { [weak self] in
                 self?.finish(incoming: incoming, outgoing: outgoing)
             }
             return

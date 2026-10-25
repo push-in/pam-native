@@ -19,7 +19,7 @@ private enum PamReturnKey: Int64 {
     case standard = 1, done, go, next, search, send, none, previous
 }
 
-public final class PamRenderer {
+public final class PamRenderer: @unchecked Sendable {
     static let hiddenCellMountBudget: CFTimeInterval = 0.005
     private var deferredVirtualListSyncs = Set<Int64>()
 
@@ -6351,8 +6351,9 @@ public final class PamRenderer {
                 guard pressInEmitted else { return }
                 pressInEmitted = false
                 guard let pressOutKind else { return }
-                let emit = { [weak self] in
-                    self?.dispatchPressPointer(
+                let emit: () -> Void = { [weak self] in
+                    guard let self else { return }
+                    self.dispatchPressPointer(
                         sender,
                         kind: pressOutKind,
                         locationInView: point,

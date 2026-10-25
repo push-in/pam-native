@@ -596,6 +596,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             }
             self.pending = completion
             self.captureType = type
+            self.pendingMaximumBytes = 64 * 1_024 * 1_024
             let picker = UIImagePickerController()
             picker.delegate = self
             picker.sourceType = .camera
@@ -700,10 +701,11 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
     ) {
         picker.dismiss(animated: true)
+        let maximumBytes = pendingMaximumBytes
         let completion = takePending()
         queue.async {
             if self.captureType == 2, let url = info[.mediaURL] as? URL {
-                self.importFile(url, completion: completion)
+                self.importFile(url, maximumBytes: maximumBytes, completion: completion)
             } else if let image = info[.originalImage] as? UIImage,
                       let data = image.jpegData(compressionQuality: 0.92) {
                 self.store(data, name: "capture.jpg", mime: "image/jpeg", completion: completion)

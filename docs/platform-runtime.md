@@ -28,7 +28,7 @@ device, even when the desktop PHP running `pam dev` has it.
 
 ### mbstring
 
-`pushinbr/pam-native` autoloads `src/Polyfill/mbstring.php` (Composer
+`pushinbr/pam-native` autoloads `src/Polyfill/mbstring_functions.php` (Composer
 `autoload.files`) before any application or package code. It defines each
 function only when it is missing, so a real ext-mbstring (desktop, tests) or an
 application's own polyfill loaded first always wins. The implementation
@@ -61,7 +61,7 @@ functions, `mb_send_mail`, `mb_parse_str` and the HTTP I/O functions.
 Cost: none in the APK/IPA binary; the tables are ~120 KB of PHP loaded on first
 use and cached by OPcache. Typical calls take 1–5 µs on short UI strings.
 
-Why not compile ext-mbstring: measured on PHP 8.5.8 with the NDK 27 flags of
+Why not compile ext-mbstring: measured on PHP 8.5.12 with the NDK 27 flags of
 `runtime-builder/android/build.sh` (`--enable-mbstring --disable-mbregex`, no
 Oniguruma), linked the way the app links `libphp.a` (`--gc-sections`, stripped):
 

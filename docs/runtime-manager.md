@@ -28,7 +28,7 @@ pam mobile runtime:update
 Runtime IDs use `<php-version>-r<revision>`. A PHP security update changes the
 PHP version and resets the revision; a PAM build, patch or flag change increments
 only the runtime revision. Pam Native never publishes a PHP binary. For
-example, `8.5.8-r2` is the second PAM build of the official PHP 8.5.8 source.
+example, `8.5.12-r2` is the second PAM build of the official PHP 8.5.12 source.
 
 Release builds should commit `pam-native.json` and preserve the generated lock
 as a CI artifact. Runtime archives must be published with checksums and must be

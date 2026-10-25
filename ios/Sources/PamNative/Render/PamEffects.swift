@@ -575,7 +575,7 @@ final class PamShimmerLayer: CALayer {
     private let strip = CAGradientLayer()
     private let clip = CAShapeLayer()
     private var color: Int64 = 0x59FF_FFFF
-    private var duration: CFTimeInterval = 1.2
+    private var shimmerDuration: CFTimeInterval = 1.2
     private var animatedWidth: CGFloat = -1
 
     override init() {
@@ -596,9 +596,9 @@ final class PamShimmerLayer: CALayer {
     }
 
     func configure(color: Int64, duration: CFTimeInterval) {
-        let changed = color != self.color || duration != self.duration
+        let changed = color != self.color || duration != shimmerDuration
         self.color = color
-        self.duration = duration
+        shimmerDuration = duration
         let parts = PamARGB.components(color)
         func tone(_ factor: CGFloat) -> CGColor {
             UIColor(red: parts.r, green: parts.g, blue: parts.b, alpha: parts.a * factor).cgColor
@@ -622,7 +622,7 @@ final class PamShimmerLayer: CALayer {
         let sweep = CABasicAnimation(keyPath: "position.x")
         sweep.fromValue = -width / 2
         sweep.toValue = bounds.width + width / 2
-        sweep.duration = duration
+        sweep.duration = shimmerDuration
         sweep.repeatCount = .infinity
         sweep.isRemovedOnCompletion = false
         strip.removeAnimation(forKey: "pam.shimmer")

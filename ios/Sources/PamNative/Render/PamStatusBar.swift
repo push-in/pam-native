@@ -65,12 +65,14 @@ public final class PamStatusBarCoordinator {
         animate: @escaping (TimeInterval, @escaping () -> Void) -> Void = { duration, changes in
             UIView.animate(withDuration: duration, animations: changes)
         },
-        legacy: @escaping (PamStatusBarConfig) -> Void = PamStatusBarCoordinator.applyApplicationStatusBar
+        legacy: ((PamStatusBarConfig) -> Void)? = nil
     ) {
         self.viewControllerBased = viewControllerBased
         self.windows = windows
         self.animate = animate
-        self.legacy = legacy
+        self.legacy = legacy ?? { config in
+            PamStatusBarCoordinator.applyApplicationStatusBar(config)
+        }
     }
 
     /// `UIViewControllerBasedStatusBarAppearance` from Info.plist; UIKit
@@ -155,9 +157,32 @@ public final class PamStatusBarCoordinator {
 
     /// RN `RCTStatusBarManager` (`UIViewControllerBasedStatusBarAppearance`
     /// NO): the application-level, pre-iOS 9 API is the only one honoured.
-    @available(iOS, deprecated: 9.0)
+    /// Resolve these selectors dynamically so modern builds remain warning-free
+    /// while apps that explicitly opt into the legacy plist mode keep working.
     static func applyApplicationStatusBar(_ config: PamStatusBarConfig) {
-        UIApplication.shared.setStatusBarStyle(config.style, animated: config.animated)
-        UIApplication.shared.setStatusBarHidden(config.hidden, with: config.updateAnimation)
+        let application = UIApplication.shared
+        let styleSelector = NSSelectorFromString("setStatusBarStyle:animated:")
+        if application.responds(to: styleSelector) {
+            typealias StyleSetter = @convention(c) (
+                AnyObject,
+                Selector,
+                UIStatusBarStyle,
+                Bool
+            ) -> Void
+            let setter = unsafeBitCast(application.method(for: styleSelector), to: StyleSetter.self)
+            setter(application, styleSelector, config.style, config.animated)
+        }
+
+        let hiddenSelector = NSSelectorFromString("setStatusBarHidden:withAnimation:")
+        if application.responds(to: hiddenSelector) {
+            typealias HiddenSetter = @convention(c) (
+                AnyObject,
+                Selector,
+                Bool,
+                UIStatusBarAnimation
+            ) -> Void
+            let setter = unsafeBitCast(application.method(for: hiddenSelector), to: HiddenSetter.self)
+            setter(application, hiddenSelector, config.hidden, config.updateAnimation)
+        }
     }
 }

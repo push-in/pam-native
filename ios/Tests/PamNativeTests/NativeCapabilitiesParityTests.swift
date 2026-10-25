@@ -50,9 +50,9 @@ final class NativeCapabilitiesParityTests: XCTestCase {
         XCTAssertTrue(PamNotificationTemplate.complete("/chats/{chat}?t={now}", variables))
         XCTAssertFalse(PamNotificationTemplate.complete("/chats/{missing}", variables))
         XCTAssertEqual(
-            PamNotificationTemplate.render("{reply}", ["reply": "a b"]) {
+            PamNotificationTemplate.render("{reply}", ["reply": "a b"], encode: {
                 $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
-            },
+            }),
             "a%20b"
         )
     }

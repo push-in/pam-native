@@ -57,7 +57,10 @@ final class IncomingShareModuleTests: XCTestCase {
                 ))
             } catch { XCTFail("Cannot decode first share: \(error)") }
         }
-        wait(for: [first], timeout: 2)
+        // The first UniformTypeIdentifiers lookup can be cold on a freshly
+        // booted Simulator. Keep the assertion deterministic under the full
+        // suite without changing the module's runtime behaviour.
+        wait(for: [first], timeout: 10)
 
         let second = expectation(description: "next share")
         module.invoke(method: "next", payload: Data()) { status, payload in
@@ -65,7 +68,7 @@ final class IncomingShareModuleTests: XCTestCase {
             XCTAssertEqual(try? WireMap.decode(payload)["text"], .text("next share"))
             second.fulfill()
         }
-        wait(for: [second], timeout: 2)
+        wait(for: [second], timeout: 10)
     }
 
     func testPendingListenerReceivesShareWhenAppBecomesActive() throws {

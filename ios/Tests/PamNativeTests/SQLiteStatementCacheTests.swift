@@ -7,14 +7,14 @@ import XCTest
 /// Uncompiled — needs Mac validation.
 final class SQLiteStatementCacheTests: XCTestCase {
     private let module = SQLiteModule()
-    private let name = "statement-cache-\(UUID().uuidString).db"
+    private let databaseName = "statement-cache-\(UUID().uuidString).db"
 
     override func tearDown() {
         module.close()
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("pam-databases")
         for suffix in ["", "-wal", "-shm"] {
-            try? FileManager.default.removeItem(at: root.appendingPathComponent(name + suffix))
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(databaseName + suffix))
         }
         super.tearDown()
     }
@@ -23,7 +23,7 @@ final class SQLiteStatementCacheTests: XCTestCase {
         let done = expectation(description: method)
         var result: (Bool, [[String: Any]], String) = (false, [], "")
         module.invoke(method: method, payload: (try? WireMap.encode([
-            "database": .text(name), "sql": .text(sql), "arguments": .text(arguments),
+            "database": .text(databaseName), "sql": .text(sql), "arguments": .text(arguments),
         ])) ?? Data()) { status, payload in
             var rows: [[String: Any]] = []
             if case let .text(json)? = (try? WireMap.decode(payload))?["rows"] {

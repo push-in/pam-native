@@ -17,10 +17,10 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "alert":
             do {
                 let values = try WireMap.decode(payload)
-                let title = (values["title"] as? WireValue).flatMap { value in
+                let title = values["title"].flatMap { value in
                     if case let .text(value) = value { value } else { nil }
                 } ?? ""
-                let message = (values["message"] as? WireValue).flatMap { value in
+                let message = values["message"].flatMap { value in
                     if case let .text(value) = value { value } else { nil }
                 } ?? ""
                 let buttons = try PamAlertButtons.decode(values)
@@ -41,7 +41,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "share":
             do {
                 let values = try WireMap.decode(payload)
-                let text = (values["text"] as? WireValue).flatMap { value in
+                let text = values["text"].flatMap { value in
                     if case let .text(value) = value { value } else { nil }
                 } ?? ""
                 share(text: text, completion: completion)
@@ -51,7 +51,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "openUrl":
             do {
                 let values = try WireMap.decode(payload)
-                guard let text = (values["url"] as? WireValue).flatMap({ v in
+                guard let text = values["url"].flatMap({ v in
                     if case let .text(v) = v { v } else { nil }
                 }), let url = safeURL(from: text) else {
                     completion(.failure, "Invalid URL".data(using: .utf8) ?? Data())
@@ -73,7 +73,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "canOpenUrl":
             do {
                 let values = try WireMap.decode(payload)
-                guard let text = (values["url"] as? WireValue).flatMap({ v in
+                guard let text = values["url"].flatMap({ v in
                     if case let .text(v) = v { v } else { nil }
                 }), let url = safeURL(from: text) else {
                     completion(.failure, "Invalid URL".data(using: .utf8) ?? Data())

@@ -23,7 +23,7 @@ $failures = [];
 if (extension_loaded('mbstring')) {
     $failures[] = 'this runtime unexpectedly has ext-mbstring; the polyfill would not be exercised';
 }
-require __DIR__.'/../../src/Polyfill/mbstring.php';
+require __DIR__.'/../../src/Polyfill/mbstring_functions.php';
 
 foreach (Pam\Native\Polyfill\Mbstring::FUNCTIONS as $function) {
     if (!function_exists($function)) {

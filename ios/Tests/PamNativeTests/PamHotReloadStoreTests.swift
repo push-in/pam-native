@@ -41,7 +41,9 @@ final class PamHotReloadStoreTests: XCTestCase {
         try store.apply(plan)
         let edited = store.live.appendingPathComponent("src/A.php")
         XCTAssertEqual(try String(contentsOf: edited), "a")
-        let firstStamp = try edited.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
+        let firstStamp = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: edited.path)[.modificationDate] as? Date
+        )
 
         let second = try manifest(["index.php": "<?php", "src/A.php": "a2"])
         let delta = store.plan(second)
@@ -56,7 +58,9 @@ final class PamHotReloadStoreTests: XCTestCase {
         XCTAssertFalse(store.hasPendingRequest)
         XCTAssertEqual(try String(contentsOf: edited), "a2")
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.live.appendingPathComponent("src/B.php").path))
-        let secondStamp = try edited.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
+        let secondStamp = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: edited.path)[.modificationDate] as? Date
+        )
         XCTAssertGreaterThanOrEqual(secondStamp.timeIntervalSince(firstStamp), 1)
 
         let reopened = PamHotReloadStore(root: root.appendingPathComponent("dev"))

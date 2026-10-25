@@ -143,9 +143,9 @@ enum PamNotificationEndpoint {
             completion(0)
             return
         }
-        let rendered = PamNotificationTemplate.render(template, variables) {
+        let rendered = PamNotificationTemplate.render(template, variables, encode: {
             $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? ""
-        }
+        })
         guard let url = URL(string: rendered), let scheme = url.scheme?.lowercased(), url.host != nil, url.user == nil else {
             completion(0)
             return

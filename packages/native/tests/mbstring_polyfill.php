@@ -5,7 +5,7 @@ declare(strict_types=1);
 /*
  * The mobile runtimes have no ext-mbstring, so the SDK ships
  * Pam\Native\Polyfill\Mbstring (defined as the global mb_* functions by
- * src/Polyfill/mbstring.php). The fixed expectations below were recorded from
+ * src/Polyfill/mbstring_functions.php). The fixed expectations below were recorded from
  * PHP 8.5's ext-mbstring and always run. When the host PHP has ext-mbstring
  * (pam does), every polyfilled function is also compared with the real one
  * over a fixed corpus plus seeded random valid and malformed strings, in
@@ -35,7 +35,7 @@ if (!isset($assert)) {
 }
 
 // Defines MB_CASE_* (and the functions) when the host has no ext-mbstring.
-require_once __DIR__.'/../src/Polyfill/mbstring.php';
+require_once __DIR__.'/../src/Polyfill/mbstring_functions.php';
 
 $polyfill = static fn (string $function, mixed ...$arguments): mixed => Mbstring::$function(...$arguments);
 $capture = static function (callable $call): array {
@@ -90,18 +90,18 @@ $assert(
 );
 
 // The bootstrap only defines what is missing and keeps the MB_CASE_* values.
-$bootstrap = (string) file_get_contents(__DIR__.'/../src/Polyfill/mbstring.php');
+$bootstrap = (string) file_get_contents(__DIR__.'/../src/Polyfill/mbstring_functions.php');
 foreach (Mbstring::FUNCTIONS as $function) {
     $assert(
         str_contains($bootstrap, "if (!function_exists('{$function}')) {\n    function {$function}("),
-        "src/Polyfill/mbstring.php must define {$function}() only when it is missing.",
+        "src/Polyfill/mbstring_functions.php must define {$function}() only when it is missing.",
     );
 }
 $composer = json_decode((string) file_get_contents(__DIR__.'/../composer.json'), true, flags: JSON_THROW_ON_ERROR);
 $rootComposer = json_decode((string) file_get_contents(__DIR__.'/../../../composer.json'), true, flags: JSON_THROW_ON_ERROR);
 $assert(
-    ($composer['autoload']['files'] ?? []) === ['src/Polyfill/mbstring.php']
-        && ($rootComposer['autoload']['files'] ?? []) === ['packages/native/src/Polyfill/mbstring.php'],
+    ($composer['autoload']['files'] ?? []) === ['src/Polyfill/mbstring_functions.php']
+        && ($rootComposer['autoload']['files'] ?? []) === ['packages/native/src/Polyfill/mbstring_functions.php'],
     'Both composer.json files must autoload the mbstring polyfill before application code.',
 );
 

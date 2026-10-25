@@ -147,7 +147,13 @@ final class PamLayoutParityTests: XCTestCase {
     }
 
     func testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt() throws {
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 300))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 300))
+        root.view.addSubview(host)
         let renderer = PamRenderer(hostView: host) { _, _, _ in }
         defer { renderer.close() }
         var mutations: [Mutation] = [
@@ -181,16 +187,28 @@ final class PamLayoutParityTests: XCTestCase {
         XCTAssertEqual(header.frame.minY, 400 + list.adjustedContentInset.top, accuracy: 0.5)
         let row = try XCTUnwrap(host.viewWithTag(17), "the row scrolling under the header")
         XCTAssertTrue(row.frame.contains(CGPoint(x: 50, y: 410)))
+        let headerBackgroundPoint = CGPoint(x: 50, y: header.frame.minY + 10)
+        let headerButtonPoint = CGPoint(x: 150, y: header.frame.minY + 20)
+        let belowHeaderPoint = CGPoint(x: 50, y: header.frame.maxY + 10)
         // The header's own background owns the touch, not the row under it.
-        let background = list.hitTest(CGPoint(x: 50, y: 410), with: nil)
-        XCTAssertTrue(background === header || background?.isDescendant(of: header) == true)
+        let background = list.hitTest(headerBackgroundPoint, with: nil)
+        XCTAssertTrue(
+            background === header || background?.isDescendant(of: header) == true,
+            "hit=\(String(describing: background)) header=\(header.frame) listBounds=\(list.bounds)"
+        )
         // A pressable inside the pinned header is reachable.
         let button = try XCTUnwrap(host.viewWithTag(4))
-        let pressed = list.hitTest(CGPoint(x: 150, y: 420), with: nil)
-        XCTAssertTrue(pressed === button || pressed?.isDescendant(of: button) == true)
+        let pressed = list.hitTest(headerButtonPoint, with: nil)
+        XCTAssertTrue(
+            pressed === button || pressed?.isDescendant(of: button) == true,
+            "hit=\(String(describing: pressed)) button=\(button.frame) header=\(header.frame) listBounds=\(list.bounds)"
+        )
         // Below the header the rows keep receiving touches.
-        let below = list.hitTest(CGPoint(x: 50, y: 470), with: nil)
-        XCTAssertFalse(below === header || below?.isDescendant(of: header) == true)
+        let below = list.hitTest(belowHeaderPoint, with: nil)
+        XCTAssertFalse(
+            below === header || below?.isDescendant(of: header) == true,
+            "hit=\(String(describing: below)) header=\(header.frame) listBounds=\(list.bounds)"
+        )
     }
 
     func testRecycledCellViewsComeBackClean() throws {

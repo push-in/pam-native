@@ -241,6 +241,8 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             finish(status: 2, canAskAgain: true, completion)
         case .denied, .restricted:
             finish(status: 3, canAskAgain: false, completion)
+        case .limited:
+            finish(status: 4, canAskAgain: false, completion)
         @unknown default:
             finish(status: 2, canAskAgain: false, completion)
         }

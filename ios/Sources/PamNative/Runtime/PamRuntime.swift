@@ -16,6 +16,7 @@ private typealias PamNativeCallCallback = @convention(c) (
 ) -> Void
 private typealias PamNativeTypedCallCallback = @convention(c) (UInt64, Int64, Int32, UnsafePointer<UInt8>?, Int) -> Void
 private typealias PamNativeErrorCallback = @convention(c) (UInt64, UnsafePointer<CChar>?) -> Void
+private typealias PamNativeReloadPrepareCallback = @convention(c) (UnsafeMutableRawPointer?) -> Void
 
 private struct EventIdentity: Hashable {
     let nodeId: Int64
@@ -122,6 +123,14 @@ private func pam_native_runtime_dispatch_module_result(
 
 @_silgen_name("pam_native_runtime_reload")
 private func pam_native_runtime_reload(_ handle: UInt64, _ entry: UnsafePointer<CChar>)
+
+@_silgen_name("pam_native_runtime_reload_prepared")
+private func pam_native_runtime_reload_prepared(
+    _ handle: UInt64,
+    _ entry: UnsafePointer<CChar>,
+    _ prepare: PamNativeReloadPrepareCallback,
+    _ context: UnsafeMutableRawPointer?,
+)
 
 @_silgen_name("pam_native_runtime_remount")
 private func pam_native_runtime_remount(_ handle: UInt64, _ on_remount: PamNativeBatchCallback)

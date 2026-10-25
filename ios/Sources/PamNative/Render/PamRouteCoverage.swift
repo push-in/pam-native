@@ -11,16 +11,16 @@ enum PamRouteCoverage {
 
     static func isCovered(_ view: UIView) -> Bool {
         guard view.window != nil else { return true }
-        var child: UIView = view
-        while let parent = child.superview {
-            if child.isHidden, isRouteContainer(parent) { return true }
-            child = parent
+        var current: UIView? = view
+        while let candidate = current {
+            // Native navigation reparents route roots below UIKit's private
+            // container views, so the old parent-type check missed hidden
+            // routes. Any hidden/transparent ancestor makes media and work in
+            // its subtree genuinely invisible and eligible for suspension.
+            if candidate.isHidden || candidate.alpha < 0.01 { return true }
+            current = candidate.superview
         }
         return false
-    }
-
-    private static func isRouteContainer(_ parent: UIView) -> Bool {
-        parent is PamNavigationHost || parent.superview is PamTabHost
     }
 
     /// Coalesced: hosts call this for every route visibility change; observers

@@ -10114,7 +10114,7 @@ mod tests {
             "runtime/catalog.json"
         )));
         assert!(safe_android_runtime_archive_path(Path::new(
-            "runtime/android/8.5.8-r1/x86_64/lib/libphp.a"
+            "runtime/android/8.5.12-r1/x86_64/lib/libphp.a"
         )));
         assert!(safe_android_runtime_archive_path(Path::new(
             "native/target/x86_64-linux-android/release/libpam_native_engine.a"

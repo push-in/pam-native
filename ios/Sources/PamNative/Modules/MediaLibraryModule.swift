@@ -325,7 +325,7 @@ final class MediaLibraryModule: NativeModule {
                 let existing = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options).firstObject
                 let collection = existing.flatMap { PHAssetCollectionChangeRequest(for: $0) }
                     ?? PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: album)
-                collection?.addAssets([placeholder] as NSArray)
+                collection.addAssets([placeholder] as NSArray)
             }) { success, error in
                 guard success, let identifier else {
                     completion(.failure, Data((error?.localizedDescription ?? "Cannot save to Photos").utf8))

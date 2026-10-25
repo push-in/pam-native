@@ -106,12 +106,16 @@ enum PamImageDownsampling {
     /// a 2 GB one 64 MB), between 16 MB and 96 MB.
     static func memoryCacheBytes(physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Int {
         let budget = physicalMemory / 32
-        return Int(min(max(budget, 16 * 1_024 * 1_024), 96 * 1_024 * 1_024))
+        let minimum: UInt64 = 16 * 1_024 * 1_024
+        let maximum: UInt64 = 96 * 1_024 * 1_024
+        return Int(min(max(budget, minimum), maximum))
     }
 
     /// Small inline glyph cache budget: 1/512 of RAM, between 2 MB and 8 MB.
     static func inlineCacheBytes(physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory) -> Int {
         let budget = physicalMemory / 512
-        return Int(min(max(budget, 2 * 1_024 * 1_024), 8 * 1_024 * 1_024))
+        let minimum: UInt64 = 2 * 1_024 * 1_024
+        let maximum: UInt64 = 8 * 1_024 * 1_024
+        return Int(min(max(budget, minimum), maximum))
     }
 }

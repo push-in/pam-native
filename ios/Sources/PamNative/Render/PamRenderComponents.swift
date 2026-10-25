@@ -488,10 +488,23 @@ final class PamVirtualListView: UIScrollView {
             : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
         let offset = min(requested, maximum)
         pamStopDeceleration()
-        if horizontal {
-            setContentOffset(CGPoint(x: offset, y: contentOffset.y), animated: animated)
-        } else {
-            setContentOffset(CGPoint(x: contentOffset.x, y: offset), animated: animated)
+        let target = horizontal
+            ? CGPoint(x: offset, y: contentOffset.y)
+            : CGPoint(x: contentOffset.x, y: offset)
+        guard animated, !PamMotionPolicy.isReduced else {
+            setContentOffset(target, animated: false)
+            return
+        }
+        // A previous UIScrollView animation stopped immediately above can be
+        // coalesced with a new `setContentOffset(animated:)` in the same run
+        // loop, leaving the list at the old offset. An explicit interruptible
+        // UIView animation always starts from the presentation state.
+        UIView.animate(
+            withDuration: 0.25,
+            delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+        ) {
+            self.contentOffset = target
         }
     }
 
@@ -2562,7 +2575,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 }
 
-final class ImageLoadContext {
+final class ImageLoadContext: @unchecked Sendable {
     let nodeId: Int64
     let generation: Int
     let source: String

@@ -117,15 +117,9 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     }
 
     public func close() {
-        if let closable = http as? any ClosableNativeModule {
-            closable.close()
-        }
-        if let closable = storage as? any ClosableNativeModule {
-            closable.close()
-        }
-        if let closable = system as? any ClosableNativeModule {
-            closable.close()
-        }
+        http.close()
+        storage.close()
+        system.close()
         modules.values.forEach { module in
             (module as? any ClosableNativeModule)?.close()
         }

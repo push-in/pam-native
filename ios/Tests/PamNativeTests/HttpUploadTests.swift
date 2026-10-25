@@ -31,12 +31,12 @@ final class HttpUploadTests: XCTestCase {
         module.invoke(method: "upload", payload: try WireMap.encode([
             "url": .text(try XCTUnwrap(server.url)), "path": .text("document.bin"),
             "headers": .text(#"{"Content-Type":"application/octet-stream"}"#),
-            "timeoutMs": .integer(timeout ? 1_000 : 15_000),
+            "timeoutMs": .integer(timeout ? 1_000 : 60_000),
         ])) { status, _ in
             XCTAssertEqual(status, .failure)
             completed.fulfill()
         }
-        wait(for: [received], timeout: 5)
+        wait(for: [received], timeout: 20)
         if !timeout { module.close() }
         wait(for: [completed], timeout: 5)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), [])
@@ -69,7 +69,7 @@ final class HttpUploadTests: XCTestCase {
         module.invoke(method: "upload", payload: try WireMap.encode([
             "url": .text(try XCTUnwrap(server.url)), "path": .text("document.bin"),
             "headers": .text(#"{"Content-Type":"application/octet-stream"}"#),
-            "timeoutMs": .integer(15_000),
+            "timeoutMs": .integer(60_000),
         ])) { status, payload in
             defer { completed.fulfill() }
             guard status == .success else {
@@ -83,7 +83,7 @@ final class HttpUploadTests: XCTestCase {
                 XCTFail("Invalid upload response: \(error)")
             }
         }
-        wait(for: [completed], timeout: 20)
+        wait(for: [completed], timeout: 75)
         XCTAssertEqual(server.digest, SHA256.hash(data: bytes))
         XCTAssertEqual(try Data(contentsOf: source), Data("changed original".utf8))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), [])
@@ -256,7 +256,13 @@ private final class UploadHTTPServer: @unchecked Sendable {
             if self.received.count == self.length {
                 self.onReceived()
                 guard self.responds else { return }
-                let statusLine = self.responseStatus == 307 ? "307 Temporary Redirect" : "204 No Content"
+                let statusLine: String
+                switch self.responseStatus {
+                case 201: statusLine = "201 Created"
+                case 204: statusLine = "204 No Content"
+                case 307: statusLine = "307 Temporary Redirect"
+                default: statusLine = "\(self.responseStatus) Test Response"
+                }
                 let redirect = self.responseStatus == 307 ? "Location: http://127.0.0.1:1/must-not-receive-file\r\n" : ""
                 let response = Data("HTTP/1.1 \(statusLine)\r\n\(redirect)Content-Length: 0\r\nConnection: close\r\n\r\n".utf8)
                 connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })

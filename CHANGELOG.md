@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- PHP SDK: the ext-mbstring polyfill functions moved from
+  `src/Polyfill/mbstring.php` to `src/Polyfill/mbstring_functions.php`. The old
+  name differed from the `Mbstring` class file only by case, so on
+  case-insensitive filesystems (macOS APFS, exFAT, Windows) one of the two files
+  silently replaced the other and `mb_*` calls or the `Mbstring` class went
+  missing on device. Composer `autoload.files` now points at the new name.
+- Runtime catalog: PHP 8.4.27 and 8.5.12 (security releases) replace 8.4.23 and
+  8.5.8 on Android and iOS.
+
 ## 1.43.1 - 2026-10-15
 
 - Android baseline profile covers Media3 (ExoPlayer, common, decoder,

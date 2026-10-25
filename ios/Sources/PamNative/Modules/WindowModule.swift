@@ -315,9 +315,12 @@ private final class PrefetchWaiter<Value>: @unchecked Sendable {
         semaphore.signal()
     }
 
-    func wait() -> Value? {
+    func wait() -> Value {
         semaphore.wait()
-        return value
+        // `resolve` stores the value before signalling the semaphore, so a
+        // completed wait always has a value. Keeping Optional inside `Value`
+        // still lets callers deliberately resolve `nil` (for example Data?).
+        return value!
     }
 }
 

@@ -46,7 +46,7 @@ final class PamStatusBarTests: XCTestCase {
         root.addChild(child)
         root.view.addSubview(child.view)
         child.didMove(toParent: root)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
         window.rootViewController = root
         var animations = 0
         var legacyCalls = 0
@@ -92,12 +92,16 @@ final class PamStatusBarTests: XCTestCase {
     }
 
     func testOnlyShownStatusBarsAreActive() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
         let route = UIView()
         let bar = UIView()
         route.addSubview(bar)
         XCTAssertFalse(PamRenderer.isStatusBarActive(bar), "not in a window")
-        window.addSubview(route)
+        root.view.addSubview(route)
         XCTAssertTrue(PamRenderer.isStatusBarActive(bar))
         route.isHidden = true
         XCTAssertFalse(PamRenderer.isStatusBarActive(bar), "an inactive route")
@@ -105,7 +109,7 @@ final class PamStatusBarTests: XCTestCase {
         let modal = PamModalHost(frame: window.bounds)
         let modalBar = UIView()
         modal.addSubview(modalBar)
-        window.addSubview(modal)
+        root.view.addSubview(modal)
         modal.setVisible(true)
         XCTAssertTrue(PamRenderer.isStatusBarActive(modalBar), "an opening modal")
         modal.setVisible(false)
@@ -113,9 +117,13 @@ final class PamStatusBarTests: XCTestCase {
     }
 
     func testRendererStacksScreenAndModalStatusBars() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
         let host = UIView(frame: window.bounds)
-        window.addSubview(host)
+        root.view.addSubview(host)
         let renderer = PamRenderer(hostView: host, dispatchEvent: { _, _, _ in })
         renderer.commit([[
             .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
