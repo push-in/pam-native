@@ -92,6 +92,36 @@ final class PamTouchParityTests: XCTestCase {
         XCTAssertEqual(host.hitTest(CGPoint(x: 50, y: 230), with: nil)?.tag, 1)
     }
 
+    func testPressableContentContainersAreTouchTransparent() throws {
+        // Android: a Row/Column inside a Pressable has no click listener, so a
+        // touch on it reaches the Pressable. UIControl only tracks touches whose
+        // hit view is the control, so iOS containers must not claim the touch.
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .pressable, properties: [PamConstants.onPress: .flag(true)])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .row, properties: [:])),
+            .create(NodeSpec(id: 4, parent: 3, index: 0, kind: .column, properties: [:])),
+            .create(NodeSpec(id: 5, parent: 4, index: 0, kind: .text, properties: [PamConstants.text: .text("Open")])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 320, height: 480)),
+            .layout(id: 2, frame: Frame(x: 20, y: 20, width: 280, height: 116)),
+            .layout(id: 3, frame: Frame(x: 16, y: 16, width: 248, height: 84)),
+            .layout(id: 4, frame: Frame(x: 0, y: 0, width: 200, height: 84)),
+            .layout(id: 5, frame: Frame(x: 0, y: 0, width: 200, height: 24)),
+            .setRoot(1),
+        ]])
+        // Text, column and row points all resolve to the pressable.
+        XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 46), with: nil)?.tag, 2, "text")
+        XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 100), with: nil)?.tag, 2, "column")
+        XCTAssertEqual(host.hitTest(CGPoint(x: 260, y: 100), with: nil)?.tag, 2, "row")
+        XCTAssertEqual(host.hitTest(CGPoint(x: 290, y: 130), with: nil)?.tag, 2, "padding")
+        // A container with its own press handler still receives the touch.
+        renderer.commit([[.update(id: 4, key: PamConstants.onPress, value: .flag(true))]])
+        XCTAssertEqual(host.hitTest(CGPoint(x: 60, y: 100), with: nil)?.tag, 4, "column with onPress")
+    }
+
     // MARK: ActivityIndicator
 
     func testActivityIndicatorColorSizeAndStopHide() throws {

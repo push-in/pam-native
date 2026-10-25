@@ -42,10 +42,22 @@ protocol PamPointerEventsHost: AnyObject {
 /// Plain layout container (View/Row/Column/Screen/Spacer).
 final class PamContainerView: UIView, PamPointerEventsHost {
     var pamPointerEvents = PamPointerEvents.auto
+    /// Row/Column/View/Spacer content containers; screens and keyboard hosts
+    /// keep claiming touches so empty screen areas behave as before.
+    var pamTouchTransparentWhenIdle = false
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         PamPointerEvents.hitTest(self, mode: pamPointerEvents) {
-            super.hitTest(point, with: event)
+            let hit = super.hitTest(point, with: event)
+            // A plain Row/Column/View with no handlers of its own is
+            // touch-transparent, like an Android View without listeners: the
+            // touch reaches the Pressable above it. UIControl only tracks a
+            // touch whose hit view is the control itself, so a container that
+            // claimed the touch would swallow every press on its content.
+            if hit === self, pamTouchTransparentWhenIdle, (gestureRecognizers ?? []).isEmpty {
+                return nil
+            }
+            return hit
         }
     }
 }

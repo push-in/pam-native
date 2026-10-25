@@ -23,6 +23,16 @@
   duration/easing; `Pressable` `pressRetentionOffset`. Each group ships XCTest
   coverage (`PamListScrollPropParityTests`, `PamInputParityTests`,
   `PamTouchParityTests`).
+- iOS: a `Pressable` only responded on its own padding. Touches on its
+  `Row`/`Column`/`View` content were claimed by the container view, and
+  `UIControl` only tracks a touch whose hit view is the control itself, so the
+  press never fired (the gallery cards of the showcase did nothing). Content
+  containers without handlers of their own are now touch-transparent like an
+  Android `View` without listeners; a container with its own `onPress`/gesture
+  still receives the touch. XCTest `testPressableContentContainersAreTouchTransparent`.
+- iOS: `StatusBar` `backgroundColor` paints the band behind the status bar like
+  Android (`translucent` keeps it off), so light-on-dark bars stay readable on
+  light screens.
 - iOS host: a `PamSceneDelegate` now receives URL opens, cold-start URLs and
   `NSUserActivity` continuations. Since the `UIApplicationSceneManifest` was
   added in 1.30.0, UIKit delivered those only to a scene delegate, so custom

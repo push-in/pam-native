@@ -1490,8 +1490,12 @@ public final class PamRenderer: @unchecked Sendable {
                 self.children[spec.id]?.forEach { self.applyLayout($0) }
             }
             return view
-        case .screen, .column, .row, .view, .keyboardAvoidingView, .inputAccessoryView:
+        case .screen, .keyboardAvoidingView, .inputAccessoryView:
             return PamContainerView()
+        case .column, .row, .view:
+            let container = PamContainerView()
+            container.pamTouchTransparentWhenIdle = true
+            return container
         case .pressable:
             return PamPressButton(type: .system)
         case .button:
@@ -1518,7 +1522,9 @@ public final class PamRenderer: @unchecked Sendable {
             }
             return list
         case .spacer:
-            return PamContainerView()
+            let spacer = PamContainerView()
+            spacer.pamTouchTransparentWhenIdle = true
+            return spacer
         case .activityIndicator:
             return PamVuetifySpinner()
         case .toggle:
