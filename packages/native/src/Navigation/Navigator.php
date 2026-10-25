@@ -437,6 +437,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($this->operation === NavigationOperation::Idle && count($this->stack) > 1) {
             $entries[] = $this->stack[count($this->stack) - 2];
         }
+        // A restored or reset stack has no outgoing route and no transition to
+        // settle into Idle, so the entry below the top is mounted here too:
+        // the iOS back gesture (and Android's predictive back) needs it.
+        if ($this->operation === NavigationOperation::Reset && $this->outgoing === null && count($this->stack) > 1) {
+            $entries[] = $this->stack[count($this->stack) - 2];
+        }
         if ($this->operation === NavigationOperation::Replace && $this->outgoing !== null) {
             $entries[] = $this->outgoing;
         }

@@ -30,6 +30,10 @@
   containers without handlers of their own are now touch-transparent like an
   Android `View` without listeners; a container with its own `onPress`/gesture
   still receives the touch. XCTest `testPressableContentContainersAreTouchTransparent`.
+- Navigator: a restored (or reset) stack mounts the route below the top like
+  an idle stack does. After a cold start into a persisted sub-route the iOS
+  back gesture had nothing to reveal and stayed inert until the next
+  navigation; Android's system back hid this.
 - iOS: the back gesture is a screen-edge recognizer that scroll views wait
   for (UIKit's own interactive-pop rule). The previous plain pan never
   received the touch on screens with a `ScrollView`/list, so edge-swipe back

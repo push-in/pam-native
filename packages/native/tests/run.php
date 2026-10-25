@@ -6569,6 +6569,10 @@ $assert(
     $restoredNavigator->current()->integer('id') === 42,
     'Navigator persistence must preserve route parameters.',
 );
+$assert(
+    count($restoredNavigator->render()->children()) === 2,
+    'A restored stack must mount the route below the top so the back gesture can reveal it.',
+);
 $tamperedNavigation = $savedNavigation;
 $tamperedNavigation['stack'][1]['params']['id'] = 999;
 $checksumProtectedNavigator = Router::stack('home')
