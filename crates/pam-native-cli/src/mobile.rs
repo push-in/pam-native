@@ -7349,7 +7349,10 @@ fn capture_native_diagnostics(options: NativeDiagnosticsOptions) -> Result<u8, S
 
 fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
     const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024;
-    const ATTEMPTS: usize = 30;
+    // A debug host may still be finishing a cold launch on slower machines.
+    // Match Android's robust diagnostics flow instead of failing after only
+    // 1.5 seconds while the Simulator is still activating the application.
+    const ATTEMPTS: usize = 200;
 
     let (root, manifest) = load_project_manifest(&project_path)?;
     let simulator = booted_ios_simulator()?;
@@ -10956,6 +10959,7 @@ mod bundle_exclusion_tests {
     #[test]
     fn ios_link_host_hooks_cover_cold_warm_universal_and_diagnostics() {
         let host = include_str!("../../../ios-host/App/PamAppDelegate.swift");
+        let project = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
         assert!(
             host.find("PamLinking.captureInitial(url)").unwrap()
                 < host.find("runtime.start(").unwrap()
@@ -10967,5 +10971,15 @@ mod bundle_exclusion_tests {
         assert_eq!(host.matches("PamLinking.open(url)").count(), 2);
         assert!(host.contains("publishDiagnostics(snapshot, requestID: requestID)"));
         assert!(host.contains("CFBundleURLSchemes"));
+        assert_eq!(
+            project.matches("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG").count(),
+            3,
+            "every Debug scope must compile the host and UI driver diagnostic hooks"
+        );
+        assert_eq!(
+            project.matches("SWIFT_OPTIMIZATION_LEVEL = \"-Onone\"").count(),
+            3,
+            "Debug builds must remain debuggable and must not inherit Release optimisation"
+        );
     }
 }

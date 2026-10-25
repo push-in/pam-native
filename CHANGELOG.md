@@ -52,6 +52,10 @@
   added in 1.30.0, UIKit delivered those only to a scene delegate, so custom
   scheme deep links, universal links and `pam mobile ios:diagnostics` /
   `ios:devtools` never reached the application delegate on iOS.
+- iOS host: generated Debug projects now explicitly compile with `DEBUG` and
+  `-Onone`, keeping diagnostics and developer tooling available even when the
+  embedding Xcode environment does not supply those defaults. Diagnostics
+  also tolerate a slower Simulator cold launch before reporting no snapshot.
 - iOS host: a `PamNativeUITests` target (`ios-host/UITests/PamUIDriverTests.swift`)
   drives the installed application from a JSON step list
   (`TEST_RUNNER_PAM_UI_SCRIPT`: tap by label/identifier/coordinates, swipe,
