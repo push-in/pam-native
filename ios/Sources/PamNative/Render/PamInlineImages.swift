@@ -25,12 +25,55 @@ enum PamInlineImages {
         if let cached = cache.object(forKey: key) {
             return cached
         }
-        guard let data = decode(source), let image = UIImage(data: data) else { return nil }
+        guard let data = decode(source),
+              let image = PamAnimatedImage.image(data: data, targetSize: .zero) ?? UIImage(data: data) else {
+            return nil
+        }
         if source.utf16.count <= cachedMaxCharacters {
             let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
             cache.setObject(image, forKey: key, cost: cost)
         }
         return image
+    }
+
+    /// Packaged `asset://` files up to this size (icon masks, Zé Chat's
+    /// `assets/icons`) decode in the frame and share the inline cache, like
+    /// Android's `INLINE_SYNC_MAX_CHARS` assets: cells re-mounting the same
+    /// icon never read and decode the file again, nor wait behind photos.
+    static let assetSyncMaxBytes = 16 * 1_024
+    private static let assetLock = NSLock()
+    /// Remembers which asset paths are larger than `assetSyncMaxBytes`.
+    private static var largeAssets: Set<String> = []
+    private static let largeAssetsMax = 1_024
+
+    static func smallAsset(_ source: String, url: URL) -> UIImage? {
+        let key = source as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        assetLock.lock()
+        let known = largeAssets.contains(source)
+        assetLock.unlock()
+        if known { return nil }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
+        guard size <= assetSyncMaxBytes, let data = try? Data(contentsOf: url) else {
+            assetLock.lock()
+            if largeAssets.count >= largeAssetsMax { largeAssets.removeAll() }
+            largeAssets.insert(source)
+            assetLock.unlock()
+            return nil
+        }
+        guard let image = PamAnimatedImage.image(data: data, targetSize: .zero) ?? UIImage(data: data) else {
+            return nil
+        }
+        let decoded = image.pamAnimation == nil ? (image.preparingForDisplay() ?? image) : image
+        decoded.pamAnimation = image.pamAnimation
+        let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+        cache.setObject(decoded, forKey: key, cost: max(cost, 1))
+        return decoded
+    }
+
+    /// A small asset already decoded (no bundle lookup, no file read).
+    static func cachedAsset(_ source: String) -> UIImage? {
+        cache.object(forKey: source as NSString)
     }
 
     static func decode(_ source: String) -> Data? {

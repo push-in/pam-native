@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+- iOS media parity with Android (`PamMediaView.kt`, `NativeImageLoader.kt`,
+  the `fix/critical-20261014` and `fix/ui-polish` media fixes):
+  - Animated GIF, WebP, APNG and HEICS (animated emoji, the GIF panel, WebP
+    stickers) now play instead of freezing on the first frame. Frames decode
+    on demand through `CGImageSource` at the covering view size, on a
+    background queue, with a small per-animation frame cache (6 MB) that is
+    purged on memory warnings. One shared 30 Hz display link drives every
+    animation and stops when none is attached; time only advances while the
+    image is really on screen (window, no hidden/transparent ancestor, inside
+    the window bounds). Animations loop forever like `AnimatedImageDrawable`.
+  - `MediaPlayer` `thumbnail()` is drawn as a poster over the video until its
+    first frame is ready (cached as `<cacheKey>:thumbnail`, like Android), and
+    the view is transparent instead of black, so feed, reels and stories no
+    longer flash a black box while the video loads.
+  - A tap on a video no longer toggles play/pause. As on Android it only shows
+    the controls when `controls=true`; with `controls=false` touches reach the
+    app's own gestures (mute, double-tap like, hold to pause).
+  - Videos without controls render through a bare `AVPlayerLayer`; an
+    `AVPlayerViewController` is created only while `controls=true`.
+  - A paused player (`autoPlay=false`) and paused seeks draw the exact frame
+    at `currentTime` (zero-tolerance seek, Android `SEEK_CLOSEST`).
+  - A playing video hidden without a coverage notification (hidden or
+    transparent ancestor) is released after 5 s and recreated at the same
+    position when shown (Android `HIDDEN_RELEASE_MS`).
+  - WebM/Matroska sources (no AVFoundation demuxer) create no player and
+    download nothing: the poster stays and `on:error` reports
+    "WebM video is not supported on iOS" so the app can show its fallback
+    (for example a WebM sticker's static image). Android keeps playing them.
+  - The image/media disk cache keeps at most 256 MB (was 512 MB; a node's
+    `cacheMaxBytes` can lower it, never raise it) and never trims the newest
+    file, matching `NativeMediaFileCache`.
+  - Packaged `asset://` images of at most 16 KiB (icon masks) decode once and
+    stay in the inline glyph cache, like Android's synchronous small assets.
+  - XCTest: `PamAnimatedImageTests`, `PamMediaParityTests`.
+
 ## 1.44.0 - 2026-10-26
 
 - PHP SDK: the ext-mbstring polyfill functions moved from

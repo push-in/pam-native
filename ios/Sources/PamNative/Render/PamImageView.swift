@@ -82,7 +82,61 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
         set {
             original = newValue
             super.image = newValue.map(displayed)
+            setAnimation(newValue?.pamAnimation)
         }
+    }
+
+    // MARK: Animated GIF/WebP (Android `AnimatedImageDrawable` parity)
+
+    private var animationPlayer: PamAnimatedImagePlayer?
+
+    /// True while an animated image is attached to a window and ticking.
+    var isAnimatingImage: Bool { animationPlayer != nil && window != nil }
+    var animationFrameIndex: Int { animationPlayer?.frameIndex ?? 0 }
+    var animationElapsed: TimeInterval { animationPlayer?.elapsed ?? 0 }
+
+    private func setAnimation(_ animation: PamAnimatedImage?) {
+        guard animation !== animationPlayer?.animation else { return }
+        animationPlayer = animation.map { animation in
+            PamAnimatedImagePlayer(animation: animation) { [weak self] frame in
+                self?.showAnimationFrame(frame)
+            }
+        }
+        syncAnimationClock()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        syncAnimationClock()
+    }
+
+    private func syncAnimationClock() {
+        if animationPlayer != nil, window != nil {
+            PamAnimatedImageClock.shared.register(self)
+        } else {
+            PamAnimatedImageClock.shared.unregister(self)
+        }
+    }
+
+    /// On screen for real: in a window, no hidden or transparent ancestor
+    /// (covered route, inactive tab) and inside the window bounds (cells
+    /// scrolled away keep their place in the window but are not drawn).
+    var isAnimationVisible: Bool {
+        guard let window, !PamRouteCoverage.isCovered(self) else { return false }
+        return convert(bounds, to: window).intersects(window.bounds)
+    }
+
+    func advanceAnimation(by delta: TimeInterval) {
+        animationPlayer?.advance(by: delta)
+    }
+
+    func purgeAnimationFrames() {
+        animationPlayer?.animation.purgeFrames()
+    }
+
+    private func showAnimationFrame(_ frame: CGImage) {
+        // `original` stays the first frame (recycling, filters, tint).
+        super.image = displayed(UIImage(cgImage: frame))
     }
 
     /// The unfiltered bitmap last assigned by the renderer.
