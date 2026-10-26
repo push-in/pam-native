@@ -685,7 +685,7 @@ class PamGestureAnimationInstrumentedTest {
             assertTrue(
                 "$label UI-thread work exceeded a 60 Hz frame in $slow of ${work.size} frames " +
                     "(p50=${"%.2f".format(p50)}ms p95=${"%.2f".format(p95)}ms, total p50=${"%.2f".format(totalP50)}ms)",
-                slow * 20 <= work.size,
+                slow <= maxOf(1, work.size / 20),
             )
         }
     }

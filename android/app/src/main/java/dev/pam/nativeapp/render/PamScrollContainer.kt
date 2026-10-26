@@ -522,6 +522,21 @@ internal class PamScrollContainer @JvmOverloads constructor(
     fun snapshotOffsetPixels(): Pair<Int, Int> =
         scrollXOf(activeScroll) to scrollYOf(activeScroll)
 
+    fun preserveOffsetAfterUnchangedKeyboardInsets() {
+        if (hasRequestedOffsetX || hasRequestedOffsetY) return
+        val (x, y) = snapshotOffsetPixels()
+        activeScroll.postOnAnimation {
+            if (
+                isAttachedToWindow &&
+                !hasRequestedOffsetX &&
+                !hasRequestedOffsetY &&
+                keyboardAvoidanceInsetPx > 0
+            ) {
+                activeScroll.scrollTo(x, y)
+            }
+        }
+    }
+
     fun restoreOffsetPixels(x: Int, y: Int) {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
         val targetOffset = if (horizontal) x else y

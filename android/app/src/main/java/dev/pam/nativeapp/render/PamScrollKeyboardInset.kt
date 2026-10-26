@@ -73,7 +73,10 @@ internal class PamScrollKeyboardInset(
         val overlap = (ime - below).coerceAtLeast(0)
         val next = if (overlap > 0) overlap + extraInsetPx else 0
         // Repeated unchanged insets must not undo a user's manual scroll.
-        if (next == scroll.keyboardAvoidanceInsetPixels()) return
+        if (next == scroll.keyboardAvoidanceInsetPixels()) {
+            if (next > 0) scroll.preserveOffsetAfterUnchangedKeyboardInsets()
+            return
+        }
         scroll.setKeyboardAvoidanceInset(next)
         if (next > 0) scroll.findFocus()?.let(scroll::ensureKeyboardTargetVisible)
     }
