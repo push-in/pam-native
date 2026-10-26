@@ -80,6 +80,11 @@ $assert($polyfill('mb_convert_encoding', "aé\xFF", 'ASCII') === 'a&#xE9;?', 'Su
 $polyfill('mb_substitute_character', 'none');
 $assert($polyfill('mb_scrub', "a\xFFb") === 'ab', 'Substitution mode "none" must drop invalid sequences.');
 $polyfill('mb_substitute_character', 0x3F);
+$assert(
+    $polyfill('mb_convert_encoding', hex2bin('dff0'), 'UTF-8', 'UCS-2BE') === '?'
+        && $polyfill('mb_convert_encoding', hex2bin('f0df'), 'UTF-8', 'UCS-2LE') === '?',
+    'PHP 8.5 UCS-2 conversion must substitute isolated surrogate code units.',
+);
 
 $converted = ['x' => "caf\xE9"];
 $second = "na\xEFve";
