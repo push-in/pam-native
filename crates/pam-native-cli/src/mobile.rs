@@ -10972,12 +10972,16 @@ mod bundle_exclusion_tests {
         assert!(host.contains("publishDiagnostics(snapshot, requestID: requestID)"));
         assert!(host.contains("CFBundleURLSchemes"));
         assert_eq!(
-            project.matches("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG").count(),
+            project
+                .matches("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG")
+                .count(),
             3,
             "every Debug scope must compile the host and UI driver diagnostic hooks"
         );
         assert_eq!(
-            project.matches("SWIFT_OPTIMIZATION_LEVEL = \"-Onone\"").count(),
+            project
+                .matches("SWIFT_OPTIMIZATION_LEVEL = \"-Onone\"")
+                .count(),
             3,
             "Debug builds must remain debuggable and must not inherit Release optimisation"
         );
