@@ -1157,7 +1157,6 @@ final class Mbstring
         $words = $whole > 0 ? array_values(unpack($format.'*', substr($string, 0, $whole)) ?: []) : [];
         $utf16 = str_starts_with($name, 'UTF-16');
         $utf32 = str_starts_with($name, 'UTF-32');
-        $ucs2 = str_starts_with($name, 'UCS-2');
         $units = [];
         $count = count($words);
         for ($index = 0; $index < $count; $index++) {
@@ -1187,9 +1186,7 @@ final class Mbstring
             } elseif ($utf32) {
                 $units[] = $word < 0x110000 && ($word < 0xD800 || $word > 0xDFFF) ? self::character($word) : self::BAD;
             } else {
-                $units[] = $word === 0xFFFFFFFF || ($ucs2 && $word >= 0xD800 && $word <= 0xDFFF)
-                    ? self::BAD
-                    : self::unit($word);
+                $units[] = $word === 0xFFFFFFFF ? self::BAD : self::unit($word);
             }
         }
         if ($whole !== $length) {
@@ -1214,7 +1211,8 @@ final class Mbstring
             foreach ($units as $unit) {
                 if (is_string($unit)) {
                     $out .= $unit;
-                } elseif ($unit !== self::BAD && $unit < 0x110000) {
+                } elseif ($unit !== self::BAD && $unit < 0x110000
+                    && ($unit < 0xD800 || $unit > 0xDFFF)) {
                     $out .= self::character($unit);
                 } else {
                     $out .= self::failure($unit, $name);
