@@ -96,7 +96,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
                 try? Data([1]).write(to: self.pin(identity), options: .atomic)
             }
             self.remember(data, identity: identity)
-            self.trim(limit: limit > 0 ? limit : 512 * 1024 * 1024)
+            self.trim(limit: limit)
             completion?(FileManager.default.fileExists(atPath: target.path))
         }
     }
@@ -161,7 +161,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
                     do {
                         try FileManager.default.moveItem(at: temporary, to: target)
                         if pinned { try? Data([1]).write(to: self.pin(identity), options: .atomic) }
-                        self.trim(limit: 512 * 1024 * 1024)
+                        self.trim(limit: 0)
                         self.finish(identity, .success(Resolution(url: target, hit: false)))
                     } catch {
                         self.finish(identity, .failure(error))
@@ -272,14 +272,40 @@ final class PamMediaDiskCache: @unchecked Sendable {
             .sorted {
                 ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
             }
-        var size: Int64 = 0
-        for file in media {
-            size += Int64(file.fileSize ?? 0)
-            if size > min(max(limit, 16 * 1024 * 1024), 4 * 1024 * 1024 * 1024),
-               !FileManager.default.fileExists(atPath: pinForFile(file).path) {
-                try? FileManager.default.removeItem(at: file)
+        let evicted = Self.evictions(
+            sizesNewestFirst: media.map { Int64($0.fileSize ?? 0) },
+            pinned: media.map { FileManager.default.fileExists(atPath: pinForFile($0).path) },
+            limit: limit
+        )
+        for index in evicted {
+            try? FileManager.default.removeItem(at: media[index])
+        }
+    }
+
+    /// Directory budget, Android `NativeMediaFileCache` parity: 256 MB by
+    /// default (the RN app's media/image disk budget); a node's
+    /// `cacheMaxBytes` may lower it to 16 MB but never raise it past 256 MB.
+    static let defaultDiskBytes: Int64 = 256 * 1_024 * 1_024
+    static let minimumDiskBytes: Int64 = 16 * 1_024 * 1_024
+
+    static func diskBudget(limit: Int64) -> Int64 {
+        min(max(limit > 0 ? limit : defaultDiskBytes, minimumDiskBytes), defaultDiskBytes)
+    }
+
+    /// Indexes (newest first) of files to delete so the directory fits the
+    /// budget. The newest file is the one being handed to a player or image
+    /// view and pinned files are kept for offline use: neither is deleted.
+    static func evictions(sizesNewestFirst sizes: [Int64], pinned: [Bool], limit: Int64) -> [Int] {
+        let budget = diskBudget(limit: limit)
+        var total: Int64 = 0
+        var result: [Int] = []
+        for (index, size) in sizes.enumerated() {
+            total += size
+            if index > 0, total > budget, !(index < pinned.count && pinned[index]) {
+                result.append(index)
             }
         }
+        return result
     }
 
     private func file(_ identity: String) -> URL {

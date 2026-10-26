@@ -364,3 +364,24 @@ Mac validation (not compiled on Linux):
 - `swift test --filter DeviceStatusChangesTests`.
 - On a device, `DeviceStatus::watch(fn, 3_000)`: one callback at start, none
   while nothing changes; toggling Wi-Fi or Low Power Mode delivers one.
+
+## Animated images, video posters and media taps (Unreleased)
+
+Compiled and unit-tested on the Simulator (`PamAnimatedImageTests`,
+`PamMediaParityTests`). Validate on an iPhone:
+
+- Zé Chat emoji panel and chat bubbles: animated Noto emoji (`512.webp`),
+  GIFs and WebP stickers animate; scrolling them away stops their decoding
+  (Instruments Time Profiler shows no `dev.pam.image.animated` work for
+  off-screen cells) and memory stays flat after 10 open/close cycles.
+- Feed, reels and stories: no black box before the first frame; the
+  `thumbnail()` poster shows until the video draws. Single tap on a reel runs
+  the app's action (mute/pause) and never also toggles playback; double-tap
+  like and hold-to-pause work.
+- WebM stickers: AVFoundation has no WebM demuxer, so `MediaPlayer` with a
+  `.webm`/`.mkv` source creates no player and downloads nothing; it keeps the
+  poster and emits `on:error` with "WebM video is not supported on iOS". Apps
+  show a static fallback (Zé Chat `ChatSticker`) or serve MP4/HEVC with alpha
+  to iOS. Android plays WebM through ExoPlayer.
+- Hidden (not covered) videos release their decoder after 5 s and resume at
+  the same position when shown.
