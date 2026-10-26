@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- iOS manifest: `ios.usageDescriptions` (NS*UsageDescription privacy strings
+  the app needs, e.g. Photos, Contacts, Location, Face ID; app values override
+  plugin defaults), `ios.orientations` (portrait-only apps) and
+  `ios.bundleIdentifier` (an iOS id that differs from `applicationId`, used for
+  the app, extensions, App Group, launch and diagnostics). Without the privacy
+  strings iOS terminated the app the first time it asked for Photos, Contacts,
+  Location or Face ID.
+
 ## 1.44.0 - 2026-10-26
 
 - PHP SDK: the ext-mbstring polyfill functions moved from

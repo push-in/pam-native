@@ -213,6 +213,34 @@
                         "pattern": "^applinks:(?:\\*\\.)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
                     },
                     "description": "Universal-link entitlements, e.g. applinks:example.com. Requires Associated Domains capability and a matching apple-app-site-association document. Merges with plugin entitlements."
+                },
+                "bundleIdentifier": {
+                    "type": "string",
+                    "maxLength": 155,
+                    "pattern": "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$",
+                    "description": "iOS bundle identifier when it differs from applicationId (for example an App Store app published under another id). Used for the app, its extensions, App Group, launch and diagnostics."
+                },
+                "usageDescriptions": {
+                    "type": "object",
+                    "maxProperties": 64,
+                    "propertyNames": {
+                        "pattern": "^(?:NS[A-Za-z0-9]+UsageDescription|NFCReaderUsageDescription)$"
+                    },
+                    "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                    },
+                    "description": "Privacy strings the app needs, e.g. NSPhotoLibraryUsageDescription, NSContactsUsageDescription, NSLocationWhenInUseUsageDescription, NSFaceIDUsageDescription, NSPhotoLibraryAddUsageDescription. iOS terminates the app when it requests a protected resource without one. App values override plugin defaults."
+                },
+                "orientations": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "items": {
+                        "enum": ["portrait", "portraitUpsideDown", "landscapeLeft", "landscapeRight"]
+                    },
+                    "description": "Supported interface orientations (iPhone and iPad). Omit to keep the host default (portrait and both landscapes)."
                 }
             }
         },
