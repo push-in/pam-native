@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.44.0 - 2026-10-26
 
 - PHP SDK: the ext-mbstring polyfill functions moved from
   `src/Polyfill/mbstring.php` to `src/Polyfill/mbstring_functions.php`. The old
