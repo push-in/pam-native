@@ -39,6 +39,8 @@ constexpr std::int32_t kModuleResultFailure = 2;
 // EventKind::MemoryPressure (PHP) / NativeViewEventKind.memoryPressure.
 constexpr std::int32_t kMemoryPressureEventKind = 18;
 
+void release_php_memory_caches();
+
 std::string oversized_module_result_message(std::size_t size) {
     return "Native module result exceeds the bridge limit (" + std::to_string(size)
         + " bytes > " + std::to_string(kMaxModuleResultBytes) + " bytes)";
@@ -99,6 +101,11 @@ struct RuntimeState {
     std::thread worker;
 
     std::atomic<bool> stopping = false;
+
+    // Cold start phases (PHP worker only): embed init and the first batch.
+    std::chrono::steady_clock::time_point boot_started;
+    std::chrono::steady_clock::time_point embed_ready;
+    bool first_batch_logged = false;
 
     // Hot reload: runs between two PHP requests (see runtime_loop).
     std::mutex reload_prepare_mutex;
@@ -201,6 +208,22 @@ void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
         return;
     }
 
+    if (!state->first_batch_logged) {
+        state->first_batch_logged = true;
+        const auto now = std::chrono::steady_clock::now();
+        const auto ms = [](auto from, auto to) {
+            return static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count()
+            );
+        };
+        os_log(
+            OS_LOG_DEFAULT,
+            "[PamNativePerf] phpEmbedMs=%lld phpFirstBatchMs=%lld phpHeapKiB=%zu",
+            ms(state->boot_started, state->embed_ready),
+            ms(state->boot_started, now),
+            zend_memory_usage(true) / 1024
+        );
+    }
     auto published = std::make_unique<PublishedBatch>(buffer);
     const auto handle = reinterpret_cast<std::uint64_t>(published.get());
     const auto accepted = state->callbacks.on_batch(
@@ -1057,7 +1080,10 @@ RequestOutcome run_php_request(RuntimeState* state) {
 
 void runtime_loop(RuntimeState* state) {
     active_runtime = state;
-    if (initialize_php(state)) {
+    state->boot_started = std::chrono::steady_clock::now();
+    const bool initialized = initialize_php(state);
+    state->embed_ready = std::chrono::steady_clock::now();
+    if (initialized) {
         RequestOutcome outcome = run_php_request(state);
         while (
             outcome != RequestOutcome::Stop
