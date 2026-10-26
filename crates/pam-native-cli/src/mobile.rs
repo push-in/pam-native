@@ -1828,10 +1828,7 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
         .find(|package| package.name == "pushinbr/pam-native")
         .map(|package| package.version.clone())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
-    let composer_release = current_version_text
-        .strip_prefix('v')
-        .unwrap_or(&current_version_text);
-    let current_version = parse_release_version(composer_release)?;
+    let current_version = installed_release_version(&current_version_text)?;
     let mut plugins = Vec::new();
 
     for package in packages {
@@ -2434,6 +2431,18 @@ fn validate_ios_binding(package: &str, kind: &str, class: Option<&str>) -> Resul
         ));
     }
     Ok(())
+}
+
+/// Version of the installed `pushinbr/pam-native` used to check plugin
+/// compatibility. Branch installs (`dev-<branch>`, `<x>.x-dev`) carry no
+/// release number, so they are checked against the CLI built from that same
+/// source instead of failing the whole build.
+fn installed_release_version(version: &str) -> Result<(u32, u32, u32), String> {
+    let release = version.strip_prefix('v').unwrap_or(version);
+    if release.starts_with("dev-") || release.ends_with("-dev") {
+        return parse_release_version(env!("CARGO_PKG_VERSION"));
+    }
+    parse_release_version(release)
 }
 
 fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
@@ -9087,6 +9096,15 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_installs_use_the_cli_release_for_plugin_checks() {
+        let cli = parse_release_version(env!("CARGO_PKG_VERSION")).expect("cli version");
+        assert_eq!(installed_release_version("dev-feat/ios-build").unwrap(), cli);
+        assert_eq!(installed_release_version("1.x-dev").unwrap(), cli);
+        assert_eq!(installed_release_version("v1.43.2").unwrap(), (1, 43, 2));
+        assert!(installed_release_version("banana").is_err());
+    }
 
     #[test]
     fn ios_launch_screen_assets_follow_the_splash_appearance() {
