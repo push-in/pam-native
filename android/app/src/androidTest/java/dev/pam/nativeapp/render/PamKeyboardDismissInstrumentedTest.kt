@@ -78,7 +78,11 @@ class PamKeyboardDismissInstrumentedTest {
             }
             await("IME initially visible") { visible() }
             SystemClock.sleep(500)
-            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            // Inject through the system input path so Android 16's predictive
+            // back/IME dispatcher sees the same event as a physical device.
+            instrumentation.uiAutomation
+                .executeShellCommand("input keyevent ${KeyEvent.KEYCODE_BACK}")
+                .close()
             await("BACK hides the IME") { !visible() }
             // Include delayed KAV reconciliation and animation completion.
             val end = SystemClock.uptimeMillis() + 1_200
