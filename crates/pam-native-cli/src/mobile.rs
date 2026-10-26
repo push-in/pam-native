@@ -3613,6 +3613,11 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
             )?;
         }
         for (key, value) in &ios.usage_descriptions {
+            // The app owns the wording of any privacy string it declares;
+            // plugin defaults only fill keys the app left out.
+            if project.manifest.ios.usage_descriptions.contains_key(key) {
+                continue;
+            }
             let object = info.as_object_mut().ok_or_else(|| {
                 format!(
                     "{} must contain a top-level dictionary",
