@@ -3733,6 +3733,9 @@ fn ios_splash_scale(png: &[u8], size: u32) -> u32 {
 }
 
 const IOS_ROOT_GROUP_CHILDREN: &str = "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000006, 400000000000000000000005);";
+const IOS_PRODUCT_GROUP_CHILDREN: &str =
+    "children = (200000000000000000000006, 200000000000000000000012); name = Products;";
+const IOS_PROJECT_TARGETS: &str = "targets = (500000000000000000000001, 500000000000000000000003);";
 
 fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), String> {
     let extensions = project
@@ -4046,17 +4049,17 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
     )?;
     replace_pbx_once(
         &mut pbx,
-        "children = (200000000000000000000006); name = Products;",
+        IOS_PRODUCT_GROUP_CHILDREN,
         &format!(
-            "children = (200000000000000000000006, {}); name = Products;",
+            "children = (200000000000000000000006, {}, 200000000000000000000012); name = Products;",
             product_references.join(", ")
         ),
     )?;
     replace_pbx_once(
         &mut pbx,
-        "targets = (500000000000000000000001);",
+        IOS_PROJECT_TARGETS,
         &format!(
-            "targets = (500000000000000000000001, {});",
+            "targets = (500000000000000000000001, {}, 500000000000000000000003);",
             extension_targets.join(", ")
         ),
     )?;
@@ -10992,5 +10995,7 @@ mod bundle_exclusion_tests {
             1,
             "extension integration must target the current root group, including UI tests"
         );
+        assert_eq!(project.matches(IOS_PRODUCT_GROUP_CHILDREN).count(), 1);
+        assert_eq!(project.matches(IOS_PROJECT_TARGETS).count(), 1);
     }
 }
