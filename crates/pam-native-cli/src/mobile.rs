@@ -3732,6 +3732,8 @@ fn ios_splash_scale(png: &[u8], size: u32) -> u32 {
     ((f64::from(width) / f64::from(size)).round() as u32).clamp(1, 3)
 }
 
+const IOS_ROOT_GROUP_CHILDREN: &str = "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000006, 400000000000000000000005);";
+
 fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), String> {
     let extensions = project
         .plugins
@@ -4036,9 +4038,9 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
     )?;
     replace_pbx_once(
         &mut pbx,
-        "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000005);",
+        IOS_ROOT_GROUP_CHILDREN,
         &format!(
-            "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, {}, 400000000000000000000005);",
+            "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000006, {}, 400000000000000000000005);",
             extension_groups.join(", ")
         ),
     )?;
@@ -10984,6 +10986,11 @@ mod bundle_exclusion_tests {
                 .count(),
             3,
             "Debug builds must remain debuggable and must not inherit Release optimisation"
+        );
+        assert_eq!(
+            project.matches(IOS_ROOT_GROUP_CHILDREN).count(),
+            1,
+            "extension integration must target the current root group, including UI tests"
         );
     }
 }
