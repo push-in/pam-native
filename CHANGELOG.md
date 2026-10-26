@@ -44,6 +44,11 @@
   data-detector taps use the same offset.
 - Showcase: the chat and marketplace screens declare dark status-bar icons on
   their light bars, and the LAB/details screens use `SafeAreaView`.
+- iOS: a `StatusBar` committed before the host view joins the window (every
+  cold start since PHP waits for the scene) is applied once it does. The
+  showcase gallery's light icons stayed dark on its dark background until the
+  first navigation. XCTest
+  `testStatusBarCommittedBeforeTheHostJoinsAWindowAppliesOnceItDoes`.
 - iOS: `StatusBar` `backgroundColor` paints the band behind the status bar like
   Android (`translucent` keeps it off), so light-on-dark bars stay readable on
   light screens.

@@ -174,6 +174,36 @@ final class PamStatusBarTests: XCTestCase {
         renderer.close()
     }
 
+    func testStatusBarCommittedBeforeTheHostJoinsAWindowAppliesOnceItDoes() {
+        // Cold start: PHP commits the first screen while the host view is
+        // not in the scene's window yet.
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
+        let renderer = PamRenderer(hostView: host, dispatchEvent: { _, _, _ in })
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .statusBar, properties: [
+                PamConstants.statusBarStyle: .integer(2),
+            ])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 360, height: 720)),
+            .setRoot(1),
+        ]])
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(PamStatusBarCoordinator.shared.config, .initial, "inactive outside a window")
+
+        let window = pamTestWindow(frame: host.frame)
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        root.view.addSubview(host)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(PamStatusBarCoordinator.shared.config.style, .lightContent)
+
+        renderer.commit([[.remove(2)]])
+        XCTAssertEqual(PamStatusBarCoordinator.shared.config, .initial)
+        renderer.close()
+    }
+
     func testRendererPaintsTheStatusBarBandLikeAndroid() {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
         let root = UIViewController()

@@ -1549,7 +1549,7 @@ public final class PamRenderer: @unchecked Sendable {
         case .drawerLayout:
             return PamDrawerLayout()
         case .statusBar:
-            return UIView()
+            return PamStatusBarNodeView()
         case .navigationHost:
             return PamNavigationHost()
         case .webView:

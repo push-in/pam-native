@@ -102,6 +102,19 @@ final class PamStatusBarBand: UIView {
     }
 }
 
+/// The view of a `StatusBar` node. A declaration only counts while its view
+/// is in a window, so entering or leaving one re-resolves the stack. On a cold
+/// start the first commit lands before the host view joins the scene's
+/// window: without this the gallery's `appearance="light"` stayed inactive
+/// and the bar kept the system's dark icons on a dark screen until the next
+/// navigation.
+final class PamStatusBarNodeView: UIView {
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        PamStatusBarCoordinator.invalidate()
+    }
+}
+
 /// Resolves the `StatusBar` stack and drives the iOS status bar.
 ///
 /// Like RN's `StatusBar._updatePropsStack`, every active (shown, in an active
