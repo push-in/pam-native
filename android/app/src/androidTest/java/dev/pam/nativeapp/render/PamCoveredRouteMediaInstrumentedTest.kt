@@ -151,7 +151,9 @@ class PamCoveredRouteMediaInstrumentedTest {
         }
         awaitPlaying(f.media, true)
         await("clock shows the remaining time") { clock.text.toString() == "0:05" || clock.text.toString() == "0:04" }
-        SystemClock.sleep(1_300)
+        await("remaining time and progress advance with the player") {
+            clock.text.toString() in setOf("0:04", "0:03") && bar.scaleX > 0.1f
+        }
         main {
             assertNotEquals("placeholder", clock.text.toString())
             assertTrue("remaining time counts down (${clock.text})", clock.text.toString() in setOf("0:04", "0:03"))

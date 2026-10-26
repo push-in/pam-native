@@ -98,7 +98,12 @@ class PamModalHiddenWindowInputInstrumentedTest {
 
         // Reopening the same mounted sheet makes it interactive again.
         instrumentation.runOnMainSync { modal!!.setVisible(true) }
-        waitUntil("the sheet reopens") { modal!!.isPresented() && inside.isShown && inside.height > 0 }
+        waitUntil("the sheet reopens") {
+            modal!!.isPresented() &&
+                dialog.window!!.decorView.hasWindowFocus() &&
+                inside.isShown &&
+                inside.height > 0
+        }
         instrumentation.runOnMainSync {
             val flags = dialog.window!!.attributes.flags
             assertEquals(0, flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
