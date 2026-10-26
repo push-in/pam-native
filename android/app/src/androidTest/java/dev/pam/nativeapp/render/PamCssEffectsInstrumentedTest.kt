@@ -9,6 +9,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
@@ -308,14 +309,18 @@ class PamCssEffectsInstrumentedTest {
             ),
         ) { _, _ -> }
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        // The sweep starts from the left edge: 30 frames (>= 500 ms) bring
-        // the highlight onto the box.
-        awaitFrames(instrumentation, 30)
         var brightest = 0
-        instrumentation.runOnMainSync {
-            val bitmap = software(viewsById.getValue(2))
-            for (x in 0 until bitmap.width step 4) {
-                brightest = maxOf(brightest, Color.red(bitmap.getPixel(x, bitmap.height / 2)))
+        // Frame count is not elapsed time: displays may run above 60 Hz and
+        // emulators may dispatch frames irregularly. Observe up to one full
+        // sweep and retain the brightest rendered sample instead.
+        val deadline = SystemClock.uptimeMillis() + 1_500L
+        while (brightest <= 60 && SystemClock.uptimeMillis() < deadline) {
+            awaitFrames(instrumentation)
+            instrumentation.runOnMainSync {
+                val bitmap = software(viewsById.getValue(2))
+                for (x in 0 until bitmap.width step 4) {
+                    brightest = maxOf(brightest, Color.red(bitmap.getPixel(x, bitmap.height / 2)))
+                }
             }
         }
         assertTrue("a highlight is visible mid-sweep: $brightest", brightest > 60)
