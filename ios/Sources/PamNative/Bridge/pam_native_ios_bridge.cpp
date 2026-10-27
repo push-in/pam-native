@@ -200,6 +200,52 @@ void report_error(RuntimeState* state, const std::string& message) {
     }
 }
 
+// OPcache state for the first batch perf line, so a real-world app shows
+// whether compiled scripts came from the cache: "off", "file-only" (no
+// shared memory) or "shm", plus cached scripts, hits and misses.
+std::string opcache_summary() {
+    if (!zend_hash_str_exists(EG(function_table), "opcache_get_status", sizeof("opcache_get_status") - 1)) {
+        return "unavailable";
+    }
+    zval name;
+    zval argument;
+    zval result;
+    ZVAL_STRING(&name, "opcache_get_status");
+    ZVAL_FALSE(&argument);
+    ZVAL_UNDEF(&result);
+    const int status = call_user_function(EG(function_table), nullptr, &name, &result, 1, &argument);
+    zval_ptr_dtor(&name);
+    std::string summary = "off";
+    if (status == SUCCESS && !EG(exception) && Z_TYPE(result) == IS_ARRAY) {
+        HashTable* table = Z_ARRVAL(result);
+        const auto number = [](HashTable* from, const char* key) -> long long {
+            zval* value = zend_hash_str_find(from, key, std::strlen(key));
+            return value != nullptr && Z_TYPE_P(value) == IS_LONG ? static_cast<long long>(Z_LVAL_P(value)) : -1;
+        };
+        zval* enabled = zend_hash_str_find(table, "opcache_enabled", sizeof("opcache_enabled") - 1);
+        zval* file_only = zend_hash_str_find(table, "file_cache_only", sizeof("file_cache_only") - 1);
+        if (file_only != nullptr && Z_TYPE_P(file_only) == IS_TRUE) {
+            summary = "file-only";
+        } else if (enabled != nullptr && Z_TYPE_P(enabled) == IS_TRUE) {
+            summary = "shm";
+        }
+        zval* statistics = zend_hash_str_find(table, "opcache_statistics", sizeof("opcache_statistics") - 1);
+        if (statistics != nullptr && Z_TYPE_P(statistics) == IS_ARRAY) {
+            summary += " scripts=" + std::to_string(number(Z_ARRVAL_P(statistics), "num_cached_scripts"));
+            summary += " hits=" + std::to_string(number(Z_ARRVAL_P(statistics), "hits"));
+            summary += " misses=" + std::to_string(number(Z_ARRVAL_P(statistics), "misses"));
+        }
+    }
+    if (EG(exception)) {
+        zend_clear_exception();
+    }
+    if (!Z_ISUNDEF(result)) {
+        zval_ptr_dtor(&result);
+    }
+    summary += " included=" + std::to_string(zend_hash_num_elements(&EG(included_files)));
+    return summary;
+}
+
 void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
     if (state == nullptr || state->callbacks.on_batch == nullptr) {
         return;
@@ -218,10 +264,11 @@ void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
         };
         os_log(
             OS_LOG_DEFAULT,
-            "[PamNativePerf] phpEmbedMs=%lld phpFirstBatchMs=%lld phpHeapKiB=%zu",
+            "[PamNativePerf] phpEmbedMs=%lld phpFirstBatchMs=%lld phpHeapKiB=%zu opcache=%{public}s",
             ms(state->boot_started, state->embed_ready),
             ms(state->boot_started, now),
-            zend_memory_usage(true) / 1024
+            zend_memory_usage(true) / 1024,
+            opcache_summary().c_str()
         );
     }
     auto published = std::make_unique<PublishedBatch>(buffer);
