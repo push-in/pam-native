@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- iOS image blur (`blurRadius`, CSS `blur()`): blurred on the CPU with vImage
+  (three box passes on a copy downscaled so σ stays near 4 px), like
+  Android's `PamBitmapBlur`, instead of a Core Image context. A feed of
+  shadowed icons no longer keeps GPU textures and compiled kernels alive:
+  in a real-world app's feed MALLOC_LARGE went from 52 MB to 8 MB and the
+  footprint from 241 MB to 211 MB (peak 342 MB to 234 MB, Simulator).
+- Engine text metrics: every weight of a variable font shares one copy of
+  the font file instead of reading it once per weight (7.2 MB for seven
+  weights of one family).
+
 - iOS Modal / BottomSheet: a modal declared inside a tab scene or a route is
   mounted on the root host at its absolute engine frame, so later siblings (a
   real-world app's tab bar) no longer paint over the sheet and hide its
