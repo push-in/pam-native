@@ -38,6 +38,7 @@ constexpr std::size_t kMaxModuleResultBytes = 32 * 1024 * 1024;
 constexpr std::int32_t kModuleResultFailure = 2;
 // EventKind::MemoryPressure (PHP) / NativeViewEventKind.memoryPressure.
 constexpr std::int32_t kMemoryPressureEventKind = 18;
+constexpr std::size_t kIdleHeapSlackBytes = 8 * 1024 * 1024;
 
 void release_php_memory_caches();
 
@@ -1091,6 +1092,22 @@ RequestOutcome run_php_request(RuntimeState* state) {
                     gc_collect_cycles();
                 })) {
                 return RequestOutcome::Failed;
+            }
+            // A render peak (a feed page of components) leaves free Zend MM
+            // chunks cached in the process: give them back once more than
+            // 8 MB of the heap is unused, instead of waiting for a memory
+            // warning. Only runs between events, with the queue empty.
+            const std::size_t heap = zend_memory_usage(true);
+            const std::size_t used = zend_memory_usage(false);
+            if (heap > used && heap - used > kIdleHeapSlackBytes) {
+                zend_mm_gc(zend_mm_get_heap());
+                os_log(
+                    OS_LOG_DEFAULT,
+                    "[PamNativePerf] idle PHP heap %zu KiB -> %zu KiB (used %zu KiB)",
+                    heap / 1024,
+                    zend_memory_usage(true) / 1024,
+                    used / 1024
+                );
             }
             events_since_gc = 0;
             last_gc = after;
