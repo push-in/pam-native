@@ -74,6 +74,62 @@
   switched through the system overlays, tall display cutout), PHP SDK
   contract (dynamic sizing, `SafeAreaLint`).
 
+### UI polish
+
+- **Styled in-app toast (Android and iOS).** `Toast::message()` takes
+  `borderColor`/`borderWidth`, `cornerRadius`, `accentWidth` (0 removes the
+  left strip), `elevation`, paddings, `minHeight`, `titleLines` (a bold title
+  on up to 4 lines), `fitContent` (the card hugs its text inside 16 dp
+  gutters) and a leading `icon`: a glyph of an icon font (`iconFont`,
+  default `Ionicons`; new public `UI\Icon::glyph()`) or a packaged
+  `asset://….png` of at most 16 KiB, tinted with `iconColor`. Defaults keep
+  the react-native-toast-message card. The iOS offset now counts from the
+  safe area like Android (a top toast no longer sits under the Dynamic
+  Island), and a bottom toast rests above the open keyboard on both
+  platforms. No protocol change.
+- **`asset://` icons paint in their first frame (Android).** A packaged
+  image of at most 16 KiB (an app's `assets/icons`, referenced by path
+  instead of a `data:` URI) is read once, decoded on the UI thread in the
+  frame that lays its view out and kept in the inline icon cache, like iOS
+  `PamInlineImages.smallAsset`. Larger assets are remembered (bounded set)
+  and keep the async lane and the photo cache.
+- **Lists in sheets no longer open scrolled to the end (Android).** A
+  RecyclerView-backed list follows its end on a viewport resize only when it
+  was opened at its end (`initialScrollIndex`) or a real scroll left it
+  there; a list at offset 0 inside a sheet or modal that animates its height
+  keeps offset 0, and inverted lists are never moved. New list prop
+  `followEndOnResize` (`FlatList`/`SectionList`/`VirtualizedList`, template
+  attribute; default true) turns following off. Its PropKey is **pending**:
+  provisional number 544 (`AGUARDA-PROTOCOLO`), declared once per layer
+  (PHP `Internal\PendingProtocol`, Rust `pending::`, Kotlin
+  `PendingProtocol`, Swift `PamPendingProtocol`) outside the sequential
+  1–540 block, so the final number is a one-line change when the protocol
+  extension lands. iOS lists never follow the end, so the prop is a no-op
+  there.
+- **Wrapping rows inside a ScrollView (engine).** A `flexWrap` row in a
+  vertical scroll measures every line: the natural scroll extent uses the
+  wrapped cross size at the width inside the padding, so the last lines are
+  no longer cut off and the content can scroll to them.
+- **Paused `MediaPlayer` shows its frame (Android).** With `autoPlay=false`
+  the MediaPlayer path seeks (`SEEK_CLOSEST`) to `currentTime` once prepared
+  so the surface draws that frame instead of staying black (ExoPlayer and
+  iOS already did).
+- **Modal remounted with the same key (Android).** Removing a node clears
+  its pending and last `on:layout`, so a Modal (ids derive from keys)
+  mounted again reports `on:layout` again and replays its entrance. iOS
+  already forgot them on remove.
+- **No gray veil after the keyboard closes (Android).** The root host turns
+  off the default focus highlight (API 26+) and leaves touch-mode focus
+  after a blur, so a search field's screen no longer keeps a gray overlay.
+- Tests: engine `wrapping_row_in_a_vertical_scroll_measures_every_line`;
+  JVM `PamProtocolTest` (pending keys); PHP SDK (toast style and icon
+  payloads, pending key contract across PHP/Kotlin/Rust/Swift);
+  instrumented `PamListFollowEndOnResizeInstrumentedTest`,
+  `PamAssetIconInstrumentedTest`, `PamInAppToastInstrumentedTest`,
+  `PamImeFocusHighlightInstrumentedTest`, `PamModalRemountInstrumentedTest`,
+  `PamMediaPlaybackInstrumentedTest` (paused players); XCTest
+  `testToastMessageDecodesCardStyleAndIcon`.
+
 ### Integration
 
 - iOS modals: when the app answers a bottom sheet's close request (a tap on

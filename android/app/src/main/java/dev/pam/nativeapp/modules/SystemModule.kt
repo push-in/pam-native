@@ -184,6 +184,21 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 titleSize = number("titleSize", 12.0).toFloat(),
                 messageSize = number("messageSize", 10.0).toFloat(),
                 fontFamily = values.textOrNull("fontFamily"),
+                borderColor = (values["borderColor"] as? WireValue.Integer)?.value?.toInt(),
+                borderWidthDp = number("borderWidth", 0.0).toFloat(),
+                cornerRadiusDp = number("cornerRadius", 6.0).toFloat(),
+                accentWidthDp = number("accentWidth", 5.0).toFloat(),
+                elevationDp = number("elevation", 2.0).toFloat(),
+                paddingHorizontalDp = number("paddingHorizontal", 15.0).toFloat(),
+                paddingVerticalDp = number("paddingVertical", 10.0).toFloat(),
+                minHeightDp = number("minHeight", 60.0).toFloat(),
+                titleLines = number("titleLines", 1.0).toInt().coerceIn(1, 4),
+                fitContent = values.flag("fitContent", false),
+                iconSource = values.textOrNull("iconSource"),
+                iconGlyph = values.textOrNull("iconGlyph"),
+                iconFontFamily = values.textOrNull("iconFontFamily"),
+                iconColor = (values["iconColor"] as? WireValue.Integer)?.value?.toInt(),
+                iconSizeDp = number("iconSize", 18.0).toFloat(),
             )
             val typefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(activity)
             main.post {

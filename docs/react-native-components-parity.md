@@ -120,6 +120,33 @@ accent bar per type, bold 12 sp title over a 10 sp `#979797` message, 40 dp
 below the top safe area, 4 s, tap to dismiss); every color, size, offset and
 duration is configurable. `Toast::show()` keeps the system toast.
 
+The card can reproduce an app's own toast host (React Native apps often
+replace the default card with a pill: border, larger radius, an icon and a
+bold two-line text):
+
+```php
+Toast::message('Link copiado', position: ToastPosition::Bottom, durationMs: 2200,
+    backgroundColor: 0xFF1E1E1E, titleColor: 0xFFFFFFFF, titleSize: 13.5, titleLines: 2,
+    borderColor: 0xFF333333, borderWidth: 0.5, cornerRadius: 16.0, accentWidth: 0.0,
+    elevation: 6.0, paddingHorizontal: 14.0, paddingVertical: 11.0, minHeight: 0.0,
+    fitContent: true, icon: 'checkmark-circle', iconColor: 0xFF00C853, iconSize: 18.0);
+```
+
+- `borderColor` + `borderWidth` (dp; 0 = none), `cornerRadius`, `elevation`
+  (dp; a matching shadow on iOS), paddings and `minHeight`.
+- `accentWidth` is the left strip; `0.0` removes it.
+- `titleLines` (1–4) wraps a bold title; with an empty message it is the
+  whole toast.
+- `fitContent` hugs the text up to the window width minus 16 dp per side
+  instead of the 340 dp card.
+- `icon` draws before the text: an icon-font glyph name of `iconFont`
+  (default `Ionicons`, see `UI\Icon`; an unknown glyph or font draws no
+  icon) or a packaged `asset://….png` of at most 16 KiB (tinted only when
+  `iconColor` is set). `iconColor` defaults to the title color.
+- Offsets count from the safe area on both platforms (status bar, notch,
+  Dynamic Island, navigation bar, home indicator), and a bottom toast rests
+  above the open keyboard.
+
 ## Keyboard-aware scroll content
 
 `<ScrollView keyboardInset="true">` adds the visible keyboard overlap as bottom

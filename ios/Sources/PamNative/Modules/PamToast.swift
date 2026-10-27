@@ -16,6 +16,26 @@ struct PamToastSpec: Equatable {
     var titleSize: CGFloat = 12
     var messageSize: CGFloat = 10
     var fontFamily: String?
+    var borderColor: Int64?
+    var borderWidth: CGFloat = 0
+    var cornerRadius: CGFloat = 6
+    /// Left accent strip width; 0 hides it.
+    var accentWidth: CGFloat = 5
+    var elevation: CGFloat = 2
+    var paddingHorizontal: CGFloat = 15
+    var paddingVertical: CGFloat = 10
+    var minHeight: CGFloat = 60
+    var titleLines = 1
+    /// The card hugs its text (up to the window width minus 16 pt gutters)
+    /// instead of the fixed 340 pt card.
+    var fitContent = false
+    /// Packaged `asset://….png` icon drawn before the text.
+    var iconSource: String?
+    /// Icon-font glyph drawn with `iconFontFamily` when there is no `iconSource`.
+    var iconGlyph: String?
+    var iconFontFamily: String?
+    var iconColor: Int64?
+    var iconSize: CGFloat = 18
     /// Plain `Toast::show()` capsule.
     var plain = false
 
@@ -62,6 +82,21 @@ struct PamToastSpec: Equatable {
         spec.titleSize = CGFloat(max(1, number("titleSize") ?? 12))
         spec.messageSize = CGFloat(max(1, number("messageSize") ?? 10))
         spec.fontFamily = text("fontFamily")
+        spec.borderColor = integer("borderColor")
+        spec.borderWidth = CGFloat(min(8, max(0, number("borderWidth") ?? 0)))
+        spec.cornerRadius = CGFloat(min(64, max(0, number("cornerRadius") ?? 6)))
+        spec.accentWidth = CGFloat(min(32, max(0, number("accentWidth") ?? 5)))
+        spec.elevation = CGFloat(min(24, max(0, number("elevation") ?? 2)))
+        spec.paddingHorizontal = CGFloat(min(64, max(0, number("paddingHorizontal") ?? 15)))
+        spec.paddingVertical = CGFloat(min(64, max(0, number("paddingVertical") ?? 10)))
+        spec.minHeight = CGFloat(min(200, max(0, number("minHeight") ?? 60)))
+        spec.titleLines = Int(min(4, max(1, integer("titleLines") ?? 1)))
+        spec.fitContent = flag("fitContent") ?? false
+        spec.iconSource = text("iconSource")
+        spec.iconGlyph = text("iconGlyph")
+        spec.iconFontFamily = text("iconFontFamily")
+        spec.iconColor = integer("iconColor")
+        spec.iconSize = CGFloat(min(64, max(1, number("iconSize") ?? 18)))
         return spec
     }
 }
@@ -90,11 +125,24 @@ enum PamToastPresenter {
         if spec.plain {
             constraints.append(toast.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -48))
         } else {
-            constraints.append(toast.widthAnchor.constraint(equalToConstant: min(340, window.bounds.width - 32)))
-            constraints.append(toast.heightAnchor.constraint(greaterThanOrEqualToConstant: 60))
+            if !spec.fitContent {
+                constraints.append(toast.widthAnchor.constraint(equalToConstant: min(340, window.bounds.width - 32)))
+            }
+            constraints.append(toast.heightAnchor.constraint(greaterThanOrEqualToConstant: spec.minHeight))
+            // Offsets count from the safe area (status bar, notch, Dynamic
+            // Island, home indicator) like Android's inset-relative margin;
+            // a bottom toast also rests above the keyboard.
             constraints.append(spec.bottom
-                ? toast.bottomAnchor.constraint(equalTo: window.bottomAnchor, constant: -spec.offset)
-                : toast.topAnchor.constraint(equalTo: window.topAnchor, constant: spec.offset))
+                ? toast.bottomAnchor.constraint(
+                    lessThanOrEqualTo: window.keyboardLayoutGuide.topAnchor,
+                    constant: -spec.offset
+                )
+                : toast.topAnchor.constraint(equalTo: guide.topAnchor, constant: spec.offset))
+            if spec.bottom {
+                let resting = toast.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -spec.offset)
+                resting.priority = .defaultHigh
+                constraints.append(resting)
+            }
         }
         NSLayoutConstraint.activate(constraints)
         current = toast
@@ -132,46 +180,97 @@ enum PamToastPresenter {
     private static func cardView(_ spec: PamToastSpec) -> UIView {
         let card = PamToastCard()
         card.backgroundColor = UIColor(argb: spec.backgroundColor)
-        card.layer.cornerRadius = 6
+        card.layer.cornerRadius = spec.cornerRadius
         card.layer.shadowColor = UIColor.black.cgColor
-        card.layer.shadowOpacity = 0.1
-        card.layer.shadowRadius = 4
-        card.layer.shadowOffset = CGSize(width: 0, height: 0)
+        // Android elevation in dp, approximated like React Native's shadow.
+        card.layer.shadowOpacity = spec.elevation > 0 ? Float(min(0.3, 0.05 + spec.elevation * 0.025)) : 0
+        card.layer.shadowRadius = spec.elevation * 1.5
+        card.layer.shadowOffset = CGSize(width: 0, height: spec.elevation > 2 ? spec.elevation * 0.6 : 0)
+        if let borderColor = spec.borderColor, spec.borderWidth > 0 {
+            card.layer.borderColor = UIColor(argb: borderColor).cgColor
+            card.layer.borderWidth = spec.borderWidth
+        }
         let accent = UIView()
         accent.backgroundColor = UIColor(argb: spec.accentColor)
         accent.translatesAutoresizingMaskIntoConstraints = false
-        accent.layer.cornerRadius = 6
+        accent.layer.cornerRadius = spec.cornerRadius
         accent.layer.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        accent.isHidden = spec.accentWidth <= 0
         card.addSubview(accent)
         let title = UILabel()
         title.text = spec.title
         title.font = font(spec.fontFamily, size: spec.titleSize, weight: 700)
         title.textColor = UIColor(argb: spec.titleColor)
-        title.numberOfLines = 1
+        title.numberOfLines = spec.titleLines
+        title.lineBreakMode = .byTruncatingTail
+        title.isHidden = spec.title.isEmpty
         let message = UILabel()
         message.text = spec.message
         message.font = font(spec.fontFamily, size: spec.messageSize, weight: 400)
         message.textColor = UIColor(argb: spec.messageColor)
         message.numberOfLines = 2
         message.isHidden = spec.message.isEmpty
-        let stack = UIStackView(arrangedSubviews: [title, message])
-        stack.axis = .vertical
-        stack.spacing = 2
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
+        let texts = UIStackView(arrangedSubviews: [title, message])
+        texts.axis = .vertical
+        texts.spacing = 2
+        var arranged: [UIView] = [texts]
+        if let icon = iconView(spec) {
+            arranged.insert(icon, at: 0)
+        }
+        let row = UIStackView(arrangedSubviews: arranged)
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(row)
         NSLayoutConstraint.activate([
             accent.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             accent.topAnchor.constraint(equalTo: card.topAnchor),
             accent.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-            accent.widthAnchor.constraint(equalToConstant: 5),
-            stack.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 15),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -15),
-            stack.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-            stack.topAnchor.constraint(greaterThanOrEqualTo: card.topAnchor, constant: 8),
+            accent.widthAnchor.constraint(equalToConstant: max(0, spec.accentWidth)),
+            row.leadingAnchor.constraint(
+                equalTo: card.leadingAnchor,
+                constant: max(0, spec.accentWidth) + spec.paddingHorizontal
+            ),
+            row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -spec.paddingHorizontal),
+            row.centerYAnchor.constraint(equalTo: card.centerYAnchor),
+            row.topAnchor.constraint(greaterThanOrEqualTo: card.topAnchor, constant: spec.paddingVertical),
         ])
         card.isAccessibilityElement = true
         card.accessibilityLabel = [spec.title, spec.message].filter { !$0.isEmpty }.joined(separator: ". ")
         return card
+    }
+
+    /// Leading icon: a packaged PNG (small assets decode synchronously from
+    /// the inline cache) or an icon-font glyph, tinted with `iconColor`.
+    private static func iconView(_ spec: PamToastSpec) -> UIView? {
+        let tint = UIColor(argb: spec.iconColor ?? spec.titleColor)
+        if let source = spec.iconSource {
+            guard let path = try? normalizedPamAssetPath(source),
+                  let url = pamAssetFileURL(path),
+                  let image = PamInlineImages.smallAsset(source, url: url) else { return nil }
+            let view = UIImageView(image: spec.iconColor == nil ? image : image.withRenderingMode(.alwaysTemplate))
+            view.tintColor = tint
+            view.contentMode = .scaleAspectFit
+            view.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                view.widthAnchor.constraint(equalToConstant: spec.iconSize),
+                view.heightAnchor.constraint(equalToConstant: spec.iconSize),
+            ])
+            view.isAccessibilityElement = false
+            return view
+        }
+        guard let glyph = spec.iconGlyph, !glyph.isEmpty else { return nil }
+        let label = UILabel()
+        label.text = glyph
+        label.textColor = tint
+        // Icon fonts never scale with Dynamic Type (React Native Icon).
+        label.font = font(spec.iconFontFamily, size: spec.iconSize, weight: 400)
+        label.adjustsFontForContentSizeCategory = false
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.isAccessibilityElement = false
+        return label
     }
 
     private static func plainView(_ spec: PamToastSpec) -> UIView {

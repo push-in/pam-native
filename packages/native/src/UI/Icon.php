@@ -77,6 +77,23 @@ final class Icon
         };
     }
 
+    /**
+     * The UTF-8 glyph of `$name` and its packaged font source, for native
+     * surfaces that draw an icon outside the tree (a toast, a notification
+     * action). Null when the font has no such glyph.
+     *
+     * @return array{glyph: string, fontFamily: string}|null
+     */
+    public static function glyph(string $name, string $font = 'Ionicons'): ?array
+    {
+        $codepoint = self::glyphs($font)[$name] ?? null;
+        if ($codepoint === null) {
+            return null;
+        }
+
+        return ['glyph' => self::utf8($codepoint), 'fontFamily' => self::font($font)['source']];
+    }
+
     public static function has(string $name, string $font = 'Ionicons'): bool
     {
         return isset(self::glyphs($font)[$name]);

@@ -247,6 +247,16 @@ internal fun isSynchronousInlineSource(source: String): Boolean =
     source.length <= INLINE_SYNC_MAX_CHARS && isInlineImageSource(source)
 
 /**
+ * Packaged `asset://` images up to this size (an app's `assets/icons`, icon
+ * masks referenced by path instead of a `data:` URI) also decode in the frame
+ * and live in the inline cache, like iOS `PamInlineImages.smallAsset`.
+ */
+internal const val ASSET_SYNC_MAX_BYTES = 16 * 1024
+
+internal fun isPackagedAssetSource(source: String): Boolean =
+    source.regionMatches(0, "asset://", 0, "asset://".length, ignoreCase = true)
+
+/**
  * One shared load per decoded key. The future is registered before its work
  * starts and leaves the map by identity when it completes, on whichever
  * thread completes it. A load that finished before its caller returned used
@@ -303,6 +313,9 @@ internal class NativeImageLoader(
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
             value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
     }
+    // Asset paths found larger than ASSET_SYNC_MAX_BYTES: they take the
+    // async lane and the photo cache without reading the file again.
+    private val largeAssets: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val inFlight = InFlightImageLoads<NativeImageResult>()
     private val active = WeakHashMap<PamImageView, ActiveRequest>()
     // Provider thumbnail work per decoded key: a recycled or rebound gallery
@@ -453,7 +466,7 @@ internal class NativeImageLoader(
         )
         if (pending.decodedKey == key) return
         pending.decodedKey = key
-        val memory = memoryCacheFor(source)
+        var memory = memoryCacheFor(source)
 
         if (
             pending.request.cachePolicy !in setOf(IMAGE_CACHE_RELOAD, IMAGE_CACHE_NONE) &&
@@ -479,13 +492,20 @@ internal class NativeImageLoader(
             }
         }
 
-        if (isSynchronousInlineSource(source)) {
+        val smallAsset = if (isPackagedAssetSource(source) && source !in largeAssets) {
+            smallAssetBytes(source).also { bytes ->
+                if (bytes == null) memory = cache
+            }
+        } else {
+            null
+        }
+        if (smallAsset != null || isSynchronousInlineSource(source)) {
             // A bundled glyph (tens of bytes to a few KiB) decodes in well
             // under a millisecond: paint it in the frame that lays the view
             // out, like a font glyph, instead of a frame later.
             val decoded = runCatching {
                 decode(
-                    loadDataUri(source),
+                    smallAsset ?: loadDataUri(source),
                     measuredWidth,
                     measuredHeight,
                     pending.request.resizeMethod,
@@ -724,10 +744,40 @@ internal class NativeImageLoader(
     }
 
     private fun imageExecutor(source: String) =
-        if (isInlineImageSource(source)) inlineExecutor else executor
+        if (isInlineImageSource(source) || isSmallAssetCandidate(source)) inlineExecutor else executor
 
     private fun memoryCacheFor(source: String) =
-        if (isInlineImageSource(source)) inlineCache else cache
+        if (isInlineImageSource(source) || isSmallAssetCandidate(source)) inlineCache else cache
+
+    private fun isSmallAssetCandidate(source: String): Boolean =
+        isPackagedAssetSource(source) && source !in largeAssets
+
+    /**
+     * The bytes of a packaged asset no larger than [ASSET_SYNC_MAX_BYTES]
+     * (one bounded read), or null for a larger or unreadable one, which is
+     * remembered so later loads go straight to the async lane.
+     */
+    private fun smallAssetBytes(source: String): ByteArray? {
+        val bytes = runCatching {
+            val path = normalizedPamAssetPath(source) ?: return null
+            context.assets.open(path).use { stream ->
+                val output = java.io.ByteArrayOutputStream(4_096)
+                val buffer = ByteArray(4_096)
+                while (output.size() <= ASSET_SYNC_MAX_BYTES) {
+                    val read = stream.read(buffer, 0, minOf(buffer.size, ASSET_SYNC_MAX_BYTES + 1 - output.size()))
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray()
+            }
+        }.getOrNull()
+        if (bytes == null || bytes.size > ASSET_SYNC_MAX_BYTES) {
+            if (largeAssets.size >= LARGE_ASSETS_MAX) largeAssets.clear()
+            largeAssets += source
+            return null
+        }
+        return bytes
+    }
 
     private fun finishSuccess(
         view: PamImageView,
@@ -1608,6 +1658,7 @@ internal class NativeImageLoader(
         /** Shared by every loader instance so prefetch and rendering never race on one file. */
         val DISK_LOCK = Any()
         const val INLINE_MEMORY_CACHE_BYTES = 4 * 1024 * 1024
+        private const val LARGE_ASSETS_MAX = 1_024
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
         const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
         const val DISK_DIRECTORY = "pam-images-v1"

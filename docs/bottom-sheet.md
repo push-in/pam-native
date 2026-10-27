@@ -68,6 +68,17 @@ by `max(bottom inset, the padding it already has)` (see
 `windowMetrics()->safeAreaBottom` padding is needed; existing manual padding
 keeps working and is not doubled.
 
+## Lists inside a sheet
+
+A `FlatList`/`SectionList`/`VirtualizedList` in a sheet keeps its scroll
+offset while the sheet animates its height (opening, snapping, keyboard).
+Only a list opened at its end (`initialScrollIndex`) or scrolled to its end
+by the user follows the end when its viewport resizes, like a chat timeline
+above a growing composer; inverted lists never move. Pass
+`->followEndOnResize(false)` (template `followEndOnResize="false"`) to keep
+the offset even then. iOS lists never follow the end on resize, so the prop
+has no effect there.
+
 ## Dynamic sizing
 
 A sheet without snap points fits its content (@gorhom
