@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `<ScrollView keyboardInset>` (iOS and Android): when everything from the
+  focused field to the end of the content fits above the keyboard, the whole
+  tail is revealed instead of just the field, so a short form keeps the
+  button under its field visible, as a resized viewport (a keyboard-aware
+  sheet) does. In a real-world app's signup the primary button sat under the
+  iOS suggestion bar. Longer content still reveals only the field.
+
 - Template `VirtualizedList windowSize="N"` (React Native FlatList
   `windowSize`): PHP renders only the `p-for` rows within the window and keeps
   a placeholder with the row's measured height for the others, driven by the

@@ -480,6 +480,14 @@ internal class PamScrollContainer @JvmOverloads constructor(
             val current = primaryCurrentOffset()
             val viewportExtent = (activeScroll.height - obscuredInsetPx)
                 .coerceAtLeast(0)
+            // Keyboard: when everything from the field to the end of the
+            // content fits above the keyboard, reveal that whole tail, so a
+            // short form keeps the button below its field visible (iOS
+            // PamKeyboardInsetObserver.revealOffset contentEnd).
+            val contentEnd = content.height
+            if (keyboardGuard && contentEnd > rect.bottom && contentEnd - rect.top <= viewportExtent) {
+                rect.bottom = contentEnd
+            }
             val clearance = minOf(
                 dp(KEYBOARD_TARGET_CLEARANCE_DP),
                 ((viewportExtent - rect.height()).coerceAtLeast(0) / 2),

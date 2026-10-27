@@ -257,15 +257,26 @@ final class PamKeyboardInsetObserver {
     /// Content offset that shows `target` (content coordinates) between the
     /// top inset and the covered bottom of the viewport, with Android's
     /// clearance; nil when it is already visible.
+    ///
+    /// With `contentEnd`, when everything from the target to the end of the
+    /// content fits above the keyboard, that whole tail is revealed: a short
+    /// form keeps the button below its field visible, as a resized viewport
+    /// (a keyboard-aware sheet, Android adjustResize) would. Longer content
+    /// only reveals the target.
     static func revealOffset(
         target: CGRect,
         current: CGFloat,
         viewport: CGFloat,
         topInset: CGFloat,
         obscured: CGFloat,
-        maxOffset: CGFloat
+        maxOffset: CGFloat,
+        contentEnd: CGFloat? = nil
     ) -> CGFloat? {
         let extent = max(0, viewport - topInset - obscured)
+        var target = target
+        if let contentEnd, contentEnd > target.maxY, contentEnd - target.minY <= extent {
+            target.size.height = contentEnd - target.minY
+        }
         let clearance = min(targetClearance, max(0, extent - target.height) / 2)
         let visibleStart = current + topInset
         let visibleEnd = visibleStart + extent
@@ -318,7 +329,8 @@ final class PamKeyboardInsetObserver {
                 viewport: scrollView.bounds.height,
                 topInset: insets.top,
                 obscured: self.applied,
-                maxOffset: scrollView.contentSize.height + insets.bottom - scrollView.bounds.height
+                maxOffset: scrollView.contentSize.height + insets.bottom - scrollView.bounds.height,
+                contentEnd: scrollView.contentSize.height
             ) {
                 scrollView.setContentOffset(
                     CGPoint(x: scrollView.contentOffset.x, y: next),

@@ -147,6 +147,26 @@ final class PamLayoutParityTests: XCTestCase {
         XCTAssertEqual(above ?? -1, 16, accuracy: 0.5)
     }
 
+    /// A short form: the field and the button below it (the rest of the
+    /// content) fit above the keyboard, so both are revealed, like a resized
+    /// viewport. Longer content only reveals the field.
+    func testKeyboardRevealShowsTheContentBelowTheEditorWhenItFits() {
+        // Viewport 874, keyboard covers 336: visible extent 538. Content 874
+        // tall, field at 546..614, button under it until the end.
+        let short = PamKeyboardInsetObserver.revealOffset(
+            target: CGRect(x: 0, y: 546, width: 360, height: 68),
+            current: 0, viewport: 874, topInset: 0, obscured: 336, maxOffset: 336,
+            contentEnd: 874
+        )
+        XCTAssertEqual(short ?? -1, 336, accuracy: 0.5, "the whole tail (button) ends above the keyboard")
+        let long = PamKeyboardInsetObserver.revealOffset(
+            target: CGRect(x: 0, y: 546, width: 360, height: 68),
+            current: 0, viewport: 874, topInset: 0, obscured: 336, maxOffset: 2_000,
+            contentEnd: 2_400
+        )
+        XCTAssertEqual(long ?? -1, 546 + 68 + 24 - 538, accuracy: 0.5, "long content reveals only the field")
+    }
+
     func testKeyboardVerticalOffsetAddsToTheOverlapInset() {
         let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let observer = PamKeyboardInsetObserver(scrollView: scroll)
