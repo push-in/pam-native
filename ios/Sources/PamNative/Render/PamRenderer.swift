@@ -5111,6 +5111,11 @@ public final class PamRenderer: @unchecked Sendable {
         guard let url = URL(string: resolvedSource),
               let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
+            // A local source paints now; a photo-library or network load the
+            // view started for its previous source must not finish later and
+            // paint that picture over this one (a recycled thumbnail cell).
+            cancelImageLoad(for: state)
+            state.imageGeneration += 1
             imageView.image = localImage(resolvedSource, targetSize: imageView.bounds.size)
             return
         }

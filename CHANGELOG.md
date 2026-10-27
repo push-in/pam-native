@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- iOS Image: switching a view's `source` to a local file (`pam-file://`,
+  `file://`, `asset://`, `data:`) now cancels the photo-library or network
+  load started for its previous source. That load used to finish afterwards
+  and paint the previous picture over the new one, so a recycled thumbnail
+  cell (a video timeline whose posters are local files) showed gallery
+  photos. Android already discarded stale loads per view.
+- Keyboard dock contract (engine test): a padding `KeyboardAvoidingView` in a
+  modal rests where its own frame ends (a safe-area padding around it, or
+  below the window inside scrolled content) and keeps its content exactly
+  `keyboardVerticalOffset` above the keyboard. See `docs/keyboard.md`.
+
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
