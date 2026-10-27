@@ -123,6 +123,9 @@ final class PamCssEffectsTests: XCTestCase {
         XCTAssertGreaterThan(edge, 40)
         XCTAssertLessThan(edge, 215)
         XCTAssertTrue(imageView.originalImage === checker)
+        // Like Android: blurred on a downscaled copy, displayed at the same point size.
+        XCTAssertEqual(try XCTUnwrap(imageView.image).size, checker.size)
+        XCTAssertLessThan(output.width, try XCTUnwrap(checker.cgImage).width)
     }
 
     func testShimmerSweepsAHighlightOverTheBackground() throws {
