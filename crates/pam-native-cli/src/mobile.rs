@@ -1698,7 +1698,11 @@ fn validate_ios_app_options(ios: &IosOptions) -> Result<(), String> {
         }
     }
     let mut seen = HashSet::new();
-    if ios.orientations.iter().any(|orientation| !seen.insert(*orientation)) {
+    if ios
+        .orientations
+        .iter()
+        .any(|orientation| !seen.insert(*orientation))
+    {
         return Err("ios.orientations must not repeat an orientation".to_owned());
     }
     if let Some(region) = &ios.development_region
@@ -4774,7 +4778,10 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
             project.manifest.ios_application_id(),
         ],
     )?;
-    println!("Started {} on {simulator}", project.manifest.ios_application_id());
+    println!(
+        "Started {} on {simulator}",
+        project.manifest.ios_application_id()
+    );
     Ok(())
 }
 
@@ -7826,7 +7833,10 @@ fn toggle_devtools_ios(project_path: PathBuf) -> Result<u8, String> {
             &format!("{scheme}://devtools"),
         ],
     )?;
-    println!("Toggled Pam Native DevTools in {}", manifest.ios_application_id());
+    println!(
+        "Toggled Pam Native DevTools in {}",
+        manifest.ios_application_id()
+    );
     Ok(0)
 }
 
@@ -9348,7 +9358,10 @@ mod tests {
     #[test]
     fn branch_installs_use_the_cli_release_for_plugin_checks() {
         let cli = parse_release_version(env!("CARGO_PKG_VERSION")).expect("cli version");
-        assert_eq!(installed_release_version("dev-feat/ios-build").unwrap(), cli);
+        assert_eq!(
+            installed_release_version("dev-feat/ios-build").unwrap(),
+            cli
+        );
         assert_eq!(installed_release_version("1.x-dev").unwrap(), cli);
         assert_eq!(installed_release_version("v1.43.2").unwrap(), (1, 43, 2));
         assert!(installed_release_version("banana").is_err());
@@ -11331,7 +11344,10 @@ mod bundle_exclusion_tests {
         for bundle in ["single", "com.bad_underscore", "com..empty", ""] {
             let mut ios = IosOptions::default();
             ios.bundle_identifier = Some(bundle.to_owned());
-            assert!(validate_ios_app_options(&ios).is_err(), "accepted {bundle:?}");
+            assert!(
+                validate_ios_app_options(&ios).is_err(),
+                "accepted {bundle:?}"
+            );
         }
         let mut ios = IosOptions::default();
         ios.usage_descriptions
@@ -11355,7 +11371,10 @@ mod bundle_exclusion_tests {
         });
         merge_ios_app_info(&ios, &mut info).unwrap();
         assert_eq!(info["CFBundleDevelopmentRegion"], "pt-BR");
-        assert_eq!(info["CFBundleLocalizations"], serde_json::json!(["pt-BR", "en"]));
+        assert_eq!(
+            info["CFBundleLocalizations"],
+            serde_json::json!(["pt-BR", "en"])
+        );
 
         let template = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
         let pbx = apply_ios_project_regions(template, &ios).unwrap();
@@ -11364,7 +11383,10 @@ mod bundle_exclusion_tests {
         assert!(!pbx.contains("developmentRegion = en;"));
 
         let default = IosOptions::default();
-        assert_eq!(apply_ios_project_regions(template, &default).unwrap(), template);
+        assert_eq!(
+            apply_ios_project_regions(template, &default).unwrap(),
+            template
+        );
         let mut untouched = serde_json::json!({});
         merge_ios_app_info(&default, &mut untouched).unwrap();
         assert!(untouched.get("CFBundleLocalizations").is_none());
