@@ -147,7 +147,7 @@ internal fun isMediaStoreVideoPosterCandidate(source: String, targetWidth: Int, 
 
 /** Where a MediaStore thumbnail comes from on this API level. */
 internal enum class MediaStoreThumbnailSource {
-    /** Android 10+: the provider's typed `image/*` stream at the requested size (cancellable). */
+    /** Android 10+: the provider's typed image stream (any image MIME type) at the requested size (cancellable). */
     PROVIDER_STREAM,
 
     /** Android 8-9: the provider's cached MINI_KIND thumbnail; never a decoded video frame. */
