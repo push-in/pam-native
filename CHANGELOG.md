@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `Storage::get()` and `Storage::set()` now pass every key through
+  `Storage::safeKey()`, like `Cache\StoragePersistence` already did. Before,
+  only `BoundedStore` persistence mapped keys: a direct call with a key
+  outside `[A-Za-z0-9_.-]{1,128}` (for example `composer:emoji-recents:v1`)
+  reached the native store, which rejected it with "Invalid storage key";
+  without `onError` the failure was thrown from the module result and shown
+  as a runtime error on every read and write. Keys that already match
+  `Storage::KEY_PATTERN` are sent unchanged, so stored values keep their
+  keys. `safeKey()` is lossy (`a:b` and `a-b` share a key): hash owner ids
+  that must stay distinct.
+
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion
