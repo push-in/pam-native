@@ -333,6 +333,7 @@ final class PamAnchoredScrollView: UIScrollView {
     }
 
     override func layoutSubviews() {
+        PamImageResidency.requestSweep()
         let oldMax = previousMaxOffset
         let previousOffset = primaryOffset
         let distanceFromEnd = max(0, oldMax - previousOffset)
@@ -652,6 +653,7 @@ final class PamVirtualListView: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        PamImageResidency.requestSweep()
         maintainEndAnchor()
         if !horizontal {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
@@ -2345,6 +2347,7 @@ final class PamRefreshContainer: UIView {
     private var progressOffset: CGFloat = 0
     private(set) var colors: [Int] = []
     private var tint: Int?
+    private var offsetObservation: NSKeyValueObservation?
 
     var isEnabled = true {
         didSet { installControl() }
@@ -2431,6 +2434,7 @@ final class PamRefreshContainer: UIView {
         contentHost.subviews.forEach { view in
             view.frame = bounds
         }
+        stopIdleSpinner()
     }
 
     override func didMoveToWindow() {
@@ -2439,6 +2443,30 @@ final class PamRefreshContainer: UIView {
         if window != nil, controlled != control.isRefreshing {
             apply(controlled)
         }
+        stopIdleSpinner()
+    }
+
+    /// UIKit's refresh control can leave its spinner rotating forever while
+    /// it is hidden and not refreshing (seen after a list settles at the top
+    /// or a refresh ends off screen). That infinite Core Animation keeps the
+    /// render server drawing (battery) and the app never reports idle to UI
+    /// tests. Outside a pull and a refresh, repeating animations of the
+    /// control are dropped; UIKit adds them again on the next pull.
+    func stopIdleSpinner() {
+        guard !control.isRefreshing, let scrollView,
+              !scrollView.isTracking, !scrollView.isDragging,
+              scrollView.contentOffset.y >= -scrollView.adjustedContentInset.top - 0.5 else { return }
+        Self.removeRepeatingAnimations(control.layer)
+    }
+
+    static func removeRepeatingAnimations(_ layer: CALayer) {
+        for key in layer.animationKeys() ?? [] {
+            guard let animation = layer.animation(forKey: key),
+                  animation.repeatCount >= Float.greatestFiniteMagnitude || animation.repeatDuration >= .greatestFiniteMagnitude
+            else { continue }
+            layer.removeAnimation(forKey: key)
+        }
+        layer.sublayers?.forEach { removeRepeatingAnimations($0) }
     }
 
     private func bind(scrollView: UIScrollView) {
@@ -2449,6 +2477,11 @@ final class PamRefreshContainer: UIView {
         self.scrollView = scrollView
         // A short or empty list must still be pullable.
         scrollView.alwaysBounceVertical = true
+        // Scrolling settles a spinner left running (see `stopIdleSpinner`);
+        // the check only walks the control's few layers.
+        offsetObservation = scrollView.observe(\.contentOffset, options: []) { [weak self] _, _ in
+            self?.stopIdleSpinner()
+        }
         installControl()
     }
 
@@ -2479,6 +2512,10 @@ final class PamRefreshContainer: UIView {
         } else if !value, control.isRefreshing {
             control.endRefreshing()
             installControl()
+            // endRefreshing animates the inset back; settle the spinner after it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.stopIdleSpinner()
+            }
         }
     }
 
