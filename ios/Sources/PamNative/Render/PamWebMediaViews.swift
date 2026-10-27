@@ -655,7 +655,9 @@ final class PamMediaView: UIView {
         return controller
     }
 
-    private func setVideoReadyForDisplay(_ ready: Bool) {
+    /// The player surface's `isReadyForDisplay` (KVO). Internal so tests
+    /// drive the first frame signal without waiting on AVFoundation.
+    func setVideoReadyForDisplay(_ ready: Bool) {
         guard player != nil else { return }
         videoReadyForDisplay = ready
         updatePoster()

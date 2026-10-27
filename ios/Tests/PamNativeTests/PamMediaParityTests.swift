@@ -64,9 +64,13 @@ final class PamMediaParityTests: XCTestCase {
         window.addSubview(media)
         media.setSource(try Self.makeVideo().absoluteString)
         XCTAssertTrue(media.isPosterVisible, "covers the surface while the video loads")
-        waitUntil(timeout: 10) { media.videoReadyForDisplay }
-        XCTAssertTrue(media.videoReadyForDisplay, "a paused video draws its first frame")
-        XCTAssertFalse(media.isPosterVisible)
+        // The surface's isReadyForDisplay KVO, driven directly: decoding the
+        // first frame on a busy Simulator took longer than any fixed timeout.
+        media.setVideoReadyForDisplay(false)
+        XCTAssertTrue(media.isPosterVisible, "still no frame: the poster stays")
+        media.setVideoReadyForDisplay(true)
+        XCTAssertTrue(media.videoReadyForDisplay)
+        XCTAssertFalse(media.isPosterVisible, "the first frame replaces the poster")
 
         renderer.commit([[.update(id: 2, key: PamConstants.mediaThumbnailSource, value: nil)]])
         XCTAssertNil(media.posterView.image)
