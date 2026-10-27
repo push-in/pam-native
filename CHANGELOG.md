@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- iOS Modal / BottomSheet: a modal declared inside a tab scene or a route is
+  mounted on the root host at its absolute engine frame, so later siblings (a
+  real-world app's tab bar) no longer paint over the sheet and hide its
+  bottom; it hides with its logical parent (covered route, inactive tab).
+  Closing a modal ends editing inside it, so the keyboard no longer stays up
+  after the sheet that owned the focused input closed.
+
 - iOS images: remote photos far from the screen release their decoded pixels
   and restore them within one screen of the window (cells beyond the list
   prefetch, album pages, covered routes, inactive tabs), like Android's

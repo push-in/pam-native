@@ -140,6 +140,8 @@ public final class PamRenderer: @unchecked Sendable {
     private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
     private var imageResidencyObserver: NSObjectProtocol?
+    /// Modals mounted on the root host instead of their logical parent.
+    private var liftedModals = Set<ObjectIdentifier>()
     /// Remote images that can drop their pixels away from the screen and
     /// restore them near it (`PamImageResidency`).
     private var residentImages: [Int64: ResidentImage] = [:]
@@ -179,6 +181,7 @@ public final class PamRenderer: @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             self?.syncRouteListeners()
+            self?.syncLiftedModals()
             PamImageResidency.requestSweep()
         }
         imageResidencyObserver = NotificationCenter.default.addObserver(
@@ -724,6 +727,11 @@ public final class PamRenderer: @unchecked Sendable {
         if let previousPosition, children[parent]?.firstIndex(of: id) == previousPosition {
             return
         }
+        if let modal = views[id] as? PamModalHost, modal.superview === host, parent != 0 {
+            // Lifted to the root host: a new logical place never re-presents it.
+            syncLiftedModal(modal, parentId: parent)
+            return
+        }
         if let view = views[id], previousParent == parent,
            let navigation = views[parent] as? PamNavigationHost {
             // A route changing places in its stack (prewarmed or kept alive)
@@ -1176,6 +1184,12 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
+        if view is PamModalHost, state.parent != 0, view.superview === host {
+            // Lifted modal: absolute engine frame in the root host.
+            let origin = frames[rootId]
+            left = CGFloat(frame.x - (origin?.x ?? 0))
+            top = CGFloat(frame.y - (origin?.y ?? 0))
+        }
         let sheetViewport = (views[effectiveParent] as? PamModalHost)?.sheetContentBounds
         let nextFrame = sheetViewport ?? CGRect(
             x: left,
@@ -1437,6 +1451,25 @@ public final class PamRenderer: @unchecked Sendable {
         }
     }
 
+    /// A lifted modal shows only while its logical parent is on screen: a
+    /// covered route or an inactive tab hides its sheet, as when the modal
+    /// was mounted inside it.
+    private func syncLiftedModal(_ modal: PamModalHost, parentId: Int64) {
+        guard let parentView = views[parentId] else { return }
+        let covered = parentView.window != nil && PamRouteCoverage.isCovered(parentView)
+        modal.alpha = covered ? 0 : 1
+        modal.isUserInteractionEnabled = !covered
+    }
+
+    private func syncLiftedModals() {
+        guard !liftedModals.isEmpty else { return }
+        for (id, view) in views {
+            guard let modal = view as? PamModalHost, modal.superview === host,
+                  let parent = nodes[id]?.parent, parent != 0 else { continue }
+            syncLiftedModal(modal, parentId: parent)
+        }
+    }
+
     private func attach(_ view: UIView, parentId: Int64, index: Int) {
         if parentId == 0 {
             let list = children[0] ?? []
@@ -1467,6 +1500,21 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let modal = parent as? PamModalHost {
             modal.insert(view, index: index)
+            return
+        }
+        if let modal = view as? PamModalHost {
+            // A Modal / BottomSheet covers the whole window like Android's
+            // dialog window: mounted inside a tab scene or route, siblings
+            // drawn later (a tab bar, a floating header) painted over the
+            // sheet and hid its bottom. It lives on the root host instead,
+            // positioned by its absolute engine frame, and mirrors the
+            // coverage of its logical parent (`syncLiftedModals`).
+            host.addSubview(view)
+            if let band = statusBarBand, host.subviews.last !== band {
+                host.bringSubviewToFront(band)
+            }
+            liftedModals.insert(ObjectIdentifier(modal))
+            syncLiftedModal(modal, parentId: parentId)
             return
         }
         // RefreshControl hosts its scrollable child in its content view and

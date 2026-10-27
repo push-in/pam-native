@@ -2951,6 +2951,8 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             return
         }
         previousFocus = window?.pamFirstResponder()
+        // The newest presented modal draws above earlier ones and the routes.
+        superview?.bringSubviewToFront(self)
         isHidden = false
         currentlyVisible = true
         accessibilityViewIsModal = true
@@ -3094,6 +3096,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
         let animationDuration: TimeInterval = 0.125
         let generation = visibilityGeneration
+        // An input focused inside the sheet kept the keyboard up after the
+        // sheet closed (a hidden view stays first responder). Android's
+        // dialog hides the IME with its window.
+        endEditing(true)
 
         let completion = {
             guard generation == self.visibilityGeneration, !self.desiredVisible else {
