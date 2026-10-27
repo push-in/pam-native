@@ -102,6 +102,11 @@ final class PamViewEffects {
         baseClips = view.layer.masksToBounds
     }
 
+    static func clampedRadius(_ radius: CGFloat, size: CGSize) -> CGFloat {
+        let limit = min(size.width, size.height) / 2
+        return limit > 0 ? min(radius, limit) : radius
+    }
+
     static func of(_ view: UIView, create: Bool = true) -> PamViewEffects? {
         if let existing = objc_getAssociatedObject(view, &key) as? PamViewEffects { return existing }
         guard create else { return nil }
@@ -142,7 +147,10 @@ final class PamViewEffects {
         let corners = next.layerCorners
         let wantsClip = next.clips || next.clipsContent || baseClips
         if let corners {
-            layer.cornerRadius = corners.radius
+            // CSS/Android clamp an oversized radius (999 = pill/circle) to
+            // half the shorter side. Core Animation does not: past that
+            // value a clipping layer masks its own children away.
+            layer.cornerRadius = Self.clampedRadius(corners.radius, size: size)
             layer.maskedCorners = corners.corners
             if maskLayer != nil {
                 layer.mask = nil
