@@ -32,6 +32,10 @@ Steps:
 | `{"tapId": "identifier"}` | Accessibility identifier (`testId`). |
 | `{"tapXY": [0.5, 0.9]}` | Normalized window coordinates. |
 | `{"longPress": "label", "seconds": 1}` | Long press. |
+| `{"doubleTapXY": [0.5, 0.4]}` | Double tap at normalized window coordinates. |
+| `{"longPressXY": [0.5, 0.4], "seconds": 1}` | Press and hold at normalized coordinates. |
+| `{"drag": [0.5, 0.3, 0.5, 0.9], "velocity": 600, "hold": 0}` | Press, drag from one normalized point to another (points/s), optionally hold before lifting. |
+| `{"pinch": 2.0, "velocity": 2}` | Two-finger pinch on the window (scale > 1 zooms in). |
 | `{"type": "text"}` | Keyboard input into the focused field. |
 | `{"swipe": "up"}` | `up`/`down`/`left`/`right` on the window. |
 | `{"edgeSwipe": true}` | Press-and-drag from the left edge. |

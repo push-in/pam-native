@@ -98,6 +98,38 @@ final class PamUIDriverTests: XCTestCase {
                 .tap()
             return
         }
+        if let point = step["doubleTapXY"] as? [Double], point.count == 2 {
+            app.windows.firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: point[0], dy: point[1]))
+                .doubleTap()
+            return
+        }
+        if let point = step["longPressXY"] as? [Double], point.count == 2 {
+            app.windows.firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: point[0], dy: point[1]))
+                .press(forDuration: step["seconds"] as? Double ?? 1)
+            return
+        }
+        if let path = step["drag"] as? [Double], path.count == 4 {
+            // Normalized [fromX, fromY, toX, toY]; "velocity" in points/s
+            // (default 600, a deliberate finger drag) and "hold" seconds at the end.
+            let window = app.windows.firstMatch
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: path[0], dy: path[1]))
+            let end = window.coordinate(withNormalizedOffset: CGVector(dx: path[2], dy: path[3]))
+            start.press(
+                forDuration: step["press"] as? Double ?? 0.05,
+                thenDragTo: end,
+                withVelocity: XCUIGestureVelocity(CGFloat(step["velocity"] as? Double ?? 600)),
+                thenHoldForDuration: step["hold"] as? Double ?? 0
+            )
+            return
+        }
+        if let scale = step["pinch"] as? Double {
+            // > 1 zooms in, < 1 zooms out; velocity is scale factor per second.
+            let velocity = step["velocity"] as? Double ?? (scale > 1 ? 2 : -2)
+            app.windows.firstMatch.pinch(withScale: CGFloat(scale), velocity: CGFloat(velocity))
+            return
+        }
         if let label = step["longPress"] as? String {
             let element = try element(labelled: label, timeout: timeout, step: index)
             element.press(forDuration: step["seconds"] as? Double ?? 1)
