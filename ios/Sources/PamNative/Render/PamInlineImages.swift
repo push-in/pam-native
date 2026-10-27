@@ -36,7 +36,7 @@ enum PamInlineImages {
         return image
     }
 
-    /// Packaged `asset://` files up to this size (icon masks, Zé Chat's
+    /// Packaged `asset://` files up to this size (icon masks, an app's
     /// `assets/icons`) decode in the frame and share the inline cache, like
     /// Android's `INLINE_SYNC_MAX_CHARS` assets: cells re-mounting the same
     /// icon never read and decode the file again, nor wait behind photos.
