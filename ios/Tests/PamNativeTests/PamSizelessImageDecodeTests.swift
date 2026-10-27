@@ -37,3 +37,16 @@ final class PamSizelessImageDecodeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(image.size.width * image.scale, floor(covering) - 1)
     }
 }
+
+@MainActor
+final class PamImageCoverClipTests: XCTestCase {
+    /// resizeMode cover never paints over the neighbouring cells of a grid.
+    func testCoverImageClipsToItsBounds() {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.imageFit: .integer(1),
+        ], kind: .image, frame: Frame(x: 0, y: 0, width: 120, height: 120))
+        defer { renderer.close() }
+        XCTAssertEqual(view.contentMode, .scaleAspectFill)
+        XCTAssertTrue(view.clipsToBounds)
+    }
+}

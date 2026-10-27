@@ -1537,7 +1537,13 @@ public final class PamRenderer: @unchecked Sendable {
             let field = PamInputField()
             field.borderStyle = .none
             return field
-        case .image, .imageBackground:
+        case .image:
+            // Android's ImageView draws inside its bounds; UIKit's aspect
+            // fill (resizeMode cover) paints past them over the neighbours.
+            let image = PamImageView()
+            image.clipsToBounds = true
+            return image
+        case .imageBackground:
             return PamImageView()
         case .scroll:
             return PamAnchoredScrollView()
