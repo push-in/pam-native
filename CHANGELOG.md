@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Android navigation bar buttons follow the authored `<StatusBar barStyle>`
+  (as React Native apps do when every StatusBar style change also styles the
+  navigation bar): over the transparent edge-to-edge bar, `light-content`
+  gives light buttons and `dark-content` dark ones, so an always-dark viewer
+  in the light theme no longer hides the buttons, and light screens in the
+  dark theme get dark ones. Without a StatusBar style the theme's
+  `pam_light_navigation_bar` still applies. An edge-to-edge modal (Android
+  10+) uses the StatusBar declared inside it; opaque bars keep the theme's
+  buttons. iOS has no navigation bar (the home indicator adapts itself).
+
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
