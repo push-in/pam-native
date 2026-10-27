@@ -12,6 +12,7 @@ use Pam\Native\HotReload\ComponentStatePreserver;
 use WeakMap;
 
 use function count;
+use function in_array;
 
 final class ComponentLifecycle
 {
@@ -236,6 +237,74 @@ final class ComponentLifecycle
         array_pop(self::$renderStack);
     }
 
+    /** The component rendering now, if any. */
+    public static function current(): ?Component
+    {
+        return self::$renderStack === [] ? null : self::$renderStack[count(self::$renderStack) - 1];
+    }
+
+    /**
+     * Renders on behalf of $owner after its render() returned (the rows of a
+     * lazy list, built when the encoder reaches them): components entered by
+     * $render become children of $owner, like the ones it rendered itself.
+     *
+     * @template T
+     * @param Closure(): T $render
+     * @return array{0: T, 1: list<Component>} the result and the top-level components it rendered
+     */
+    public static function renderFor(?Component $owner, Closure $render): array
+    {
+        if ($owner === null) {
+            return self::capture($render);
+        }
+        self::$renderStack[] = $owner;
+        DependencyTracker::resume($owner);
+        try {
+            return self::capture($render);
+        } finally {
+            DependencyTracker::suspend($owner);
+            array_pop(self::$renderStack);
+        }
+    }
+
+    /**
+     * Detaches components rendered for $owner by renderFor() that are no
+     * longer shown (a lazy row left the materialized window): they and their
+     * descendants unmount at the end of this pass even when $owner is reused.
+     *
+     * @param list<Component> $components
+     */
+    public static function release(?Component $owner, array $components): void
+    {
+        if ($components === []) {
+            return;
+        }
+        $holder = $owner === null ? null : (self::$children[$owner] ?? null);
+        if ($holder !== null) {
+            $holder->children = array_values(array_filter(
+                $holder->children,
+                static fn (Component $child): bool => !in_array($child, $components, true),
+            ));
+            $holder->retained = null;
+            $holder->walked = -1;
+        }
+        $pass = self::$pass;
+        foreach ($components as $component) {
+            $state = self::$states[$component] ?? null;
+            if ($state !== null && $state->seen === $pass) {
+                $state->seen = $pass - 1;
+            }
+            $childHolder = self::$children[$component] ?? null;
+            if ($childHolder !== null) {
+                foreach (self::descendantStates($childHolder, 0) as $descendant) {
+                    if ($descendant->seen === $pass) {
+                        $descendant->seen = $pass - 1;
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Runs a render and returns its result with the top-level components it
      * rendered, so a caller can later reuse the result without rendering
@@ -320,6 +389,9 @@ final class ComponentLifecycle
             $children[$parent] = $holder = new ComponentLifecycleState();
         }
         $holder->children[] = $component;
+        // A child joined after the subtree was walked (a lazy list row).
+        $holder->retained = null;
+        $holder->walked = -1;
     }
 
     /**

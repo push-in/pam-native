@@ -718,6 +718,9 @@ pub enum PropKey {
     ScrollKeyboardPersistTaps = 538,
     GestureNativeBounds = 539,
     GestureNativeContentAspect = 540,
+    ListPlaceholder = 541,
+    ListWindowed = 542,
+    ListPlaceholderRows = 543,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1265,6 +1268,9 @@ impl TryFrom<u16> for PropKey {
             538 => Ok(Self::ScrollKeyboardPersistTaps),
             539 => Ok(Self::GestureNativeBounds),
             540 => Ok(Self::GestureNativeContentAspect),
+            541 => Ok(Self::ListPlaceholder),
+            542 => Ok(Self::ListWindowed),
+            543 => Ok(Self::ListPlaceholderRows),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2202,10 +2208,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=540 {
+        for value in 1..=543 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(541).is_err());
+        assert!(PropKey::try_from(544).is_err());
     }
 
     #[test]

@@ -247,6 +247,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
         richIds = ids
         richExtents = pixelExtents
+        richSpans = rowSpan?.let { span ->
+            HashMap<Long, IntArray>(ids.size * 2).also { spans ->
+                for (id in ids) span(id)?.let { spans[id] = it }
+            }
+        } ?: emptyMap()
         val current = adapter as? RichRecyclerAdapter
         if (keepEnd) {
             post {
@@ -999,7 +1004,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             val itemCount = adapter?.itemCount ?: 0
             if (itemCount == 0) return@post
             (layoutManager as? LinearLayoutManager)
-                ?.scrollToPositionWithOffset(initialIndex.coerceAtMost(itemCount - 1), 0)
+                ?.scrollToPositionWithOffset(positionOfRow(initialIndex).coerceAtMost(itemCount - 1), 0)
             initialPositionApplied = true
         }
     }
@@ -1015,8 +1020,101 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (initialPositionApplied || pendingInitialGeneration != initialPositionGeneration) return
         val itemCount = adapter?.itemCount ?: 0
         if (itemCount == 0) return
-        manager.scrollToPositionWithOffset(initialIndex.coerceAtMost(itemCount - 1), 0)
+        manager.scrollToPositionWithOffset(positionOfRow(initialIndex).coerceAtMost(itemCount - 1), 0)
         initialPositionApplied = true
+    }
+
+    /** Item (row node) id at adapter [position], or null outside the rows. */
+    fun richIdAt(position: Int): Long? = richIds.getOrNull(position)
+
+    /**
+     * Rows of a windowed list: [rowSpan] gives an item's first row index and
+     * how many rows it stands for (a placeholder run covers several, each
+     * extent / rows tall), or null when it is not a row.
+     */
+    var rowSpan: ((Long) -> IntArray?)? = null
+
+    /** [rowSpan] of each item as of the last [setRichItems] (what is on screen). */
+    private var richSpans: Map<Long, IntArray> = emptyMap()
+
+    /** A list row and how far the viewport's start edge is inside it (px). */
+    class RowAnchor(val row: Int, val intoRow: Int, val itemId: Long, val intoItem: Int)
+
+    /**
+     * The row at the viewport's start edge (inside a placeholder run, the row
+     * of the run under it), or null.
+     */
+    fun rowAnchor(): RowAnchor? = rowAt(atEnd = false)
+
+    /** First and last row index the viewport shows, or null. */
+    fun visibleRows(): IntArray? {
+        val first = rowAt(atEnd = false) ?: return null
+        val last = rowAt(atEnd = true) ?: first
+        return intArrayOf(first.row, last.row)
+    }
+
+    private fun rowAt(atEnd: Boolean): RowAnchor? {
+        if (rowSpan == null) return null
+        val span = richSpans::get
+        if (horizontal) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val position = if (atEnd) manager.findLastVisibleItemPosition() else manager.findFirstVisibleItemPosition()
+        if (position == NO_POSITION) return null
+        val view = manager.findViewByPosition(position) ?: return null
+        val id = richIds.getOrNull(position) ?: return null
+        val (start, rows) = span(id)?.let { it[0] to it[1].coerceAtLeast(1) } ?: return null
+        val extent = view.height
+        // Distance from the item's start edge (layout direction) to the
+        // viewport edge asked for.
+        val edge = if (atEnd) {
+            if (inverted) paddingTop else height - paddingBottom
+        } else {
+            if (inverted) height - paddingBottom else paddingTop
+        }
+        val into = (if (inverted) view.bottom - edge else edge - view.top).coerceIn(0, max(0, extent - 1))
+        if (rows == 1 || extent <= 0) return RowAnchor(start, into, id, 0)
+        val rowPx = extent.toFloat() / rows
+        val row = (into / rowPx).toInt().coerceIn(0, rows - 1)
+        val rowStart = (row * rowPx).toInt()
+        return RowAnchor(start + row, into - rowStart, id, rowStart)
+    }
+
+    /**
+     * After rows were replaced (a placeholder run split into rows), keeps
+     * [anchor]'s row exactly where it was on screen. A fling in progress
+     * continues: scrollToPositionWithOffset does not stop it.
+     */
+    fun restoreRowAnchor(anchor: RowAnchor) {
+        if (rowSpan == null) return
+        val span = richSpans::get
+        val manager = layoutManager as? LinearLayoutManager ?: return
+        for ((position, id) in richIds.withIndex()) {
+            val item = span(id) ?: continue
+            val start = item[0]
+            val rows = item[1].coerceAtLeast(1)
+            if (anchor.row < start || anchor.row >= start + rows) continue
+            val extent = richExtents[id] ?: return
+            val intoItem = if (rows == 1) 0 else ((anchor.row - start) * (extent.toFloat() / rows)).toInt()
+            if (id == anchor.itemId && intoItem == anchor.intoItem) return
+            manager.scrollToPositionWithOffset(position, -(intoItem + anchor.intoRow))
+            return
+        }
+    }
+
+    /** Adapter position of the item holding row [row] (windowed lists), or [row]. */
+    private fun positionOfRow(row: Int): Int {
+        if (rowSpan == null) return row
+        val span = richSpans::get
+        for ((position, id) in richIds.withIndex()) {
+            val item = span(id) ?: continue
+            if (row >= item[0] && row < item[0] + item[1].coerceAtLeast(1)) return position
+        }
+        return row
+    }
+
+    /** Reports the current visible range again (after rows were replaced). */
+    fun reportViewport() {
+        if (viewportChanged != null && isLaidOut) dispatchViewport()
     }
 
     private fun dispatchViewport() {
@@ -1387,6 +1485,100 @@ private class RichRecyclerAdapter(
         setHasStableIds(true)
     }
 
+    /**
+     * Keyed rows that kept their relative order (filtering, pages appended or
+     * prepended, rows inserted or removed anywhere): range updates from one
+     * O(N) walk, instead of DiffUtil's O(N + D^2) (a filter that dropped
+     * 8,000 of 10,000 rows took seconds on the UI thread). Returns false when
+     * rows moved relative to each other.
+     */
+    private fun submitKeyed(
+        previous: List<Long>,
+        previousExtents: Map<Long, Int>,
+        replacement: List<Long>,
+        replacementExtents: Map<Long, Int>,
+    ): Boolean {
+        val nextPositions = HashMap<Long, Int>(replacement.size * 2)
+        replacement.forEachIndexed { position, id -> nextPositions[id] = position }
+        val previousIds = HashSet<Long>(previous.size * 2)
+        var lastCommon = -1
+        for (id in previous) {
+            previousIds += id
+            val position = nextPositions[id] ?: continue
+            if (position < lastCommon) return false
+            lastCommon = position
+        }
+        // Count the runs first: too many scattered ranges rebind instead.
+        var runs = 0
+        run {
+            var i = 0
+            var j = 0
+            var inRun = 0 // 1 removed, 2 inserted, 3 changed
+            while (i < previous.size || j < replacement.size) {
+                val kind = when {
+                    i < previous.size && previous[i] !in nextPositions -> { i++; 1 }
+                    j < replacement.size && replacement[j] !in previousIds -> { j++; 2 }
+                    else -> {
+                        val id = replacement[j]
+                        i++
+                        j++
+                        if (previousExtents[id] != replacementExtents[id]) 3 else 0
+                    }
+                }
+                if (kind != 0 && kind != inRun) runs++
+                inRun = kind
+            }
+        }
+        ids = replacement
+        extents = replacementExtents
+        if (runs > MAX_RANGE_UPDATES) {
+            notifyDataSetChanged()
+            return true
+        }
+        var i = 0
+        var j = 0
+        var position = 0
+        while (i < previous.size || j < replacement.size) {
+            if (i < previous.size && previous[i] !in nextPositions) {
+                var count = 0
+                while (i < previous.size && previous[i] !in nextPositions) {
+                    i++
+                    count++
+                }
+                notifyItemRangeRemoved(position, count)
+            } else if (j < replacement.size && replacement[j] !in previousIds) {
+                var count = 0
+                while (j < replacement.size && replacement[j] !in previousIds) {
+                    j++
+                    count++
+                }
+                notifyItemRangeInserted(position, count)
+                position += count
+            } else {
+                var count = 0
+                val start = position
+                while (
+                    i < previous.size && j < replacement.size &&
+                    previous[i] == replacement[j] &&
+                    previousExtents[replacement[j]] != replacementExtents[replacement[j]]
+                ) {
+                    i++
+                    j++
+                    count++
+                }
+                if (count > 0) {
+                    notifyItemRangeChanged(start, count, PAYLOAD_LAYOUT)
+                    position += count
+                } else {
+                    i++
+                    j++
+                    position++
+                }
+            }
+        }
+        return true
+    }
+
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
         if (ids == next && extents == nextExtents) {
             remountEmptyHolders()
@@ -1407,6 +1599,15 @@ private class RichRecyclerAdapter(
                     applyLayout(holder.container, id)
                 }
             }
+            return
+        }
+        if (submitKeyed(previous, previousExtents, replacement, replacementExtents)) return
+        if (previous.size + replacement.size > LARGE_DIFF_ROWS) {
+            // Reordered rows in a long list: Myers with move detection is
+            // O(N + D^2); rebinding by stable id is cheaper.
+            ids = replacement
+            extents = replacementExtents
+            notifyDataSetChanged()
             return
         }
         val diff = DiffUtil.calculateDiff(
@@ -1618,6 +1819,10 @@ private class RichRecyclerAdapter(
 
     private companion object {
         val PAYLOAD_LAYOUT = Any()
+        /** More scattered range updates than this rebind by stable id instead. */
+        const val MAX_RANGE_UPDATES = 64
+        /** Reordered lists longer than this rebind instead of a Myers diff. */
+        const val LARGE_DIFF_ROWS = 2_000
         const val MOUNT_BUDGET_NANOS = 5_000_000L
         const val SHOWN_MOUNT_BUDGET_NANOS = 10_000_000L
     }

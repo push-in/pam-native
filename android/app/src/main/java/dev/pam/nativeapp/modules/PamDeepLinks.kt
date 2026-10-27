@@ -33,6 +33,9 @@ internal object PamDeepLinks {
         pending?.complete(ModuleResultStatus.SUCCESS, payload)
     }
 
+    /** The launch URL without consuming it (exported to PHP at boot). */
+    fun launchUrl(): String? = synchronized(lock) { initialUrl }
+
     fun initial(completion: ModuleCompletion) {
         val url = synchronized(lock) {
             val value = initialUrl

@@ -916,11 +916,11 @@ horizontal list) remains authoritative, so one recycled list can render
 different media aspect ratios without measuring them on the UI thread.
 `rowHeight` remains a compatibility alias.
 
-### PHP window (`windowSize`)
+### List window (`windowSize`)
 
-The native list only creates views near the viewport, but PHP still builds
-every row it is given. A template list whose rows come from one `p-for` can
-bound that too, like React Native FlatList `windowSize`:
+The native list only creates views near the viewport. The list window also
+bounds what PHP builds and what the hosts keep as nodes, like React Native
+FlatList `windowSize`:
 
 ```html
 <VirtualizedList windowSize="5" estimatedRowHeight="600">
@@ -929,18 +929,35 @@ bound that too, like React Native FlatList `windowSize`:
 </VirtualizedList>
 ```
 
-Only the loop rows within `(windowSize - 1) / 2` screens above and below the
-viewport are rendered. Every other row is a childless placeholder view with the
-height the row last measured (or `estimatedRowHeight` before it was ever
-mounted), so the content height, the scroll position and the native cell
-recycling do not move. Rows leaving the window unmount their components (their
-local state is lost, as in React Native) and the encoder forgets their nodes.
+```php
+VirtualizedList::of($posts, fn (array $post) => PostCard::make($post))
+    ->estimatedRowHeight(600)
+    ->windowSize(5);
+```
 
-The window follows the list's scroll phases: drag start, release (a fling is
-materialized up to its predicted landing as soon as the finger lifts) and
-momentum end, plus a `scrollRequest` with a `scrollTargetOffset`. PHP is never
-woken per scroll frame. Static children before and after the loop always
-render. It uses no new protocol keys, so it behaves the same on Android and iOS.
+Only the rows within `(windowSize - 1) / 2` screens above and below the rows
+on screen are built and mounted; a screen is the number of rows the host
+reports visible. Every other row is a childless placeholder with the height
+(and margins) the row last measured, or `estimatedRowHeight` before it was
+ever mounted, so the content height, the scroll position and the native cell
+recycling do not move. Rows leaving the window unmount their components
+(their local state is lost, as in React Native). Static children before and
+after the `p-for` (a header, a footer) are rows of the same window, and a
+`p-for` row is only rendered when the window reaches it.
+
+The hosts send the rows on screen (event `ListWindow`) only when a
+placeholder comes near them, and the window moves in batches of half a
+margin, so PHP is never woken per scroll frame and needs no scroll handler.
+A `scrollRequest` with a `scrollTargetOffset` materializes the rows around
+the target before the list gets there. Several windowed lists in one
+builder component need distinct keys.
+
+Without `windowSize`, a vertical list (or a template `p-for` inside one) with
+more than 96 rows is windowed automatically by rows: its first 48 rows, then
+64-row margins around the rows on screen, with the rows outside sent as one
+placeholder per run (`ListPlaceholderRows`) sized by the estimate. Horizontal
+lists are never windowed. See [PROTOCOL.md](../PROTOCOL.md) for the wire
+format.
 
 The native list viewport and every recycled holder are paint boundaries.
 Scrolling media cannot draw over screen headers, adjacent rows, or tab bars;

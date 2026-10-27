@@ -48,6 +48,68 @@ their state (a horizontal tab rail offset, a focused input) is kept.
   — use it for `ListHeaderComponent`/`ListFooterComponent` equivalents placed
   first/last; they scroll with the list.
 
+### Windowed materialization (long lists)
+
+Write long lists the plain way (`VirtualizedList::make(...$rows)`,
+`VirtualGrid`, or `p-for` inside `<VirtualizedList>`); nothing else is needed.
+A vertical list with more than 96 rows is materialized by window, like
+FlashList's `renderItem`: the first frame carries the first 48 rows (and the
+rows around `initialScrollIndex`) and every other row as a placeholder — its
+own root node with its authored size, without children or events, sized by
+the list estimate (`estimatedRowHeight`) when it has no height of its own.
+
+While the user scrolls, the host reports the rows on screen whenever a
+placeholder comes within a screen of them (event kind 80, framework-owned,
+never an app callback) and the next frame turns the rows ahead into full rows
+in place: same node ids, so materialized rows keep their views, decoded
+images and state and are never re-encoded. The window slides: rows more than
+four margins (at least 256 rows) away from the visible ones go back to
+placeholders, and the first 48 rows always stay, so a list scrolled end to
+end keeps a bounded number of rows in PHP, the engine and the host. Sticky headers and full-span rows
+are always materialized; horizontal lists and lists up to 96 rows are encoded
+completely as before. On a 10,000-row list this removes ~99% of the first
+frame's nodes from the PHP encoder, the engine's measure/layout pass and the
+native mount, so the list appears in the time of a short one.
+
+### Rows rendered on demand (templates, closures)
+
+Nothing to opt into: when a `p-for` is the only child of a
+`<VirtualizedList>` or `<VirtualGrid>` with more than 96 items, each row is
+rendered when the window reaches it, exactly as the eager loop would render
+it (same `p-key`, slot, events and component instances).
+
+```html
+<VirtualizedList estimatedRowHeight="72">
+    <MessageRow p-for="$message in $messages" :key="$message['id']" :message="$message" />
+</VirtualizedList>
+```
+
+Row components are children of the component that owns the template: they
+mount when their row is first rendered, keep their state by key across
+re-renders and reorders, and unmount when they leave the list or the
+materialized window (while the owner is not re-rendered, their instances
+stay keyed, so state survives a return to the window). State a row reads
+subscribes the owner, so changing it re-renders the list as before. Loops
+with 96 items or fewer, loops of control tags and lists with other children
+render eagerly. `VirtualizedList::make()` defers closure rows (and
+generators of them) the same way, keyed by position.
+
+### Data-driven lists (`VirtualizedList::of`)
+
+The FlatList/FlashList shape: items, a row builder and a key.
+
+```php
+VirtualizedList::of($messages, fn (Message $m, int $i) => MessageRow::make($m), fn (Message $m) => $m->id)
+VirtualGrid::of(3, $photos, fn (Photo $p) => Thumb::make($p))
+```
+
+`$row` runs only for the rows the window materializes (and once per row per
+list instance); the other rows are keyed placeholders. A 10,000-item list
+builds about 48 rows on its first frame instead of 10,000 `Element` trees.
+Keys default to the item's `key`/`id` (array key or public property), then
+to its index. Theme defaults reach rows built later; a row builder may return
+`null` for a hole. Both the PHP and the native encoders handle these lists.
+
 ### Keyed sections (tabs over one list)
 
 Screens such as chat details render a header, a sticky tab rail and the

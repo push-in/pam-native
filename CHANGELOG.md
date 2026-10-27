@@ -90,14 +90,24 @@
   sheet) does. In a real-world app's signup the primary button sat under the
   iOS suggestion bar. Longer content still reveals only the field.
 
-- Template `VirtualizedList windowSize="N"` (React Native FlatList
-  `windowSize`): PHP renders only the `p-for` rows within the window and keeps
-  a placeholder with the row's measured height for the others, driven by the
-  list's scroll phases (a fling is materialized up to its predicted landing).
-  The tree encoder also forgets the identities and child placements of
-  removed nodes. In a real-world app's feed after 30 swipes: PHP memory
-  51.6 MB to 33.9 MB, encoded nodes 3,688 to 742, footprint 208 MB to 184 MB
-  (iOS Simulator). No protocol change.
+- One list window for every `VirtualizedList`/`VirtualGrid` (Android and
+  iOS). `windowSize` (React Native FlatList `windowSize`; template attribute
+  or `->windowSize(n)`) keeps the rows within `(n - 1) / 2` screens of the
+  visible ones built and mounted, a screen being the rows the host reports
+  on screen; the rows outside are childless `ListPlaceholder` nodes with the
+  height (and margins) their row last measured, or `estimatedRowHeight`
+  before that, so the content height and the scroll position stay put. Rows
+  leave and rejoin the window in batches (half a margin of slack), a
+  `scrollRequest` with a target offset materializes the rows around it at
+  once, and rows leaving unmount their components. Static children around
+  the `p-for` (a feed header, a footer) are rows of the same window. PHP is
+  woken by the host's `ListWindow` event only when a placeholder comes near
+  the screen (no scroll-phase handlers, no per-frame events). Lists without
+  `windowSize` keep the automatic window of long lists (below). The tree
+  encoders (PHP and native) forget the identities of removed nodes. In a
+  real-world app's feed after 30 swipes (iOS Simulator, first `windowSize`
+  version): PHP memory 51.6 MB to 33.9 MB, encoded nodes 3,688 to 742,
+  footprint 208 MB to 184 MB.
 - iOS UI driver (`ios-host/UITests`): `{"fling": "up"|"down"}` step, a fast
   flick that returns while the list still decelerates (scroll QA).
 
@@ -213,6 +223,78 @@
 - Push rendering: route aliases let a screen known by several route ids
   suppress the pushes of any of them while it is shown (a real-world app's
   conversation reached by more than one route).
+
+- Long lists are materialized by window, with no app change (Android and
+  iOS): a vertical `VirtualizedList`/`VirtualGrid` (or `p-for` inside
+  `<VirtualizedList>`) with more than 96 rows ships its first 48 rows (and
+  the rows around `initialScrollIndex`) plus childless placeholder roots,
+  sized by their authored height or the list estimate. Hosts report the rows
+  on screen when a placeholder comes within a screen of them and the next
+  frame turns the rows ahead into full rows in place (same node ids, so
+  views, decoded images and state are kept). Sticky headers and full-span
+  rows are always materialized; horizontal and short lists are unchanged.
+  The window slides: rows more than four margins (256+ rows) away from the
+  visible ones go back to placeholders (their row components unmount), and
+  the first 48 rows stay, so memory stays bounded however far a list is
+  scrolled.
+  On the framework suite's 10,000-row list (x86_64 API 36 emulator, release
+  builds, three alternating runs against 1.43.0) the content shows in
+  ~1.0 s instead of ~2.9 s and PSS drops from 336-383 MB to 205 MB, with
+  frame p99 unchanged at 16 ms; PHP encodes a 424 KB first frame instead of
+  2 MB, 4x faster with 3.6x less memory. Flinging through placeholders costs
+  ~20% more CPU (each window growth is still an O(rows) patch).
+- Rows outside the window cost O(1) per run, not per row: a single-column
+  list sends each run of them as one placeholder node sized rows x the
+  estimate (`ListPlaceholderRows`), so PHP, the engine and the host keep
+  O(window) nodes for any list length. Hosts report the visible rows by
+  index (also inside a run) and Android keeps the row at the top of the
+  screen in place while a run splits into rows. A 10,000-row list's first
+  frame drops from 270 KB / 10,051 nodes to ~3 KB / 50 nodes; encoding it
+  takes 1.2 ms natively (was 9.1 ms) and 5.1 ms in PHP (was 31.9 ms).
+- Protocol: properties 541 (`ListPlaceholder`), 542 (`ListWindowed`) and 543
+  (`ListPlaceholderRows`) and event 80 (`ListWindow`, consumed by the
+  runtime; payload `@first,last` row indexes or legacy node ids) are
+  appended. Android, iOS, Rust and PHP tables stay in parity.
+- Rows are rendered only when the window reaches them, with no app change:
+  a `p-for` that is the only child of `<VirtualizedList>`/`<VirtualGrid>`
+  (more than 96 items) renders each row when the encoder materializes it,
+  exactly as the eager loop would (same keys, slots, events and component
+  instances). Row components mount as children of the component that owns
+  the template, keep their state by key across re-renders and reorders, and
+  unmount when they leave the list (or the materialized window). On the
+  10,000-row list the template screen builds 48 rows instead of 10,000.
+  `VirtualizedList::make()` defers closure rows (and generators of them) the
+  same way, and `VirtualizedList::of($items, $row, $key)` / `VirtualGrid::of()`
+  remain as the data-driven builder (FlatList `data` + `renderItem`).
+- Android renderer: node and frame maps are O(1) (`PamLongMap`; hashed node
+  ids made `LongSparseArray.put` O(n²)); virtual-list row removals/reorders
+  are applied once per commit and the adapter updates by ranges in one O(N)
+  walk instead of DiffUtil's O(N+D²); the answer to a press/text change/
+  submit/toggle jumps the main queue and mounts as soon as it is decoded, so
+  the next traversal draws it, like a native click handler (it used to wait
+  for a frame callback, a full frame whenever it landed after a vsync):
+  touch-to-pixel of a like went from ~47 ms to ~37 ms (native ~34 ms). A filter keystroke over 10,000
+  rows went from seconds of UI-thread work to milliseconds.
+- `Style::properties()` is read natively on Android/iOS (same result, 14x).
+- Android renderer: re-applying an unchanged layout no longer redraws or
+  re-lays out the screen (the ancestor invalidation only follows a changed
+  frame; `TextView.setJustificationMode()`, which drops the text layout even
+  for the same mode, is only called on a change; the same safe-area insets
+  dispatched again skip the subtree relayout). A cold start drew 4 extra
+  frames after the content (window focus and insets dispatches); now 2.
+- `NavigationContainer::linking()` routes the launch URL before the first
+  frame (Android/iOS export `PAM_NATIVE_LAUNCH_URL`), without a transition
+  (no AnimationComplete round trip re-renders the stack after it), and the
+  Android navigation host lays out and shows the top route in the very first
+  frame when it is mounted with the host (it used to show the screen under
+  it first and the deep-linked one a frame later).
+- Native tree encoder (Android and iOS, transparent): the hosts register a
+  C++ port of `Internal\TreeEncoder` and the runtime uses it automatically.
+  Frames, patches, node ids, callbacks and errors are byte-for-byte those of
+  the PHP encoder (`tests/native_encoder_equivalence.php`, run by
+  `scripts/native-encoder-test.sh`; `PAM_NATIVE_ENCODER=php` keeps the PHP
+  encoder). Re-encoding a rebuilt 43,000-node tree drops from ~257 ms to
+  ~35 ms on the host.
 
 ## 1.44.0 - 2026-10-26
 - iOS runtime: OPcache is now enabled in the embedded PHP (JIT stays off: iOS

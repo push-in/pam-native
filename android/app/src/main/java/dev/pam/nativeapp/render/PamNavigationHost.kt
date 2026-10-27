@@ -138,7 +138,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         // A screen mounted hidden (prewarmed, kept alive, or pushed and not
         // yet animating) is measured and laid out on the next frame, so its
         // mount and its first layout never add up in a single frame.
-        if (!isVisibleRoute && !moved && isAttachedToWindow) {
+        // Before the host's own first layout (a cold start routed straight to
+        // a deep link: stack [home, list] in one commit) nothing is on screen
+        // yet, so the top route is laid out and shown in the very first frame.
+        if (!isVisibleRoute && !moved && isAttachedToWindow && isLaidOut) {
             awaitingFirstLayout.add(view)
             releaseFirstLayoutOnNextFrame(view)
         }

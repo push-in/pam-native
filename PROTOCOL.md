@@ -25,6 +25,22 @@ actions, property `451` marks its event handler, and event `65` returns the
 selected stable action name. Android and iOS independently reject malformed,
 duplicate, oversized, or more than eight action definitions.
 
+Windowed lists append properties `541` (`ListPlaceholder`, a
+childless placeholder), `542` (`ListWindowed`, on a `VirtualList` whose rows
+are materialized by window) and `543` (`ListPlaceholderRows`, integer), and
+event `80` (`ListWindow`). In a single-column list each run of rows outside
+the window is one `View` placeholder at the index of its first row, carrying
+`ListPlaceholderRows` when it stands for more than one row; the engine sizes
+it rows x the list estimate. Multi-column lists keep one placeholder per
+cell (the row root without its children). The host sends
+`"@<first row>,<last row>"` (row indexes, including rows inside a run) of
+the rows on screen when a placeholder is near them; `"<first id>,<last id>"`
+(node ids of materialized rows) is still accepted for lists without
+`windowSize`. The event is consumed by the runtime, never by application
+callbacks. A list with `windowSize` sends no runs: every row outside its
+window is its own placeholder, keyed like the row, with the row's measured
+`Height` (and margins); hosts report the same `@first,last` rows.
+
 ## Frames
 
 Every integer and floating-point value is little-endian.

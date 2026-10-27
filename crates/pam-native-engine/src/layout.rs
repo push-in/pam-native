@@ -836,7 +836,16 @@ fn layout_node(
                         } else if mounted_empty {
                             0.0
                         } else {
-                            row_height.max(1.0)
+                            // A placeholder run stands for ListPlaceholderRows
+                            // rows of the estimate (single-column lists only).
+                            let rows = if row.len() == 1 {
+                                integer(row[0], PropKey::ListPlaceholderRows)
+                                    .unwrap_or(1)
+                                    .max(1)
+                            } else {
+                                1
+                            };
+                            row_height.max(1.0) * rows as f32
                         }
                     }
                 };
@@ -7494,6 +7503,105 @@ mod tests {
         assert_eq!(layout[&5].y, 148.0);
         assert_eq!(layout[&5].height, 240.0);
         assert_eq!(layout[&7].y, 178.0);
+    }
+
+    #[test]
+    fn windowed_virtual_list_placeholders_use_authored_height_or_the_estimate() {
+        // Rows PHP has not materialized yet arrive as their childless root
+        // flagged ListPlaceholder: an authored height is kept, otherwise the
+        // list estimate sizes them, and the materialized rows after them are
+        // placed below.
+        let placeholder = |id: u64, index: u32, height: Option<f64>| {
+            let mut props = vec![(PropKey::ListPlaceholder, PropValue::Boolean(true))];
+            if let Some(height) = height {
+                props.push((PropKey::Height, PropValue::Float(height)));
+            }
+            node(id, 1, index, NodeKind::Column, props)
+        };
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListRowHeight, PropValue::Float(72.0)),
+                    (PropKey::ListWindowed, PropValue::Boolean(true)),
+                ],
+            ),
+        );
+        nodes.insert(2, placeholder(2, 0, Some(64.0)));
+        nodes.insert(3, placeholder(3, 1, None));
+        nodes.insert(4, node(4, 1, 2, NodeKind::Column, []));
+        nodes.insert(5, fixed_box(5, 4, 30.0));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("windowed virtual list");
+
+        assert_eq!(layout[&2].height, 64.0);
+        assert_eq!(layout[&3].y, 64.0);
+        assert_eq!(layout[&3].height, 72.0);
+        assert_eq!(layout[&4].y, 136.0);
+        assert_eq!(layout[&4].height, 30.0);
+    }
+
+    #[test]
+    fn windowed_virtual_list_placeholder_runs_take_their_rows_of_the_estimate() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListRowHeight, PropValue::Float(72.0)),
+                    (PropKey::ListWindowed, PropValue::Boolean(true)),
+                ],
+            ),
+        );
+        nodes.insert(2, node(2, 1, 0, NodeKind::Column, []));
+        nodes.insert(3, fixed_box(3, 2, 30.0));
+        nodes.insert(
+            4,
+            node(
+                4,
+                1,
+                1,
+                NodeKind::View,
+                [
+                    (PropKey::ListPlaceholder, PropValue::Boolean(true)),
+                    (PropKey::ListPlaceholderRows, PropValue::Integer(9_999)),
+                ],
+            ),
+        );
+        nodes.insert(
+            5,
+            node(5, 1, 10_000, NodeKind::View, [(PropKey::ListPlaceholder, PropValue::Boolean(true))]),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("placeholder runs");
+
+        assert_eq!(layout[&4].y, 30.0);
+        assert_eq!(layout[&4].height, 72.0 * 9_999.0);
+        assert_eq!(layout[&5].y, 30.0 + 72.0 * 9_999.0);
+        assert_eq!(layout[&5].height, 72.0);
     }
 
     #[test]
