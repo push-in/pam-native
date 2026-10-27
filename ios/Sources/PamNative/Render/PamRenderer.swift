@@ -139,6 +139,10 @@ public final class PamRenderer: @unchecked Sendable {
     /// resolved `StatusBar` config paints one (`backgroundColor`, opaque).
     private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
+    private var imageResidencyObserver: NSObjectProtocol?
+    /// Remote images that can drop their pixels away from the screen and
+    /// restore them near it (`PamImageResidency`).
+    private var residentImages: [Int64: ResidentImage] = [:]
     /// Nodes with `on:routeCovered`/`on:routeFocused` and their last coverage.
     private var routeListeners: [Int64: PamRouteFocusTracker] = [:]
     /// Nodes bound to a player position (`mediaClock`, `mediaProgress`).
@@ -175,6 +179,14 @@ public final class PamRenderer: @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             self?.syncRouteListeners()
+            PamImageResidency.requestSweep()
+        }
+        imageResidencyObserver = NotificationCenter.default.addObserver(
+            forName: PamImageResidency.sweepRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.sweepImageResidency()
         }
     }
 
@@ -184,6 +196,9 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let routeCoverageObserver {
             NotificationCenter.default.removeObserver(routeCoverageObserver)
+        }
+        if let imageResidencyObserver {
+            NotificationCenter.default.removeObserver(imageResidencyObserver)
         }
     }
 
@@ -300,6 +315,9 @@ public final class PamRenderer: @unchecked Sendable {
         }
         dirtyLists.forEach { syncVirtualList($0) }
         flushPendingImageLoads()
+        if !residentImages.isEmpty {
+            PamImageResidency.requestSweep()
+        }
         committing = outerCommit
         if !outerCommit, !deferredNavigations.isEmpty {
             let navigations = deferredNavigations
@@ -398,6 +416,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
         viewPool.removeAll()
         viewPoolCount = 0
+        PamDecodedImageCache.shared.removeAll()
         guard critical else {
             // Android UI_HIDDEN parity: halve the media memory layer only.
             PamMediaDiskCache.shared.trimMemory(critical: false)
@@ -613,6 +632,7 @@ public final class PamRenderer: @unchecked Sendable {
         removeChild(from: state.parent, child: id)
         views[id] = nil
         nodes[id] = nil
+        residentImages[id] = nil
         virtualListIds.remove(id)
         parkedCells.remove(id)
         appliedListSections[id] = nil
@@ -4945,12 +4965,60 @@ public final class PamRenderer: @unchecked Sendable {
         }.resume()
     }
 
+    private func rememberResidentImage(
+        nodeId: Int64,
+        source: String,
+        imageView: UIImageView,
+        decodedKey: String
+    ) {
+        // Only plain image views: canvases and composited hosts keep theirs.
+        guard views[nodeId] === imageView, imageView.image?.pamAnimation == nil else {
+            residentImages[nodeId] = nil
+            return
+        }
+        residentImages[nodeId] = ResidentImage(source: source, imageView: imageView, decodedKey: decodedKey)
+        PamImageResidency.requestSweep()
+    }
+
+    /// Releases the pixels of remote images far from the screen and restores
+    /// those that came back near it (from the decoded cache when the bitmap
+    /// is still there, otherwise a silent reload from the disk cache).
+    private func sweepImageResidency() {
+        guard !residentImages.isEmpty else { return }
+        for (nodeId, entry) in residentImages {
+            guard let state = nodes[nodeId],
+                  let imageView = entry.imageView,
+                  views[nodeId] === imageView else {
+                residentImages[nodeId] = nil
+                continue
+            }
+            let hold = PamImageResidency.shouldHold(imageView)
+            if !hold, !entry.released {
+                guard !state.imageLoading, let image = imageView.image else { continue }
+                entry.released = true
+                entry.releasedImage = image
+                imageView.image = nil
+            } else if hold, entry.released {
+                entry.released = false
+                if let image = entry.releasedImage
+                    ?? PamDecodedImageCache.shared.image(forKey: entry.decodedKey) {
+                    imageView.image = image
+                    notifyDrawingImageChanged(nodeId: nodeId)
+                } else {
+                    state.imageSilentRestore = true
+                    loadImage(entry.source, into: imageView, nodeId: nodeId)
+                }
+            }
+        }
+    }
+
     /// A `source` set on a view created in this batch arrives before the
     /// batch's layouts: the view still has no size, the decode had no target
     /// and kept the full-resolution bitmap (a feed photo decoded at 12 MB
     /// instead of its cell's size). Like Android's decode plan, a sizeless
     /// view loads once the layouts of its batch are applied.
     private func requestImageLoad(_ source: String, into imageView: UIImageView, nodeId: Int64) {
+        residentImages[nodeId] = nil
         // Inline icons (data: URIs) are tiny and paint in the commit that sets them.
         guard imageView.bounds.width <= 0 || imageView.bounds.height <= 0,
               !source.hasPrefix("data:") else {
@@ -5016,26 +5084,60 @@ public final class PamRenderer: @unchecked Sendable {
         let multiplier = CGFloat(
             state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
         )
+        let decodedKey = PamDecodedImageCache.key(
+            identity: identity,
+            targetSize: targetSize,
+            scale: UIScreen.main.scale,
+            multiplier: multiplier
+        )
+        if let decoded = PamDecodedImageCache.shared.image(forKey: decodedKey) {
+            // Same photo at the same size already decoded: no disk read, no
+            // second bitmap.
+            imageView.image = decoded
+            state.imageLoading = false
+            notifyDrawingImageChanged(nodeId: nodeId)
+            rememberResidentImage(nodeId: nodeId, source: source, imageView: imageView, decodedKey: decodedKey)
+            if !state.imageSilentRestore {
+                if state.properties[PamConstants.onMediaCacheHit] != nil {
+                    dispatchMediaCacheEvent(nodeId: nodeId, kind: .mediaCacheHit, key: identity, disk: false)
+                }
+                dispatchCachedImageLoad(nodeId: nodeId, source: resolvedSource, image: decoded)
+            }
+            state.imageSilentRestore = false
+            return
+        }
         PamMediaDiskCache.shared.data(
             source: resolvedSource,
             stableKey: key,
             maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
         ) { [weak self, weak imageView] data in
             guard let self else { return }
-            let image = data.flatMap {
+            let image = PamDecodedImageCache.shared.image(forKey: decodedKey) ?? data.flatMap {
                 self.decodeImage(
                     $0,
                     targetSize: targetSize,
                     multiplier: multiplier
                 )
             }
+            if let image {
+                PamDecodedImageCache.shared.store(image, forKey: decodedKey)
+            }
             DispatchQueue.main.async {
                 guard let current = self.nodes[nodeId],
                       current.imageGeneration == generation,
                       let imageView else { return }
+                let silent = current.imageSilentRestore
+                current.imageSilentRestore = false
                 if let image {
                     imageView.image = image
                     current.imageLoading = false
+                    self.rememberResidentImage(
+                        nodeId: nodeId,
+                        source: source,
+                        imageView: imageView,
+                        decodedKey: decodedKey
+                    )
+                    if silent { return }
                     if current.properties[PamConstants.onMediaCacheHit] != nil {
                         self.dispatchMediaCacheEvent(
                             nodeId: nodeId,
@@ -5283,6 +5385,14 @@ public final class PamRenderer: @unchecked Sendable {
                     }
                 }
             }
+            let decodedKey = PamDecodedImageCache.key(
+                identity: PamMediaDiskCache.shared.identity(source: context.source, stableKey: cacheKey),
+                targetSize: targetSize,
+                scale: UIScreen.main.scale,
+                multiplier: multiplier
+            )
+            let residentSource = source
+            let releasable = cachePolicy != 5 && [3, 4, 5, 8].contains(mediaPolicy)
             self.imageDecodeQueue.async { [weak self, weak imageView] in
                 guard let self,
                       let image = self.decodeImage(
@@ -5290,6 +5400,9 @@ public final class PamRenderer: @unchecked Sendable {
                         targetSize: targetSize,
                         multiplier: multiplier
                       ) else { return }
+                if releasable {
+                    PamDecodedImageCache.shared.store(image, forKey: decodedKey)
+                }
                 DispatchQueue.main.async {
                     guard let state = self.nodes[context.nodeId],
                           state.imageGeneration == context.generation,
@@ -5307,6 +5420,14 @@ public final class PamRenderer: @unchecked Sendable {
                     }
                     self.notifyDrawingImageChanged(nodeId: context.nodeId)
                     state.imageLoading = false
+                    if releasable {
+                        self.rememberResidentImage(
+                            nodeId: context.nodeId,
+                            source: residentSource,
+                            imageView: imageView,
+                            decodedKey: decodedKey
+                        )
+                    }
                     guard state.properties[PamConstants.onImageLoad] != nil else { return }
                     let payload = (try? WireMap.encode(
                         [
@@ -7242,6 +7363,21 @@ private struct AccessibilityActionSpec {
     let label: String
 }
 
+private final class ResidentImage {
+    let source: String
+    weak var imageView: UIImageView?
+    let decodedKey: String
+    var released = false
+    /// Weak: the bitmap survives only while the decoded cache keeps it.
+    weak var releasedImage: UIImage?
+
+    init(source: String, imageView: UIImageView, decodedKey: String) {
+        self.source = source
+        self.imageView = imageView
+        self.decodedKey = decodedKey
+    }
+}
+
 private final class NodeState {
     let id: Int64
     var parent: Int64
@@ -7255,6 +7391,8 @@ private final class NodeState {
     var childrenNeedRethrow: UIView?
     var imageGeneration: Int
     var imageLoading: Bool
+    /// Reloading pixels released away from the screen: no load events again.
+    var imageSilentRestore = false
     var imageProgressLoaded: Int64
     var imageProgressTotal: Int64
     var imageProgressScheduled: Bool
