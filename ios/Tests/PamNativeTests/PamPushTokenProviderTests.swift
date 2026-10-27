@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import PamNative
 
@@ -25,7 +26,48 @@ final class PamPushTokenProviderTests: XCTestCase {
     override func tearDown() {
         PamPushNotifications.tokenProvider = nil
         PushTokenRegistry.shared.unregister()
+        PushTokenRegistry.shared.requestApnsToken = { UIApplication.shared.registerForRemoteNotifications() }
         super.tearDown()
+    }
+
+    /// Counts APNs registration requests (main queue) after the registry settles.
+    private func apnsRequests(_ body: () -> Void) -> Int {
+        var requests = 0
+        PushTokenRegistry.shared.requestApnsToken = { requests += 1 }
+        body()
+        let settled = expectation(description: "main queue")
+        DispatchQueue.main.async { settled.fulfill() }
+        wait(for: [settled], timeout: 2)
+        return requests
+    }
+
+    func testConcurrentRegistrationsShareOneApnsRequest() {
+        PushTokenRegistry.shared.unregister()
+        let requests = apnsRequests {
+            PushTokenRegistry.shared.register { _, _ in }
+            PushTokenRegistry.shared.register { _, _ in }
+        }
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testCachedTokenAsksApnsOncePerProcess() {
+        PamPushNotifications.tokenProvider = nil
+        PamPushNotifications.didRegister(deviceToken: Data([0x0B]))
+        var answers = 0
+        let requests = apnsRequests {
+            PushTokenRegistry.shared.register { status, _ in if status == .success { answers += 1 } }
+            PushTokenRegistry.shared.register { status, _ in if status == .success { answers += 1 } }
+        }
+        XCTAssertEqual(answers, 2)
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testFailedRegistrationMayAskApnsAgain() {
+        PushTokenRegistry.shared.unregister()
+        let first = apnsRequests { PushTokenRegistry.shared.register { _, _ in } }
+        PushTokenRegistry.shared.reject("APNs failed")
+        let retry = apnsRequests { PushTokenRegistry.shared.register { _, _ in } }
+        XCTAssertEqual(first + retry, 2)
     }
 
     func testRawApnsTokenWithoutProvider() {
