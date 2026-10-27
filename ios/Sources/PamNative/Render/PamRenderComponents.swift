@@ -2552,6 +2552,19 @@ final class PamRefreshContainer: UIView {
     }
 }
 
+/// Full-window container of a modal's content. As a bottom sheet the content
+/// only covers the snap height, so a touch on the empty part above it falls
+/// through to the backdrop (tap to close, like the Android scrim and
+/// gorhom's `pressBehavior="close"`) instead of being swallowed here.
+final class PamModalContentClip: UIView {
+    var passesEmptyTouches = false
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return passesEmptyTouches && hit === self ? nil : hit
+    }
+}
+
 /// Reports actual Auto Layout viewport changes once; no display link or polling.
 private final class PamModalContentViewport: UIView {
     var onBoundsChange: (() -> Void)?
@@ -2595,7 +2608,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     private let backdropView = UIControl()
     private let contentHost = PamModalContentViewport()
-    private let contentClip = UIView()
+    private let contentClip = PamModalContentClip()
     private let sheetHandle = UIView()
     private let orientationObserver = NotificationCenter.default
     private var contentHeightConstraint: NSLayoutConstraint!
@@ -3353,7 +3366,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             contentHost.clipsToBounds = true
             sheetHandle.isHidden = !bottomSheetHandleVisible
             contentClip.bringSubviewToFront(sheetHandle)
+            contentClip.passesEmptyTouches = true
         } else {
+            contentClip.passesEmptyTouches = false
             contentHeightConstraint.isActive = false
             contentHeightConstraint = contentHost.heightAnchor.constraint(equalTo: contentClip.heightAnchor)
             contentHeightConstraint.isActive = true
