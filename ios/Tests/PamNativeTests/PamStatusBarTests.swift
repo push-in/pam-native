@@ -52,6 +52,11 @@ final class PamStatusBarTests: XCTestCase {
             PamStatusBarConfig(backgroundColor: 0x000B1120).bandColor,
             "a fully transparent colour paints nothing, as on Android"
         )
+        let immersive = PamStatusBarDeclaration(hidden: true)
+        XCTAssertNil(
+            PamStatusBarCoordinator.merge([screen, immersive]).bandColor,
+            "a hidden bar paints no band over a screen drawn into the notch"
+        )
     }
 
     func testMissingInfoPlistKeyMeansViewControllerBased() {
