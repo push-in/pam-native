@@ -6897,8 +6897,9 @@ public final class PamRenderer: @unchecked Sendable {
 
         private func dispatchTextChange(_ value: String) {
             textField?.recordDispatchedValue(value)
-            let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
-            dispatchEvent(nodeId, EventKind.change.rawValue, payload)
+            // Same contract as Android and the other iOS change events: the
+            // payload is the UTF-8 text itself (PHP binds it as the value).
+            dispatchEvent(nodeId, EventKind.change.rawValue, Data(value.utf8))
         }
 
         @objc private func onToggle() {
@@ -6906,8 +6907,8 @@ public final class PamRenderer: @unchecked Sendable {
                 dispatchEvent(nodeId, EventKind.toggle.rawValue, Data())
                 return
             }
-            let payload = (try? WireMap.encode(["value": .flag(control.isOn)])) ?? Data()
-            dispatchEvent(nodeId, EventKind.toggle.rawValue, payload)
+            // Android sends "1"/"0".
+            dispatchEvent(nodeId, EventKind.toggle.rawValue, Data((control.isOn ? "1" : "0").utf8))
         }
 
         @objc private func onFocus() {
@@ -6951,12 +6952,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         private func dispatchInputEndEditing(value: String) {
-            let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
-            dispatchEvent(
-                nodeId,
-                EventKind.inputEndEditing.rawValue,
-                payload,
-            )
+            dispatchEvent(nodeId, EventKind.inputEndEditing.rawValue, Data(value.utf8))
         }
 
         private func dispatchInputSelection(start: Int, end: Int) {
