@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- iOS images: remote photos far from the screen release their decoded pixels
+  and restore them within one screen of the window (cells beyond the list
+  prefetch, album pages, covered routes, inactive tabs), like Android's
+  shown/detached release; one shared decoded-image cache (identity + pixel
+  size) stops decoding the same photo twice. Encoded bytes keep a quarter of
+  the media memory budget. In a real-world app's photo feed the ImageIO
+  memory went from 161 MB to 26-47 MB and the footprint from 325-395 MB to
+  about 250-260 MB.
+- iOS PHP runtime: after an idle cycle collection, more than 8 MB of free
+  Zend MM chunks are returned to the system instead of waiting for a memory
+  warning. The first batch perf line reports the OPcache mode and counters.
+- iOS RefreshControl: UIKit could leave the refresh spinner rotating forever
+  while hidden and not refreshing, which kept Core Animation drawing and UI
+  tests waiting for idle for a minute per step. Outside a pull and a refresh,
+  the control's repeating animations are dropped.
+
 - iOS manifest: `ios.usageDescriptions` (NS*UsageDescription privacy strings
   the app needs, e.g. Photos, Contacts, Location, Face ID; app values override
   plugin defaults), `ios.orientations` (portrait-only apps) and
