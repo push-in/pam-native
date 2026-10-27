@@ -16,6 +16,10 @@
   Calls are sent after the current handler's UI update is committed, so a
   caret placed right after changing the value lands in the new text.
   `Runtime::afterCommit()` (internal) queues them.
+- Portals: `<Portal name host>` / `<PortalHost name>` (and `UI\Portal::make()`,
+  `to()`, `host()`) render content outside the parent tree in the same window,
+  like `@gorhom/portal`. A portal lives while its component renders it and is
+  removed on re-render without it or unmount.
 
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the

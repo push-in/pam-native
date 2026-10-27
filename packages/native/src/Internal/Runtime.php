@@ -211,6 +211,7 @@ final class Runtime
 
         self::$rendering = true;
         $renderStarted = hrtime(true);
+        PortalRegistry::instance()->beginRender();
         try {
             do {
                 self::$renderRequested = false;
@@ -226,6 +227,7 @@ final class Runtime
                 ComponentLifecycle::detectChanges();
                 PamPhpRegistry::beginRender();
                 ComponentLifecycle::beginRender();
+                PortalRegistry::instance()->beginPass();
                 try {
                 $element = Profiler::measure('php.render', static function () use ($root): ?Element {
                     $rendered = $root instanceof Renderable ? $root : $root();
@@ -303,6 +305,9 @@ final class Runtime
                     PamPhpRegistry::finishRender();
                 }
                 ComponentLifecycle::commit();
+                if (PortalRegistry::instance()->endPass()) {
+                    self::$renderRequested = true;
+                }
             } while (self::$renderRequested);
         } catch (Throwable $error) {
             self::$renderFailure = $error;
@@ -392,6 +397,12 @@ final class Runtime
         }
         DependencyTracker::invalidateAll();
         self::scheduleRender();
+    }
+
+    /** @internal True while a render pass runs. */
+    public static function isRendering(): bool
+    {
+        return self::$rendering;
     }
 
     /** Requests a render after a tracked change; memoized components stay reused. */
@@ -857,6 +868,7 @@ final class Runtime
         self::$themed = null;
         Appearance::resetRuntime();
         \Pam\Native\System\Keyboard::resetRuntime();
+        PortalRegistry::reset();
         self::$windowMetrics = self::bootMetrics();
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();

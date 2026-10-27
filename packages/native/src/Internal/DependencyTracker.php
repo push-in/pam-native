@@ -40,6 +40,18 @@ final class DependencyTracker
             unset($parents[$component]);
         }
         self::$stack[] = $component;
+        if (PortalRegistry::active()) {
+            PortalRegistry::instance()->beginOwner($component);
+        }
+    }
+
+    /** The component currently rendering, if any. */
+    public static function current(): ?Component
+    {
+        $last = array_key_last(self::$stack);
+        $component = $last === null ? null : self::$stack[$last];
+
+        return $component instanceof Component ? $component : null;
     }
 
     public static function end(Component $component): void
@@ -51,6 +63,9 @@ final class DependencyTracker
         }
         $dirty = self::$dirty ??= new WeakMap();
         unset($dirty[$component]);
+        if (PortalRegistry::active()) {
+            PortalRegistry::instance()->endOwner($component);
+        }
     }
 
     public static function read(object $source, string $key): void
@@ -142,6 +157,9 @@ final class DependencyTracker
 
     public static function forget(Component $component): void
     {
+        if (PortalRegistry::active()) {
+            PortalRegistry::instance()->forgetOwner($component);
+        }
         self::clear($component);
         $dirty = self::$dirty ??= new WeakMap();
         unset($dirty[$component]);

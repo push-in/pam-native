@@ -8148,6 +8148,7 @@ require __DIR__.'/navigation_lifecycle.php';
 require __DIR__.'/image_layers.php';
 require __DIR__.'/view_capture.php';
 require __DIR__.'/view_ref.php';
+require __DIR__.'/portal.php';
 require __DIR__.'/image_events.php';
 require __DIR__.'/encoder_patches.php';
 require __DIR__.'/framework_utilities.php';

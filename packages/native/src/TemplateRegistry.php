@@ -103,7 +103,29 @@ final class TemplateRegistry
     /** @return Closure(array<string, mixed>, list<Element>, ?object): Renderable|null */
     public static function factory(string $tag): ?Closure
     {
-        return self::$components[$tag] ?? null;
+        return self::$components[$tag] ?? self::builtin($tag);
+    }
+
+    /**
+     * Framework tags implemented as template factories:
+     * `<Portal name="menu" host="screen">…</Portal>` and
+     * `<PortalHost name="screen" />` (see UI\Portal).
+     *
+     * @return Closure(array<string, mixed>, list<Element>, ?object): Renderable|null
+     */
+    private static function builtin(string $tag): ?Closure
+    {
+        return match ($tag) {
+            'Portal' => static fn (array $props, array $children, ?object $_scope): Element => \Pam\Native\UI\Portal::to(
+                is_string($props['host'] ?? null) ? $props['host'] : \Pam\Native\UI\Portal::DEFAULT_HOST,
+                is_string($props['name'] ?? null) ? $props['name'] : throw new \InvalidArgumentException('<Portal> requires a name.'),
+                ...$children,
+            ),
+            'PortalHost' => static fn (array $props, array $_children, ?object $_scope): Element => \Pam\Native\UI\Portal::host(
+                is_string($props['name'] ?? null) ? $props['name'] : \Pam\Native\UI\Portal::DEFAULT_HOST,
+            )->toElement(),
+            default => null,
+        };
     }
 
     /**
