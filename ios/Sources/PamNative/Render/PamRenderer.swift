@@ -45,6 +45,7 @@ public final class PamRenderer: @unchecked Sendable {
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
 
     private var views: [Int64: UIView] = [:]
+    internal func mountedView(_ id: Int64) -> UIView? { views[id] }
     private var nodes: [Int64: NodeState] = [:]
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
@@ -124,6 +125,11 @@ public final class PamRenderer: @unchecked Sendable {
     /// Mounted `StatusBar` nodes; PamStatusBarCoordinator resolves them.
     private var statusBarIds = Set<Int64>()
     private var statusBarDirty = false
+    /// Navigation revisions received inside a commit run after its moves and
+    /// layouts, like Android's pre-draw transition: a route moved to the top
+    /// in the same batch as the revision is the incoming one.
+    private var committing = false
+    private var deferredNavigations: [(host: PamNavigationHost, revision: Int64)] = []
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
     /// The band behind the status bar, mounted on the host while the
@@ -239,6 +245,8 @@ public final class PamRenderer: @unchecked Sendable {
         // the structure or a marker changed (no full-tree passes per commit).
         var dirtyLists = Set<Int64>()
         var needsModalSync = false
+        let outerCommit = committing
+        committing = true
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -288,6 +296,12 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(id)
         }
         dirtyLists.forEach { syncVirtualList($0) }
+        committing = outerCommit
+        if !outerCommit, !deferredNavigations.isEmpty {
+            let navigations = deferredNavigations
+            deferredNavigations.removeAll()
+            navigations.forEach { $0.host.navigate($0.revision) }
+        }
         flushStackingOrder()
         if needsModalSync {
             syncLocalModalTriggers()
@@ -2827,7 +2841,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.navigationSheetExpandsWhenScrolledToEdge:
             configureNavigationPresentation(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
-            (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
+            if let host = view as? PamNavigationHost {
+                let revision = value.integerOrNil() ?? 0
+                if committing {
+                    deferredNavigations.removeAll { $0.host === host }
+                    deferredNavigations.append((host, revision))
+                } else {
+                    host.navigate(revision)
+                }
+            }
         case PamConstants.tabItems,
              PamConstants.tabSelectedIndex,
              PamConstants.tabPosition,
@@ -7021,6 +7043,26 @@ private extension NodeKind {
     }
 }
 
+extension PropValue {
+    /// Numeric value of a decimal or integer property (Android
+    /// `PropValue.decimal()`): PHP sends whole numbers such as `opacity="1"`
+    /// or `:opacity="$x ? 0 : 1"` as integers.
+    func decimalOrNil() -> Double? {
+        switch self {
+        case let .decimal(value):
+            value
+        case let .integer(value):
+            Double(value)
+        default:
+            nil
+        }
+    }
+
+    func decimalOrZero() -> Double {
+        decimalOrNil() ?? 0
+    }
+}
+
 private extension PropValue {
     func textOrNil() -> String? {
         switch self {
@@ -7040,24 +7082,6 @@ private extension PropValue {
         default:
             nil
         }
-    }
-
-    /// Numeric value of a decimal or integer property (Android
-    /// `PropValue.decimal()`): PHP sends whole numbers such as `opacity="1"`
-    /// or `:opacity="$x ? 0 : 1"` as integers.
-    func decimalOrNil() -> Double? {
-        switch self {
-        case let .decimal(value):
-            value
-        case let .integer(value):
-            Double(value)
-        default:
-            nil
-        }
-    }
-
-    func decimalOrZero() -> Double {
-        decimalOrNil() ?? 0
     }
 
     func boolOrNil() -> Bool? {
