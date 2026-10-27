@@ -12,6 +12,7 @@ use Pam\Native\EventKind;
 use Pam\Native\NodeKind;
 use Pam\Native\Protocol;
 use Pam\Native\PropKey;
+use Pam\Native\TextScalePolicy;
 use WeakMap;
 
 use function array_slice;
@@ -25,6 +26,10 @@ use function strlen;
 final class TreeEncoder
 {
     private const MAX_NODES = 100_000;
+
+    private const FONT_SIZE = PropKey::FontSize->value;
+    private const MAX_FONT_SCALE = PropKey::TextMaxFontSizeMultiplier->value;
+    private const ALLOW_FONT_SCALING = PropKey::TextAllowFontScaling->value;
 
     private const EVENT_PROPERTIES = EventProperties::MAP;
 
@@ -272,6 +277,20 @@ final class TreeEncoder
         $countStart = $this->nodeCount;
 
         $properties = $element->properties;
+        $scaleCapped = false;
+        if (
+            TextScalePolicy::$active
+            && ($element->kind === NodeKind::Text || $element->kind === NodeKind::Input)
+            && !isset($properties[self::MAX_FONT_SCALE])
+            && ($properties[self::ALLOW_FONT_SCALING] ?? true) !== false
+        ) {
+            $fontSize = $properties[self::FONT_SIZE] ?? 14.0;
+            $cap = TextScalePolicy::capFor(is_int($fontSize) || is_float($fontSize) ? (float) $fontSize : 14.0);
+            if ($cap > 0.0) {
+                $properties[self::MAX_FONT_SCALE] = $cap;
+                $scaleCapped = true;
+            }
+        }
         foreach ($element->events as $eventKind => $callback) {
             $this->callbacks[$id.':'.$eventKind] = $callback;
             $properties[self::EVENT_PROPERTIES[$eventKind] ?? self::eventProperty($eventKind)] = true;
@@ -279,7 +298,7 @@ final class TreeEncoder
 
         $cached = $element->encodedProperties;
         $propertyBytes = null;
-        if ($cached !== null && $cached[0] === $element->properties) {
+        if ($cached !== null && !$scaleCapped && $cached[0] === $element->properties) {
             // Encoded by the template renderer from its per-element template.
             $encodedProperties = $cached[1];
             $propertyBytes = $cached[2];

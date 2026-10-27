@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
+  scale caps by typographic role (React Native apps install the same rule in
+  their theme). Every Text and Input without its own `maxFontSizeMultiplier`
+  or `allowFontScaling="false"` gets the cap of its size, so display text no
+  longer outgrows body text at accessibility sizes. No protocol change.
+- iOS single-line Input: the placeholder is no longer indented by the
+  padding twice, and a colored placeholder follows Dynamic Type (it kept the
+  font from before the field joined the window).
+
 - Template components: a compiled component's declared props (constructor
   parameters, public properties) are no longer also applied as attributes of
   its root element. A `height` prop used as the root's `minHeight` became a

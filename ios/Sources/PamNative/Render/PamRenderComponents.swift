@@ -1163,6 +1163,16 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         didSet { if placeholderColor != nil { refreshPlaceholder() } }
     }
 
+    /// Dynamic Type changes the field's font without going through the
+    /// setter: the colored placeholder is rebuilt with the scaled font.
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if placeholderColor != nil,
+           previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            DispatchQueue.main.async { [weak self] in self?.refreshPlaceholder() }
+        }
+    }
+
     private func refreshPlaceholder() {
         guard let placeholderText, !placeholderText.isEmpty else {
             attributedPlaceholder = nil
@@ -1196,8 +1206,11 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         super.editingRect(forBounds: bounds.inset(by: contentInsets))
     }
 
+    /// UIKit derives the placeholder rect from `textRect(forBounds:)`, which
+    /// already applies `contentInsets`: insetting here too indented the
+    /// placeholder by the padding twice (the typed text only once).
     override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
-        super.placeholderRect(forBounds: bounds.inset(by: contentInsets))
+        textRect(forBounds: bounds)
     }
 
     override func caretRect(for position: UITextPosition) -> CGRect {
