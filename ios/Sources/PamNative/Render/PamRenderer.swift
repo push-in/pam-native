@@ -45,6 +45,7 @@ public final class PamRenderer: @unchecked Sendable {
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
 
     private var views: [Int64: UIView] = [:]
+    internal func mountedView(_ id: Int64) -> UIView? { views[id] }
     private var nodes: [Int64: NodeState] = [:]
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
@@ -124,12 +125,26 @@ public final class PamRenderer: @unchecked Sendable {
     /// Mounted `StatusBar` nodes; PamStatusBarCoordinator resolves them.
     private var statusBarIds = Set<Int64>()
     private var statusBarDirty = false
+    /// Navigation revisions received inside a commit run after its moves and
+    /// layouts, like Android's pre-draw transition: a route moved to the top
+    /// in the same batch as the revision is the incoming one.
+    private var committing = false
+    /// Image sources waiting for their view's first layout (requestImageLoad).
+    private var pendingImageLoads: [Int64: String] = [:]
+    private var pendingImageFlushScheduled = false
+    private var deferredNavigations: [(host: PamNavigationHost, revision: Int64)] = []
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
     /// The band behind the status bar, mounted on the host while the
     /// resolved `StatusBar` config paints one (`backgroundColor`, opaque).
     private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
+    private var imageResidencyObserver: NSObjectProtocol?
+    /// Modals mounted on the root host instead of their logical parent.
+    private var liftedModals = Set<ObjectIdentifier>()
+    /// Remote images that can drop their pixels away from the screen and
+    /// restore them near it (`PamImageResidency`).
+    private var residentImages: [Int64: ResidentImage] = [:]
     /// Nodes with `on:routeCovered`/`on:routeFocused` and their last coverage.
     private var routeListeners: [Int64: PamRouteFocusTracker] = [:]
     /// Nodes bound to a player position (`mediaClock`, `mediaProgress`).
@@ -166,6 +181,15 @@ public final class PamRenderer: @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             self?.syncRouteListeners()
+            self?.syncLiftedModals()
+            PamImageResidency.requestSweep()
+        }
+        imageResidencyObserver = NotificationCenter.default.addObserver(
+            forName: PamImageResidency.sweepRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.sweepImageResidency()
         }
     }
 
@@ -175,6 +199,9 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let routeCoverageObserver {
             NotificationCenter.default.removeObserver(routeCoverageObserver)
+        }
+        if let imageResidencyObserver {
+            NotificationCenter.default.removeObserver(imageResidencyObserver)
         }
     }
 
@@ -239,6 +266,8 @@ public final class PamRenderer: @unchecked Sendable {
         // the structure or a marker changed (no full-tree passes per commit).
         var dirtyLists = Set<Int64>()
         var needsModalSync = false
+        let outerCommit = committing
+        committing = true
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -288,6 +317,16 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(id)
         }
         dirtyLists.forEach { syncVirtualList($0) }
+        flushPendingImageLoads()
+        if !residentImages.isEmpty {
+            PamImageResidency.requestSweep()
+        }
+        committing = outerCommit
+        if !outerCommit, !deferredNavigations.isEmpty {
+            let navigations = deferredNavigations
+            deferredNavigations.removeAll()
+            navigations.forEach { $0.host.navigate($0.revision) }
+        }
         flushStackingOrder()
         if needsModalSync {
             syncLocalModalTriggers()
@@ -380,6 +419,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
         viewPool.removeAll()
         viewPoolCount = 0
+        PamDecodedImageCache.shared.removeAll()
         guard critical else {
             // Android UI_HIDDEN parity: halve the media memory layer only.
             PamMediaDiskCache.shared.trimMemory(critical: false)
@@ -595,6 +635,7 @@ public final class PamRenderer: @unchecked Sendable {
         removeChild(from: state.parent, child: id)
         views[id] = nil
         nodes[id] = nil
+        residentImages[id] = nil
         virtualListIds.remove(id)
         parkedCells.remove(id)
         appliedListSections[id] = nil
@@ -660,7 +701,7 @@ public final class PamRenderer: @unchecked Sendable {
 
         if key == PamConstants.source, let source = value?.textOrNil() {
             if let imageView = imageView(for: view) {
-                loadImage(source, into: imageView, nodeId: id)
+                requestImageLoad(source, into: imageView, nodeId: id)
             }
         }
     }
@@ -684,6 +725,11 @@ public final class PamRenderer: @unchecked Sendable {
         state.index = index
         addChild(to: parent, child: id)
         if let previousPosition, children[parent]?.firstIndex(of: id) == previousPosition {
+            return
+        }
+        if let modal = views[id] as? PamModalHost, modal.superview === host, parent != 0 {
+            // Lifted to the root host: a new logical place never re-presents it.
+            syncLiftedModal(modal, parentId: parent)
             return
         }
         if let view = views[id], previousParent == parent,
@@ -1138,6 +1184,12 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
+        if view is PamModalHost, state.parent != 0, view.superview === host {
+            // Lifted modal: absolute engine frame in the root host.
+            let origin = frames[rootId]
+            left = CGFloat(frame.x - (origin?.x ?? 0))
+            top = CGFloat(frame.y - (origin?.y ?? 0))
+        }
         let sheetViewport = (views[effectiveParent] as? PamModalHost)?.sheetContentBounds
         let nextFrame = sheetViewport ?? CGRect(
             x: left,
@@ -1399,6 +1451,25 @@ public final class PamRenderer: @unchecked Sendable {
         }
     }
 
+    /// A lifted modal shows only while its logical parent is on screen: a
+    /// covered route or an inactive tab hides its sheet, as when the modal
+    /// was mounted inside it.
+    private func syncLiftedModal(_ modal: PamModalHost, parentId: Int64) {
+        guard let parentView = views[parentId] else { return }
+        let covered = parentView.window != nil && PamRouteCoverage.isCovered(parentView)
+        modal.alpha = covered ? 0 : 1
+        modal.isUserInteractionEnabled = !covered
+    }
+
+    private func syncLiftedModals() {
+        guard !liftedModals.isEmpty else { return }
+        for (id, view) in views {
+            guard let modal = view as? PamModalHost, modal.superview === host,
+                  let parent = nodes[id]?.parent, parent != 0 else { continue }
+            syncLiftedModal(modal, parentId: parent)
+        }
+    }
+
     private func attach(_ view: UIView, parentId: Int64, index: Int) {
         if parentId == 0 {
             let list = children[0] ?? []
@@ -1429,6 +1500,29 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let modal = parent as? PamModalHost {
             modal.insert(view, index: index)
+            return
+        }
+        if let modal = view as? PamModalHost {
+            // A Modal / BottomSheet covers the whole window like Android's
+            // dialog window: mounted inside a tab scene or route, siblings
+            // drawn later (a tab bar, a floating header) painted over the
+            // sheet and hid its bottom. It lives on the root host instead,
+            // positioned by its absolute engine frame, and mirrors the
+            // coverage of its logical parent (`syncLiftedModals`).
+            host.addSubview(view)
+            if let band = statusBarBand, host.subviews.last !== band {
+                host.bringSubviewToFront(band)
+            }
+            liftedModals.insert(ObjectIdentifier(modal))
+            syncLiftedModal(modal, parentId: parentId)
+            return
+        }
+        // RefreshControl hosts its scrollable child in its content view and
+        // binds the UIRefreshControl to it. Inserted as a plain sibling, the
+        // child sat under the empty content view: rows got no touches, the
+        // list did not scroll and pull-to-refresh never attached.
+        if let refresh = parent as? PamRefreshContainer {
+            refresh.insert(view, index: index)
             return
         }
 
@@ -1511,7 +1605,13 @@ public final class PamRenderer: @unchecked Sendable {
             let field = PamInputField()
             field.borderStyle = .none
             return field
-        case .image, .imageBackground:
+        case .image:
+            // Android's ImageView draws inside its bounds; UIKit's aspect
+            // fill (resizeMode cover) paints past them over the neighbours.
+            let image = PamImageView()
+            image.clipsToBounds = true
+            return image
+        case .imageBackground:
             return PamImageView()
         case .scroll:
             return PamAnchoredScrollView()
@@ -1556,6 +1656,10 @@ public final class PamRenderer: @unchecked Sendable {
             return PamWebView()
         case .media:
             let media = PamMediaView()
+            // Local poster sources (asset://, pam-file://, data:) decode like images.
+            media.localImageResolver = { [weak self] source, size in
+                self?.localImage(source, targetSize: size)
+            }
             media.boundViews = { [weak self] in
                 guard let self, !self.mediaBoundIds.isEmpty else { return [] }
                 return self.mediaBoundIds.compactMap { self.views[$0] }
@@ -2538,7 +2642,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
         case PamConstants.source:
             if let imageView = imageView(for: view), let source = value.textOrNil() {
-                loadImage(source, into: imageView, nodeId: nodeId)
+                requestImageLoad(source, into: imageView, nodeId: nodeId)
             }
         case PamConstants.tintColor:
             if let refresh = view as? PamRefreshContainer {
@@ -2635,6 +2739,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.borderGradient,
              PamConstants.overflow:
             applyBorder(view: view, nodeId: nodeId)
+            applyLeafPadding(view: view, nodeId: nodeId)
+        case PamConstants.padding,
+             PamConstants.paddingHorizontal,
+             PamConstants.paddingVertical,
+             PamConstants.paddingLeft,
+             PamConstants.paddingTop,
+             PamConstants.paddingRight,
+             PamConstants.paddingBottom:
+            applyLeafPadding(view: view, nodeId: nodeId)
         case PamConstants.borderRadius,
              PamConstants.borderTopLeftRadius,
              PamConstants.borderTopRightRadius,
@@ -2737,7 +2850,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(nodeId)
         case PamConstants.onLayout:
             layoutEvents.queue(nodeId)
-        case PamConstants.scrollKeyboardInset:
+        case PamConstants.scrollKeyboardInset, PamConstants.keyboardVerticalOffset:
             configureKeyboardInset(view: view, nodeId: nodeId)
         case PamConstants.blurRadius, PamConstants.filterColorMatrix:
             applyFilter(view: view, nodeId: nodeId)
@@ -2806,7 +2919,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.navigationSheetExpandsWhenScrolledToEdge:
             configureNavigationPresentation(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
-            (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
+            if let host = view as? PamNavigationHost {
+                let revision = value.integerOrNil() ?? 0
+                if committing {
+                    deferredNavigations.removeAll { $0.host === host }
+                    deferredNavigations.append((host, revision))
+                } else {
+                    host.navigate(revision)
+                }
+            }
         case PamConstants.tabItems,
              PamConstants.tabSelectedIndex,
              PamConstants.tabPosition,
@@ -2915,13 +3036,14 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheStreaming,
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
-             PamConstants.mediaCacheChecksum:
+             PamConstants.mediaCacheChecksum,
+             PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView, let state = nodes[nodeId] {
                 configureMediaCache(media, state: state)
+                configureMediaThumbnail(media, state: state)
             }
         case PamConstants.mediaCacheTags,
              PamConstants.mediaCachePreloadSeconds,
-             PamConstants.mediaThumbnailSource,
              PamConstants.mediaResizeWidth,
              PamConstants.mediaResizeHeight,
              PamConstants.mediaPriority:
@@ -3226,7 +3348,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(nodeId)
         case PamConstants.onLayout:
             layoutEvents.forget(nodeId)
-        case PamConstants.scrollKeyboardInset:
+        case PamConstants.scrollKeyboardInset, PamConstants.keyboardVerticalOffset:
             configureKeyboardInset(view: view, nodeId: nodeId)
         case PamConstants.blurRadius, PamConstants.filterColorMatrix:
             applyFilter(view: view, nodeId: nodeId)
@@ -3308,6 +3430,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.borderRightWidth,
              PamConstants.borderBottomWidth:
             applyBorder(view: view, nodeId: nodeId)
+            applyLeafPadding(view: view, nodeId: nodeId)
+        case PamConstants.padding,
+             PamConstants.paddingHorizontal,
+             PamConstants.paddingVertical,
+             PamConstants.paddingLeft,
+             PamConstants.paddingTop,
+             PamConstants.paddingRight,
+             PamConstants.paddingBottom:
+            applyLeafPadding(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
@@ -3458,13 +3589,14 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheStreaming,
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
-             PamConstants.mediaCacheChecksum:
+             PamConstants.mediaCacheChecksum,
+             PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView {
                 configureMediaCache(media, state: state)
+                configureMediaThumbnail(media, state: state)
             }
         case PamConstants.mediaCacheTags,
              PamConstants.mediaCachePreloadSeconds,
-             PamConstants.mediaThumbnailSource,
              PamConstants.mediaResizeWidth,
              PamConstants.mediaResizeHeight,
              PamConstants.mediaPriority:
@@ -3656,6 +3788,38 @@ public final class PamRenderer: @unchecked Sendable {
         spec.clips = properties[PamConstants.overflow]?.integerOrNil() == 2
         spec.clipsContent = state.kind == .image && !spec.radii.isZero
         return spec
+    }
+
+    /// Leaf padding (Android `applyLeafPadding`): the engine lays out flex
+    /// children inside the padding box, but text and input content has no
+    /// child frame, so those views inset their own content by the authored
+    /// padding plus the border widths (Yoga's padding box).
+    private func applyLeafPadding(view: UIView, nodeId: Int64) {
+        guard view is PamTextView || view is PamInputField || view is PamMultilineInputField else { return }
+        let insets = nodes[nodeId].map { Self.leafContentInsets($0.properties) } ?? .zero
+        switch view {
+        case let text as PamTextView: text.contentInsets = insets
+        case let field as PamInputField: field.contentInsets = insets
+        case let field as PamMultilineInputField: field.contentInsets = insets
+        default: break
+        }
+    }
+
+    static func leafContentInsets(_ properties: [Int: PropValue]) -> UIEdgeInsets {
+        func number(_ key: Int) -> Double? { properties[key]?.pamNumber }
+        let all = number(PamConstants.padding) ?? 0
+        let horizontal = number(PamConstants.paddingHorizontal) ?? all
+        let vertical = number(PamConstants.paddingVertical) ?? all
+        let border = max(0, number(PamConstants.borderWidth) ?? 0)
+        func edge(_ padding: Int, _ fallback: Double, _ borderKey: Int) -> CGFloat {
+            CGFloat(max(0, number(padding) ?? fallback) + max(0, number(borderKey) ?? border))
+        }
+        return UIEdgeInsets(
+            top: edge(PamConstants.paddingTop, vertical, PamConstants.borderTopWidth),
+            left: edge(PamConstants.paddingLeft, horizontal, PamConstants.borderLeftWidth),
+            bottom: edge(PamConstants.paddingBottom, vertical, PamConstants.borderBottomWidth),
+            right: edge(PamConstants.paddingRight, horizontal, PamConstants.borderRightWidth)
+        )
     }
 
     private func applyBorder(view: UIView, nodeId: Int64) {
@@ -3865,9 +4029,11 @@ public final class PamRenderer: @unchecked Sendable {
     private func configureKeyboardInset(view: UIView, nodeId: Int64) {
         let enabled = nodes[nodeId]?.properties[PamConstants.scrollKeyboardInset]?.boolOrNil() ?? false
         if enabled, let scroll = view as? UIScrollView {
-            if keyboardInsetObservers[nodeId] == nil {
-                keyboardInsetObservers[nodeId] = PamKeyboardInsetObserver(scrollView: scroll)
-            }
+            let observer = keyboardInsetObservers[nodeId] ?? PamKeyboardInsetObserver(scrollView: scroll)
+            keyboardInsetObservers[nodeId] = observer
+            observer.extraInset = CGFloat(
+                nodes[nodeId]?.properties[PamConstants.keyboardVerticalOffset]?.decimalOrNil() ?? 0
+            )
         } else {
             keyboardInsetObservers.removeValue(forKey: nodeId)?.reset()
         }
@@ -3939,6 +4105,13 @@ public final class PamRenderer: @unchecked Sendable {
         view is PamMultilineInputField ? .newline : .blurAndSubmit
     }
 
+    private static let textFieldTraits = UITextField().accessibilityTraits
+    private static let textViewTraits = UITextView().accessibilityTraits
+
+    static func inputBaseTraits(_ view: UIView) -> UIAccessibilityTraits {
+        view is UITextView ? textViewTraits : textFieldTraits
+    }
+
     private func applyAccessibility(view: UIView, state: NodeState?) {
         guard let state else { return }
         let role = Int(
@@ -3950,7 +4123,11 @@ public final class PamRenderer: @unchecked Sendable {
         let explicitlyAccessible =
             state.properties[PamConstants.accessible]?.boolOrNil()
 
-        var traits: UIAccessibilityTraits = []
+        // Text inputs keep UIKit's own traits (text entry, editing state) and
+        // stay accessibility elements like Android's EditText: without them
+        // VoiceOver and UI tests cannot find the field that has the keyboard.
+        let textInput = view is UITextField || view is UITextView
+        var traits: UIAccessibilityTraits = textInput ? Self.inputBaseTraits(view) : []
         switch role {
         case 2, 5, 8, 11, 19, 25, 29:
             traits.insert(.button)
@@ -3993,10 +4170,16 @@ public final class PamRenderer: @unchecked Sendable {
             traits.insert(.updatesFrequently)
         }
 
-        view.accessibilityTraits = traits
+        // UIKit computes an input's traits on every read (the editing state
+        // marks the field that has the keyboard); assigning them freezes that.
+        if !textInput || !traits.subtracting(Self.inputBaseTraits(view)).isEmpty {
+            view.accessibilityTraits = traits
+        }
         view.isAccessibilityElement =
             explicitlyAccessible ??
-            (role != 1 && role != 17 && role != 34 && importance != 3)
+            (textInput
+                ? importance != 3
+                : (role != 1 && role != 17 && role != 34 && importance != 3))
         view.accessibilityElementsHidden = importance == 4
 
         let explicitValue =
@@ -4684,6 +4867,17 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
+    /// `thumbnail()` poster (Android `configureMediaThumbnail`): drawn over
+    /// the video until its first frame, cached under `<cacheKey>:thumbnail`.
+    private func configureMediaThumbnail(_ view: PamMediaView, state: NodeState) {
+        view.setThumbnail(
+            state.properties[PamConstants.mediaThumbnailSource]?.textOrNil(),
+            cacheKey: state.properties[PamConstants.mediaCacheKey]?.textOrNil().map { "\($0):thumbnail" },
+            policy: Int(state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 4),
+            maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
+        )
+    }
+
     private func dispatchMediaCacheEvent(
         nodeId: Int64,
         kind: EventKind,
@@ -4706,9 +4900,6 @@ public final class PamRenderer: @unchecked Sendable {
         targetSize: CGSize,
         multiplier: CGFloat
     ) -> UIImage? {
-        guard targetSize.width > 0, targetSize.height > 0 else {
-            return UIImage(data: data)
-        }
         // Decode at the size that covers the view (both edges), not at the
         // view's longest edge: a portrait photo in a square cell kept a
         // shorter edge below the cell and was upscaled.
@@ -4732,31 +4923,21 @@ public final class PamRenderer: @unchecked Sendable {
         // Bundled photos and sandbox files decode at the view size through
         // ImageIO instead of keeping their full resolution.
         func fileImage(_ url: URL) -> UIImage? {
-            if targetSize.width > 0, targetSize.height > 0,
-               let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
+            // Animated files (any view size) and large photos go through ImageIO.
+            if let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
                 return image
             }
             return UIImage(contentsOfFile: url.path)
         }
         if source.lowercased().hasPrefix("asset://") {
+            if let cached = PamInlineImages.cachedAsset(source) {
+                return cached
+            }
             guard let path = try? normalizedPamAssetPath(source) else {
                 return nil
             }
-            let resourcePath = path as NSString
-            let directory = resourcePath.deletingLastPathComponent
-            let fileName = resourcePath.lastPathComponent
-            if let url = Bundle.main.url(
-                forResource: fileName,
-                withExtension: nil,
-                subdirectory: directory
-            ) {
-                return fileImage(url)
-            }
-            if let resourceRoot = Bundle.main.resourceURL {
-                let url = resourceRoot.appendingPathComponent(path, isDirectory: false)
-                if FileManager.default.fileExists(atPath: url.path) {
-                    return fileImage(url)
-                }
+            if let url = pamAssetFileURL(path) {
+                return PamInlineImages.smallAsset(source, url: url) ?? fileImage(url)
             }
             return UIImage(named: path)
         }
@@ -4832,6 +5013,90 @@ public final class PamRenderer: @unchecked Sendable {
         }.resume()
     }
 
+    private func rememberResidentImage(
+        nodeId: Int64,
+        source: String,
+        imageView: UIImageView,
+        decodedKey: String
+    ) {
+        // Only plain image views: canvases and composited hosts keep theirs.
+        guard views[nodeId] === imageView, imageView.image?.pamAnimation == nil else {
+            residentImages[nodeId] = nil
+            return
+        }
+        residentImages[nodeId] = ResidentImage(source: source, imageView: imageView, decodedKey: decodedKey)
+        PamImageResidency.requestSweep()
+    }
+
+    /// Releases the pixels of remote images far from the screen and restores
+    /// those that came back near it (from the decoded cache when the bitmap
+    /// is still there, otherwise a silent reload from the disk cache).
+    private func sweepImageResidency() {
+        guard !residentImages.isEmpty else { return }
+        for (nodeId, entry) in residentImages {
+            guard let state = nodes[nodeId],
+                  let imageView = entry.imageView,
+                  views[nodeId] === imageView else {
+                residentImages[nodeId] = nil
+                continue
+            }
+            let hold = PamImageResidency.shouldHold(imageView)
+            if !hold, !entry.released {
+                guard !state.imageLoading, let image = imageView.image else { continue }
+                entry.released = true
+                entry.releasedImage = image
+                imageView.image = nil
+            } else if hold, entry.released {
+                entry.released = false
+                if let image = entry.releasedImage
+                    ?? PamDecodedImageCache.shared.image(forKey: entry.decodedKey) {
+                    imageView.image = image
+                    notifyDrawingImageChanged(nodeId: nodeId)
+                } else {
+                    state.imageSilentRestore = true
+                    loadImage(entry.source, into: imageView, nodeId: nodeId)
+                }
+            }
+        }
+    }
+
+    /// A `source` set on a view created in this batch arrives before the
+    /// batch's layouts: the view still has no size, the decode had no target
+    /// and kept the full-resolution bitmap (a feed photo decoded at 12 MB
+    /// instead of its cell's size). Like Android's decode plan, a sizeless
+    /// view loads once the layouts of its batch are applied.
+    private func requestImageLoad(_ source: String, into imageView: UIImageView, nodeId: Int64) {
+        residentImages[nodeId] = nil
+        // Inline icons (data: URIs) are tiny and paint in the commit that sets them.
+        guard imageView.bounds.width <= 0 || imageView.bounds.height <= 0,
+              !source.hasPrefix("data:") else {
+            pendingImageLoads.removeValue(forKey: nodeId)
+            loadImage(source, into: imageView, nodeId: nodeId)
+            return
+        }
+        pendingImageLoads[nodeId] = source
+        if !committing && !pendingImageFlushScheduled {
+            pendingImageFlushScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                self?.pendingImageFlushScheduled = false
+                self?.flushPendingImageLoads()
+            }
+        }
+    }
+
+    private func flushPendingImageLoads() {
+        guard !pendingImageLoads.isEmpty else { return }
+        let pending = pendingImageLoads
+        pendingImageLoads.removeAll()
+        for (nodeId, source) in pending {
+            guard let view = views[nodeId], let imageView = imageView(for: view) else { continue }
+            if imageView !== view, imageView.bounds.isEmpty, !view.bounds.isEmpty {
+                view.layoutIfNeeded()
+            }
+            loadImage(source, into: imageView, nodeId: nodeId)
+        }
+    }
+
     private func loadImage(_ source: String, into imageView: UIImageView, nodeId: Int64) {
         guard let state = nodes[nodeId] else { return }
         let resolvedSource = resolveImageSource(
@@ -4867,26 +5132,60 @@ public final class PamRenderer: @unchecked Sendable {
         let multiplier = CGFloat(
             state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
         )
+        let decodedKey = PamDecodedImageCache.key(
+            identity: identity,
+            targetSize: targetSize,
+            scale: UIScreen.main.scale,
+            multiplier: multiplier
+        )
+        if let decoded = PamDecodedImageCache.shared.image(forKey: decodedKey) {
+            // Same photo at the same size already decoded: no disk read, no
+            // second bitmap.
+            imageView.image = decoded
+            state.imageLoading = false
+            notifyDrawingImageChanged(nodeId: nodeId)
+            rememberResidentImage(nodeId: nodeId, source: source, imageView: imageView, decodedKey: decodedKey)
+            if !state.imageSilentRestore {
+                if state.properties[PamConstants.onMediaCacheHit] != nil {
+                    dispatchMediaCacheEvent(nodeId: nodeId, kind: .mediaCacheHit, key: identity, disk: false)
+                }
+                dispatchCachedImageLoad(nodeId: nodeId, source: resolvedSource, image: decoded)
+            }
+            state.imageSilentRestore = false
+            return
+        }
         PamMediaDiskCache.shared.data(
             source: resolvedSource,
             stableKey: key,
             maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
         ) { [weak self, weak imageView] data in
             guard let self else { return }
-            let image = data.flatMap {
+            let image = PamDecodedImageCache.shared.image(forKey: decodedKey) ?? data.flatMap {
                 self.decodeImage(
                     $0,
                     targetSize: targetSize,
                     multiplier: multiplier
                 )
             }
+            if let image {
+                PamDecodedImageCache.shared.store(image, forKey: decodedKey)
+            }
             DispatchQueue.main.async {
                 guard let current = self.nodes[nodeId],
                       current.imageGeneration == generation,
                       let imageView else { return }
+                let silent = current.imageSilentRestore
+                current.imageSilentRestore = false
                 if let image {
                     imageView.image = image
                     current.imageLoading = false
+                    self.rememberResidentImage(
+                        nodeId: nodeId,
+                        source: source,
+                        imageView: imageView,
+                        decodedKey: decodedKey
+                    )
+                    if silent { return }
                     if current.properties[PamConstants.onMediaCacheHit] != nil {
                         self.dispatchMediaCacheEvent(
                             nodeId: nodeId,
@@ -5134,6 +5433,14 @@ public final class PamRenderer: @unchecked Sendable {
                     }
                 }
             }
+            let decodedKey = PamDecodedImageCache.key(
+                identity: PamMediaDiskCache.shared.identity(source: context.source, stableKey: cacheKey),
+                targetSize: targetSize,
+                scale: UIScreen.main.scale,
+                multiplier: multiplier
+            )
+            let residentSource = source
+            let releasable = cachePolicy != 5 && [3, 4, 5, 8].contains(mediaPolicy)
             self.imageDecodeQueue.async { [weak self, weak imageView] in
                 guard let self,
                       let image = self.decodeImage(
@@ -5141,6 +5448,9 @@ public final class PamRenderer: @unchecked Sendable {
                         targetSize: targetSize,
                         multiplier: multiplier
                       ) else { return }
+                if releasable {
+                    PamDecodedImageCache.shared.store(image, forKey: decodedKey)
+                }
                 DispatchQueue.main.async {
                     guard let state = self.nodes[context.nodeId],
                           state.imageGeneration == context.generation,
@@ -5158,6 +5468,14 @@ public final class PamRenderer: @unchecked Sendable {
                     }
                     self.notifyDrawingImageChanged(nodeId: context.nodeId)
                     state.imageLoading = false
+                    if releasable {
+                        self.rememberResidentImage(
+                            nodeId: context.nodeId,
+                            source: residentSource,
+                            imageView: imageView,
+                            decodedKey: decodedKey
+                        )
+                    }
                     guard state.properties[PamConstants.onImageLoad] != nil else { return }
                     let payload = (try? WireMap.encode(
                         [
@@ -6843,8 +7161,9 @@ public final class PamRenderer: @unchecked Sendable {
 
         private func dispatchTextChange(_ value: String) {
             textField?.recordDispatchedValue(value)
-            let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
-            dispatchEvent(nodeId, EventKind.change.rawValue, payload)
+            // Same contract as Android and the other iOS change events: the
+            // payload is the UTF-8 text itself (PHP binds it as the value).
+            dispatchEvent(nodeId, EventKind.change.rawValue, Data(value.utf8))
         }
 
         @objc private func onToggle() {
@@ -6852,8 +7171,8 @@ public final class PamRenderer: @unchecked Sendable {
                 dispatchEvent(nodeId, EventKind.toggle.rawValue, Data())
                 return
             }
-            let payload = (try? WireMap.encode(["value": .flag(control.isOn)])) ?? Data()
-            dispatchEvent(nodeId, EventKind.toggle.rawValue, payload)
+            // Android sends "1"/"0".
+            dispatchEvent(nodeId, EventKind.toggle.rawValue, Data((control.isOn ? "1" : "0").utf8))
         }
 
         @objc private func onFocus() {
@@ -6897,12 +7216,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         private func dispatchInputEndEditing(value: String) {
-            let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
-            dispatchEvent(
-                nodeId,
-                EventKind.inputEndEditing.rawValue,
-                payload,
-            )
+            dispatchEvent(nodeId, EventKind.inputEndEditing.rawValue, Data(value.utf8))
         }
 
         private func dispatchInputSelection(start: Int, end: Int) {
@@ -6963,6 +7277,26 @@ private extension NodeKind {
     }
 }
 
+extension PropValue {
+    /// Numeric value of a decimal or integer property (Android
+    /// `PropValue.decimal()`): PHP sends whole numbers such as `opacity="1"`
+    /// or `:opacity="$x ? 0 : 1"` as integers.
+    func decimalOrNil() -> Double? {
+        switch self {
+        case let .decimal(value):
+            value
+        case let .integer(value):
+            Double(value)
+        default:
+            nil
+        }
+    }
+
+    func decimalOrZero() -> Double {
+        decimalOrNil() ?? 0
+    }
+}
+
 private extension PropValue {
     func textOrNil() -> String? {
         switch self {
@@ -6982,19 +7316,6 @@ private extension PropValue {
         default:
             nil
         }
-    }
-
-    func decimalOrNil() -> Double? {
-        switch self {
-        case let .decimal(value):
-            value
-        default:
-            nil
-        }
-    }
-
-    func decimalOrZero() -> Double {
-        decimalOrNil() ?? 0
     }
 
     func boolOrNil() -> Bool? {
@@ -7090,6 +7411,21 @@ private struct AccessibilityActionSpec {
     let label: String
 }
 
+private final class ResidentImage {
+    let source: String
+    weak var imageView: UIImageView?
+    let decodedKey: String
+    var released = false
+    /// Weak: the bitmap survives only while the decoded cache keeps it.
+    weak var releasedImage: UIImage?
+
+    init(source: String, imageView: UIImageView, decodedKey: String) {
+        self.source = source
+        self.imageView = imageView
+        self.decodedKey = decodedKey
+    }
+}
+
 private final class NodeState {
     let id: Int64
     var parent: Int64
@@ -7103,6 +7439,8 @@ private final class NodeState {
     var childrenNeedRethrow: UIView?
     var imageGeneration: Int
     var imageLoading: Bool
+    /// Reloading pixels released away from the screen: no load events again.
+    var imageSilentRestore = false
     var imageProgressLoaded: Int64
     var imageProgressTotal: Int64
     var imageProgressScheduled: Bool

@@ -916,6 +916,32 @@ horizontal list) remains authoritative, so one recycled list can render
 different media aspect ratios without measuring them on the UI thread.
 `rowHeight` remains a compatibility alias.
 
+### PHP window (`windowSize`)
+
+The native list only creates views near the viewport, but PHP still builds
+every row it is given. A template list whose rows come from one `p-for` can
+bound that too, like React Native FlatList `windowSize`:
+
+```html
+<VirtualizedList windowSize="5" estimatedRowHeight="600">
+    <FeedHeader />
+    <PostCard p-for="$post in $posts" :key="$post['id']" :post="$post" />
+</VirtualizedList>
+```
+
+Only the loop rows within `(windowSize - 1) / 2` screens above and below the
+viewport are rendered. Every other row is a childless placeholder view with the
+height the row last measured (or `estimatedRowHeight` before it was ever
+mounted), so the content height, the scroll position and the native cell
+recycling do not move. Rows leaving the window unmount their components (their
+local state is lost, as in React Native) and the encoder forgets their nodes.
+
+The window follows the list's scroll phases: drag start, release (a fling is
+materialized up to its predicted landing as soon as the finger lifts) and
+momentum end, plus a `scrollRequest` with a `scrollTargetOffset`. PHP is never
+woken per scroll frame. Static children before and after the loop always
+render. It uses no new protocol keys, so it behaves the same on Android and iOS.
+
 The native list viewport and every recycled holder are paint boundaries.
 Scrolling media cannot draw over screen headers, adjacent rows, or tab bars;
 `overflow` remains available to control clipping inside the cell itself.

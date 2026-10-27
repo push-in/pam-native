@@ -12,6 +12,8 @@ pub(crate) type TextMetrics = BTreeMap<u64, GlyphAdvances>;
 pub(crate) struct FontMetricsCache {
     asset_root: Option<PathBuf>,
     fonts: BTreeMap<FontInstance, CachedFont>,
+    /// Font files by path: every weight of a variable font shares one copy.
+    files: BTreeMap<PathBuf, Arc<[u8]>>,
     node_fonts: BTreeMap<u64, FontInstance>,
     metrics: TextMetrics,
 }
@@ -24,7 +26,7 @@ struct FontInstance {
 
 #[derive(Debug)]
 struct CachedFont {
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
     advances: BTreeMap<char, f32>,
     snapshot: GlyphAdvances,
 }
@@ -35,6 +37,7 @@ impl FontMetricsCache {
         if self.asset_root.as_ref() != Some(&asset_root) {
             self.asset_root = Some(asset_root);
             self.fonts.clear();
+            self.files.clear();
             self.node_fonts.clear();
             self.metrics.clear();
         }
@@ -91,11 +94,16 @@ impl FontMetricsCache {
             let Some(path) = self.resolve_asset_font(&family.family) else {
                 continue;
             };
+            let files = &mut self.files;
             let cached = self
                 .fonts
                 .entry(family.clone())
                 .or_insert_with(|| CachedFont {
-                    bytes: fs::read(path).unwrap_or_default(),
+                    bytes: Arc::clone(
+                        files
+                            .entry(path)
+                            .or_insert_with_key(|path| Arc::from(fs::read(path).unwrap_or_default())),
+                    ),
                     advances: BTreeMap::new(),
                     snapshot: Arc::new(BTreeMap::new()),
                 });
@@ -288,6 +296,16 @@ mod tests {
             .properties
             .insert(PropKey::FontWeight, PropValue::Integer(400));
         assert_eq!(width(cache.measure_nodes(&tree, &[1])), regular);
+        // Every weight instance reads the variable font file once.
+        assert_eq!(cache.files.len(), 1);
+        let file = cache.files.values().next().unwrap();
+        assert!(cache.fonts.len() > 1);
+        assert!(
+            cache
+                .fonts
+                .values()
+                .all(|font| std::sync::Arc::ptr_eq(&font.bytes, file))
+        );
     }
     #[test]
     fn automatic_row_layout_reflows_variable_font_after_weight_and_scale_changes() {

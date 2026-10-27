@@ -76,6 +76,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private var onGestureEnd: (() -> Void)?
     private var onGestureCancel: (() -> Void)?
     private var interactivePopCommitted = false
+    /// Bumped per transition; a finish from an older one only resets its
+    /// transforms and never overrides the newer visibility.
+    private var transitionGeneration = 0
     private var routeViews: [UIView] = []
     private var routeControllers: [ObjectIdentifier: PamRouteViewController] = [:]
     private weak var containerController: UIViewController?
@@ -264,6 +267,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     }
 
     private func runTransition() {
+        transitionGeneration += 1
         if navigationController != nil {
             runControllerTransition()
             return
@@ -294,6 +298,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             outgoing.layer.shouldRasterize = true
         }
         let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+        let generation = transitionGeneration
         UIView.animate(
             withDuration: min(max(max(duration, sharedDuration), 0), 2),
             delay: 0,
@@ -302,7 +307,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
         } completion: { _ in
             if !outgoingRasterized { outgoing?.layer.shouldRasterize = false }
-            self.finish(incoming: incoming, outgoing: outgoing)
+            self.finish(incoming: incoming, outgoing: outgoing, generation: generation)
         }
     }
 
@@ -633,7 +638,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         return operation == 3 ? routeViews.last : routeViews[routeViews.count - 2]
     }
 
-    private func finish(incoming: UIView, outgoing: UIView?) {
+    private func finish(incoming: UIView, outgoing: UIView?, generation: Int? = nil) {
+        if let generation, generation != transitionGeneration {
+            // A newer transition owns visibility now; only undo this one's
+            // in-flight transforms.
+            [incoming, outgoing].compactMap { $0 }.forEach {
+                $0.alpha = 1
+                $0.transform = .identity
+            }
+            return
+        }
         clearSharedElements()
         incoming.alpha = 1
         incoming.transform = .identity
@@ -791,8 +805,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         if animated {
             let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+            let generation = transitionGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + min(max(max(duration, sharedDuration), 0), 2)) { [weak self] in
-                self?.finish(incoming: incoming, outgoing: outgoing)
+                self?.finish(incoming: incoming, outgoing: outgoing, generation: generation)
             }
         } else {
             finish(incoming: incoming, outgoing: outgoing)

@@ -153,8 +153,34 @@ private final class WeakWebMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Video surface without player chrome: a bare `AVPlayerLayer`. The
+/// heavier `AVPlayerViewController` (and its gesture recognizers) exists only
+/// while `controls=true`, like Android's MediaController.
+final class PamPlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+}
+
 final class PamMediaView: UIView {
-    private let controller = AVPlayerViewController()
+    /// A hidden (not covered) player keeps its decoder this long before it is
+    /// released, Android `HIDDEN_RELEASE_MS`.
+    static var hiddenReleaseDelay: TimeInterval = 5
+
+    private let playerView = PamPlayerLayerView()
+    private(set) var controller: AVPlayerViewController?
+    /// Poster (`thumbnail()`), shown until the first video frame is drawn.
+    let posterView = PamImageView()
+    private var controls = true
+    private var gravity: AVLayerVideoGravity = .resizeAspect
+    private var readyForDisplayObservation: NSKeyValueObservation?
+    private(set) var videoReadyForDisplay = false
+    private var hiddenSince: CFTimeInterval?
+    private var thumbnail: PamMediaThumbnail?
+    private var thumbnailLoaded = false
+    private var thumbnailGeneration: UInt64 = 0
+    private var thumbnailRequestId: PHImageRequestID = PHInvalidImageRequestID
+    /// Decodes local poster sources (asset://, pam-file://, data:), set by the renderer.
+    var localImageResolver: ((String, CGSize) -> UIImage?)?
     private var player: AVPlayer?
     private var source = ""
     private var autoPlay = false
@@ -209,11 +235,34 @@ final class PamMediaView: UIView {
         coverageObserver = NotificationCenter.default.addObserver(
             forName: PamRouteCoverage.didChange, object: nil, queue: .main
         ) { [weak self] _ in self?.syncCoverage() }
-        backgroundColor = .black
-        controller.view.frame = bounds
-        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(controller.view)
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(togglePlayback)))
+        // Transparent like Android's TextureView: no black box before the
+        // first frame (the app's own background or the poster shows).
+        backgroundColor = .clear
+        clipsToBounds = true
+        playerView.frame = bounds
+        playerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        playerView.isUserInteractionEnabled = false
+        playerView.playerLayer.videoGravity = gravity
+        addSubview(playerView)
+        posterView.frame = bounds
+        posterView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        posterView.isUserInteractionEnabled = false
+        posterView.contentMode = .scaleAspectFit
+        posterView.clipsToBounds = true
+        posterView.isHidden = true
+        addSubview(posterView)
+        // No tap recognizer: like Android, a tap only shows the controls when
+        // `controls=true` (AVPlayerViewController's own), and with
+        // `controls=false` touches reach the app's Pressable/gestures
+        // (reels mute, double-tap like, hold to pause) untouched.
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if thumbnail != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0 {
+            loadThumbnail()
+        }
+        if releasedForCover { syncCoverage() }
     }
 
     required init?(coder: NSCoder) {
@@ -222,6 +271,9 @@ final class PamMediaView: UIView {
 
     deinit {
         if let coverageObserver { NotificationCenter.default.removeObserver(coverageObserver) }
+        if thumbnailRequestId != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(thumbnailRequestId)
+        }
         releasePlayer()
     }
 
@@ -238,6 +290,7 @@ final class PamMediaView: UIView {
     }
 
     private func syncCoverage() {
+        hiddenSince = nil
         let covered = !keepAliveWhenCovered && !source.isEmpty && PamRouteCoverage.isCovered(self)
         guard covered != releasedForCover else { return }
         releasedForCover = covered
@@ -353,6 +406,16 @@ final class PamMediaView: UIView {
             url = local
         }
         let generation = sourceGeneration
+        if Self.isUnsupportedContainer(url) {
+            // AVFoundation has no WebM/Matroska demuxer (Android plays them
+            // through ExoPlayer). No download, no player: the poster stays
+            // and `on:error` lets the app show its fallback (WebM sticker).
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.sourceGeneration == generation else { return }
+                self.onError?(Self.unsupportedContainerMessage)
+            }
+            return
+        }
         let remote = url.scheme == "https" || url.scheme == "http"
         if remote && cachePolicy >= 3 {
             let identity = PamMediaDiskCache.shared.identity(source: value, stableKey: cacheKey)
@@ -396,6 +459,14 @@ final class PamMediaView: UIView {
         installPlayer(url)
     }
 
+    static let unsupportedContainerMessage = "WebM video is not supported on iOS"
+
+    /// WebM/Matroska sources (by extension): AVPlayer cannot open them.
+    static func isUnsupportedContainer(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "webm" || ext == "mkv"
+    }
+
     func setCache(
         policy: Int,
         key: String?,
@@ -433,7 +504,7 @@ final class PamMediaView: UIView {
         item.preferredForwardBufferDuration = forwardBufferSeconds
         let next = AVPlayer(playerItem: item)
         player = next
-        controller.player = next
+        attachSurface()
         next.isMuted = muted
         next.volume = volume
         onLoadStart?()
@@ -454,8 +525,15 @@ final class PamMediaView: UIView {
                 case .readyToPlay:
                     let resuming = !self.resumeSource.isEmpty && self.resumeSource == self.source
                     let startAt = resuming ? self.resumeAt : self.currentTime
-                    if startAt > 0 {
-                        self.player?.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
+                    let willPlay = self.autoPlay || (resuming && self.resumePlaying)
+                    if startAt > 0 || !willPlay {
+                        // A paused player (autoPlay=false) draws the exact
+                        // frame at currentTime (Android SEEK_CLOSEST).
+                        self.player?.seek(
+                            to: CMTime(seconds: startAt, preferredTimescale: 600),
+                            toleranceBefore: willPlay ? .positiveInfinity : .zero,
+                            toleranceAfter: willPlay ? .positiveInfinity : .zero
+                        )
                     }
                     let size = item.presentationSize
                     let duration = item.duration.seconds
@@ -467,6 +545,8 @@ final class PamMediaView: UIView {
                     self.updateBindings(position: startAt, duration: duration, animated: false)
                     if self.autoPlay || (resuming && self.resumePlaying) { self.play() }
                 case .failed:
+                    self.videoReadyForDisplay = false
+                    self.updatePoster()
                     self.onError?(item.error?.localizedDescription ?? "Media could not be loaded")
                 case .unknown:
                     break
@@ -480,6 +560,7 @@ final class PamMediaView: UIView {
             queue: .main
         ) { [weak self] time in
             guard let self, let item = self.player?.currentItem else { return }
+            if self.checkHiddenRelease() { return }
             let duration = item.duration.seconds
             let position = time.seconds.isFinite ? time.seconds : 0
             self.onProgress?(position, duration.isFinite ? duration : 0)
@@ -504,13 +585,209 @@ final class PamMediaView: UIView {
         guard player?.currentItem?.status == .readyToPlay else { return }
         if value { play() } else { pause() }
     }
-    func setControls(_ value: Bool) { controller.showsPlaybackControls = value }
+    func setControls(_ value: Bool) {
+        guard controls != value else { return }
+        controls = value
+        attachSurface()
+    }
+
     func setResizeMode(_ value: Int) {
-        controller.videoGravity = switch value {
+        gravity = switch value {
         case 1: .resizeAspectFill
         case 3: .resize
         default: .resizeAspect
         }
+        playerView.playerLayer.videoGravity = gravity
+        controller?.videoGravity = gravity
+        posterView.contentMode = switch value {
+        case 1: .scaleAspectFill
+        case 3: .scaleToFill
+        default: .scaleAspectFit
+        }
+    }
+
+    /// Puts the player on the bare layer (`controls=false`) or on an
+    /// `AVPlayerViewController` created only for `controls=true`.
+    private func attachSurface() {
+        readyForDisplayObservation?.invalidate()
+        readyForDisplayObservation = nil
+        videoReadyForDisplay = false
+        if controls, player != nil {
+            let controller = controller ?? makeController()
+            playerView.playerLayer.player = nil
+            controller.player = player
+            controller.videoGravity = gravity
+            controller.view.isHidden = false
+            readyForDisplayObservation = controller.observe(
+                \.isReadyForDisplay, options: [.initial, .new]
+            ) { [weak self] controller, _ in
+                let ready = controller.isReadyForDisplay
+                DispatchQueue.main.async { self?.setVideoReadyForDisplay(ready) }
+            }
+        } else {
+            if let controller {
+                controller.player = nil
+                controller.view.removeFromSuperview()
+                self.controller = nil
+            }
+            playerView.playerLayer.player = player
+            if player != nil {
+                readyForDisplayObservation = playerView.playerLayer.observe(
+                    \.isReadyForDisplay, options: [.initial, .new]
+                ) { [weak self] layer, _ in
+                    let ready = layer.isReadyForDisplay
+                    DispatchQueue.main.async { self?.setVideoReadyForDisplay(ready) }
+                }
+            }
+        }
+        updatePoster()
+    }
+
+    private func makeController() -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.showsPlaybackControls = true
+        // No black box behind a letterboxed or loading video.
+        controller.view.backgroundColor = .clear
+        controller.view.frame = bounds
+        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        insertSubview(controller.view, belowSubview: posterView)
+        self.controller = controller
+        return controller
+    }
+
+    /// The player surface's `isReadyForDisplay` (KVO). Internal so tests
+    /// drive the first frame signal without waiting on AVFoundation.
+    func setVideoReadyForDisplay(_ ready: Bool) {
+        guard player != nil else { return }
+        videoReadyForDisplay = ready
+        updatePoster()
+    }
+
+    /// The poster covers the video until its first frame (Android hides it in
+    /// `onSurfaceTextureUpdated`) and comes back when the player is released.
+    private func updatePoster() {
+        posterView.isHidden = posterView.image == nil || (player != nil && videoReadyForDisplay)
+    }
+
+    var isPosterVisible: Bool { !posterView.isHidden }
+
+    // MARK: Poster (`thumbnail()`)
+
+    func setThumbnail(_ source: String?, cacheKey: String?, policy: Int, maxAgeMs: Int64) {
+        let next = source.flatMap { $0.isEmpty ? nil : PamMediaThumbnail(
+            source: $0, cacheKey: cacheKey, policy: policy, maxAgeMs: maxAgeMs
+        ) }
+        guard next != thumbnail else { return }
+        thumbnail = next
+        thumbnailLoaded = false
+        thumbnailGeneration &+= 1
+        if thumbnailRequestId != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(thumbnailRequestId)
+            thumbnailRequestId = PHInvalidImageRequestID
+        }
+        posterView.image = nil
+        updatePoster()
+        if next != nil, bounds.width > 0, bounds.height > 0 {
+            loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() {
+        guard let thumbnail else { return }
+        thumbnailLoaded = true
+        let generation = thumbnailGeneration
+        let size = bounds.size
+        let deliver: (UIImage?) -> Void = { [weak self] image in
+            guard let self, self.thumbnailGeneration == generation, let image else { return }
+            self.posterView.image = image
+            self.updatePoster()
+        }
+        let source = thumbnail.source
+        if PamPhotoAssetURI.identifier(source) != nil {
+            guard let asset = PamPhotoAssetURI.asset(source) else { return }
+            let options = PHImageRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+            let scale = window?.screen.scale ?? UIScreen.main.scale
+            thumbnailRequestId = PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: size.width * scale, height: size.height * scale),
+                contentMode: .aspectFill,
+                options: options
+            ) { image, info in
+                if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
+                DispatchQueue.main.async { deliver(image) }
+            }
+            return
+        }
+        guard let url = URL(string: source),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else {
+            deliver(localImageResolver?(source, size))
+            return
+        }
+        let decode: (Data) -> UIImage? = { data in
+            PamImageDownsampling.image(data: data, targetSize: size)
+                ?? UIImage(data: data).map { $0.preparingForDisplay() ?? $0 }
+        }
+        let fetch: () -> Void = {
+            URLSession.shared.dataTask(with: url) { data, response, _ in
+                guard let data, !data.isEmpty,
+                      (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else {
+                    return
+                }
+                if thumbnail.policy >= 3 {
+                    PamMediaDiskCache.shared.store(
+                        data,
+                        source: source,
+                        stableKey: thumbnail.cacheKey,
+                        checksum: nil,
+                        limit: 0,
+                        pinned: false
+                    )
+                }
+                let image = decode(data)
+                DispatchQueue.main.async { deliver(image) }
+            }.resume()
+        }
+        guard thumbnail.policy >= 3 else {
+            fetch()
+            return
+        }
+        PamMediaDiskCache.shared.data(
+            source: source,
+            stableKey: thumbnail.cacheKey,
+            maxAgeMs: thumbnail.maxAgeMs
+        ) { data in
+            guard let data else {
+                if thumbnail.policy != 7 { fetch() }
+                return
+            }
+            let image = decode(data)
+            DispatchQueue.main.async { deliver(image) }
+        }
+    }
+
+    // MARK: Hidden release
+
+    /// A playing view that is hidden without a coverage notification (an
+    /// ancestor hidden or made transparent, the view scrolled into a detached
+    /// pager page) keeps decoding unseen: after `hiddenReleaseDelay` it is
+    /// released like a covered route and comes back at the same position.
+    /// Returns true when the player was released.
+    @discardableResult
+    func checkHiddenRelease(now: CFTimeInterval = CACurrentMediaTime()) -> Bool {
+        guard !keepAliveWhenCovered, !source.isEmpty, PamRouteCoverage.isCovered(self) else {
+            hiddenSince = nil
+            return false
+        }
+        guard let since = hiddenSince else {
+            hiddenSince = now
+            return false
+        }
+        guard now - since >= Self.hiddenReleaseDelay else { return false }
+        syncCoverage()
+        return releasedForCover
     }
     func setLoop(_ value: Bool) { looping = value }
     func setMuted(_ value: Bool) { muted = value; player?.isMuted = value }
@@ -520,15 +797,18 @@ final class PamMediaView: UIView {
     }
     func seek(_ seconds: Double) {
         currentTime = max(seconds, 0)
-        player?.seek(to: CMTime(seconds: currentTime, preferredTimescale: 600))
+        guard let player else { return }
+        let time = CMTime(seconds: currentTime, preferredTimescale: 600)
+        if player.timeControlStatus == .paused {
+            // Paused: draw the exact frame (Android SEEK_CLOSEST).
+            player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        } else {
+            player.seek(to: time)
+        }
     }
     func setPlaybackRate(_ value: Float) {
         playbackRate = min(max(value, 0.25), 4)
         if player?.timeControlStatus == .playing { player?.rate = playbackRate }
-    }
-
-    @objc private func togglePlayback() {
-        if player?.timeControlStatus == .playing { player?.pause() } else { play() }
     }
 
     private func play() {
@@ -562,6 +842,23 @@ final class PamMediaView: UIView {
         bufferingObservation = nil
         player?.pause()
         player = nil
-        controller.player = nil
+        readyForDisplayObservation?.invalidate()
+        readyForDisplayObservation = nil
+        videoReadyForDisplay = false
+        playerView.playerLayer.player = nil
+        controller?.player = nil
+        updatePoster()
     }
+
+    /// Player state for tests.
+    var hasPlayer: Bool { player != nil }
+    var isUsingPlayerLayer: Bool { playerView.playerLayer.player != nil }
+}
+
+/// Poster request of a `PamMediaView` (`thumbnail()` and its cache options).
+struct PamMediaThumbnail: Equatable, Sendable {
+    let source: String
+    let cacheKey: String?
+    let policy: Int
+    let maxAgeMs: Int64
 }

@@ -312,11 +312,12 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             let values = try WireMap.decode(payload)
             guard case let .text(assetPath)? = values["assetPath"],
                   case let .text(path)? = values["path"],
-                  let bundledPath = try normalizedPamAssetPath("asset://\(assetPath)"),
-                  let resourceRoot = Bundle.main.resourceURL else {
+                  let bundledPath = try normalizedPamAssetPath("asset://\(assetPath)") else {
                 throw FileModuleError("Invalid bundled asset payload")
             }
-            let source = resourceRoot.appendingPathComponent(bundledPath, isDirectory: false)
+            guard let source = pamAssetFileURL(bundledPath) else {
+                throw FileModuleError("Bundled asset does not exist")
+            }
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: source.path, isDirectory: &isDirectory),
                   !isDirectory.boolValue else {

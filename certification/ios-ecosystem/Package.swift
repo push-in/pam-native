@@ -11,6 +11,8 @@ let package = Package(
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", exact: "12.17.0"),
         .package(url: "https://github.com/stripe/stripe-ios.git", exact: "26.0.0"),
         .package(url: "https://github.com/SDWebImage/SDWebImage.git", exact: "5.21.7"),
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.40.0"),
+        .package(url: "https://github.com/stasel/WebRTC.git", from: "124.0.0"),
     ],
     targets: [
         .target(
@@ -153,6 +155,35 @@ let package = Package(
             path: "Sources/PamPlugin23PushinbrPamNativeImage",
         ),
         .target(
+            name: "PamPlugin24PushinbrPamNativeAudio",
+            dependencies: [.product(name: "PamNative", package: "ios")],
+            path: "Sources/PamPlugin24PushinbrPamNativeAudio",
+            linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("CoreMedia")],
+        ),
+        .target(
+            name: "PamPlugin25PushinbrPamNativeCalls",
+            dependencies: [.product(name: "PamNative", package: "ios")],
+            path: "Sources/PamPlugin25PushinbrPamNativeCalls",
+            linkerSettings: [.linkedFramework("CallKit"), .linkedFramework("PushKit"), .linkedFramework("AVFoundation")],
+        ),
+        .target(
+            name: "PamPlugin26PushinbrPamNativeWebrtc",
+            dependencies: [.product(name: "PamNative", package: "ios"), .product(name: "WebRTC", package: "WebRTC")],
+            path: "Sources/PamPlugin26PushinbrPamNativeWebrtc",
+            linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("AudioToolbox")],
+        ),
+        .target(
+            name: "PamPlugin27PushinbrPamNativeObservability",
+            dependencies: [.product(name: "PamNative", package: "ios"), .product(name: "Sentry", package: "sentry-cocoa")],
+            path: "Sources/PamPlugin27PushinbrPamNativeObservability",
+        ),
+        .target(
+            name: "PamPlugin28PushinbrPamNativeSvg",
+            dependencies: [.product(name: "PamNative", package: "ios")],
+            path: "Sources/PamPlugin28PushinbrPamNativeSvg",
+            linkerSettings: [.linkedFramework("CoreGraphics"), .linkedFramework("QuartzCore"), .linkedFramework("UIKit")],
+        ),
+        .target(
             name: "PamExtensionIntents",
             path: "Sources/PamExtensionIntents",
             linkerSettings: [.linkedFramework("AppIntents")],
@@ -174,7 +205,7 @@ let package = Package(
         ),
         .target(
             name: "PamNativePlugins",
-            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeMediaEditor", "PamPlugin11PushinbrPamNativeNfc", "PamPlugin12PushinbrPamNativePayments", "PamPlugin13PushinbrPamNativeRealtime", "PamPlugin14PushinbrPamNativeScanner", "PamPlugin15PushinbrPamNativeShareExtension", "PamPlugin16PushinbrPamNativeSubscriptions", "PamPlugin17PushinbrPamNativeVideo", "PamPlugin18PushinbrPamNativeWidgets", "PamPlugin19PushinbrPamNativeCamera", "PamPlugin20PushinbrPamNativeCanvas", "PamPlugin21PushinbrPamNativeGpu", "PamPlugin22PushinbrPamNative3d", "PamPlugin23PushinbrPamNativeImage", "PamExtensionIntents", "PamExtensionLiveActivities", "PamExtensionShare", "PamExtensionWidgets"],
+            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeMediaEditor", "PamPlugin11PushinbrPamNativeNfc", "PamPlugin12PushinbrPamNativePayments", "PamPlugin13PushinbrPamNativeRealtime", "PamPlugin14PushinbrPamNativeScanner", "PamPlugin15PushinbrPamNativeShareExtension", "PamPlugin16PushinbrPamNativeSubscriptions", "PamPlugin17PushinbrPamNativeVideo", "PamPlugin18PushinbrPamNativeWidgets", "PamPlugin19PushinbrPamNativeCamera", "PamPlugin20PushinbrPamNativeCanvas", "PamPlugin21PushinbrPamNativeGpu", "PamPlugin22PushinbrPamNative3d", "PamPlugin23PushinbrPamNativeImage", "PamPlugin24PushinbrPamNativeAudio", "PamPlugin25PushinbrPamNativeCalls", "PamPlugin26PushinbrPamNativeWebrtc", "PamPlugin27PushinbrPamNativeObservability", "PamPlugin28PushinbrPamNativeSvg", "PamExtensionIntents", "PamExtensionLiveActivities", "PamExtensionShare", "PamExtensionWidgets"],
             path: "Sources/PamNativePlugins"
         ),
     ]

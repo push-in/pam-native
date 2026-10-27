@@ -108,6 +108,18 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         contentMode = .redraw
     }
 
+    /// Authored padding and border widths (Yoga padding box). The engine
+    /// measured the text at the inner width, so lines are laid out and drawn
+    /// inside these insets, like Android's leaf `setPadding`.
+    var contentInsets: UIEdgeInsets = .zero {
+        didSet {
+            guard contentInsets != oldValue else { return }
+            invalidateTextLayout()
+        }
+    }
+
+    var contentBounds: CGRect { bounds.inset(by: contentInsets) }
+
     override var textColor: UIColor! {
         didSet { setNeedsDisplay() }
     }
@@ -143,9 +155,9 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     /// Android `gravity = CENTER_VERTICAL`: a box taller than its text
     /// centres the lines instead of pinning them to the top.
     func textBox(for result: PamTextLayoutResult) -> CGRect {
-        let extra = bounds.height - result.size.height
-        guard extra > 0.5 else { return bounds }
-        return CGRect(x: bounds.minX, y: bounds.minY + extra / 2, width: bounds.width, height: result.size.height)
+        let extra = contentBounds.height - result.size.height
+        guard extra > 0.5 else { return contentBounds }
+        return CGRect(x: contentBounds.minX, y: contentBounds.minY + extra / 2, width: contentBounds.width, height: result.size.height)
     }
 
     override func draw(_ rect: CGRect) {
@@ -153,7 +165,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
             super.draw(rect)
             return
         }
-        guard let context = UIGraphicsGetCurrentContext(), bounds.width > 0 else { return }
+        guard let context = UIGraphicsGetCurrentContext(), contentBounds.width > 0 else { return }
         if content.options.ellipsize == 5 {
             drawMarquee(content, in: context)
             return
@@ -211,7 +223,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         defer { marqueeLastTick = now }
         guard now >= marqueeResume, let content = pamContent else { return }
         let width = marqueeLayout(content).size.width
-        guard width > bounds.width else { return }
+        guard width > contentBounds.width else { return }
         marqueeOffset += Self.marqueePointsPerSecond * CGFloat(now - marqueeLastTick)
         let cycle = width + Self.marqueeGap
         if marqueeOffset >= cycle {
@@ -224,13 +236,13 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     private func drawMarquee(_ content: PamTextContent, in context: CGContext) {
         let result = marqueeLayout(content)
         var options = content.options
-        if result.size.width > bounds.width { options.alignment = 1 }
+        if result.size.width > contentBounds.width { options.alignment = 1 }
         context.saveGState()
-        context.clip(to: bounds)
-        let width = max(result.size.width, bounds.width)
-        let first = CGRect(x: -marqueeOffset, y: 0, width: width, height: bounds.height)
+        context.clip(to: contentBounds)
+        let width = max(result.size.width, contentBounds.width)
+        let first = CGRect(x: contentBounds.minX - marqueeOffset, y: contentBounds.minY, width: width, height: contentBounds.height)
         PamTextLayout.draw(result, in: context, bounds: first, color: textColor ?? .label, options: options, traits: traitCollection)
-        if result.size.width > bounds.width {
+        if result.size.width > contentBounds.width {
             let second = first.offsetBy(dx: result.size.width + Self.marqueeGap, dy: 0)
             PamTextLayout.draw(result, in: context, bounds: second, color: textColor ?? .label, options: options, traits: traitCollection)
         }
@@ -262,7 +274,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     /// Layout at the current width, shrinking fonts first when
     /// `adjustsFontSizeToFit` is set (React Native iOS semantics).
     func currentLayout(_ content: PamTextContent) -> PamTextLayoutResult {
-        let width = bounds.width
+        let width = contentBounds.width
         let scale = content.options.adjustsFontSizeToFit ? fittingScale(content) : 1
         if let cachedLayout, cachedLayout.width == width, cachedLayout.scale == scale {
             return cachedLayout.result
@@ -280,9 +292,9 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     }
 
     private func fittingScale(_ content: PamTextContent) -> CGFloat {
-        if fitScaleWidth == bounds.width, fitScaleHeight == bounds.height { return fitScale }
-        fitScaleWidth = bounds.width
-        fitScaleHeight = bounds.height
+        if fitScaleWidth == contentBounds.width, fitScaleHeight == contentBounds.height { return fitScale }
+        fitScaleWidth = contentBounds.width
+        fitScaleHeight = contentBounds.height
         func fits(_ scale: CGFloat) -> Bool {
             var unlimited = content.style
             unlimited.fontScale *= scale
@@ -290,11 +302,11 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
             let result = PamTextLayout.layout(
                 attributed(content, scale: scale),
                 style: unlimited,
-                width: bounds.width,
+                width: contentBounds.width,
                 ellipsize: content.options.ellipsize
             )
             let lineLimit = content.style.maxLines > 0 ? content.style.maxLines : Int.max
-            return result.totalLineCount <= lineLimit && result.size.height <= bounds.height + 0.5
+            return result.totalLineCount <= lineLimit && result.size.height <= contentBounds.height + 0.5
         }
         if fits(1) {
             fitScale = 1
@@ -311,16 +323,16 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     }
 
     private func reportTextLayoutIfNeeded() {
-        guard let onTextLayout, let content = pamContent, bounds.width > 0 else { return }
+        guard let onTextLayout, let content = pamContent, contentBounds.width > 0 else { return }
         let visible = currentLayout(content)
         var unlimited = content.style
         unlimited.maxLines = 0
-        let full = PamTextLayout.layout(attributed(content), style: unlimited, width: bounds.width)
+        let full = PamTextLayout.layout(attributed(content), style: unlimited, width: contentBounds.width)
         let report = PamTextLayoutReport(
             lines: full.totalLineCount,
             visibleLines: visible.lines.count,
             truncated: visible.truncated,
-            width: bounds.width,
+            width: contentBounds.width,
             height: full.size.height,
             lineWidths: Array(full.lineWidths.prefix(200))
         )
@@ -429,7 +441,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         guard !string.isEmpty, let index = PamTextLayout.characterIndex(
             at: centredPoint(point, for: result),
             in: result,
-            boxWidth: bounds.width,
+            boxWidth: contentBounds.width,
             alignment: content.options.alignment
         ) else { return nil }
         let range = NSRange(location: 0, length: (string as NSString).length)
@@ -459,7 +471,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
             at: centredPoint(point, for: result),
             in: result,
             content: attributed(content),
-            boxWidth: bounds.width,
+            boxWidth: contentBounds.width,
             alignment: content.options.alignment
         )
     }

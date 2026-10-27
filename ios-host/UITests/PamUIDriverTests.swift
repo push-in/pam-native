@@ -16,6 +16,8 @@ import XCTest
 ///     {"longPress": "label", "seconds": 1.0}
 ///     {"type": "hello"}                keyboard input into the focused field
 ///     {"swipe": "up"}                  up/down/left/right on the window
+///     {"fling": "up"}                  fast up/down flick; returns while the
+///                                      list still decelerates (scroll QA)
 ///     {"edgeSwipe": true}              interactive pop from the left edge
 ///     {"home": true}                   press the home button
 ///     {"alert": "Open"}                tap a SpringBoard alert button
@@ -114,6 +116,22 @@ final class PamUIDriverTests: XCTestCase {
             case "right": window.swipeRight()
             default: XCTFail("step \(index): unknown swipe direction \(direction)")
             }
+            return
+        }
+        if let direction = step["fling"] as? String {
+            let window = app.windows.firstMatch
+            let (from, to): (CGFloat, CGFloat) = switch direction {
+            case "up": (0.8, 0.2)
+            case "down": (0.2, 0.8)
+            default: (0.5, 0.5)
+            }
+            guard from != to else {
+                XCTFail("step \(index): unknown fling direction \(direction)")
+                return
+            }
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
             return
         }
         if step["edgeSwipe"] as? Bool == true {

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <memory>
@@ -14,9 +15,15 @@
 #include <utility>
 #include <unordered_map>
 
+#include <os/log.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+
 #include <sapi/embed/php_embed.h>
+#include <Zend/zend_alloc.h>
 #include <Zend/zend_exceptions.h>
 #include <Zend/zend_execute.h>
+#include <Zend/zend_gc.h>
 
 #include "pam_native_ios_bridge.h"
 #include "pam_native_engine.h"
@@ -29,6 +36,11 @@ constexpr std::size_t kMaxEventBytes = 1024 * 1024;
 // receives a failure so its callback always runs.
 constexpr std::size_t kMaxModuleResultBytes = 32 * 1024 * 1024;
 constexpr std::int32_t kModuleResultFailure = 2;
+// EventKind::MemoryPressure (PHP) / NativeViewEventKind.memoryPressure.
+constexpr std::int32_t kMemoryPressureEventKind = 18;
+constexpr std::size_t kIdleHeapSlackBytes = 8 * 1024 * 1024;
+
+void release_php_memory_caches();
 
 std::string oversized_module_result_message(std::size_t size) {
     return "Native module result exceeds the bridge limit (" + std::to_string(size)
@@ -90,6 +102,11 @@ struct RuntimeState {
     std::thread worker;
 
     std::atomic<bool> stopping = false;
+
+    // Cold start phases (PHP worker only): embed init and the first batch.
+    std::chrono::steady_clock::time_point boot_started;
+    std::chrono::steady_clock::time_point embed_ready;
+    bool first_batch_logged = false;
 
     // Hot reload: runs between two PHP requests (see runtime_loop).
     std::mutex reload_prepare_mutex;
@@ -184,6 +201,52 @@ void report_error(RuntimeState* state, const std::string& message) {
     }
 }
 
+// OPcache state for the first batch perf line, so a real-world app shows
+// whether compiled scripts came from the cache: "off", "file-only" (no
+// shared memory) or "shm", plus cached scripts, hits and misses.
+std::string opcache_summary() {
+    if (!zend_hash_str_exists(EG(function_table), "opcache_get_status", sizeof("opcache_get_status") - 1)) {
+        return "unavailable";
+    }
+    zval name;
+    zval argument;
+    zval result;
+    ZVAL_STRING(&name, "opcache_get_status");
+    ZVAL_FALSE(&argument);
+    ZVAL_UNDEF(&result);
+    const int status = call_user_function(EG(function_table), nullptr, &name, &result, 1, &argument);
+    zval_ptr_dtor(&name);
+    std::string summary = "off";
+    if (status == SUCCESS && !EG(exception) && Z_TYPE(result) == IS_ARRAY) {
+        HashTable* table = Z_ARRVAL(result);
+        const auto number = [](HashTable* from, const char* key) -> long long {
+            zval* value = zend_hash_str_find(from, key, std::strlen(key));
+            return value != nullptr && Z_TYPE_P(value) == IS_LONG ? static_cast<long long>(Z_LVAL_P(value)) : -1;
+        };
+        zval* enabled = zend_hash_str_find(table, "opcache_enabled", sizeof("opcache_enabled") - 1);
+        zval* file_only = zend_hash_str_find(table, "file_cache_only", sizeof("file_cache_only") - 1);
+        if (file_only != nullptr && Z_TYPE_P(file_only) == IS_TRUE) {
+            summary = "file-only";
+        } else if (enabled != nullptr && Z_TYPE_P(enabled) == IS_TRUE) {
+            summary = "shm";
+        }
+        zval* statistics = zend_hash_str_find(table, "opcache_statistics", sizeof("opcache_statistics") - 1);
+        if (statistics != nullptr && Z_TYPE_P(statistics) == IS_ARRAY) {
+            summary += " scripts=" + std::to_string(number(Z_ARRVAL_P(statistics), "num_cached_scripts"));
+            summary += " hits=" + std::to_string(number(Z_ARRVAL_P(statistics), "hits"));
+            summary += " misses=" + std::to_string(number(Z_ARRVAL_P(statistics), "misses"));
+        }
+    }
+    if (EG(exception)) {
+        zend_clear_exception();
+    }
+    if (!Z_ISUNDEF(result)) {
+        zval_ptr_dtor(&result);
+    }
+    summary += " included=" + std::to_string(zend_hash_num_elements(&EG(included_files)));
+    return summary;
+}
+
 void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
     if (state == nullptr || state->callbacks.on_batch == nullptr) {
         return;
@@ -192,6 +255,23 @@ void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
         return;
     }
 
+    if (!state->first_batch_logged) {
+        state->first_batch_logged = true;
+        const auto now = std::chrono::steady_clock::now();
+        const auto ms = [](auto from, auto to) {
+            return static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count()
+            );
+        };
+        os_log(
+            OS_LOG_DEFAULT,
+            "[PamNativePerf] phpEmbedMs=%lld phpFirstBatchMs=%lld phpHeapKiB=%zu opcache=%{public}s",
+            ms(state->boot_started, state->embed_ready),
+            ms(state->boot_started, now),
+            zend_memory_usage(true) / 1024,
+            opcache_summary().c_str()
+        );
+    }
     auto published = std::make_unique<PublishedBatch>(buffer);
     const auto handle = reinterpret_cast<std::uint64_t>(published.get());
     const auto accepted = state->callbacks.on_batch(
@@ -610,6 +690,10 @@ void dispatch_event(RuntimeState* state, const Event& event) {
         ZVAL_STRINGL(&arguments[2], event.payload.data(), event.payload.size());
         call_runtime("dispatchEvent", 3, arguments);
         zval_ptr_dtor(&arguments[2]);
+        if (event.first == 0 && event.second == kMemoryPressureEventKind) {
+            // PHP handlers already dropped their caches for this pressure.
+            release_php_memory_caches();
+        }
     } else if (event.type == EventType::ModuleResult) {
         const auto pending = state->module_requests.find(event.first);
         if (pending == state->module_requests.end()) return;
@@ -624,12 +708,117 @@ void dispatch_event(RuntimeState* state, const Event& event) {
     }
 }
 
+void set_ini(HashTable* configuration, const char* name, const std::string& value) {
+    // The configuration hash is persistent and php_shutdown_config() frees it
+    // with free(): a request-allocator (emalloc) string here corrupts the heap
+    // at shutdown.
+    zval entry;
+    ZVAL_NEW_STR(&entry, zend_string_init(value.data(), value.size(), 1));
+    zend_hash_str_update(configuration, name, std::strlen(name), &entry);
+}
+
+std::string environment_value(const char* name) {
+    const char* value = std::getenv(name);
+    return value == nullptr ? std::string() : std::string(value);
+}
+
+std::uint64_t physical_memory_mb() {
+    std::uint64_t bytes = 0;
+    std::size_t size = sizeof(bytes);
+    if (sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) != 0) return 0;
+    return bytes / (1024u * 1024u);
+}
+
+// Safety net only: a long session must keep the PHP heap flat (the leak
+// validators gate that). Mirrors Android's 128/192/256M tiers so a burst (a
+// huge first frame, an image-heavy screen) cannot fatal the runtime, while
+// the whole process stays far below the jetsam limit. The Swift host computes
+// the same tiers (capped by os_proc_available_memory) and exports
+// PAM_NATIVE_MEMORY_LIMIT; this fallback only runs for hosts that do not.
+std::string php_memory_limit() {
+    std::string forced = environment_value("PAM_NATIVE_MEMORY_LIMIT");
+    if (!forced.empty()) return forced;
+    const std::uint64_t ram_mb = physical_memory_mb();
+    if (ram_mb >= 6u * 1024u) return "256M";
+    if (ram_mb >= 3u * 1024u + 512u) return "192M";
+    return "128M";
+}
+
+// The opcache file cache lives in Library/Caches (never backed up, purgeable
+// by the system) when the host exports PAM_NATIVE_OPCACHE_DIR, otherwise in
+// the state directory like Android.
+std::string opcache_directory(const RuntimeState* state) {
+    std::string directory = environment_value("PAM_NATIVE_OPCACHE_DIR");
+    if (!directory.empty()) return directory;
+    if (state == nullptr || state->state_dir.empty()) return std::string();
+    return state->state_dir + "/opcache";
+}
+
+void apply_php_ini_defaults(HashTable* configuration) {
+    // php_embed_init() already hardcodes max_execution_time=0 and
+    // max_input_time=-1 (its ini_entries win over these defaults).
+    set_ini(configuration, "memory_limit", php_memory_limit());
+    // OPcache keeps compiled scripts in shared memory for the life of the
+    // process and in a file cache, so a cold start reuses the opcodes
+    // compiled by the previous launch instead of recompiling the framework
+    // and app sources. iOS forbids W^X transitions: JIT stays off (the
+    // runtime is also built without it).
+    const std::string cache = opcache_directory(active_runtime);
+    const bool enabled = !cache.empty() && environment_value("PAM_NATIVE_OPCACHE") != "0";
+    set_ini(configuration, "opcache.enable", enabled ? "1" : "0");
+    set_ini(configuration, "opcache.enable_cli", enabled ? "1" : "0");
+    set_ini(configuration, "opcache.jit", "disable");
+    set_ini(configuration, "opcache.jit_buffer_size", "0");
+    const std::string shared_memory = environment_value("PAM_NATIVE_OPCACHE_MEMORY");
+    set_ini(configuration, "opcache.memory_consumption", shared_memory.empty() ? "128" : shared_memory);
+    set_ini(configuration, "opcache.interned_strings_buffer", "16");
+    set_ini(configuration, "opcache.max_accelerated_files", "16000");
+    // Bundles are read-only (app bundle) or activated by rename (OTA):
+    // fresh mtimes never mean a half-written file, so cache on first launch.
+    set_ini(configuration, "opcache.file_update_protection", "0");
+    // Release sources never change under a path (app bundle, content-addressed
+    // ota-releases/<digest>), so no include stats its source. Debug builds hot
+    // reload into the same paths and revalidate on every include.
+    const bool revalidate = environment_value("PAM_NATIVE_IMMUTABLE_SOURCES") != "1";
+    set_ini(configuration, "opcache.validate_timestamps", revalidate ? "1" : "0");
+    set_ini(configuration, "opcache.revalidate_freq", "0");
+    set_ini(configuration, "opcache.enable_file_override", "1");
+    if (enabled) {
+#if !defined(HAVE_SHM_MMAP_ANON) && !defined(HAVE_SHM_MMAP_POSIX) && !defined(HAVE_SHM_IPC)
+        // Runtimes cross-compiled before the builder forced the mmap(MAP_ANON)
+        // probe have no shared memory model: OPcache would refuse to start.
+        // The file cache alone still skips recompilation on cold start.
+        set_ini(configuration, "opcache.file_cache_only", "1");
+#endif
+        set_ini(configuration, "opcache.lockfile_path", cache);
+        set_ini(configuration, "opcache.file_cache", cache);
+        set_ini(configuration, "opcache.file_cache_consistency_checks", "1");
+    }
+}
+
+// Returns the Zend MM free pages (cached chunks) to the system after a
+// cycle collection. Runs on the PHP worker between two events, never inside
+// a frame, so it is the iOS counterpart of gc_mem_caches() on onTrimMemory.
+void release_php_memory_caches() {
+    const std::size_t before = zend_memory_usage(true);
+    zend_gc_collect_cycles();
+    zend_mm_gc(zend_mm_get_heap());
+    os_log(
+        OS_LOG_DEFAULT,
+        "[PamNativePerf] memory pressure: PHP heap %zu KiB -> %zu KiB",
+        before / 1024,
+        zend_memory_usage(true) / 1024
+    );
+}
+
 bool initialize_php(RuntimeState* state) {
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
-    php_embed_module.ini_entries =
-        "max_execution_time=0\n"
-        "max_input_time=-1\n";
+    const std::string cache = opcache_directory(state);
+    if (!cache.empty()) {
+        mkdir(cache.c_str(), 0700);
+    }
+    php_embed_module.ini_defaults = apply_php_ini_defaults;
 
     state->php_entry_argument = state->entry;
     state->php_arguments = {
@@ -904,6 +1093,22 @@ RequestOutcome run_php_request(RuntimeState* state) {
                 })) {
                 return RequestOutcome::Failed;
             }
+            // A render peak (a feed page of components) leaves free Zend MM
+            // chunks cached in the process: give them back once more than
+            // 8 MB of the heap is unused, instead of waiting for a memory
+            // warning. Only runs between events, with the queue empty.
+            const std::size_t heap = zend_memory_usage(true);
+            const std::size_t used = zend_memory_usage(false);
+            if (heap > used && heap - used > kIdleHeapSlackBytes) {
+                zend_mm_gc(zend_mm_get_heap());
+                os_log(
+                    OS_LOG_DEFAULT,
+                    "[PamNativePerf] idle PHP heap %zu KiB -> %zu KiB (used %zu KiB)",
+                    heap / 1024,
+                    zend_memory_usage(true) / 1024,
+                    used / 1024
+                );
+            }
             events_since_gc = 0;
             last_gc = after;
         }
@@ -939,7 +1144,10 @@ RequestOutcome run_php_request(RuntimeState* state) {
 
 void runtime_loop(RuntimeState* state) {
     active_runtime = state;
-    if (initialize_php(state)) {
+    state->boot_started = std::chrono::steady_clock::now();
+    const bool initialized = initialize_php(state);
+    state->embed_ready = std::chrono::steady_clock::now();
+    if (initialized) {
         RequestOutcome outcome = run_php_request(state);
         while (
             outcome != RequestOutcome::Stop

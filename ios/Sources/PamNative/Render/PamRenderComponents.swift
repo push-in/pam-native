@@ -69,6 +69,33 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
         isEnabled && !isHidden && alpha > 0.01
     }
 
+    /// RN Pressable is `accessible` and, without its own label, announces the
+    /// labels of its content (`RCTRecursiveAccessibilityLabel`), like a
+    /// focusable Android ViewGroup reading its children. A press target that
+    /// only wraps labelled content (a gesture detector around a button) must
+    /// not become an unnamed element that hides that content's label.
+    override var accessibilityLabel: String? {
+        get {
+            if let own = super.accessibilityLabel, !own.isEmpty { return own }
+            return Self.contentAccessibilityLabel(of: self)
+        }
+        set { super.accessibilityLabel = newValue }
+    }
+
+    static func contentAccessibilityLabel(of view: UIView) -> String? {
+        var parts: [String] = []
+        for child in view.subviews where !child.isHidden && child.alpha > 0.01 && !child.accessibilityElementsHidden {
+            if let label = child.accessibilityLabel, !label.isEmpty {
+                parts.append(label)
+            } else if let text = (child as? UILabel)?.text, !text.isEmpty {
+                parts.append(text)
+            } else if let nested = contentAccessibilityLabel(of: child) {
+                parts.append(nested)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard isEnabled, isUserInteractionEnabled, !isHidden, alpha > 0.01 else {
             return false
@@ -333,6 +360,7 @@ final class PamAnchoredScrollView: UIScrollView {
     }
 
     override func layoutSubviews() {
+        PamImageResidency.requestSweep()
         let oldMax = previousMaxOffset
         let previousOffset = primaryOffset
         let distanceFromEnd = max(0, oldMax - previousOffset)
@@ -652,6 +680,7 @@ final class PamVirtualListView: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        PamImageResidency.requestSweep()
         maintainEndAnchor()
         if !horizontal {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
@@ -1161,6 +1190,16 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         didSet { if placeholderColor != nil { refreshPlaceholder() } }
     }
 
+    /// Dynamic Type changes the field's font without going through the
+    /// setter: the colored placeholder is rebuilt with the scaled font.
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if placeholderColor != nil,
+           previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            DispatchQueue.main.async { [weak self] in self?.refreshPlaceholder() }
+        }
+    }
+
     private func refreshPlaceholder() {
         guard let placeholderText, !placeholderText.isEmpty else {
             attributedPlaceholder = nil
@@ -1174,6 +1213,31 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: placeholderColor]
         if let font { attributes[.font] = font }
         attributedPlaceholder = NSAttributedString(string: placeholderText, attributes: attributes)
+    }
+
+    /// Authored padding and border widths (Yoga padding box): text,
+    /// placeholder and caret stay inside them, like Android's leaf padding.
+    var contentInsets: UIEdgeInsets = .zero {
+        didSet {
+            guard contentInsets != oldValue else { return }
+            setNeedsLayout()
+            scheduleContentSizeUpdate()
+        }
+    }
+
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        super.textRect(forBounds: bounds.inset(by: contentInsets))
+    }
+
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        super.editingRect(forBounds: bounds.inset(by: contentInsets))
+    }
+
+    /// UIKit derives the placeholder rect from `textRect(forBounds:)`, which
+    /// already applies `contentInsets`: insetting here too indented the
+    /// placeholder by the padding twice (the typed text only once).
+    override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
+        textRect(forBounds: bounds)
     }
 
     override func caretRect(for position: UITextPosition) -> CGRect {
@@ -1598,6 +1662,11 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     var verticalAlignment: PamInputVerticalAlignment = .auto {
         didSet { if verticalAlignment != oldValue { setNeedsLayout() } }
     }
+    /// Authored padding and border widths, added to the vertical-alignment
+    /// container inset (Android leaf padding).
+    var contentInsets: UIEdgeInsets = .zero {
+        didSet { if contentInsets != oldValue { setNeedsLayout() } }
+    }
     /// `minLines`: the smallest number of text lines the box keeps room for.
     var minimumLines = 1 {
         didSet { if minimumLines != oldValue { setNeedsLayout() } }
@@ -1829,13 +1898,18 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     }
 
     private func applyVerticalAlignment() {
-        let free = max(0, bounds.height - textHeight())
+        let free = max(0, bounds.height - contentInsets.top - contentInsets.bottom - textHeight())
         let top: CGFloat = switch verticalAlignment {
         case .center: (free / 2).rounded(.down)
         case .bottom: free.rounded(.down)
         case .auto, .top: 0
         }
-        let inset = UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+        let inset = UIEdgeInsets(
+            top: contentInsets.top + top,
+            left: contentInsets.left,
+            bottom: contentInsets.bottom,
+            right: contentInsets.right
+        )
         if textContainerInset != inset { textContainerInset = inset }
     }
 
@@ -2313,6 +2387,7 @@ final class PamRefreshContainer: UIView {
     private var progressOffset: CGFloat = 0
     private(set) var colors: [Int] = []
     private var tint: Int?
+    private var offsetObservation: NSKeyValueObservation?
 
     var isEnabled = true {
         didSet { installControl() }
@@ -2399,6 +2474,7 @@ final class PamRefreshContainer: UIView {
         contentHost.subviews.forEach { view in
             view.frame = bounds
         }
+        stopIdleSpinner()
     }
 
     override func didMoveToWindow() {
@@ -2407,6 +2483,30 @@ final class PamRefreshContainer: UIView {
         if window != nil, controlled != control.isRefreshing {
             apply(controlled)
         }
+        stopIdleSpinner()
+    }
+
+    /// UIKit's refresh control can leave its spinner rotating forever while
+    /// it is hidden and not refreshing (seen after a list settles at the top
+    /// or a refresh ends off screen). That infinite Core Animation keeps the
+    /// render server drawing (battery) and the app never reports idle to UI
+    /// tests. Outside a pull and a refresh, repeating animations of the
+    /// control are dropped; UIKit adds them again on the next pull.
+    func stopIdleSpinner() {
+        guard !control.isRefreshing, let scrollView,
+              !scrollView.isTracking, !scrollView.isDragging,
+              scrollView.contentOffset.y >= -scrollView.adjustedContentInset.top - 0.5 else { return }
+        Self.removeRepeatingAnimations(control.layer)
+    }
+
+    static func removeRepeatingAnimations(_ layer: CALayer) {
+        for key in layer.animationKeys() ?? [] {
+            guard let animation = layer.animation(forKey: key),
+                  animation.repeatCount >= Float.greatestFiniteMagnitude || animation.repeatDuration >= .greatestFiniteMagnitude
+            else { continue }
+            layer.removeAnimation(forKey: key)
+        }
+        layer.sublayers?.forEach { removeRepeatingAnimations($0) }
     }
 
     private func bind(scrollView: UIScrollView) {
@@ -2417,6 +2517,11 @@ final class PamRefreshContainer: UIView {
         self.scrollView = scrollView
         // A short or empty list must still be pullable.
         scrollView.alwaysBounceVertical = true
+        // Scrolling settles a spinner left running (see `stopIdleSpinner`);
+        // the check only walks the control's few layers.
+        offsetObservation = scrollView.observe(\.contentOffset, options: []) { [weak self] _, _ in
+            self?.stopIdleSpinner()
+        }
         installControl()
     }
 
@@ -2447,6 +2552,10 @@ final class PamRefreshContainer: UIView {
         } else if !value, control.isRefreshing {
             control.endRefreshing()
             installControl()
+            // endRefreshing animates the inset back; settle the spinner after it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.stopIdleSpinner()
+            }
         }
     }
 
@@ -2483,6 +2592,17 @@ private final class PamModalContentViewport: UIView {
     }
 }
 
+/// Holds the modal content above the backdrop without taking its touches:
+/// for a bottom sheet the content is shorter than the window, and a tap above
+/// it must reach the backdrop (gorhom `pressBehavior="close"`, Android's
+/// dialog outside touch) instead of stopping at this full-window container.
+private final class PamModalContentClip: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self ? nil : hit
+    }
+}
+
 final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private enum Presentation {
         static let dialog = 2
@@ -2513,7 +2633,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     private let backdropView = UIControl()
     private let contentHost = PamModalContentViewport()
-    private let contentClip = UIView()
+    private let contentClip = PamModalContentClip()
     private let sheetHandle = UIView()
     private let orientationObserver = NotificationCenter.default
     private var contentHeightConstraint: NSLayoutConstraint!
@@ -2746,6 +2866,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     func setVisible(_ value: Bool) {
+        // A backdrop tap already hid the modal before the app answered its
+        // close request with `visible = false`: repeating the state must not
+        // restart (and then undo) the dismissal that is running.
+        if !value && !desiredVisible { return }
         visibilityGeneration += 1
         let changed = desiredVisible != value
         desiredVisible = value
@@ -2882,6 +3006,8 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             return
         }
         previousFocus = window?.pamFirstResponder()
+        // The newest presented modal draws above earlier ones and the routes.
+        superview?.bringSubviewToFront(self)
         isHidden = false
         currentlyVisible = true
         accessibilityViewIsModal = true
@@ -3025,12 +3151,18 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
         let animationDuration: TimeInterval = 0.125
         let generation = visibilityGeneration
+        // An input focused inside the sheet kept the keyboard up after the
+        // sheet closed (a hidden view stays first responder). Android's
+        // dialog hides the IME with its window.
+        endEditing(true)
 
         let completion = {
-            guard generation == self.visibilityGeneration, !self.desiredVisible else {
+            guard !self.desiredVisible else {
                 self.present()
                 return
             }
+            // A newer dismissal owns the teardown.
+            guard generation == self.visibilityGeneration else { return }
             self.currentlyVisible = false
             self.isHidden = true
             self.resetSheetKeyboardLift()

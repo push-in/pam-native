@@ -145,8 +145,8 @@ final class PamFontResolver: @unchecked Sendable {
         var face = faces[path]
         lock.unlock()
         if face == nil {
-            let url = resourceRoot.appendingPathComponent(path)
-            guard let provider = CGDataProvider(url: url as CFURL),
+            guard let url = pamAssetFileURL(path, resourceRoot: resourceRoot),
+                  let provider = CGDataProvider(url: url as CFURL),
                   let loaded = CGFont(provider) else { return nil }
             lock.lock()
             faces[path] = loaded
@@ -172,7 +172,7 @@ final class PamFontResolver: @unchecked Sendable {
             return known
         }
         lock.unlock()
-        let exists = FileManager.default.fileExists(atPath: resourceRoot.appendingPathComponent(path).path)
+        let exists = pamAssetFileURL(path, resourceRoot: resourceRoot) != nil
         lock.lock()
         existing[path] = exists
         lock.unlock()

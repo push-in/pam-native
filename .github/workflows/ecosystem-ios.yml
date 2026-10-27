@@ -46,7 +46,8 @@ jobs:
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
             pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
-            pam-native-image
+            pam-native-image pam-native-audio pam-native-calls
+            pam-native-webrtc pam-native-observability pam-native-svg
           )
           for repo in "${repos[@]}"; do
             git clone --depth 1 --branch main \
@@ -65,7 +66,8 @@ jobs:
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
             pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
-            pam-native-image
+            pam-native-image pam-native-audio pam-native-calls
+            pam-native-webrtc pam-native-observability pam-native-svg
           )
           targets=(
             PamPlugin0PushinbrPamNativeAuth
@@ -92,6 +94,11 @@ jobs:
             PamPlugin21PushinbrPamNativeGpu
             PamPlugin22PushinbrPamNative3d
             PamPlugin23PushinbrPamNativeImage
+            PamPlugin24PushinbrPamNativeAudio
+            PamPlugin25PushinbrPamNativeCalls
+            PamPlugin26PushinbrPamNativeWebrtc
+            PamPlugin27PushinbrPamNativeObservability
+            PamPlugin28PushinbrPamNativeSvg
           )
           for index in "${!repos[@]}"; do
             source="${RUNNER_TEMP}/${repos[$index]}/ios/Sources"

@@ -1,6 +1,155 @@
 # Changelog
 
+## Unreleased
+
+- iOS modals: a tap on the backdrop above a bottom sheet closes it again
+  (gorhom `pressBehavior="close"`, Android's outside touch). The full-window
+  content container took the touch before the backdrop. When the app answers
+  the close request with `visible = false` while the native dismissal runs,
+  the repeated hide no longer restarts the dismissal, whose earlier completion
+  presented the sheet again with the app's emptied content.
+- iOS Pressable without its own `accessibilityLabel` announces the labels of
+  its content, like React Native (`RCTRecursiveAccessibilityLabel`) and a
+  focusable Android ViewGroup. A `GestureDetector` around a labelled button
+  became an unnamed button that hid the inner label from VoiceOver and UI
+  tests.
+
+- `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
+  scale caps by typographic role (React Native apps install the same rule in
+  their theme). Every Text and Input without its own `maxFontSizeMultiplier`
+  or `allowFontScaling="false"` gets the cap of its size, so display text no
+  longer outgrows body text at accessibility sizes. No protocol change.
+- iOS single-line Input: the placeholder is no longer indented by the
+  padding twice, and a colored placeholder follows Dynamic Type (it kept the
+  font from before the field joined the window).
+
+- Template components: a compiled component's declared props (constructor
+  parameters, public properties) are no longer also applied as attributes of
+  its root element. A `height` prop used as the root's `minHeight` became a
+  fixed root height, so a content-sized list cell (a real-world app's profile
+  summary) stopped growing at large Dynamic Type sizes and overlapped the
+  next row.
+
+- `<ScrollView keyboardInset>` (iOS and Android): when everything from the
+  focused field to the end of the content fits above the keyboard, the whole
+  tail is revealed instead of just the field, so a short form keeps the
+  button under its field visible, as a resized viewport (a keyboard-aware
+  sheet) does. In a real-world app's signup the primary button sat under the
+  iOS suggestion bar. Longer content still reveals only the field.
+
+- Template `VirtualizedList windowSize="N"` (React Native FlatList
+  `windowSize`): PHP renders only the `p-for` rows within the window and keeps
+  a placeholder with the row's measured height for the others, driven by the
+  list's scroll phases (a fling is materialized up to its predicted landing).
+  The tree encoder also forgets the identities and child placements of
+  removed nodes. In a real-world app's feed after 30 swipes: PHP memory
+  51.6 MB to 33.9 MB, encoded nodes 3,688 to 742, footprint 208 MB to 184 MB
+  (iOS Simulator). No protocol change.
+- iOS UI driver (`ios-host/UITests`): `{"fling": "up"|"down"}` step, a fast
+  flick that returns while the list still decelerates (scroll QA).
+
+- Bottom sheets: the engine lays out a sheet's content at its current snap
+  point of the window below the top inset, the same rule iOS and Android use
+  for the panel, instead of the whole window. Content that fills the panel
+  (a list over a composer) kept its bottom below the screen.
+
+- iOS image blur (`blurRadius`, CSS `blur()`): blurred on the CPU with vImage
+  (three box passes on a copy downscaled so σ stays near 4 px), like
+  Android's `PamBitmapBlur`, instead of a Core Image context. A feed of
+  shadowed icons no longer keeps GPU textures and compiled kernels alive:
+  in a real-world app's feed MALLOC_LARGE went from 52 MB to 8 MB and the
+  footprint from 241 MB to 211 MB (peak 342 MB to 234 MB, Simulator).
+- Engine text metrics: every weight of a variable font shares one copy of
+  the font file instead of reading it once per weight (7.2 MB for seven
+  weights of one family).
+
+- iOS Modal / BottomSheet: a modal declared inside a tab scene or a route is
+  mounted on the root host at its absolute engine frame, so later siblings (a
+  real-world app's tab bar) no longer paint over the sheet and hide its
+  bottom; it hides with its logical parent (covered route, inactive tab).
+  Closing a modal ends editing inside it, so the keyboard no longer stays up
+  after the sheet that owned the focused input closed.
+
+- iOS images: remote photos far from the screen release their decoded pixels
+  and restore them within one screen of the window (cells beyond the list
+  prefetch, album pages, covered routes, inactive tabs), like Android's
+  shown/detached release; one shared decoded-image cache (identity + pixel
+  size) stops decoding the same photo twice. Encoded bytes keep a quarter of
+  the media memory budget. In a real-world app's photo feed the ImageIO
+  memory went from 161 MB to 26-47 MB and the footprint from 325-395 MB to
+  about 250-260 MB.
+- iOS PHP runtime: after an idle cycle collection, more than 8 MB of free
+  Zend MM chunks are returned to the system instead of waiting for a memory
+  warning. The first batch perf line reports the OPcache mode and counters.
+- iOS RefreshControl: UIKit could leave the refresh spinner rotating forever
+  while hidden and not refreshing, which kept Core Animation drawing and UI
+  tests waiting for idle for a minute per step. Outside a pull and a refresh,
+  the control's repeating animations are dropped.
+
+- iOS manifest: `ios.usageDescriptions` (NS*UsageDescription privacy strings
+  the app needs, e.g. Photos, Contacts, Location, Face ID; app values override
+  plugin defaults), `ios.orientations` (portrait-only apps) and
+  `ios.bundleIdentifier` (an iOS id that differs from `applicationId`, used for
+  the app, extensions, App Group, launch and diagnostics). Without the privacy
+  strings iOS terminated the app the first time it asked for Photos, Contacts,
+  Location or Face ID.
+- iOS media parity with Android (`PamMediaView.kt`, `NativeImageLoader.kt`,
+  the `fix/critical-20261014` and `fix/ui-polish` media fixes):
+  - Animated GIF, WebP, APNG and HEICS (animated emoji, the GIF panel, WebP
+    stickers) now play instead of freezing on the first frame. Frames decode
+    on demand through `CGImageSource` at the covering view size, on a
+    background queue, with a small per-animation frame cache (6 MB) that is
+    purged on memory warnings. One shared 30 Hz display link drives every
+    animation and stops when none is attached; time only advances while the
+    image is really on screen (window, no hidden/transparent ancestor, inside
+    the window bounds). Animations loop forever like `AnimatedImageDrawable`.
+  - `MediaPlayer` `thumbnail()` is drawn as a poster over the video until its
+    first frame is ready (cached as `<cacheKey>:thumbnail`, like Android), and
+    the view is transparent instead of black, so feed, reels and stories no
+    longer flash a black box while the video loads.
+  - A tap on a video no longer toggles play/pause. As on Android it only shows
+    the controls when `controls=true`; with `controls=false` touches reach the
+    app's own gestures (mute, double-tap like, hold to pause).
+  - Videos without controls render through a bare `AVPlayerLayer`; an
+    `AVPlayerViewController` is created only while `controls=true`.
+  - A paused player (`autoPlay=false`) and paused seeks draw the exact frame
+    at `currentTime` (zero-tolerance seek, Android `SEEK_CLOSEST`).
+  - A playing video hidden without a coverage notification (hidden or
+    transparent ancestor) is released after 5 s and recreated at the same
+    position when shown (Android `HIDDEN_RELEASE_MS`).
+  - WebM/Matroska sources (no AVFoundation demuxer) create no player and
+    download nothing: the poster stays and `on:error` reports
+    "WebM video is not supported on iOS" so the app can show its fallback
+    (for example a WebM sticker's static image). Android keeps playing them.
+  - The image/media disk cache keeps at most 256 MB (was 512 MB; a node's
+    `cacheMaxBytes` can lower it, never raise it) and never trims the newest
+    file, matching `NativeMediaFileCache`.
+  - Packaged `asset://` images of at most 16 KiB (icon masks) decode once and
+    stay in the inline glyph cache, like Android's synchronous small assets.
+  - XCTest: `PamAnimatedImageTests`, `PamMediaParityTests`.
+
 ## 1.44.0 - 2026-10-26
+- iOS runtime: OPcache is now enabled in the embedded PHP (JIT stays off: iOS
+  forbids W^X). Compiled scripts persist in a file cache under
+  `Library/Caches/pam/opcache` (never backed up, purgeable), dropped whenever
+  the app bundle path or build changes; release builds mark sources immutable
+  (`opcache.validate_timestamps=0`), debug builds revalidate for hot reload.
+  Runtimes built before the builder forced the `mmap(MAP_ANON)` probe have no
+  shared memory model, so the bridge falls back to `opcache.file_cache_only`.
+- iOS runtime: `memory_limit` follows device RAM like Android (128/192/256M),
+  capped at a third of `os_proc_available_memory()`;
+  `PAM_NATIVE_MEMORY_LIMIT`, `PAM_NATIVE_OPCACHE=0`,
+  `PAM_NATIVE_OPCACHE_MEMORY` override it (`PamPhpRuntimeConfiguration`).
+- iOS runtime: memory warnings and going to background now also return the
+  Zend MM cached pages to the system (`gc_collect_cycles` + `zend_mm_gc`, the
+  `gc_mem_caches()` of PHP) after the PHP `MemoryPressure` handlers ran.
+- iOS runtime: an invalid property value (malformed UTF-8, non-finite
+  decimal, invalid boolean, malformed list/section/host map, duplicate id) is
+  skipped and reported as a non-fatal render error instead of dropping the
+  whole batch (Android `guardProperty` parity). `BatchDecoder.decode` stays
+  strict; the runtime uses `BatchDecoder.decodeTolerant`.
+- iOS runtime: `[PamNativePerf] firstFrameMs=` is logged once per process
+  (cold start from process creation to the first committed frame).
 
 - PHP SDK: the ext-mbstring polyfill functions moved from
   `src/Polyfill/mbstring.php` to `src/Polyfill/mbstring_functions.php`. The old

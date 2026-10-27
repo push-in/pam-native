@@ -371,6 +371,17 @@ struct IosOptions {
     url_schemes: Vec<String>,
     #[serde(default)]
     associated_domains: Vec<String>,
+    /// iOS bundle identifier when it differs from `applicationId` (e.g. an
+    /// App Store app published before the Android package name was chosen).
+    #[serde(default)]
+    bundle_identifier: Option<String>,
+    /// Privacy strings the app itself needs (NS*UsageDescription). They win
+    /// over plugin defaults so the app owns the wording shown to the user.
+    #[serde(default)]
+    usage_descriptions: BTreeMap<String, String>,
+    /// Supported interface orientations; empty keeps the host template.
+    #[serde(default)]
+    orientations: Vec<IosOrientation>,
 }
 
 impl Default for IosOptions {
@@ -380,7 +391,40 @@ impl Default for IosOptions {
             icon: None,
             url_schemes: Vec::new(),
             associated_domains: Vec::new(),
+            bundle_identifier: None,
+            usage_descriptions: BTreeMap::new(),
+            orientations: Vec::new(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+enum IosOrientation {
+    Portrait,
+    PortraitUpsideDown,
+    LandscapeLeft,
+    LandscapeRight,
+}
+
+impl IosOrientation {
+    fn plist_value(self) -> &'static str {
+        match self {
+            Self::Portrait => "UIInterfaceOrientationPortrait",
+            Self::PortraitUpsideDown => "UIInterfaceOrientationPortraitUpsideDown",
+            Self::LandscapeLeft => "UIInterfaceOrientationLandscapeLeft",
+            Self::LandscapeRight => "UIInterfaceOrientationLandscapeRight",
+        }
+    }
+}
+
+impl NativeManifest {
+    /// The identifier every iOS artifact is signed and grouped with.
+    fn ios_application_id(&self) -> &str {
+        self.ios
+            .bundle_identifier
+            .as_deref()
+            .unwrap_or(&self.application_id)
     }
 }
 
@@ -1424,6 +1468,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
             manifest.version
         ));
     }
+    validate_ios_app_options(&manifest.ios)?;
     if !matches!(manifest.runtime.php.as_str(), "8.4" | "8.5") {
         return Err("runtime.php must be 8.4 or 8.5".to_owned());
     }
@@ -1597,6 +1642,73 @@ fn valid_mime_type(value: &str) -> bool {
     valid(kind) && (subtype == "*" || valid(subtype))
 }
 
+fn validate_ios_app_options(ios: &IosOptions) -> Result<(), String> {
+    if let Some(bundle) = &ios.bundle_identifier
+        && !valid_bundle_identifier(bundle)
+    {
+        return Err(format!(
+            "ios.bundleIdentifier {bundle:?} must be a reverse-DNS identifier (letters, digits, '-' and '.')"
+        ));
+    }
+    if ios.usage_descriptions.len() > 64 {
+        return Err("ios.usageDescriptions is limited to 64 entries".to_owned());
+    }
+    for (key, value) in &ios.usage_descriptions {
+        if !(key.starts_with("NS") || key == "NFCReaderUsageDescription")
+            || !key.ends_with("UsageDescription")
+            || !valid_apple_identifier(key)
+            || value.trim().is_empty()
+            || value.len() > 1000
+            || value.contains('\0')
+        {
+            return Err(format!("invalid ios.usageDescriptions entry {key:?}"));
+        }
+    }
+    let mut seen = HashSet::new();
+    if ios.orientations.iter().any(|orientation| !seen.insert(*orientation)) {
+        return Err("ios.orientations must not repeat an orientation".to_owned());
+    }
+    Ok(())
+}
+
+/// Apple bundle identifiers: reverse-DNS, at least two components, only
+/// letters, digits, hyphens and dots (no underscores, unlike Android).
+fn valid_bundle_identifier(value: &str) -> bool {
+    value.len() <= 155
+        && value.split('.').count() >= 2
+        && value.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn merge_ios_app_info(ios: &IosOptions, info: &mut serde_json::Value) -> Result<(), String> {
+    let object = info
+        .as_object_mut()
+        .ok_or_else(|| "App/Info.plist must contain a top-level dictionary".to_owned())?;
+    for (key, value) in &ios.usage_descriptions {
+        object.insert(key.clone(), serde_json::Value::String(value.clone()));
+    }
+    if !ios.orientations.is_empty() {
+        let values: Vec<serde_json::Value> = ios
+            .orientations
+            .iter()
+            .map(|orientation| serde_json::Value::String(orientation.plist_value().to_owned()))
+            .collect();
+        object.insert(
+            "UISupportedInterfaceOrientations".to_owned(),
+            serde_json::Value::Array(values.clone()),
+        );
+        object.insert(
+            "UISupportedInterfaceOrientations~ipad".to_owned(),
+            serde_json::Value::Array(values),
+        );
+    }
+    Ok(())
+}
+
 fn validate_ios_links(ios: &IosOptions) -> Result<(), String> {
     if ios.url_schemes.len() > 32 || ios.associated_domains.len() > 32 {
         return Err(
@@ -1716,10 +1828,7 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
         .find(|package| package.name == "pushinbr/pam-native")
         .map(|package| package.version.clone())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
-    let composer_release = current_version_text
-        .strip_prefix('v')
-        .unwrap_or(&current_version_text);
-    let current_version = parse_release_version(composer_release)?;
+    let current_version = installed_release_version(&current_version_text)?;
     let mut plugins = Vec::new();
 
     for package in packages {
@@ -2322,6 +2431,18 @@ fn validate_ios_binding(package: &str, kind: &str, class: Option<&str>) -> Resul
         ));
     }
     Ok(())
+}
+
+/// Version of the installed `pushinbr/pam-native` used to check plugin
+/// compatibility. Branch installs (`dev-<branch>`, `<x>.x-dev`) carry no
+/// release number, so they are checked against the CLI built from that same
+/// source instead of failing the whole build.
+fn installed_release_version(version: &str) -> Result<(u32, u32, u32), String> {
+    let release = version.strip_prefix('v').unwrap_or(version);
+    if release.starts_with("dev-") || release.ends_with("-dev") {
+        return parse_release_version(env!("CARGO_PKG_VERSION"));
+    }
+    parse_release_version(release)
 }
 
 fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
@@ -3441,7 +3562,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         &[
             (
                 "__PAM_APPLICATION_ID__",
-                project.manifest.application_id.as_str(),
+                project.manifest.ios_application_id(),
             ),
             ("__PAM_APPLICATION_NAME__", project.manifest.name.as_str()),
             (
@@ -3468,7 +3589,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             ("__PAM_ENTRY_EXTENSION__", "php"),
             (
                 "__PAM_DIAGNOSTICS_SCHEME__",
-                &ios_diagnostics_scheme(&project.manifest.application_id),
+                &ios_diagnostics_scheme(project.manifest.ios_application_id()),
             ),
         ],
     )?;
@@ -3476,14 +3597,14 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         &workspace.join("App/Info.plist"),
         &[(
             "__PAM_DIAGNOSTICS_SCHEME__",
-            &ios_diagnostics_scheme(&project.manifest.application_id),
+            &ios_diagnostics_scheme(project.manifest.ios_application_id()),
         )],
     )?;
     Ok(workspace)
 }
 
 fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, String> {
-    let application_id = &project.manifest.application_id;
+    let application_id = project.manifest.ios_application_id();
     let info_path = workspace.join("App/Info.plist");
     let mut info = read_apple_plist(&info_path)?;
     let mut entitlements = serde_json::json!({});
@@ -3501,6 +3622,11 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
             )?;
         }
         for (key, value) in &ios.usage_descriptions {
+            // The app owns the wording of any privacy string it declares;
+            // plugin defaults only fill keys the app left out.
+            if project.manifest.ios.usage_descriptions.contains_key(key) {
+                continue;
+            }
             let object = info.as_object_mut().ok_or_else(|| {
                 format!(
                     "{} must contain a top-level dictionary",
@@ -3533,6 +3659,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
     }
 
     has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
+    merge_ios_app_info(&project.manifest.ios, &mut info)?;
     merge_ios_appearance(project, &mut info, &info_path)?;
     write_ios_launch_assets(project, workspace, &mut info, &info_path)?;
     if let Some(object) = info.as_object_mut() {
@@ -3797,7 +3924,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         if let Some(path) = &extension.info_plist {
             let value = replace_plist_application_id(
                 read_apple_plist(&canonical_plugin_path(plugin, path)?)?,
-                &project.manifest.application_id,
+                project.manifest.ios_application_id(),
             );
             merge_plist_value(
                 &mut info,
@@ -3816,7 +3943,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         let entitlements_setting = if let Some(path) = &extension.entitlements {
             let value = replace_plist_application_id(
                 read_apple_plist(&canonical_plugin_path(plugin, path)?)?,
-                &project.manifest.application_id,
+                project.manifest.ios_application_id(),
             );
             write_apple_plist(&extension_root.join("Extension.entitlements"), &value)?;
             "CODE_SIGN_ENTITLEMENTS = Extensions/".to_owned() + name + "/Extension.entitlements; "
@@ -4453,10 +4580,10 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
             "simctl",
             "launch",
             simulator,
-            &project.manifest.application_id,
+            project.manifest.ios_application_id(),
         ],
     )?;
-    println!("Started {} on {simulator}", project.manifest.application_id);
+    println!("Started {} on {simulator}", project.manifest.ios_application_id());
     Ok(())
 }
 
@@ -7362,7 +7489,7 @@ fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
     let (root, manifest) = load_project_manifest(&project_path)?;
     let simulator = booted_ios_simulator()?;
     let request_id = diagnostic_request_id(&root);
-    let scheme = ios_diagnostics_scheme(&manifest.application_id);
+    let scheme = ios_diagnostics_scheme(manifest.ios_application_id());
     let url = format!("{scheme}://diagnostics/{request_id}");
     command_status("xcrun", &["simctl", "openurl", &simulator, &url])?;
     let container = Command::new("xcrun")
@@ -7370,7 +7497,7 @@ fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
             "simctl",
             "get_app_container",
             &simulator,
-            &manifest.application_id,
+            manifest.ios_application_id(),
             "data",
         ])
         .output()
@@ -7378,7 +7505,7 @@ fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
     if !container.status.success() {
         return Err(format!(
             "{} is not installed on the booted simulator; start it with `pam dev` first",
-            manifest.application_id
+            manifest.ios_application_id()
         ));
     }
     let container = String::from_utf8(container.stdout)
@@ -7441,7 +7568,7 @@ fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
 fn toggle_devtools_ios(project_path: PathBuf) -> Result<u8, String> {
     let (_, manifest) = load_project_manifest(&project_path)?;
     let simulator = booted_ios_simulator()?;
-    let scheme = ios_diagnostics_scheme(&manifest.application_id);
+    let scheme = ios_diagnostics_scheme(manifest.ios_application_id());
     command_status(
         "xcrun",
         &[
@@ -7451,7 +7578,7 @@ fn toggle_devtools_ios(project_path: PathBuf) -> Result<u8, String> {
             &format!("{scheme}://devtools"),
         ],
     )?;
-    println!("Toggled Pam Native DevTools in {}", manifest.application_id);
+    println!("Toggled Pam Native DevTools in {}", manifest.ios_application_id());
     Ok(0)
 }
 
@@ -8971,6 +9098,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn branch_installs_use_the_cli_release_for_plugin_checks() {
+        let cli = parse_release_version(env!("CARGO_PKG_VERSION")).expect("cli version");
+        assert_eq!(installed_release_version("dev-feat/ios-build").unwrap(), cli);
+        assert_eq!(installed_release_version("1.x-dev").unwrap(), cli);
+        assert_eq!(installed_release_version("v1.43.2").unwrap(), (1, 43, 2));
+        assert!(installed_release_version("banana").is_err());
+    }
+
+    #[test]
     fn ios_launch_screen_assets_follow_the_splash_appearance() {
         let colors = ios_color_set(0xF7F6F2, 0x111511);
         assert!(colors.contains("\"red\" : \"0xF7\""));
@@ -9552,6 +9688,8 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).expect("test project");
+        // macOS temp dirs live behind the /var -> /private/var link.
+        let root = root.canonicalize().expect("canonical test project");
         let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
         png.extend_from_slice(&[0, 0, 0, 13]);
         png.extend_from_slice(b"IHDR");
@@ -10654,9 +10792,12 @@ mod tests {
         })
         .expect("persist and clean");
 
+        // macOS temp dirs live behind the /var -> /private/var link.
         assert_eq!(
-            built.path,
-            root.join("dist/cleanup-app-1.2.3-android-debug.apk")
+            built.path.canonicalize().expect("built APK"),
+            root.canonicalize()
+                .expect("canonical test project")
+                .join("dist/cleanup-app-1.2.3-android-debug.apk")
         );
         assert!(built.path.is_file());
         assert!(built.path.with_extension("apk.sha256").is_file());
@@ -10913,6 +11054,44 @@ mod bundle_exclusion_tests {
             3,
             "repeated preparation is idempotent"
         );
+    }
+
+    #[test]
+    fn ios_app_options_merge_privacy_strings_orientations_and_bundle_id() {
+        let ios: IosOptions = serde_json::from_value(serde_json::json!({
+            "bundleIdentifier": "com.example.legacy-app",
+            "usageDescriptions": {"NSPhotoLibraryUsageDescription": "Choose photos."},
+            "orientations": ["portrait"]
+        }))
+        .unwrap();
+        validate_ios_app_options(&ios).unwrap();
+        let mut info = serde_json::json!({
+            "NSPhotoLibraryUsageDescription": "Plugin default",
+            "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft"]
+        });
+        merge_ios_app_info(&ios, &mut info).unwrap();
+        assert_eq!(info["NSPhotoLibraryUsageDescription"], "Choose photos.");
+        assert_eq!(
+            info["UISupportedInterfaceOrientations"],
+            serde_json::json!(["UIInterfaceOrientationPortrait"])
+        );
+        assert_eq!(
+            info["UISupportedInterfaceOrientations~ipad"],
+            serde_json::json!(["UIInterfaceOrientationPortrait"])
+        );
+
+        for bundle in ["single", "com.bad_underscore", "com..empty", ""] {
+            let mut ios = IosOptions::default();
+            ios.bundle_identifier = Some(bundle.to_owned());
+            assert!(validate_ios_app_options(&ios).is_err(), "accepted {bundle:?}");
+        }
+        let mut ios = IosOptions::default();
+        ios.usage_descriptions
+            .insert("CameraPermission".to_owned(), "x".to_owned());
+        assert!(validate_ios_app_options(&ios).is_err());
+        let mut ios = IosOptions::default();
+        ios.orientations = vec![IosOrientation::Portrait, IosOrientation::Portrait];
+        assert!(validate_ios_app_options(&ios).is_err());
     }
 
     #[test]
