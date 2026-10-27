@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `DeviceInfo` exposes the installed `appVersion` (Android `versionName`, iOS
+  `CFBundleShortVersionString`) and `buildNumber` (Android `versionCode`, iOS
+  `CFBundleVersion`), so an app can enforce a minimum supported version
+  (forced-update screen) without a plugin. Both are `''` when unknown.
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion

@@ -210,6 +210,9 @@ class NativeCapabilitiesInstrumentedTest {
         assertTrue(((values["memoryClassMb"] as WireValue.Integer).value) > 0)
         assertTrue(values["lowRamDevice"] is WireValue.Flag)
         assertTrue(values["powerSaveMode"] is WireValue.Flag)
+        val installed = context.packageManager.getPackageInfo(context.packageName, 0)
+        assertEquals(installed.versionName.orEmpty(), (values["appVersion"] as WireValue.Text).value)
+        assertTrue((values["buildNumber"] as WireValue.Text).value.isNotEmpty())
         system.close()
     }
 
