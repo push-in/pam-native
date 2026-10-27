@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- iOS push: Firebase is configured once at install without probing
+  `FirebaseApp.app()` first (that probe logs I-COR000003 before
+  `configure()`), and `registerForRemoteNotifications()` is asked at most
+  once per process: concurrent `Notifications::registerPush()` calls share
+  the registration in flight and a cached token no longer re-registers on
+  every call. A failed or cancelled registration may ask again. Android needs
+  no change (Firebase initializes from google-services and has no APNs step).
+
 - iOS push parity with Android: a `GoogleService-Info.plist` (`.pam/` or the
   project root) turns on Firebase Messaging in the generated iOS plugin
   package, like `google-services.json` on Android. `registerPush()` then

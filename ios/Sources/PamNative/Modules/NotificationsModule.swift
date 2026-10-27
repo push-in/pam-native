@@ -358,6 +358,14 @@ final class PushTokenRegistry {
         }
     }
     private var waiters: [ModuleCompletion] = []
+    /// `registerForRemoteNotifications()` already asked in this process: a
+    /// second request (another `registerPush()`, a cached token) only makes
+    /// iOS and Firebase log a duplicate APNs registration.
+    private var apnsRequested = false
+    /// Asks iOS for the APNs device token (replaced in tests).
+    var requestApnsToken: () -> Void = {
+        UIApplication.shared.registerForRemoteNotifications()
+    }
     private var events: [Data] = []
     private var eventWaiter: ModuleCompletion?
 
@@ -372,19 +380,25 @@ final class PushTokenRegistry {
         lock.lock()
         if let token {
             let provider = provider
+            // Apple asks for a registration on every launch: a rotated APNs
+            // token still reaches the provider (and the cached token). Once
+            // per process is enough.
+            let request = !apnsRequested
+            apnsRequested = true
             lock.unlock()
             completion(.success, payload(token, provider: provider))
-            // Apple asks for a registration on every launch: a rotated APNs
-            // token still reaches the provider (and the cached token).
-            DispatchQueue.main.async {
-                UIApplication.shared.registerForRemoteNotifications()
+            if request {
+                DispatchQueue.main.async { [weak self] in self?.requestApnsToken() }
             }
             return
         }
+        // Concurrent callers share the registration already in flight.
+        let request = waiters.isEmpty && !apnsRequested
         waiters.append(completion)
+        if request { apnsRequested = true }
         lock.unlock()
-        DispatchQueue.main.async {
-            UIApplication.shared.registerForRemoteNotifications()
+        if request {
+            DispatchQueue.main.async { [weak self] in self?.requestApnsToken() }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             self?.reject("APNs token registration timed out")
@@ -415,6 +429,7 @@ final class PushTokenRegistry {
     func unregister() {
         lock.lock()
         token = nil
+        apnsRequested = false
         let callbacks = waiters
         waiters.removeAll()
         lock.unlock()
@@ -427,6 +442,8 @@ final class PushTokenRegistry {
             lock.unlock()
             return
         }
+        // A failed or timed-out registration may be retried.
+        apnsRequested = false
         let callbacks = waiters
         waiters.removeAll()
         lock.unlock()

@@ -25,14 +25,15 @@ final class PamFirebaseMessaging: NSObject, PamPushTokenProvider, MessagingDeleg
         }
         guard !installed else { return }
         installed = true
-        if FirebaseApp.app() == nil {
-            guard let path = Bundle.module.path(forResource: "GoogleService-Info", ofType: "plist"),
-                  let options = FirebaseOptions(contentsOfFile: path) else {
-                NSLog("PAM Native: GoogleService-Info.plist is unreadable; push stays on raw APNs tokens")
-                return
-            }
-            FirebaseApp.configure(options: options)
+        // Configured once, with no FirebaseApp.app() / allApps probe first:
+        // querying before configure() logs I-COR000003 / I-COR000005. The
+        // `installed` flag is the only guard (nothing else configures it).
+        guard let path = Bundle.module.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let options = FirebaseOptions(contentsOfFile: path) else {
+            NSLog("PAM Native: GoogleService-Info.plist is unreadable; push stays on raw APNs tokens")
+            return
         }
+        FirebaseApp.configure(options: options)
         Messaging.messaging().delegate = shared
         PamPushNotifications.tokenProvider = shared
     }
