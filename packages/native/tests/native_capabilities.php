@@ -493,6 +493,28 @@ $assert(
         && $route['values']['path'] === '/chat/42',
     'Focused routes must be reported for push suppression once rules need them.',
 );
+// A screen known by a second id reports it as an alias of its focused route.
+$aliasHandle = PushRendering::routeAliases('chat', ['chatId' => '42'], ['loadedChatId' => 'uuid-42', 'chatId' => 'ignored']);
+$route = $lastCall();
+$assert(
+    $route['method'] === 'setActiveRoute' && $route['values']['name'] === 'chat'
+        && json_decode((string) $route['values']['params'], true) === ['chatId' => '42', 'loadedChatId' => 'uuid-42'],
+    'routeAliases must re-report the focused route with the alias, route params winning.',
+);
+$otherHandle = PushRendering::routeAliases('chat', ['chatId' => '7'], ['loadedChatId' => 'uuid-7']);
+$assert(
+    json_decode((string) $lastCall()['values']['params'], true) === ['chatId' => '42', 'loadedChatId' => 'uuid-42'],
+    'Aliases of another chat must not leak into the focused route.',
+);
+PushRendering::forgetRouteAliases($aliasHandle);
+$assert(
+    $lastCall()['method'] === 'setActiveRoute' && json_decode((string) $lastCall()['values']['params'], true) === ['chatId' => '42'],
+    'forgetRouteAliases must re-report the focused route without the alias.',
+);
+PushRendering::forgetRouteAliases($otherHandle);
+PushRendering::forgetRouteAliases(999);
+$assert($rejects(static fn () => PushRendering::routeAliases('', [], ['a' => 'b'])), 'Aliased routes need a name.');
+
 PushRendering::forget('chat.read');
 $assert($lastCall()['method'] === 'forgetPushRendering' && $lastCall()['values'] == ['type' => 'chat.read', 'field' => 'type'], 'PushRendering::forget must remove one rule.');
 
