@@ -70,6 +70,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         applyRequestedOffset()
     }
     private var viewportChanged: ((Float, Float) -> Unit)? = null
+    private val pageTransformer = PamPageTransformer()
     private val stickyChildren = LinkedHashSet<View>()
     private val content = object : FrameLayout(context) {
         init {
@@ -87,6 +88,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
             super.onLayout(changed, left, top, right, bottom)
             updateStickyChildren()
+            applyPageTransform()
         }
     }.apply {
         clipChildren = false
@@ -246,6 +248,17 @@ internal class PamScrollContainer @JvmOverloads constructor(
         // A fresh viewport drops any fade callback queued by the old one.
         // Content, focus and scroll offsets are retained by replacement.
         replaceActiveScroll()
+    }
+
+    /** `ScrollPageTransform` of a horizontal pager (0 = none, 1 = cube). */
+    fun setPageTransform(value: Int) {
+        pageTransformer.setKind(value)
+        applyPageTransform()
+    }
+
+    private fun applyPageTransform() {
+        if (pageTransformer.kind == PamPageTransformKind.NONE || !horizontal) return
+        pageTransformer.apply(content, activeScroll.scrollX, activeScroll.width)
     }
 
     fun setPagingEnabled(value: Boolean) {
@@ -631,6 +644,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private fun createHorizontalScroll(): ViewGroup =
         PamHorizontalScrollView(indicatorContext(), ::dismissKeyboard).apply {
             setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
+                applyPageTransform()
                 dispatchViewport(scrollX, scrollY)
             }
         }

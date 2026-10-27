@@ -63,6 +63,7 @@ use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ScrollPageTransform;
 use Pam\Native\Navigation\SharedTransitionStyle;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
@@ -384,6 +385,7 @@ final class TemplateRenderer
         'currentTime' => PropKey::MediaCurrentTime,
         'playbackRate' => PropKey::MediaPlaybackRate,
         'keepAliveWhenCovered' => PropKey::MediaKeepAliveWhenCovered,
+        'startBufferMs' => PropKey::MediaStartBufferMs,
         'mediaClock' => PropKey::MediaClock,
         'mediaClockFormat' => PropKey::MediaClockFormat,
         'mediaProgress' => PropKey::MediaProgress,
@@ -432,6 +434,7 @@ final class TemplateRenderer
         'persistentScrollbar' => PropKey::ScrollPersistentScrollbar,
         'pagingEnabled' => PropKey::ScrollPagingEnabled,
         'snapToInterval' => PropKey::ScrollSnapInterval,
+        'pageTransform' => PropKey::ScrollPageTransform,
         'decelerationRate' => PropKey::ScrollDecelerationRate,
         'keyboardDismissMode' => PropKey::ScrollKeyboardDismissMode,
         'keyboardShouldPersistTaps' => PropKey::ScrollKeyboardPersistTaps,
@@ -4205,6 +4208,7 @@ final class TemplateRenderer
             PropKey::ScrollSnapInterval,
             PropKey::ScrollDecelerationRate,
             PropKey::ScrollKeyboardDismissMode,
+            PropKey::ScrollPageTransform,
             => $kind === NodeKind::Scroll,
             PropKey::ScrollPagingEnabled,
             PropKey::ScrollTargetTestId,
@@ -4741,6 +4745,12 @@ final class TemplateRenderer
                 'padding' => SafeAreaMode::Padding->value,
                 'margin' => SafeAreaMode::Margin->value,
             ]),
+            PropKey::ScrollPageTransform => $value instanceof ScrollPageTransform
+                ? $value->value
+                : ($value === null || $value === false || $value === '' || $value === 'none'
+                    ? null
+                    : self::named($value, ['cube' => ScrollPageTransform::Cube->value])),
+            PropKey::MediaStartBufferMs => max(0, min(30_000, self::intValue($value, 'startBufferMs'))),
             PropKey::ScrollOverScrollMode => self::named($value, [
                 'auto' => ScrollOverScrollMode::Auto->value,
                 'always' => ScrollOverScrollMode::Always->value,

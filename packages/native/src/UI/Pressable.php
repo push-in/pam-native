@@ -52,7 +52,7 @@ final class Pressable extends Element
         return $this->withProperty(PropKey::PressDoubleTapDelayMs, max(80, min(1_000, $milliseconds)));
     }
 
-    /** Native animation centred on the double-tap point (Reels heart burst). */
+    /** Native animation on a double tap (Reels heart burst) or a single tap (like pop); see TapEffect. */
     public function tapEffect(TapEffect $effect): self
     {
         return $this->withProperty(PropKey::PressTapEffect, $effect->encode());

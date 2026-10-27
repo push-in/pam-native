@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- ScrollView `pageTransform` (`ScrollPageTransform::Cube`, template
+  `pageTransform="cube"`, extension property `1002`): a horizontal paging
+  ScrollView turns its pages like a cube (Instagram stories): each page
+  rotates up to 90° around the edge it shares with its neighbour, with
+  perspective 2.4× the page width, and darkens up to 55% while it turns away.
+  Android (`rotationY`/`cameraDistance`/foreground shade) and iOS
+  (`CATransform3D` with `m34`, shade sublayer) apply it from the scroll offset
+  on the UI thread, only while the offset changes; pages off-screen are reset.
+- MediaPlayer `startBufferMs` (template `startBufferMs="350"`, extension
+  property `1003`): playback starts once that much media is buffered, like
+  ExoPlayer `bufferForPlaybackMs` (and resumes after a stall at twice that,
+  capped by the ExoPlayer default). Android plays such a player through
+  ExoPlayer; iOS waits on `loadedTimeRanges` (KVO, no polling) and reports
+  the wait as buffering.
+- TapEffect `origin` (`Touch`, `Center`, `Anchor`), `trigger` (`DoubleTap`,
+  `Tap`) and `armed`. `TapEffect::pop($ref)` plays a squash-and-spring on the
+  anchor in place on a single tap, on the UI thread before PHP hears the
+  press, for like/save toggles; `armed(false)` silences it (a toggle that is
+  already on). The double-tap heart keeps its encoding.
+- iOS MediaPlayer: `autoPlay=false` on a ready player called the POSIX
+  `pause()` (suspending the main thread until a signal) instead of pausing the
+  player; it now pauses the AVPlayer.
+
 - Protocol: the core identifier tables are closed (properties `1`–`543`,
   events `1`–`80`), and new identifiers go to an extension table that starts
   at `1001`. Extension IDs use the existing `u16` property field, so frames

@@ -129,6 +129,7 @@ internal class PamMediaView(
      * ahead of the playhead; at 0 it keeps the platform MediaPlayer.
      */
     private var forwardBufferSeconds = 0
+    private var startBufferMs = 0
     private var exo: PamExoPlayback? = null
     var onReady: (() -> Unit)? = null
 
@@ -288,16 +289,25 @@ internal class PamMediaView(
         imageLoader.load(request, poster, NativeImageCallbacks())
     }
 
-    fun setForwardBufferSeconds(seconds: Int) {
-        val value = seconds.coerceIn(0, 300)
-        if (forwardBufferSeconds == value) return
-        forwardBufferSeconds = value
+    /**
+     * `preloadSeconds` (forward buffer) and `startBufferMs` (media buffered
+     * before playback starts, ExoPlayer `bufferForPlaybackMs`) together, so a
+     * render that changes both re-prepares the player once.
+     */
+    fun setBufferTargets(forwardSeconds: Int, startMs: Int) {
+        val seconds = forwardSeconds.coerceIn(0, 300)
+        val start = startMs.coerceIn(0, 30_000)
+        if (forwardBufferSeconds == seconds && startBufferMs == start) return
+        forwardBufferSeconds = seconds
+        startBufferMs = start
         if (source.isNotEmpty()) {
             val current = source
             source = ""
             setSource(current)
         }
     }
+
+    fun setForwardBufferSeconds(seconds: Int) = setBufferTargets(seconds, startBufferMs)
 
     fun setCacheRequest(request: MediaCacheRequest) {
         if (cacheRequest == request) return
@@ -553,7 +563,7 @@ internal class PamMediaView(
      */
     private fun prepareMedia(uri: Uri) {
         releasePlayer()
-        pamForwardBuffer(forwardBufferSeconds)?.let { buffer ->
+        pamForwardBuffer(forwardBufferSeconds, startBufferMs)?.let { buffer ->
             prepareExo(uri, buffer)
             return
         }

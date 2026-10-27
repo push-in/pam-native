@@ -25,17 +25,40 @@ internal data class PamForwardBuffer(
     val bufferForPlaybackAfterRebufferMs: Int,
 )
 
-/** `null` (platform MediaPlayer, no forward-buffer control) for 0 seconds. */
-internal fun pamForwardBuffer(seconds: Int): PamForwardBuffer? {
-    if (seconds <= 0) return null
-    val target = seconds.coerceAtMost(MAX_FORWARD_BUFFER_SECONDS) * 1_000
+/**
+ * `null` (platform MediaPlayer, no buffer control) when neither a forward
+ * buffer ([seconds]) nor a start buffer ([startBufferMs], RN/ExoPlayer
+ * `bufferForPlaybackMs`) is declared. A start buffer makes playback begin
+ * once that much media is loaded (and resume after a stall once twice that
+ * is, capped by the ExoPlayer default); without a forward buffer the
+ * ExoPlayer default targets are kept.
+ */
+internal fun pamForwardBuffer(seconds: Int, startBufferMs: Int = 0): PamForwardBuffer? {
+    val start = startBufferMs.coerceIn(0, MAX_START_BUFFER_MS)
+    if (seconds <= 0 && start <= 0) return null
+    val target = if (seconds > 0) {
+        seconds.coerceAtMost(MAX_FORWARD_BUFFER_SECONDS) * 1_000
+    } else {
+        EXO_DEFAULT_BUFFER_MS
+    }
+    val playback = if (start > 0) start else EXO_BUFFER_FOR_PLAYBACK_MS
+    val rebuffer = if (start > 0) {
+        minOf(EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS, start * 2)
+    } else {
+        EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+    }
     return PamForwardBuffer(
         minBufferMs = target,
         maxBufferMs = target,
-        bufferForPlaybackMs = minOf(EXO_BUFFER_FOR_PLAYBACK_MS, target),
-        bufferForPlaybackAfterRebufferMs = minOf(EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS, target),
+        bufferForPlaybackMs = minOf(playback, target),
+        bufferForPlaybackAfterRebufferMs = minOf(rebuffer, target),
     )
 }
+
+private const val MAX_START_BUFFER_MS = 30_000
+
+/** `DefaultLoadControl.DEFAULT_MIN_BUFFER_MS` / `DEFAULT_MAX_BUFFER_MS`. */
+private const val EXO_DEFAULT_BUFFER_MS = 50_000
 
 private const val MAX_FORWARD_BUFFER_SECONDS = 300
 

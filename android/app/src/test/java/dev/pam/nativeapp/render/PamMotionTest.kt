@@ -205,4 +205,22 @@ class PamMotionTest {
         assertNull(PamTapEffect.parse("ref=heart"))
         assertTrue(abs(effect.tiltDegrees) <= 180f)
     }
+
+    @Test
+    fun tapEffectDefaultsToDoubleTapAtTheTouchAndParsesPopOptions() {
+        val program = "\npam-motion 1 id=3 iterations=1\n0 scale timing(0.82,70,ease-out-quad,0)"
+        val heart = PamTapEffect.parse("ref=heart;tilt=13$program")!!
+        assertEquals(PamTapEffect.ORIGIN_TOUCH, heart.origin)
+        assertTrue(heart.playsOn(PamTapEffect.TRIGGER_DOUBLE_TAP))
+        assertTrue(!heart.playsOn(PamTapEffect.TRIGGER_TAP))
+
+        val pop = PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap$program")!!
+        assertEquals(PamTapEffect.ORIGIN_ANCHOR, pop.origin)
+        assertTrue(pop.playsOn(PamTapEffect.TRIGGER_TAP))
+        assertTrue(!pop.playsOn(PamTapEffect.TRIGGER_DOUBLE_TAP))
+
+        val disarmed = PamTapEffect.parse("ref=like;tilt=0;origin=center;trigger=tap;armed=0$program")!!
+        assertEquals(PamTapEffect.ORIGIN_CENTER, disarmed.origin)
+        assertTrue(!disarmed.playsOn(PamTapEffect.TRIGGER_TAP))
+    }
 }

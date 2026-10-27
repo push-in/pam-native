@@ -15,6 +15,7 @@ use Pam\Native\Renderable;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollIndicatorStyle;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ScrollPageTransform;
 use Pam\Native\ScrollTargetAlignment;
 
 final class Scroll extends Element
@@ -94,6 +95,15 @@ final class Scroll extends Element
     public function fillViewport(bool $fill = true): self
     {
         return $this->withProperty(PropKey::ScrollFillViewport, $fill);
+    }
+
+    /**
+     * Native per-page transform of a horizontal pager (e.g. the stories
+     * cube), driven by the scroll offset on the UI thread.
+     */
+    public function pageTransform(ScrollPageTransform $transform): self
+    {
+        return $this->withProperty(PropKey::ScrollPageTransform, $transform->value);
     }
 
     public function overScrollMode(ScrollOverScrollMode $mode): self

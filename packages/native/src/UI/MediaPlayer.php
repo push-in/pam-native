@@ -111,6 +111,19 @@ final class MediaPlayer extends Element
         );
     }
 
+    /**
+     * Media buffered before playback starts (ExoPlayer `bufferForPlaybackMs`;
+     * on iOS playback starts once that much is loaded ahead of the playhead).
+     * 0 keeps the platform default.
+     */
+    public function startBufferMs(int $milliseconds): self
+    {
+        return $this->withProperty(
+            PropKey::MediaStartBufferMs,
+            max(0, min(30_000, $milliseconds)),
+        );
+    }
+
     public function downloadWhilePlaying(bool $enabled = true): self
     {
         return $this->withProperty(

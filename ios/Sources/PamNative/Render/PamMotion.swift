@@ -756,11 +756,21 @@ enum PamTransitionSpec {
     }
 }
 
-/// `ref=<nativeRef>;tilt=<deg>` line followed by a `pam-motion` program.
+/// `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0]`
+/// line followed by a `pam-motion` program.
 struct PamTapEffect {
+    enum Origin: Equatable { case touch, center, anchor }
+    enum Trigger: Equatable { case doubleTap, tap }
+
     let ref: String
     let tiltDegrees: Double
     let program: PamMotionProgram
+    var origin: Origin = .touch
+    var trigger: Trigger = .doubleTap
+    var armed = true
+
+    /// Whether [gesture] plays this effect.
+    func plays(on gesture: Trigger) -> Bool { armed && trigger == gesture }
 
     static func parse(_ source: String) -> PamTapEffect? {
         guard let newline = source.firstIndex(of: "\n") else { return nil }
@@ -776,7 +786,10 @@ struct PamTapEffect {
         return PamTapEffect(
             ref: ref,
             tiltDegrees: min(max(options["tilt"].flatMap { Double($0) } ?? 0, 0), 180),
-            program: program
+            program: program,
+            origin: options["origin"] == "center" ? .center : (options["origin"] == "anchor" ? .anchor : .touch),
+            trigger: options["trigger"] == "tap" ? .tap : .doubleTap,
+            armed: options["armed"] != "0"
         )
     }
 }

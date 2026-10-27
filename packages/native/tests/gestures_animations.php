@@ -136,6 +136,35 @@ $assert(
     'Double tap, its delay and the native tap effect must be encoded on the Pressable.',
 );
 
+$likePop = \Pam\Native\Animation\TapEffect::pop('like-icon');
+$assert(
+    str_starts_with($likePop->encode(), "ref=like-icon;tilt=0;origin=anchor;trigger=tap\npam-motion 1 ")
+        && str_starts_with($likePop->armed(false)->encode(), "ref=like-icon;tilt=0;origin=anchor;trigger=tap;armed=0\n")
+        && str_starts_with(
+            TapEffect::make('heart', tilt: 0)->origin(\Pam\Native\Animation\TapEffectOrigin::Center)->encode(),
+            "ref=heart;tilt=0;origin=center\n",
+        )
+        && str_starts_with(
+            TapEffect::make('heart')->trigger(\Pam\Native\Animation\TapEffectTrigger::Tap)->encode(),
+            "ref=heart;tilt=15;trigger=tap\n",
+        ),
+    'TapEffect encodes origin/trigger/armed only when they differ from the double-tap-at-touch default.',
+);
+
+// --- Scroll page transform and media start buffer ------------------------------
+$cubePager = \Pam\Native\UI\ScrollView::make(Text::make('page'))->horizontal()->pageTransform(\Pam\Native\ScrollPageTransform::Cube);
+$assert(
+    $cubePager->properties()[PropKey::ScrollPageTransform->value] === 1,
+    'pageTransform(Cube) sends 1 on the extension key.',
+);
+$player = \Pam\Native\UI\MediaPlayer::make('https://example.com/a.mp4');
+$assert(
+    $player->startBufferMs(350)->properties()[PropKey::MediaStartBufferMs->value] === 350
+        && $player->startBufferMs(-5)->properties()[PropKey::MediaStartBufferMs->value] === 0
+        && $player->startBufferMs(99_000)->properties()[PropKey::MediaStartBufferMs->value] === 30_000,
+    'startBufferMs is clamped to 0..30000 ms.',
+);
+
 // --- Drag and Swipeable ---------------------------------------------------------
 $storyDrag = Drag::vertical()
     ->bounds(min: 0)

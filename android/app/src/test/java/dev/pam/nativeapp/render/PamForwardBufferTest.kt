@@ -27,4 +27,23 @@ class PamForwardBufferTest {
     fun theTargetIsBoundedLikeThePhpSetter() {
         assertEquals(300_000, pamForwardBuffer(10_000)!!.maxBufferMs)
     }
+
+    @Test
+    fun startBufferAloneKeepsTheExoTargetsAndStartsAfterThatMuchMedia() {
+        // RN stories: bufferForPlaybackMs 350, rebuffer ~2x.
+        assertEquals(PamForwardBuffer(50_000, 50_000, 350, 700), pamForwardBuffer(0, 350))
+    }
+
+    @Test
+    fun startBufferWithForwardBufferIsCappedByTheTarget() {
+        assertEquals(PamForwardBuffer(8_000, 8_000, 500, 1_000), pamForwardBuffer(8, 500))
+        assertEquals(PamForwardBuffer(1_000, 1_000, 1_000, 1_000), pamForwardBuffer(1, 4_000))
+    }
+
+    @Test
+    fun rebufferThresholdNeverExceedsTheExoDefault() {
+        assertEquals(5_000, pamForwardBuffer(0, 9_000)!!.bufferForPlaybackAfterRebufferMs)
+        assertNull(pamForwardBuffer(0, 0))
+        assertNull(pamForwardBuffer(0, -10))
+    }
 }

@@ -309,6 +309,8 @@ final class PamAnchoredScrollView: UIScrollView {
     private var previousMaxOffset: CGFloat = 0
     /// Sticky header children (`stickyHeader`).
     let pamSticky = PamStickyRegistry()
+    /// `pageTransform` of a horizontal pager (stories cube).
+    let pamPageTransformer = PamPageTransformer()
 
     /// RN `keyboardShouldPersistTaps`; nil when absent or `always`.
     var pamKeyboardTaps: PamKeyboardTapController?
@@ -381,6 +383,8 @@ final class PamAnchoredScrollView: UIScrollView {
         applyRequestedContentOffset()
         if !horizontal {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
+        } else if pamPageTransformer.kind != .none {
+            pamPageTransformer.apply(to: self)
         }
     }
 

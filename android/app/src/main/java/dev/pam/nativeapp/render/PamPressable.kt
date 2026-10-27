@@ -618,6 +618,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         // Touch clicks carry the release point; accessibility clicks the centre.
         val pointer = clickPointer ?: centerPointer()
         clickPointer = null
+        playTapEffect(pointer, PamTapEffect.TRIGGER_TAP)
         localOnPress?.invoke()
         onPress?.invoke(pointer)
         return platformHandled || localOnPress != null || onPress != null
@@ -652,7 +653,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             removeCallbacks(singleTapRunnable)
             pendingSingleTap = null
             lastTap = null
-            playTapEffect(pointer)
+            playTapEffect(pointer, PamTapEffect.TRIGGER_DOUBLE_TAP)
             doubleTap(pointer)
             return
         }
@@ -664,20 +665,24 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         }
     }
 
-    private fun playTapEffect(pointer: PamPressPointer) {
-        val effect = tapEffect ?: return
+    private fun playTapEffect(pointer: PamPressPointer, gesture: Int) {
+        val effect = tapEffect?.takeIf { it.playsOn(gesture) } ?: return
         val anchor = PamDragController.findRef(this, effect.ref) ?: return
         val animated = (anchor as? ViewGroup)?.getChildAt(0) ?: anchor
-        var offsetX = 0f
-        var offsetY = 0f
-        var parentView = anchor.parent as? View
-        while (parentView != null && parentView !== this) {
-            offsetX += parentView.left + parentView.translationX
-            offsetY += parentView.top + parentView.translationY
-            parentView = parentView.parent as? View
+        if (effect.origin != PamTapEffect.ORIGIN_ANCHOR) {
+            var offsetX = 0f
+            var offsetY = 0f
+            var parentView = anchor.parent as? View
+            while (parentView != null && parentView !== this) {
+                offsetX += parentView.left + parentView.translationX
+                offsetY += parentView.top + parentView.translationY
+                parentView = parentView.parent as? View
+            }
+            val x = if (effect.origin == PamTapEffect.ORIGIN_CENTER) width / 2f else pointer.x
+            val y = if (effect.origin == PamTapEffect.ORIGIN_CENTER) height / 2f else pointer.y
+            anchor.translationX = x - offsetX - anchor.left - anchor.width / 2f
+            anchor.translationY = y - offsetY - anchor.top - anchor.height / 2f
         }
-        anchor.translationX = pointer.x - offsetX - anchor.left - anchor.width / 2f
-        anchor.translationY = pointer.y - offsetY - anchor.top - anchor.height / 2f
         anchor.rotation = if (effect.tiltDegrees > 0f) {
             ((Math.random() - 0.5) * 2.0 * effect.tiltDegrees).toFloat()
         } else {
@@ -915,13 +920,28 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 }
 
-/** `ref=<nativeRef>;tilt=<deg>` line followed by a `pam-motion` program. */
+/**
+ * `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0]`
+ * line followed by a `pam-motion` program.
+ */
 internal data class PamTapEffect(
     val ref: String,
     val tiltDegrees: Float,
     val program: PamMotionProgram,
+    val origin: Int = ORIGIN_TOUCH,
+    val trigger: Int = TRIGGER_DOUBLE_TAP,
+    val armed: Boolean = true,
 ) {
+    /** Whether [gesture] (a `TRIGGER_*`) plays this effect. */
+    fun playsOn(gesture: Int): Boolean = armed && trigger == gesture
+
     companion object {
+        const val ORIGIN_TOUCH = 1
+        const val ORIGIN_CENTER = 2
+        const val ORIGIN_ANCHOR = 3
+        const val TRIGGER_DOUBLE_TAP = 1
+        const val TRIGGER_TAP = 2
+
         private val parsed = PamParseCache<PamTapEffect>()
 
         /** [parse] memoized by source (one tap effect shared by every list row). */
@@ -940,6 +960,13 @@ internal data class PamTapEffect(
                 ref = ref,
                 tiltDegrees = (options["tilt"]?.toFloatOrNull() ?: 0f).coerceIn(0f, 180f),
                 program = program,
+                origin = when (options["origin"]) {
+                    "center" -> ORIGIN_CENTER
+                    "anchor" -> ORIGIN_ANCHOR
+                    else -> ORIGIN_TOUCH
+                },
+                trigger = if (options["trigger"] == "tap") TRIGGER_TAP else TRIGGER_DOUBLE_TAP,
+                armed = options["armed"] != "0",
             )
         }
     }

@@ -3448,6 +3448,7 @@ class PamRenderer(
             PropKey.MEDIA_CACHE_PIN_OFFLINE,
             PropKey.MEDIA_CACHE_STREAMING,
             PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_START_BUFFER_MS,
             PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
             PropKey.MEDIA_CACHE_MAX_BYTES,
             PropKey.MEDIA_THUMBNAIL_SOURCE,
@@ -3645,6 +3646,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setSnapInterval(
                     value.decimal().toFloat(),
                 )
+            // Implemented by the list follow-end change (ui-polish); reserved here so the when stays exhaustive.
+            PropKey.LIST_FOLLOW_END_ON_RESIZE -> Unit
+            PropKey.SCROLL_PAGE_TRANSFORM ->
+                (view as? PamScrollContainer)?.setPageTransform(value.integer().toInt())
             PropKey.SCROLL_DECELERATION_RATE ->
                 (view as? PamScrollContainer)?.setDecelerationRate(
                     value.decimal().toFloat(),
@@ -4315,6 +4320,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setSnapInterval(0f)
             PropKey.SCROLL_DECELERATION_RATE ->
                 (view as? PamScrollContainer)?.setDecelerationRate(0.985f)
+            PropKey.SCROLL_PAGE_TRANSFORM ->
+                (view as? PamScrollContainer)?.setPageTransform(PamPageTransformKind.NONE)
             PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
                 (view as? PamScrollContainer)?.setKeyboardDismissMode(1)
             PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)
@@ -4414,6 +4421,7 @@ class PamRenderer(
             PropKey.MEDIA_CACHE_PIN_OFFLINE,
             PropKey.MEDIA_CACHE_STREAMING,
             PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_START_BUFFER_MS,
             PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
             PropKey.MEDIA_CACHE_MAX_BYTES,
             PropKey.MEDIA_THUMBNAIL_SOURCE,
@@ -4966,7 +4974,10 @@ class PamRenderer(
 
     private fun configureMediaCache(view: PamMediaView, state: NodeState) {
         // `preloadSeconds`: the forward buffer (ExoPlayer above 0 seconds).
-        view.setForwardBufferSeconds(state.integer(PropKey.MEDIA_CACHE_PRELOAD_SECONDS, 0).toInt())
+        view.setBufferTargets(
+            state.integer(PropKey.MEDIA_CACHE_PRELOAD_SECONDS, 0).toInt(),
+            state.integer(PropKey.MEDIA_START_BUFFER_MS, 0).toInt(),
+        )
         view.setCacheRequest(
             MediaCacheRequest(
                 source = state.textOrNull(PropKey.MEDIA_SOURCE).orEmpty(),

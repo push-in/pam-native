@@ -292,16 +292,28 @@ final class PamMotionCoordinator {
 
     // MARK: Tap effect
 
-    /// Plays the TapEffect program centred on [point] (pressable coordinates).
-    func playTapEffect(nodeId: Int64, pressable: UIView, source: String?, point: CGPoint) {
-        guard let source, let effect = PamTapEffect.parse(source),
+    /// Plays the TapEffect program for [gesture]: centred on [point]
+    /// (pressable coordinates), on the pressable's centre, or in place.
+    func playTapEffect(
+        nodeId: Int64,
+        pressable: UIView,
+        source: String?,
+        point: CGPoint,
+        gesture: PamTapEffect.Trigger = .doubleTap
+    ) {
+        guard let source, let effect = PamTapEffect.parse(source), effect.plays(on: gesture),
               let anchor = pressable.pamFindNativeRef(effect.ref),
               let container = anchor.superview else { return }
         let animated = firstChild(Int64(anchor.tag)) ?? anchor
-        let target = pressable.convert(point, to: container)
         var transform = PamMotionTarget.transform(of: anchor)
-        transform.translateX = target.x - anchor.center.x
-        transform.translateY = target.y - anchor.center.y
+        if effect.origin != .anchor {
+            let origin = effect.origin == .center
+                ? CGPoint(x: pressable.bounds.midX, y: pressable.bounds.midY)
+                : point
+            let target = pressable.convert(origin, to: container)
+            transform.translateX = target.x - anchor.center.x
+            transform.translateY = target.y - anchor.center.y
+        }
         transform.rotationDegrees = effect.tiltDegrees > 0
             ? CGFloat(Double.random(in: -effect.tiltDegrees...effect.tiltDegrees))
             : 0
