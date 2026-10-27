@@ -348,7 +348,7 @@ public final class PamRuntime {
     private let stateLock = NSLock()
     private var handle: UInt64 = 0
     private var closed = false
-    private var frameScheduled = false
+    private var framePump = PamFramePump()
     private var readyForEvents = false
     private var ownedBatchHandles: Set<UInt64> = []
     private var pendingBatches: [PendingBatch] = []
@@ -1089,7 +1089,7 @@ public final class PamRuntime {
         closed = true
         let currentHandle = handle
         handle = 0
-        frameScheduled = false
+        framePump.reset()
         readyForEvents = false
         let pendingHandle = ownedBatchHandles
         ownedBatchHandles.removeAll()
@@ -1475,7 +1475,7 @@ public final class PamRuntime {
             stateLock.unlock()
             return
         }
-        frameScheduled = false
+        framePump.ticked()
         stateLock.unlock()
 
         flushEvents()
@@ -1652,23 +1652,26 @@ public final class PamRuntime {
             guard let self else { return }
             self.stateLock.lock()
             defer { self.stateLock.unlock() }
-            if self.frameScheduled {
-                return
-            }
             if self.closed {
                 return
             }
             if self.pendingBatches.isEmpty && (self.pendingEvents.isEmpty || !self.readyForEvents) {
                 return
             }
-            self.frameScheduled = true
-            self.displayLink?.isPaused = false
+            if self.framePump.request() {
+                self.displayLink?.isPaused = false
+            }
         }
     }
 
     private func schedulePauseIfNeeded() {
         stateLock.lock()
         let shouldPause = closed || ((pendingBatches.isEmpty && pendingEvents.isEmpty) || (!readyForEvents && !pendingImmediateEvents.isEmpty))
+        if shouldPause {
+            // The link stops here, so no tick will clear a pending request:
+            // the next batch must be able to resume it.
+            framePump.paused()
+        }
         stateLock.unlock()
 
         if shouldPause {
@@ -1719,4 +1722,26 @@ private final class PamReloadPreparation {
     func run() {
         body()
     }
+}
+
+/// Display-link request state of the frame pump. A request resumes the link
+/// once until a tick consumes it. Pausing the link (a deferred heavy commit
+/// or the first frame flushed every pending batch outside a tick) also drops
+/// the request: otherwise the next batch sees a request still pending, never
+/// resumes the paused link and the host stops applying frames.
+struct PamFramePump {
+    private(set) var scheduled = false
+
+    /// True when the caller must resume the display link.
+    mutating func request() -> Bool {
+        if scheduled { return false }
+        scheduled = true
+        return true
+    }
+
+    mutating func ticked() { scheduled = false }
+
+    mutating func paused() { scheduled = false }
+
+    mutating func reset() { scheduled = false }
 }
