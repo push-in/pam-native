@@ -129,6 +129,9 @@ public final class PamRenderer: @unchecked Sendable {
     /// layouts, like Android's pre-draw transition: a route moved to the top
     /// in the same batch as the revision is the incoming one.
     private var committing = false
+    /// Image sources waiting for their view's first layout (requestImageLoad).
+    private var pendingImageLoads: [Int64: String] = [:]
+    private var pendingImageFlushScheduled = false
     private var deferredNavigations: [(host: PamNavigationHost, revision: Int64)] = []
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
@@ -296,6 +299,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(id)
         }
         dirtyLists.forEach { syncVirtualList($0) }
+        flushPendingImageLoads()
         committing = outerCommit
         if !outerCommit, !deferredNavigations.isEmpty {
             let navigations = deferredNavigations
@@ -674,7 +678,7 @@ public final class PamRenderer: @unchecked Sendable {
 
         if key == PamConstants.source, let source = value?.textOrNil() {
             if let imageView = imageView(for: view) {
-                loadImage(source, into: imageView, nodeId: id)
+                requestImageLoad(source, into: imageView, nodeId: id)
             }
         }
     }
@@ -2564,7 +2568,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
         case PamConstants.source:
             if let imageView = imageView(for: view), let source = value.textOrNil() {
-                loadImage(source, into: imageView, nodeId: nodeId)
+                requestImageLoad(source, into: imageView, nodeId: nodeId)
             }
         case PamConstants.tintColor:
             if let refresh = view as? PamRefreshContainer {
@@ -4916,6 +4920,42 @@ public final class PamRenderer: @unchecked Sendable {
                 self.notifyDrawingImageChanged(nodeId: nodeId)
             }
         }.resume()
+    }
+
+    /// A `source` set on a view created in this batch arrives before the
+    /// batch's layouts: the view still has no size, the decode had no target
+    /// and kept the full-resolution bitmap (a feed photo decoded at 12 MB
+    /// instead of its cell's size). Like Android's decode plan, a sizeless
+    /// view loads once the layouts of its batch are applied.
+    private func requestImageLoad(_ source: String, into imageView: UIImageView, nodeId: Int64) {
+        // Inline icons (data: URIs) are tiny and paint in the commit that sets them.
+        guard imageView.bounds.width <= 0 || imageView.bounds.height <= 0,
+              !source.hasPrefix("data:") else {
+            pendingImageLoads.removeValue(forKey: nodeId)
+            loadImage(source, into: imageView, nodeId: nodeId)
+            return
+        }
+        pendingImageLoads[nodeId] = source
+        if !committing && !pendingImageFlushScheduled {
+            pendingImageFlushScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                self?.pendingImageFlushScheduled = false
+                self?.flushPendingImageLoads()
+            }
+        }
+    }
+
+    private func flushPendingImageLoads() {
+        guard !pendingImageLoads.isEmpty else { return }
+        let pending = pendingImageLoads
+        pendingImageLoads.removeAll()
+        for (nodeId, source) in pending {
+            guard let view = views[nodeId], let imageView = imageView(for: view) else { continue }
+            if imageView !== view, imageView.bounds.isEmpty, !view.bounds.isEmpty {
+                view.layoutIfNeeded()
+            }
+            loadImage(source, into: imageView, nodeId: nodeId)
+        }
     }
 
     private func loadImage(_ source: String, into imageView: UIImageView, nodeId: Int64) {
