@@ -2054,8 +2054,8 @@ public final class PamRenderer: @unchecked Sendable {
                 self?.dispatchEvent(nodeId, EventKind.webViewError.rawValue, payload)
             } : nil
             webView.onMessage = eventProperties.contains(PamConstants.onWebViewMessage) ? {
-                [weak self] message in
-                let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
+                [weak self] message, pageUrl in
+                let payload = (try? WireMap.encode(["message": .text(message), "url": .text(pageUrl)])) ?? Data()
                 self?.dispatchEvent(nodeId, EventKind.webViewMessage.rawValue, payload)
             } : nil
         }
@@ -3120,6 +3120,8 @@ public final class PamRenderer: @unchecked Sendable {
                 let enabled = value.boolOrNil() ?? true
                 scroll.isScrollEnabled = enabled
                 if !enabled { scroll.pamStopDeceleration() }
+            } else if let webView = view as? PamWebView {
+                webView.setScrollEnabled(value.boolOrNil() ?? true)
             }
         case PamConstants.showsScrollIndicator:
             if let scroll = view as? UIScrollView {
@@ -3660,6 +3662,7 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamVirtualListView)?.pamRemoveClippedSubviews = true
         case PamConstants.scrollEnabled:
             (view as? UIScrollView)?.isScrollEnabled = true
+            (view as? PamWebView)?.setScrollEnabled(true)
         case PamConstants.showsScrollIndicator:
             if let scroll = view as? UIScrollView {
                 (scroll as? PamAnchoredScrollView)?.pamShowsScrollIndicator = true

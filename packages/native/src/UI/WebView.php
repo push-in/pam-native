@@ -11,6 +11,7 @@ use Pam\Native\EventKind;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\ScrollOverScrollMode;
 
 use function in_array;
 use function is_string;
@@ -73,7 +74,22 @@ final class WebView extends Element
         );
     }
 
-    public function onLoad(Closure $handler): self
+    /**
+     * false: the page itself never scrolls, bounces or over-scrolls (iOS
+     * scroll view and bounce off, Android over-scroll never). For full-screen
+     * pages such as games.
+     */
+    public function scrollEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollEnabled, $enabled);
+    }
+
+    public function overScrollMode(ScrollOverScrollMode $mode): self
+    {
+        return $this->withProperty(PropKey::ScrollOverScrollMode, $mode->value);
+    }
+
+        public function onLoad(Closure $handler): self
     {
         return $this->withEvent(EventKind::WebViewLoad, $handler);
     }
@@ -89,14 +105,27 @@ final class WebView extends Element
         );
     }
 
-    /** @param Closure(string): void $handler */
+    /**
+     * Messages the page posts with `window.PamNative.postMessage(text)` or,
+     * for pages written for react-native-webview,
+     * `window.ReactNativeWebView.postMessage(text)` (present from document
+     * start). The second argument is the URL of the page that posted it (the
+     * main frame): check it before trusting the message.
+     *
+     * The host answers by changing `injectedJavaScript`: a page that already
+     * loaded runs each new script once (and every load runs the current one).
+     *
+     * @param Closure(string, string): void $handler
+     */
     public function onMessage(Closure $handler): self
     {
         return $this->withEvent(
             EventKind::WebViewMessage,
-            static fn (string $payload): mixed => $handler(
-                (string) (Wire::decodeMap($payload)['message'] ?? ''),
-            ),
+            static function (string $payload) use ($handler): mixed {
+                $values = Wire::decodeMap($payload);
+
+                return $handler((string) ($values['message'] ?? ''), (string) ($values['url'] ?? ''));
+            },
         );
     }
 

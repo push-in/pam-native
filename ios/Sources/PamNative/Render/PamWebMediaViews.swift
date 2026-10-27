@@ -5,33 +5,66 @@ import Photos
 import UIKit
 import WebKit
 
+/// Page ↔ host channel rules shared with Android (`PamWebBridge.kt`).
+///
+/// Pages post with `window.PamNative.postMessage(text)` or, for pages written
+/// for react-native-webview, `window.ReactNativeWebView.postMessage(text)`;
+/// both exist from document start. The host answers by changing
+/// `injectedJavaScript`: a loaded page runs each new script once. Only the
+/// main frame may post, and each message carries the page URL.
+enum PamWebBridge {
+    static let handlerName = "pam"
+    static let maxMessageCharacters = 1_048_576
+    static let documentStartScript = """
+    window.PamNative = window.PamNative || {};
+    window.PamNative.postMessage = function(value) {
+        window.webkit.messageHandlers.pam.postMessage(String(value));
+    };
+    window.ReactNativeWebView = window.ReactNativeWebView || {
+        postMessage: function(value) { window.PamNative.postMessage(value); }
+    };
+    """
+
+    static func accepts(_ message: String, isMainFrame: Bool) -> Bool {
+        isMainFrame && message.count <= maxMessageCharacters
+    }
+
+    static func runsOnChange(previous: String, next: String, pageLoaded: Bool) -> Bool {
+        pageLoaded && !next.isEmpty && next != previous
+    }
+}
+
 final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler {
     var onLoad: (() -> Void)?
     var onError: ((String) -> Void)?
-    var onMessage: ((String) -> Void)?
+    /// Message text and the URL of the page that posted it.
+    var onMessage: ((String, String) -> Void)?
     private var source = ""
     private var injectedJavaScript = ""
     private var javaScriptEnabled = true
     private var allowedHosts: Set<String> = []
     private var loadTimeout: DispatchWorkItem?
+    private var pageLoaded = false
 
     init() {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.addUserScript(
             WKUserScript(
-                source: """
-                window.PamNative = window.PamNative || {};
-                window.PamNative.postMessage = function(value) {
-                    window.webkit.messageHandlers.pam.postMessage(String(value));
-                };
-                """,
+                source: PamWebBridge.documentStartScript,
                 injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
+                forMainFrameOnly: true
             )
         )
+        // Hardened defaults: no data detectors, no popups.
+        configuration.dataDetectorTypes = []
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         super.init(frame: .zero, configuration: configuration)
         navigationDelegate = self
-        configuration.userContentController.add(WeakWebMessageHandler(self), name: "pam")
+        // No link previews (long press) and no back/forward swipes inside the page.
+        allowsLinkPreview = false
+        allowsBackForwardNavigationGestures = false
+        scrollView.contentInsetAdjustmentBehavior = .never
+        configuration.userContentController.add(WeakWebMessageHandler(self), name: PamWebBridge.handlerName)
     }
 
     required init?(coder: NSCoder) {
@@ -41,6 +74,7 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler 
     func setSource(_ value: String) {
         guard value != source else { return }
         source = value
+        pageLoaded = false
         guard !value.isEmpty else {
             cancelLoadTimeout()
             stopLoading()
@@ -61,8 +95,25 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler 
 
     func setDomStorageEnabled(_: Bool) {}
     func setUserAgent(_ value: String) { customUserAgent = value.isEmpty ? nil : value }
-    func setInjectedJavaScript(_ value: String) { injectedJavaScript = value }
+
+    func setInjectedJavaScript(_ value: String) {
+        let runNow = javaScriptEnabled
+            && PamWebBridge.runsOnChange(previous: injectedJavaScript, next: value, pageLoaded: pageLoaded)
+        injectedJavaScript = value
+        if runNow { evaluateJavaScript(value) }
+    }
+
     func setAllowsInlineMedia(_ value: Bool) { configuration.allowsInlineMediaPlayback = value }
+
+    /// false: the page never scrolls, bounces or zooms with the scroll view (a fixed page such as a game).
+    func setScrollEnabled(_ value: Bool) {
+        scrollView.isScrollEnabled = value
+        scrollView.bounces = value
+        scrollView.alwaysBounceVertical = false
+        scrollView.alwaysBounceHorizontal = false
+        scrollView.pinchGestureRecognizer?.isEnabled = value
+    }
+
     func setAllowedHosts(_ value: String) {
         allowedHosts = Set(
             value.split(separator: "\n")
@@ -117,8 +168,13 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler 
         loadTimeout = nil
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        pageLoaded = false
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         cancelLoadTimeout()
+        pageLoaded = true
         if javaScriptEnabled && !injectedJavaScript.isEmpty {
             evaluateJavaScript(injectedJavaScript)
         }
@@ -138,7 +194,9 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler 
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        onMessage?(String(describing: message.body))
+        let text = String(describing: message.body)
+        guard PamWebBridge.accepts(text, isMainFrame: message.frameInfo.isMainFrame) else { return }
+        onMessage?(text, url?.absoluteString ?? "")
     }
 }
 
