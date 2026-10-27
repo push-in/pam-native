@@ -417,6 +417,49 @@ any number of listeners to Active/Inactive/Background transitions
 fraction of the viewport, and re-arms after the content grows or the user
 scrolls back (Android).
 
+
+## View refs (`System\ViewRef`)
+
+Imperative handle to a mounted view named by its `nativeRef` attribute, like
+a React Native ref:
+
+```php
+use Pam\Native\System\ViewRef;
+use Pam\Native\ViewMeasurement;
+
+// <Input nativeRef="composer" :value="$draft" on:change="draftChanged" />
+ViewRef::of('composer')->focus();                 // ref.focus(): focus + soft keyboard
+ViewRef::of('composer')->blur();                  // ref.blur()
+ViewRef::of('composer')->clear();                 // ref.clear(): on:change receives ""
+ViewRef::of('composer')->setSelection(3);         // caret after 3 UTF-16 units
+ViewRef::of('composer')->setSelection(0, 5);      // select [0, 5)
+ViewRef::of('composer')->isFocused(fn (bool $focused) => ...);
+ViewRef::of('bubble-42')->measure(function (?ViewMeasurement $frame, string $error): void {
+    // $frame->x/y in the parent, pageX/pageY in the app root, windowX/windowY in the window
+});
+ViewRef::of('bubble-42')->measureInWindow(function (?ViewMeasurement $frame): void {
+    // $frame->x/y are window coordinates (React Native measureInWindow)
+});
+```
+
+- Each call is one native request on the UI thread, sent after the UI update
+  of the current handler is committed: `setSelection()` right after changing
+  the value applies to the new text, and `measure()` sees the new layout.
+  Nothing is observed afterwards (no polling, no listeners).
+- `focus()` uses the `autoFocus` path: it waits for a sheet/dialog that is
+  still presenting and opens the keyboard. It replaces pulsing `autoFocus`
+  with a timer.
+- `setSelection()` applies once and never fights the user's next caret move,
+  unlike controlled `selectionStart`/`selectionEnd`.
+- `clear()` edits the text like the user, so a controlled value follows.
+- `nativeRef` may be on the input itself or on a container; input operations
+  use the first text input inside it.
+- A ref that is not mounted (or a view that is not laid out) completes with
+  an error: the optional `done(bool $ok, string $error)` callback receives it,
+  measurement callbacks receive `null`, and development builds log it.
+- Positions include ancestor transforms and scrolling (Android
+  `getLocationInWindow`, iOS `convert(_:to:)`).
+
 ### Capturing a view as an image
 
 `System\ViewCapture::capture($ref, $callback, pixelRatio:, format:, quality:, directory:)`
