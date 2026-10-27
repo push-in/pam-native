@@ -2,6 +2,20 @@
 
 ## 1.44.0 - 2026-10-26
 
+- iOS push parity with Android: a `GoogleService-Info.plist` (`.pam/` or the
+  project root) turns on Firebase Messaging in the generated iOS plugin
+  package, like `google-services.json` on Android. `registerPush()` then
+  answers with the FCM token and `PushProvider::Fcm` instead of the raw APNs
+  token, so FCM-only servers reach iOS. New public hook
+  `PamPushTokenProvider` / `PamPushNotifications.tokenProvider` (plus
+  `didRefresh(token:provider:)`); `unregisterPush()` deletes the provider
+  token. The host signs `aps-environment` per configuration through
+  `$(PAM_APS_ENVIRONMENT)` (Debug `development`, Release `production`),
+  replacing fixed plugin values. A cached token no longer skips
+  `registerForRemoteNotifications()` on later launches. Tests:
+  `PamPushTokenProviderTests` (XCTest) and the CLI
+  `ios_push_entitlement_follows_the_build_configuration` /
+  `ios_firebase_config_compiles_the_fcm_token_bridge`.
 - PHP SDK: the ext-mbstring polyfill functions moved from
   `src/Polyfill/mbstring.php` to `src/Polyfill/mbstring_functions.php`. The old
   name differed from the `Mbstring` class file only by case, so on

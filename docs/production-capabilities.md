@@ -245,6 +245,23 @@ notification-opening intents are forwarded automatically. Custom native
 integrations may still call `PamPushNotifications.reportReceived(...)` or
 `reportOpened(...)`.
 
+iOS projects do the same with `.pam/GoogleService-Info.plist` (preferred) or
+root `GoogleService-Info.plist`. `ios:prepare` then adds Firebase Messaging
+(`firebase-ios-sdk` 12.17.0, `FirebaseCore` + `FirebaseMessaging`) to the
+generated plugin package, bundles the plist there and compiles
+`PamFirebaseMessaging`: it configures Firebase before PHP starts, hands every
+APNs device token to Firebase and answers `register()` with the **FCM token**
+and `PushProvider::Fcm`, so one FCM HTTP v1 sender reaches Android and iOS.
+Swizzling stays off (`FirebaseAppDelegateProxyEnabled` = NO); the PAM
+delegate keeps categories, inline reply, mark-as-read and buttons. Without the
+plist the raw APNs token is reported with `PushProvider::Apns`. The plist's
+`BUNDLE_ID` must equal `applicationId` (prepare warns otherwise), and the
+Firebase project needs an APNs key for that bundle.
+
+Whenever Firebase is enabled or a plugin declares `aps-environment`, the host
+entitlements carry `aps-environment = $(PAM_APS_ENVIRONMENT)`: `development`
+in Debug and `production` in Release (archives, TestFlight, App Store).
+
 Debug builds must use a package ID separate from production. Without Firebase,
 PAM appends `.debug` automatically. When a Firebase client file is present,
 set `android.debugApplicationIdSuffix` in `pam-native.json`, for example
