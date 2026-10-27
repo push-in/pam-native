@@ -365,6 +365,8 @@ public final class PamRuntime {
     /// thread instead of waiting for the next display-link tick (Android
     /// parity: PamRuntime.surfaceAwaitingFirstFrame). Main thread only.
     private var surfaceAwaitingFirstFrame = true
+    /// Cold start metric: logged once per process (first committed frame).
+    private var firstFrameLogged = false
 
     private let coalescedEvents: Set<Int> = [
         EventKind.scroll.rawValue,
@@ -556,7 +558,7 @@ public final class PamRuntime {
             if owned {
                 let start = DispatchTime.now().uptimeNanoseconds
                 do {
-                    mutations = try BatchDecoder.decode(CInterop.data(from: bytes, size))
+                    mutations = try decodeBatch(CInterop.data(from: bytes, size))
                 } catch {
                     stateLock.lock()
                     _ = ownedBatchHandles.remove(batchHandle)
@@ -639,6 +641,19 @@ public final class PamRuntime {
         )
         renderer.engineManagedSafeArea = true
         exportBootMetrics(widthDp: widthDp, heightDp: heightDp, textScale: textScale, insets: insets)
+#if DEBUG
+        let phpConfiguration = PamPhpRuntimeConfiguration.current(debugBuild: true)
+#else
+        let phpConfiguration = PamPhpRuntimeConfiguration.current(debugBuild: false)
+#endif
+        phpConfiguration.export()
+        NSLog(
+            "[PamNativePerf] php memory_limit=%@ opcache=%@ opcacheMemory=%@ immutableSources=%@",
+            getenv(PamPhpRuntimeConfiguration.memoryLimitVariable).map { String(cString: $0) } ?? "?",
+            getenv("PAM_NATIVE_OPCACHE").map { String(cString: $0) } == "0" ? "off" : "file-cache",
+            getenv(PamPhpRuntimeConfiguration.opcacheMemoryVariable).map { String(cString: $0) } ?? "?",
+            getenv(PamPhpRuntimeConfiguration.immutableSourcesVariable).map { String(cString: $0) } ?? "?"
+        )
 
         var startedHandle: UInt64 = 0
         stateLock.lock()
@@ -1174,7 +1189,7 @@ public final class PamRuntime {
         let payload = CInterop.data(from: bytes, size)
         let mutations: [Mutation]
         do {
-            mutations = try BatchDecoder.decode(payload)
+            mutations = try decodeBatch(payload)
         } catch {
             onNativeError(error.localizedDescription)
             releaseBatch(batchHandle)
@@ -1343,6 +1358,35 @@ public final class PamRuntime {
                     bytes.count,
                 )
             }
+        }
+    }
+
+    /// Decodes a PHP batch skipping invalid property values (Android parity:
+    /// `guardProperty`): the node keeps rendering without that prop and the
+    /// error is reported as non-fatal instead of dropping the whole frame.
+    private func decodeBatch(_ payload: Data) throws -> [Mutation] {
+        let batch = try BatchDecoder.decodeTolerant(payload)
+        if !batch.skippedProperties.isEmpty {
+            onPropertyErrors(batch.skippedProperties)
+        }
+        return batch.mutations
+    }
+
+    private func onPropertyErrors(_ lines: [String]) {
+        let message = lines.joined(separator: "\n")
+        NSLog("[PamNativeErrors] %@", String(message.prefix(4_000)))
+        let report = PamRuntimeErrorReport.native(message, fatal: false, phase: "render")
+        reportDiagnostic(RuntimeDiagnostic(
+            kind: .error,
+            label: String("\(report.shortType): \(report.message)".prefix(120)),
+            failed: true
+        ))
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.showsErrorOverlay, self.errorOverlay.developerMode else { return }
+            if let host = self.renderer.hostView {
+                self.errorOverlay.install(over: host)
+            }
+            self.errorOverlay.report(report)
         }
     }
 
@@ -1596,6 +1640,12 @@ public final class PamRuntime {
         } else {
             keyboardLayoutAnimation = nil
             renderer.commit(mutations)
+        }
+        if !firstFrameLogged {
+            firstFrameLogged = true
+            if let elapsed = PamProcessClock.millisecondsSinceProcessStart() {
+                NSLog("[PamNativePerf] firstFrameMs=%ld batches=%ld", elapsed, mutations.count)
+            }
         }
         surfaceAwaitingFirstFrame = false
         let mountNanos = Int64(DispatchTime.now().uptimeNanoseconds - started)

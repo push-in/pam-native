@@ -819,12 +819,37 @@ public enum PamConstants {
     public static let modalAllowSwipeDismissal = 258
 }
 
+struct InvalidPropertyContent: Error {
+    let reason: String
+}
+
+public struct TolerantBatch {
+    public let mutations: [Mutation]
+    /// One line per property value that was dropped instead of failing the
+    /// whole batch (Android parity: `guardProperty` / `onPropertyError`).
+    public let skippedProperties: [String]
+}
+
 public enum BatchDecoder {
+    /// Strict decoding: any invalid value rejects the batch (wire contract).
     public static func decode(_ input: Data) throws -> [Mutation] {
+        try decode(input, tolerant: false).mutations
+    }
+
+    /// Runtime decoding: a property whose value is invalid but whose size is
+    /// known (malformed UTF-8, non-finite decimal, invalid boolean, malformed
+    /// packed list or host map, duplicate id) is skipped and reported, so one
+    /// bad prop never breaks the tree. Framing errors still reject the batch.
+    public static func decodeTolerant(_ input: Data) throws -> TolerantBatch {
+        try decode(input, tolerant: true)
+    }
+
+    private static func decode(_ input: Data, tolerant: Bool) throws -> TolerantBatch {
         guard input.count <= MAX_FRAME_BYTES else {
             throw PamProtocolError.invalidProtocol("Batch exceeds 16 MiB")
         }
         return try BinaryReader.withSource(input) { reader in
+            reader.tolerant = tolerant
             guard try reader.ascii(4) == "PNB1" else {
                 throw PamProtocolError.invalidProtocol("Invalid batch magic")
             }
@@ -855,7 +880,11 @@ public enum BatchDecoder {
                     let presence = try reader.u8()
                     let value: PropValue?
                     if presence == 1 {
-                        value = try reader.value(for: key)
+                        guard let decoded = try reader.guardedValue(for: key, node: id) else {
+                            // Keep the previous value instead of clearing it.
+                            continue
+                        }
+                        value = decoded
                     } else if presence == 2 {
                         value = nil
                     } else {
@@ -887,7 +916,7 @@ public enum BatchDecoder {
             }
 
             try reader.finish()
-            return mutations
+            return TolerantBatch(mutations: mutations, skippedProperties: reader.skippedProperties)
         }
     }
 }
@@ -896,6 +925,8 @@ struct BinaryReader {
     private let source: Data
     private let raw: UnsafeRawBufferPointer
     private var cursor: Data.Index
+    var tolerant = false
+    private(set) var skippedProperties: [String] = []
 
     var offset: Int { cursor }
 
@@ -979,9 +1010,14 @@ struct BinaryReader {
         for _ in 0..<propertyCount {
             let key = try u16()
             if properties[key] != nil {
-                throw PamProtocolError.invalidPayload("Duplicate property id")
+                guard tolerant else {
+                    throw PamProtocolError.invalidPayload("Duplicate property id")
+                }
+                skip(key: key, node: id, reason: "duplicate property id (last value kept)")
             }
-            properties[key] = try value(for: key)
+            if let value = try guardedValue(for: key, node: id) {
+                properties[key] = value
+            }
         }
 
         return NodeSpec(
@@ -993,35 +1029,80 @@ struct BinaryReader {
         )
     }
 
+    /// Strict mode: same as `value(for:)`. Tolerant mode: a value whose
+    /// frame was read but whose content is invalid is dropped and reported;
+    /// the cursor already sits on the next property.
+    mutating func guardedValue(for key: Int, node: Int64) throws -> PropValue? {
+        guard tolerant else { return try value(for: key) }
+        do {
+            return try framedValue(for: key)
+        } catch let invalid as InvalidPropertyContent {
+            skip(key: key, node: node, reason: invalid.reason)
+            return nil
+        }
+    }
+
     mutating func value(for key: Int) throws -> PropValue {
+        do {
+            return try framedValue(for: key)
+        } catch let invalid as InvalidPropertyContent {
+            throw PamProtocolError.invalidPayload(invalid.reason)
+        }
+    }
+
+    private mutating func skip(key: Int, node: Int64, reason: String) {
+        if skippedProperties.count < 32 {
+            skippedProperties.append("Invalid property \(key) on node \(node) skipped: \(reason)")
+        }
+    }
+
+    /// Reads the whole framed value before validating its content, so a
+    /// content error (`InvalidPropertyContent`) never desynchronizes the
+    /// stream. Framing errors stay `PamProtocolError`.
+    private mutating func framedValue(for key: Int) throws -> PropValue {
         let tag = try u8()
         switch tag {
         case 1:
-            return .text(try strictUTF8(sizedBytes(), label: "Text property"))
+            let bytes = try sizedBytes()
+            return .text(try validated { try strictUTF8(bytes, label: "Text property") })
         case 2:
             return .integer(try i64())
         case 3:
-            return .decimal(try d64())
+            let value = Double(bitPattern: UInt64(bitPattern: try i64()))
+            guard value.isFinite else {
+                throw InvalidPropertyContent(reason: "Floating property must be finite")
+            }
+            return .decimal(value)
         case 4:
             switch try u8() {
             case 0: return .flag(false)
             case 1: return .flag(true)
-            default: throw PamProtocolError.invalidPayload("Invalid boolean value")
+            default: throw InvalidPropertyContent(reason: "Invalid boolean value")
             }
         case 5:
             let value = try sizedBytes()
             switch key {
             case PamConstants.items:
-                return .strings(try PackedStringList.decode(value))
+                return .strings(try validated { try PackedStringList.decode(value) })
             case PamConstants.sectionItems:
-                return .sections(try PackedSectionList.decode(value))
+                return .sections(try validated { try PackedSectionList.decode(value) })
             case PamConstants.hostProperties:
-                return .properties(try WireMap.decode(value))
+                return .properties(try validated { try WireMap.decode(value) })
             default:
                 return .bytes(value)
             }
         default:
             throw PamProtocolError.invalidPayload("Unknown property tag")
+        }
+    }
+
+    private func validated<T>(_ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch PamProtocolError.invalidPayload(let reason) {
+            throw InvalidPropertyContent(reason: reason)
+        } catch PamProtocolError.invalidProtocol(let reason) {
+            throw InvalidPropertyContent(reason: reason)
         }
     }
 

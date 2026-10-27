@@ -45,6 +45,27 @@
   - XCTest: `PamAnimatedImageTests`, `PamMediaParityTests`.
 
 ## 1.44.0 - 2026-10-26
+- iOS runtime: OPcache is now enabled in the embedded PHP (JIT stays off: iOS
+  forbids W^X). Compiled scripts persist in a file cache under
+  `Library/Caches/pam/opcache` (never backed up, purgeable), dropped whenever
+  the app bundle path or build changes; release builds mark sources immutable
+  (`opcache.validate_timestamps=0`), debug builds revalidate for hot reload.
+  Runtimes built before the builder forced the `mmap(MAP_ANON)` probe have no
+  shared memory model, so the bridge falls back to `opcache.file_cache_only`.
+- iOS runtime: `memory_limit` follows device RAM like Android (128/192/256M),
+  capped at a third of `os_proc_available_memory()`;
+  `PAM_NATIVE_MEMORY_LIMIT`, `PAM_NATIVE_OPCACHE=0`,
+  `PAM_NATIVE_OPCACHE_MEMORY` override it (`PamPhpRuntimeConfiguration`).
+- iOS runtime: memory warnings and going to background now also return the
+  Zend MM cached pages to the system (`gc_collect_cycles` + `zend_mm_gc`, the
+  `gc_mem_caches()` of PHP) after the PHP `MemoryPressure` handlers ran.
+- iOS runtime: an invalid property value (malformed UTF-8, non-finite
+  decimal, invalid boolean, malformed list/section/host map, duplicate id) is
+  skipped and reported as a non-fatal render error instead of dropping the
+  whole batch (Android `guardProperty` parity). `BatchDecoder.decode` stays
+  strict; the runtime uses `BatchDecoder.decodeTolerant`.
+- iOS runtime: `[PamNativePerf] firstFrameMs=` is logged once per process
+  (cold start from process creation to the first committed frame).
 
 - PHP SDK: the ext-mbstring polyfill functions moved from
   `src/Polyfill/mbstring.php` to `src/Polyfill/mbstring_functions.php`. The old
