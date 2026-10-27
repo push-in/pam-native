@@ -50,3 +50,19 @@ final class PamImageCoverClipTests: XCTestCase {
         XCTAssertTrue(view.clipsToBounds)
     }
 }
+
+@MainActor
+final class PamInputAccessibilityTests: XCTestCase {
+    /// A multiline input stays an accessibility element with UIKit's text
+    /// entry traits, so VoiceOver and UI tests find the focused editor.
+    func testMultilineInputKeepsTextEntryAccessibility() {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.multiline: .flag(true),
+            PamConstants.accessibilityLabel: .text("Mensagem"),
+        ], kind: .input, frame: Frame(x: 0, y: 0, width: 300, height: 44))
+        defer { renderer.close() }
+        XCTAssertTrue(view is UITextView)
+        XCTAssertTrue(view.isAccessibilityElement)
+        XCTAssertTrue(view.accessibilityTraits.isSuperset(of: PamRenderer.inputBaseTraits(view)))
+    }
+}

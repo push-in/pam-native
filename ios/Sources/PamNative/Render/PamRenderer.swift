@@ -4037,6 +4037,13 @@ public final class PamRenderer: @unchecked Sendable {
         view is PamMultilineInputField ? .newline : .blurAndSubmit
     }
 
+    private static let textFieldTraits = UITextField().accessibilityTraits
+    private static let textViewTraits = UITextView().accessibilityTraits
+
+    static func inputBaseTraits(_ view: UIView) -> UIAccessibilityTraits {
+        view is UITextView ? textViewTraits : textFieldTraits
+    }
+
     private func applyAccessibility(view: UIView, state: NodeState?) {
         guard let state else { return }
         let role = Int(
@@ -4048,7 +4055,11 @@ public final class PamRenderer: @unchecked Sendable {
         let explicitlyAccessible =
             state.properties[PamConstants.accessible]?.boolOrNil()
 
-        var traits: UIAccessibilityTraits = []
+        // Text inputs keep UIKit's own traits (text entry, editing state) and
+        // stay accessibility elements like Android's EditText: without them
+        // VoiceOver and UI tests cannot find the field that has the keyboard.
+        let textInput = view is UITextField || view is UITextView
+        var traits: UIAccessibilityTraits = textInput ? Self.inputBaseTraits(view) : []
         switch role {
         case 2, 5, 8, 11, 19, 25, 29:
             traits.insert(.button)
@@ -4091,10 +4102,16 @@ public final class PamRenderer: @unchecked Sendable {
             traits.insert(.updatesFrequently)
         }
 
-        view.accessibilityTraits = traits
+        // UIKit computes an input's traits on every read (the editing state
+        // marks the field that has the keyboard); assigning them freezes that.
+        if !textInput || !traits.subtracting(Self.inputBaseTraits(view)).isEmpty {
+            view.accessibilityTraits = traits
+        }
         view.isAccessibilityElement =
             explicitlyAccessible ??
-            (role != 1 && role != 17 && role != 34 && importance != 3)
+            (textInput
+                ? importance != 3
+                : (role != 1 && role != 17 && role != 34 && importance != 3))
         view.accessibilityElementsHidden = importance == 4
 
         let explicitValue =
