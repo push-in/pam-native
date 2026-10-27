@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- iOS modals: a tap on the backdrop above a bottom sheet closes it again
+  (gorhom `pressBehavior="close"`, Android's outside touch). The full-window
+  content container took the touch before the backdrop. When the app answers
+  the close request with `visible = false` while the native dismissal runs,
+  the repeated hide no longer restarts the dismissal, whose earlier completion
+  presented the sheet again with the app's emptied content.
+- iOS Pressable without its own `accessibilityLabel` announces the labels of
+  its content, like React Native (`RCTRecursiveAccessibilityLabel`) and a
+  focusable Android ViewGroup. A `GestureDetector` around a labelled button
+  became an unnamed button that hid the inner label from VoiceOver and UI
+  tests.
+
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
