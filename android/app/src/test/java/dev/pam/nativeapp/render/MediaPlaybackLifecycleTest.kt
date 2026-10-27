@@ -99,4 +99,13 @@ class MediaPlaybackLifecycleTest {
         lifecycle.ownerActive(true)
         assertTrue(lifecycle.mayPlay)
     }
+
+    @Test fun playIntentSurvivesBackgroundForTheResumeDecision() {
+        val lifecycle = playing()
+        lifecycle.hostActive(false)
+        assertFalse(lifecycle.mayPlay)
+        assertTrue("background keeps the intent: resume restores this player", lifecycle.wantsPlay)
+        lifecycle.request(false)
+        assertFalse("a paused player is restored only on demand", lifecycle.wantsPlay)
+    }
 }

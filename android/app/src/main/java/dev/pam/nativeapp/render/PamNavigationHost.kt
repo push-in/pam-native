@@ -1014,18 +1014,16 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     private fun animationsDisabled(): Boolean = PamMotionPolicy.isReduced(context)
 
+    /** Orientation the manifest declares for the activity, kept as the PlatformDefault. */
+    private var manifestOrientation: Int? = null
+
     private fun applyOrientation() {
         val activity = context as? Activity ?: return
-        val requested = when (navigationOrientation) {
-            2 -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-            3 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            4 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            5 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-            6 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            7 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            8 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
+        val declared = manifestOrientation ?: runCatching {
+            @Suppress("DEPRECATION")
+            activity.packageManager.getActivityInfo(activity.componentName, 0).screenOrientation
+        }.getOrDefault(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED).also { manifestOrientation = it }
+        val requested = navigationRequestedOrientation(navigationOrientation, declared)
         if (activity.requestedOrientation != requested) activity.requestedOrientation = requested
     }
 
@@ -1114,4 +1112,21 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val PRESENTATION_CONTAINED_MODAL = 3
         const val PRESENTATION_FORM_SHEET = 7
     }
+}
+
+/**
+ * `NavigationOrientation` → `ActivityInfo` orientation. PlatformDefault (1)
+ * is the orientation the manifest declares (a portrait-locked app stays
+ * portrait after a route that freed rotation). All (2) follows the user's
+ * auto-rotate setting (FULL_USER): a phone with rotation locked stays put.
+ */
+internal fun navigationRequestedOrientation(value: Int, manifest: Int): Int = when (value) {
+    2 -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+    3 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    4 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    5 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+    6 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    7 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    8 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+    else -> manifest
 }

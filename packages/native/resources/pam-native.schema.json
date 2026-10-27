@@ -241,6 +241,23 @@
                         "enum": ["portrait", "portraitUpsideDown", "landscapeLeft", "landscapeRight"]
                     },
                     "description": "Supported interface orientations (iPhone and iPad). Omit to keep the host default (portrait and both landscapes)."
+                },
+                "developmentRegion": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$",
+                    "maxLength": 35,
+                    "description": "Language of the app's own texts (BCP 47, e.g. \"pt-BR\"). Becomes the Xcode development region and CFBundleDevelopmentRegion, so system UI (photo picker, share sheet, default alert buttons) falls back to it instead of English. Omit to keep \"en\"."
+                },
+                "localizations": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 64,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$",
+                        "maxLength": 35
+                    },
+                    "description": "Languages the app is localized in (CFBundleLocalizations and the Xcode known regions). The development region is always included."
                 }
             }
         },

@@ -382,6 +382,16 @@ struct IosOptions {
     /// Supported interface orientations; empty keeps the host template.
     #[serde(default)]
     orientations: Vec<IosOrientation>,
+    /// Language of the app's own texts (BCP 47, e.g. `pt-BR`). It becomes the
+    /// Xcode project's development region and `CFBundleDevelopmentRegion`, so
+    /// system UI (pickers, share sheet, alerts' default buttons) falls back to
+    /// it instead of English. `None` keeps the host template (`en`).
+    #[serde(default)]
+    development_region: Option<String>,
+    /// Languages the app is localized in (`CFBundleLocalizations` and the
+    /// project's known regions). The development region is always included.
+    #[serde(default)]
+    localizations: Vec<String>,
 }
 
 impl Default for IosOptions {
@@ -394,7 +404,30 @@ impl Default for IosOptions {
             bundle_identifier: None,
             usage_descriptions: BTreeMap::new(),
             orientations: Vec::new(),
+            development_region: None,
+            localizations: Vec::new(),
         }
+    }
+}
+
+impl IosOptions {
+    /// Every localization the app declares, development region first, without
+    /// duplicates. Empty when the app declares neither.
+    fn effective_localizations(&self) -> Vec<String> {
+        let mut values: Vec<String> = Vec::new();
+        for value in self
+            .development_region
+            .iter()
+            .chain(self.localizations.iter())
+        {
+            if !values
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(value))
+            {
+                values.push(value.clone());
+            }
+        }
+        values
     }
 }
 
@@ -1665,10 +1698,94 @@ fn validate_ios_app_options(ios: &IosOptions) -> Result<(), String> {
         }
     }
     let mut seen = HashSet::new();
-    if ios.orientations.iter().any(|orientation| !seen.insert(*orientation)) {
+    if ios
+        .orientations
+        .iter()
+        .any(|orientation| !seen.insert(*orientation))
+    {
         return Err("ios.orientations must not repeat an orientation".to_owned());
     }
+    if let Some(region) = &ios.development_region
+        && !valid_language_tag(region)
+    {
+        return Err(format!(
+            "ios.developmentRegion {region:?} must be a language tag such as \"pt-BR\""
+        ));
+    }
+    if ios.localizations.len() > 64 {
+        return Err("ios.localizations is limited to 64 entries".to_owned());
+    }
+    let mut languages = HashSet::new();
+    for language in &ios.localizations {
+        if !valid_language_tag(language) || !languages.insert(language.to_ascii_lowercase()) {
+            return Err(format!(
+                "invalid or duplicate ios.localizations entry {language:?}"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// BCP 47 language tags as Xcode accepts them for regions: a 2-3 letter
+/// language, then optional script/region/variant subtags (`pt-BR`,
+/// `zh-Hans`, `es-419`).
+fn valid_language_tag(value: &str) -> bool {
+    let mut parts = value.split('-');
+    let Some(language) = parts.next() else {
+        return false;
+    };
+    value.len() <= 35
+        && (2..=3).contains(&language.len())
+        && language.bytes().all(|byte| byte.is_ascii_alphabetic())
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+}
+
+/// Sets the Xcode project's development region and known regions (the
+/// template ships `en`). `DEVELOPMENT_LANGUAGE`, used by the app and extension
+/// Info.plists, follows `developmentRegion`.
+fn apply_ios_project_regions(pbx: &str, ios: &IosOptions) -> Result<String, String> {
+    let Some(region) = &ios.development_region else {
+        if ios.localizations.is_empty() {
+            return Ok(pbx.to_owned());
+        }
+        let mut regions = vec!["en".to_owned()];
+        regions.extend(ios.localizations.iter().cloned());
+        return replace_ios_known_regions(pbx, &regions);
+    };
+    let development = "developmentRegion = en;";
+    if !pbx.contains(development) {
+        return Err("the iOS project template has no developmentRegion".to_owned());
+    }
+    let pbx = pbx.replacen(
+        development,
+        &format!("developmentRegion = \"{region}\";"),
+        1,
+    );
+    replace_ios_known_regions(&pbx, &ios.effective_localizations())
+}
+
+fn replace_ios_known_regions(pbx: &str, regions: &[String]) -> Result<String, String> {
+    let known = "knownRegions = (en, Base);";
+    if !pbx.contains(known) {
+        return Err("the iOS project template has no knownRegions".to_owned());
+    }
+    let mut values: Vec<String> = Vec::new();
+    for region in regions.iter().map(String::as_str).chain(["Base"]) {
+        if !values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(region))
+        {
+            values.push(region.to_owned());
+        }
+    }
+    let list = values
+        .iter()
+        .map(|region| format!("\"{region}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(pbx.replacen(known, &format!("knownRegions = ({list});"), 1))
 }
 
 /// Apple bundle identifiers: reverse-DNS, at least two components, only
@@ -1704,6 +1821,24 @@ fn merge_ios_app_info(ios: &IosOptions, info: &mut serde_json::Value) -> Result<
         object.insert(
             "UISupportedInterfaceOrientations~ipad".to_owned(),
             serde_json::Value::Array(values),
+        );
+    }
+    if let Some(region) = &ios.development_region {
+        object.insert(
+            "CFBundleDevelopmentRegion".to_owned(),
+            serde_json::Value::String(region.clone()),
+        );
+    }
+    let localizations = ios.effective_localizations();
+    if !localizations.is_empty() {
+        object.insert(
+            "CFBundleLocalizations".to_owned(),
+            serde_json::Value::Array(
+                localizations
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
         );
     }
     Ok(())
@@ -3582,6 +3717,15 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             ("__PAM_APP_ICON__", app_icon),
         ],
     )?;
+    {
+        let path = workspace.join("PamNativeApp.xcodeproj/project.pbxproj");
+        let pbx = fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let patched = apply_ios_project_regions(&pbx, &project.manifest.ios)?;
+        if patched != pbx {
+            write_atomic(&path, patched.as_bytes())?;
+        }
+    }
     replace_ios_placeholders(
         &workspace.join("App/PamAppDelegate.swift"),
         &[
@@ -3660,6 +3804,19 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
 
     has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
     merge_ios_app_info(&project.manifest.ios, &mut info)?;
+    let firebase = ios_firebase_config(&project.root);
+    has_entitlements |= apply_ios_push_entitlement(&mut entitlements, firebase.is_some());
+    if let Some(config) = &firebase {
+        warn_ios_firebase_bundle(config, application_id);
+        if let Some(object) = info.as_object_mut() {
+            // PamAppDelegate owns notifications; Firebase gets the APNs token
+            // through PamFirebaseMessaging instead of swizzling the delegate.
+            object.insert(
+                "FirebaseAppDelegateProxyEnabled".to_owned(),
+                serde_json::Value::Bool(false),
+            );
+        }
+    }
     merge_ios_appearance(project, &mut info, &info_path)?;
     write_ios_launch_assets(project, workspace, &mut info, &info_path)?;
     if let Some(object) = info.as_object_mut() {
@@ -3676,6 +3833,44 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
         )?;
     }
     Ok(has_entitlements)
+}
+
+/// Build setting the host defines per configuration: `development` for Debug,
+/// `production` for Release (archives, TestFlight, App Store).
+const IOS_APS_ENVIRONMENT: &str = "$(PAM_APS_ENVIRONMENT)";
+
+/// Remote notifications need `aps-environment` on the app itself, matching
+/// the signing configuration. Firebase Messaging turns it on; a plugin value
+/// (e.g. a fixed `development`) is replaced so Release always signs for the
+/// production APNs gateway.
+fn apply_ios_push_entitlement(entitlements: &mut serde_json::Value, firebase: bool) -> bool {
+    let Some(object) = entitlements.as_object_mut() else {
+        return false;
+    };
+    if !firebase && !object.contains_key("aps-environment") {
+        return false;
+    }
+    object.insert(
+        "aps-environment".to_owned(),
+        serde_json::Value::String(IOS_APS_ENVIRONMENT.to_owned()),
+    );
+    true
+}
+
+/// FCM only reaches the app registered for the plist's bundle identifier.
+fn warn_ios_firebase_bundle(config: &Path, application_id: &str) {
+    let bundle = read_apple_plist(config).ok().and_then(|value| {
+        value
+            .get("BUNDLE_ID")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    });
+    if let Some(bundle) = bundle.filter(|bundle| bundle != application_id) {
+        eprintln!(
+            "warning: {} is for {bundle}, but applicationId is {application_id}; FCM pushes will not reach this app until Firebase has an iOS app for {application_id}",
+            config.display()
+        );
+    }
 }
 
 /// Exposes the configured appearance to the iOS host, which applies the
@@ -4583,7 +4778,10 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
             project.manifest.ios_application_id(),
         ],
     )?;
-    println!("Started {} on {simulator}", project.manifest.ios_application_id());
+    println!(
+        "Started {} on {simulator}",
+        project.manifest.ios_application_id()
+    );
     Ok(())
 }
 
@@ -6265,6 +6463,8 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         .iter()
         .filter(|plugin| has_ios_payload(&plugin.manifest))
         .collect::<Vec<_>>();
+    let firebase_config = ios_firebase_config(&project.root);
+    let firebase_package = ios_firebase_swift_package();
     let mut package_dependencies = BTreeMap::<String, &PluginSwiftPackage>::new();
     let mut target_names = Vec::new();
     let mut targets = String::new();
@@ -6370,11 +6570,37 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         .map(|target| swift_string(target))
         .collect::<Vec<_>>()
         .join(", ");
-    let aggregate_dependencies = if aggregate_target_dependencies.is_empty() {
+    let mut aggregate_dependencies = if aggregate_target_dependencies.is_empty() {
         ".product(name: \"PamNative\", package: \"ios\")".to_owned()
     } else {
         format!(".product(name: \"PamNative\", package: \"ios\"), {aggregate_target_dependencies}")
     };
+    // GoogleService-Info.plist turns on Firebase Messaging like
+    // google-services.json does on Android: the aggregate target compiles the
+    // FCM token bridge and bundles the plist it configures Firebase from.
+    let mut aggregate_resources = "";
+    let mut registry_install = "";
+    if let Some(config) = &firebase_config {
+        package_dependencies
+            .entry(firebase_package.url.clone())
+            .or_insert(&firebase_package);
+        let identity = swift_package_identity(&firebase_package.url)?;
+        for product in &firebase_package.products {
+            aggregate_dependencies.push_str(&format!(
+                ", .product(name: {}, package: {})",
+                swift_string(product),
+                swift_string(&identity)
+            ));
+        }
+        let sources = package_root.join("Sources/PamNativePlugins");
+        fs::copy(config, sources.join("GoogleService-Info.plist"))
+            .map_err(|error| format!("cannot bundle {} for iOS: {error}", config.display()))?;
+        let bridge = native_home.join(IOS_FIREBASE_BRIDGE);
+        fs::copy(&bridge, sources.join("PamFirebaseMessaging.swift"))
+            .map_err(|error| format!("cannot stage {}: {error}", bridge.display()))?;
+        aggregate_resources = "\n            resources: [.copy(\"GoogleService-Info.plist\")],";
+        registry_install = "PamFirebaseMessaging.install()\n        return ";
+    }
     let swift_dictionary = |entries: &[String]| {
         if entries.is_empty() {
             "[:]".to_owned()
@@ -6383,8 +6609,9 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         }
     };
     let registry = format!(
-        "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        {}\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        {}\n    }}\n}}\n",
+        "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        {}{}\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        {}\n    }}\n}}\n",
         registry_imports,
+        registry_install,
         swift_dictionary(&module_entries),
         swift_dictionary(&view_entries),
     );
@@ -6393,7 +6620,7 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         registry.as_bytes(),
     )?;
     targets.push_str(&format!(
-        "        .target(\n            name: \"PamNativePlugins\",\n            dependencies: [{aggregate_dependencies}],\n            path: \"Sources/PamNativePlugins\"\n        ),\n"
+        "        .target(\n            name: \"PamNativePlugins\",\n            dependencies: [{aggregate_dependencies}],\n            path: \"Sources/PamNativePlugins\",{aggregate_resources}\n        ),\n"
     ));
     let external_dependencies = package_dependencies
         .values()
@@ -6412,6 +6639,34 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         targets,
     );
     write_atomic(&package_root.join("Package.swift"), manifest.as_bytes())
+}
+
+/// Firebase Messaging bridge compiled into the generated plugin package
+/// (path inside the staged native SDK).
+const IOS_FIREBASE_BRIDGE: &str = "ios/Firebase/PamFirebaseMessaging.swift";
+
+/// `GoogleService-Info.plist` that turns on FCM tokens on iOS, looked up like
+/// Android's google-services.json (`.pam/` first, then the project root).
+fn ios_firebase_config(root: &Path) -> Option<PathBuf> {
+    [
+        root.join(".pam/GoogleService-Info.plist"),
+        root.join("GoogleService-Info.plist"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
+/// Firebase SDK pinned like the pam-native-firebase plugin, so both resolve
+/// to one package when an app uses both.
+fn ios_firebase_swift_package() -> PluginSwiftPackage {
+    PluginSwiftPackage {
+        url: "https://github.com/firebase/firebase-ios-sdk.git".to_owned(),
+        requirement: PluginSwiftPackageRequirement {
+            kind: SwiftPackageRequirementKind::Exact,
+            value: "12.17.0".to_owned(),
+        },
+        products: vec!["FirebaseCore".to_owned(), "FirebaseMessaging".to_owned()],
+    }
 }
 
 fn swift_target_name(index: usize, package: &str) -> String {
@@ -7578,7 +7833,10 @@ fn toggle_devtools_ios(project_path: PathBuf) -> Result<u8, String> {
             &format!("{scheme}://devtools"),
         ],
     )?;
-    println!("Toggled Pam Native DevTools in {}", manifest.ios_application_id());
+    println!(
+        "Toggled Pam Native DevTools in {}",
+        manifest.ios_application_id()
+    );
     Ok(0)
 }
 
@@ -9100,7 +9358,10 @@ mod tests {
     #[test]
     fn branch_installs_use_the_cli_release_for_plugin_checks() {
         let cli = parse_release_version(env!("CARGO_PKG_VERSION")).expect("cli version");
-        assert_eq!(installed_release_version("dev-feat/ios-build").unwrap(), cli);
+        assert_eq!(
+            installed_release_version("dev-feat/ios-build").unwrap(),
+            cli
+        );
         assert_eq!(installed_release_version("1.x-dev").unwrap(), cli);
         assert_eq!(installed_release_version("v1.43.2").unwrap(), (1, 43, 2));
         assert!(installed_release_version("banana").is_err());
@@ -11083,7 +11344,10 @@ mod bundle_exclusion_tests {
         for bundle in ["single", "com.bad_underscore", "com..empty", ""] {
             let mut ios = IosOptions::default();
             ios.bundle_identifier = Some(bundle.to_owned());
-            assert!(validate_ios_app_options(&ios).is_err(), "accepted {bundle:?}");
+            assert!(
+                validate_ios_app_options(&ios).is_err(),
+                "accepted {bundle:?}"
+            );
         }
         let mut ios = IosOptions::default();
         ios.usage_descriptions
@@ -11091,6 +11355,49 @@ mod bundle_exclusion_tests {
         assert!(validate_ios_app_options(&ios).is_err());
         let mut ios = IosOptions::default();
         ios.orientations = vec![IosOrientation::Portrait, IosOrientation::Portrait];
+        assert!(validate_ios_app_options(&ios).is_err());
+    }
+
+    #[test]
+    fn ios_development_region_and_localizations_reach_info_plist_and_project() {
+        let ios: IosOptions = serde_json::from_value(serde_json::json!({
+            "developmentRegion": "pt-BR",
+            "localizations": ["en", "pt-BR"]
+        }))
+        .unwrap();
+        validate_ios_app_options(&ios).unwrap();
+        let mut info = serde_json::json!({
+            "CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)"
+        });
+        merge_ios_app_info(&ios, &mut info).unwrap();
+        assert_eq!(info["CFBundleDevelopmentRegion"], "pt-BR");
+        assert_eq!(
+            info["CFBundleLocalizations"],
+            serde_json::json!(["pt-BR", "en"])
+        );
+
+        let template = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
+        let pbx = apply_ios_project_regions(template, &ios).unwrap();
+        assert!(pbx.contains("developmentRegion = \"pt-BR\";"));
+        assert!(pbx.contains("knownRegions = (\"pt-BR\", \"en\", \"Base\");"));
+        assert!(!pbx.contains("developmentRegion = en;"));
+
+        let default = IosOptions::default();
+        assert_eq!(
+            apply_ios_project_regions(template, &default).unwrap(),
+            template
+        );
+        let mut untouched = serde_json::json!({});
+        merge_ios_app_info(&default, &mut untouched).unwrap();
+        assert!(untouched.get("CFBundleLocalizations").is_none());
+
+        for tag in ["", "p", "portuguese", "pt_BR", "pt-", "pt-BR\""] {
+            let mut ios = IosOptions::default();
+            ios.development_region = Some(tag.to_owned());
+            assert!(validate_ios_app_options(&ios).is_err(), "accepted {tag:?}");
+        }
+        let mut ios = IosOptions::default();
+        ios.localizations = vec!["pt-BR".to_owned(), "pt-br".to_owned()];
         assert!(validate_ios_app_options(&ios).is_err());
     }
 
@@ -11138,6 +11445,134 @@ mod bundle_exclusion_tests {
         entitlements =
             serde_json::json!({"com.apple.developer.associated-domains":"invalid plugin value"});
         assert!(merge_ios_links(&ios, &mut info, &mut entitlements).is_err());
+    }
+
+    #[test]
+    fn ios_push_entitlement_follows_the_build_configuration() {
+        let mut entitlements = serde_json::json!({});
+        assert!(!apply_ios_push_entitlement(&mut entitlements, false));
+        assert_eq!(entitlements, serde_json::json!({}));
+
+        assert!(apply_ios_push_entitlement(&mut entitlements, true));
+        assert_eq!(
+            entitlements["aps-environment"],
+            serde_json::json!("$(PAM_APS_ENVIRONMENT)")
+        );
+
+        // A plugin's fixed `development` would sign Release for the sandbox.
+        let mut plugin = serde_json::json!({"aps-environment": "development"});
+        assert!(apply_ios_push_entitlement(&mut plugin, false));
+        assert_eq!(
+            plugin["aps-environment"],
+            serde_json::json!("$(PAM_APS_ENVIRONMENT)")
+        );
+
+        let project = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
+        assert_eq!(
+            project
+                .matches("PAM_APS_ENVIRONMENT = development;")
+                .count(),
+            1
+        );
+        assert_eq!(
+            project.matches("PAM_APS_ENVIRONMENT = production;").count(),
+            1
+        );
+        let debug = project
+            .lines()
+            .find(|line| line.contains("PAM_APS_ENVIRONMENT = development;"))
+            .expect("debug app configuration");
+        assert!(debug.contains("name = Debug;"));
+        assert!(debug.contains("__PAM_CODE_SIGN_ENTITLEMENTS__"));
+        let release = project
+            .lines()
+            .find(|line| line.contains("PAM_APS_ENVIRONMENT = production;"))
+            .expect("release app configuration");
+        assert!(release.contains("name = Release;"));
+        assert!(release.contains("__PAM_CODE_SIGN_ENTITLEMENTS__"));
+    }
+
+    #[test]
+    fn ios_firebase_config_compiles_the_fcm_token_bridge() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-ios-firebase-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("vendor")).expect("vendor");
+        fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
+        fs::write(root.join("index.php"), "<?php\n").expect("entry");
+        fs::write(
+            root.join(MANIFEST_NAME),
+            r#"{
+                "version": 1,
+                "applicationId": "app.pam.push",
+                "name": "Push",
+                "entry": "index.php",
+                "modules": [],
+                "views": []
+            }"#,
+        )
+        .expect("manifest");
+        let native_home = root.join("pam-native-home");
+        fs::create_dir_all(native_home.join("ios/Firebase")).expect("native iOS package");
+        fs::write(native_home.join("ios/Package.swift"), "// fixture\n").expect("Package.swift");
+        fs::write(
+            native_home.join(IOS_FIREBASE_BRIDGE),
+            include_str!("../../../ios/Firebase/PamFirebaseMessaging.swift"),
+        )
+        .expect("bridge");
+        let package = root.join(".pam-native/ios/PamNativePlugins");
+        let sources = package.join("Sources/PamNativePlugins");
+
+        let project = load_project(&root).expect("project");
+        assert!(ios_firebase_config(&root).is_none());
+        write_ios_plugin_package(&project, &native_home).expect("package without Firebase");
+        let manifest = fs::read_to_string(package.join("Package.swift")).expect("Package.swift");
+        assert!(!manifest.contains("firebase-ios-sdk"));
+        assert!(!manifest.contains("resources:"));
+        assert!(!sources.join("PamFirebaseMessaging.swift").exists());
+        let registry =
+            fs::read_to_string(sources.join("PamNativePlugins.swift")).expect("registry");
+        assert!(!registry.contains("PamFirebaseMessaging"));
+
+        fs::create_dir_all(root.join(".pam")).expect(".pam");
+        fs::write(root.join(".pam/GoogleService-Info.plist"), "<plist/>\n").expect("plist");
+        assert_eq!(
+            ios_firebase_config(&root),
+            Some(root.join(".pam/GoogleService-Info.plist"))
+        );
+        write_ios_plugin_package(&project, &native_home).expect("package with Firebase");
+        let manifest = fs::read_to_string(package.join("Package.swift")).expect("Package.swift");
+        assert!(manifest.contains(
+            ".package(url: \"https://github.com/firebase/firebase-ios-sdk.git\", exact: \"12.17.0\")"
+        ));
+        assert!(
+            manifest
+                .contains(".product(name: \"FirebaseMessaging\", package: \"firebase-ios-sdk\")")
+        );
+        assert!(
+            manifest.contains(".product(name: \"FirebaseCore\", package: \"firebase-ios-sdk\")")
+        );
+        assert!(manifest.contains("resources: [.copy(\"GoogleService-Info.plist\")]"));
+        assert_eq!(
+            fs::read_to_string(sources.join("GoogleService-Info.plist")).expect("bundled plist"),
+            "<plist/>\n"
+        );
+        let bridge =
+            fs::read_to_string(sources.join("PamFirebaseMessaging.swift")).expect("bridge");
+        assert!(bridge.contains("PamPushNotifications.tokenProvider = shared"));
+        assert!(bridge.contains("setAPNSToken(apnsToken, type: .unknown)"));
+        let registry =
+            fs::read_to_string(sources.join("PamNativePlugins.swift")).expect("registry");
+        let install = registry
+            .find("PamFirebaseMessaging.install()")
+            .expect("install");
+        assert!(install < registry.find("return [:]").expect("modules"));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

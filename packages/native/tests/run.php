@@ -7599,6 +7599,48 @@ $assert(
     'WebView host allowlists must use the append-only native protocol.',
 );
 
+// A fixed full-screen page (a game): no scroll, bounce or over-scroll, on the
+// existing scroll keys (no new protocol numbers).
+$fixedWebView = WebView::make('https://example.com/app')
+    ->scrollEnabled(false)
+    ->overScrollMode(ScrollOverScrollMode::Never);
+$assert(
+    $fixedWebView->properties()[PropKey::ScrollEnabled->value] === false
+        && $fixedWebView->properties()[PropKey::ScrollOverScrollMode->value] === ScrollOverScrollMode::Never->value,
+    'WebView must accept scrollEnabled and overScrollMode on the shared scroll keys.',
+);
+$fixedTemplate = TemplateRenderer::render(TemplateCompiler::compile(
+    '<WebView source="https://example.com/app" scrollEnabled="false" overScrollMode="never" />',
+), null, []);
+$assert(
+    $fixedTemplate->kind() === NodeKind::WebView
+        && ($fixedTemplate->properties()[PropKey::ScrollEnabled->value] ?? null) === false
+        && ($fixedTemplate->properties()[PropKey::ScrollOverScrollMode->value] ?? null) === ScrollOverScrollMode::Never->value,
+    'WebView templates must forward scrollEnabled and overScrollMode.',
+);
+$webMessages = [];
+$messageWebView = WebView::make('https://example.com/app')->onMessage(
+    static function (string $message, string $url) use (&$webMessages): void {
+        $webMessages[] = [$message, $url];
+    },
+);
+$messageWebView->events()[EventKind::WebViewMessage->value](Wire::map([
+    'message' => '{"type":1}',
+    'url' => 'https://example.com/app',
+]));
+$messageWebView->events()[EventKind::WebViewMessage->value](Wire::map(['message' => 'legacy']));
+$legacyMessages = [];
+WebView::make('https://example.com/app')->onMessage(
+    static function (string $message) use (&$legacyMessages): void {
+        $legacyMessages[] = $message;
+    },
+)->events()[EventKind::WebViewMessage->value](Wire::map(['message' => 'one', 'url' => 'https://example.com/']));
+$assert(
+    $webMessages === [['{"type":1}', 'https://example.com/app'], ['legacy', '']]
+        && $legacyMessages === ['one'],
+    'WebView messages must carry the posting page URL and keep one-argument handlers working.',
+);
+
 $permission = new PermissionDecision(
     PermissionKind::Photos,
     PermissionStatus::Limited,

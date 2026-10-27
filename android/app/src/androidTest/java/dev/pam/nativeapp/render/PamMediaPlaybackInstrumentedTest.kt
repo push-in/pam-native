@@ -49,6 +49,98 @@ class PamMediaPlaybackInstrumentedTest {
         assertStopped(media)
     }
 
+    @Test fun backgroundReleasesTheDecoderAndResumeRestoresOnlyThePlayingOne() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setAutoPlay(true)
+            media.setLoop(true)
+            media.setSource(source)
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+        main {
+            media.onHostPause()
+            media.onHostBackground()
+            assertTrue(media.releasedForBackground)
+            assertEquals(null, field(media, "preparedPlayer"))
+            assertEquals(null, field(media, "exo"))
+        }
+        val restored = CountDownLatch(1)
+        main {
+            media.onReady = { restored.countDown() }
+            media.onHostResume()
+            assertFalse(media.releasedForBackground)
+        }
+        assertTrue("the playing player comes back", restored.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+    }
+
+    @Test fun pausedPlayerStaysReleasedAfterResumeUntilPlayOrSeek() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setSource(source)
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        main {
+            media.onHostPause()
+            media.onHostBackground()
+            media.onHostResume()
+            assertTrue("a paused neighbour warms again on demand", media.awaitingRestore)
+            assertEquals(null, field(media, "preparedPlayer"))
+        }
+        SystemClock.sleep(150)
+        main { assertEquals(null, field(media, "preparedPlayer")) }
+        val restored = CountDownLatch(1)
+        main {
+            media.onReady = { restored.countDown() }
+            media.setAutoPlay(true)
+            assertFalse(media.awaitingRestore)
+        }
+        assertTrue(restored.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+    }
+
+    @Test fun sourceSetInBackgroundAllocatesNothingUntilResume() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setAutoPlay(true)
+            media.onHostPause()
+            PamMediaView.appInBackground = true
+            media.onHostBackground()
+            media.setSource(source)
+            assertTrue(media.awaitingRestore)
+        }
+        assertFalse("no decoder while the app is in background", ready.await(400, TimeUnit.MILLISECONDS))
+        main {
+            PamMediaView.appInBackground = false
+            media.onHostResume()
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+    }
+
+    @Test fun keepAlivePlayerOnlyPausesInBackground() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setKeepAliveWhenCovered(true)
+            media.setAutoPlay(true)
+            media.setSource(source)
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        main {
+            media.onHostPause()
+            media.onHostBackground()
+            assertFalse(media.releasedForBackground)
+            assertTrue(field(media, "preparedPlayer") != null)
+            media.onHostResume()
+        }
+        awaitPlaying(media, true)
+    }
+
     @Test fun hiddenParentBlocksLatePreparationAndDetachReleasesThePlayer() = withMedia { media, parent, source ->
         val ready = CountDownLatch(1)
         main {

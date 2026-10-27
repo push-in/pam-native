@@ -201,6 +201,24 @@ internal fun modalNavigationBarStyle(
     )
 }
 
+/**
+ * A modal whose content draws under a transparent navigation bar (edge to
+ * edge, Android 10+) gives its buttons the style of the StatusBar declared
+ * inside it: an always-dark editor in the light theme gets light buttons. An opaque or
+ * scrimmed bar is painted in the theme's colour, so its buttons keep the
+ * theme's appearance.
+ */
+internal fun modalNavigationBarLightAppearance(
+    sdkInt: Int,
+    edgeToEdge: Boolean,
+    authoredDarkIcons: Boolean?,
+    themeDarkIcons: Boolean,
+): Boolean = if (edgeToEdge && sdkInt >= Build.VERSION_CODES.Q) {
+    useDarkNavigationBarIcons(authoredDarkIcons, themeDarkIcons)
+} else {
+    themeDarkIcons
+}
+
 /** RN `WindowUtil` LightNavigationBarColor / DarkNavigationBarColor. */
 internal const val MODAL_LIGHT_NAVIGATION_BAR = 0xE6FFFFFF.toInt()
 internal const val MODAL_DARK_NAVIGATION_BAR = 0x801B1B1B.toInt()
@@ -497,6 +515,8 @@ internal class PamModalHost @JvmOverloads constructor(
         val hidden: Boolean,
         val translucent: Boolean,
         val navigationBarHidden: Boolean,
+        /** Style of the StatusBar declared inside this modal (null: none). */
+        val navigationDarkIcons: Boolean?,
     )
 
     fun applyStatusBar(
@@ -505,8 +525,16 @@ internal class PamModalHost @JvmOverloads constructor(
         hidden: Boolean,
         translucent: Boolean,
         navigationBarHidden: Boolean = false,
+        navigationDarkIcons: Boolean? = null,
     ) {
-        statusBarConfig = ModalStatusBar(color, useDarkIcons, hidden, translucent, navigationBarHidden)
+        statusBarConfig = ModalStatusBar(
+            color,
+            useDarkIcons,
+            hidden,
+            translucent,
+            navigationBarHidden,
+            navigationDarkIcons,
+        )
         dialog?.let {
             applyStoredStatusBar(it)
             applyNavigationBar(it)
@@ -528,7 +556,12 @@ internal class PamModalHost @JvmOverloads constructor(
             // An edge-to-edge window (either bar translucent, or a bottom
             // sheet) draws its content under the navigation bar too.
             translucent = edgeToEdgeWindow(),
-            lightAppearance = PamAppearance.bool(context, R.bool.pam_light_navigation_bar, dark),
+            lightAppearance = modalNavigationBarLightAppearance(
+                sdkInt = Build.VERSION.SDK_INT,
+                edgeToEdge = edgeToEdgeWindow(),
+                authoredDarkIcons = statusBarConfig?.navigationDarkIcons,
+                themeDarkIcons = PamAppearance.bool(context, R.bool.pam_light_navigation_bar, dark),
+            ),
             windowBackground = PamAppearance.color(context, R.color.pam_window_background, dark),
             sheet = presentation == PRESENTATION_SHEET,
         )

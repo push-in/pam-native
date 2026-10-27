@@ -66,3 +66,57 @@ final class PamInputAccessibilityTests: XCTestCase {
         XCTAssertTrue(view.accessibilityTraits.isSuperset(of: PamRenderer.inputBaseTraits(view)))
     }
 }
+
+/// A recycled thumbnail whose source turns into a local file keeps that file:
+/// the cached remote picture its previous source was still loading never
+/// paints over it afterwards.
+@MainActor
+final class PamImageSourceSwitchTests: XCTestCase {
+    private var fileURL: URL!
+    private let remote = "https://example.invalid/pam-source-switch-\(UUID().uuidString).png"
+
+    private static func png(_ color: UIColor) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40), format: format).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+        }
+        return try XCTUnwrap(image.pngData())
+    }
+
+    override func setUpWithError() throws {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("pam-files", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        fileURL = directory.appendingPathComponent("source-switch-local.png")
+        try Self.png(.blue).write(to: fileURL)
+        let stored = expectation(description: "remote picture cached")
+        PamMediaDiskCache.shared.store(
+            try Self.png(.red),
+            source: remote,
+            stableKey: nil,
+            checksum: nil,
+            limit: PamMediaDiskCache.defaultDiskBytes,
+            pinned: false
+        ) { _ in stored.fulfill() }
+        wait(for: [stored], timeout: 5)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    func testLocalSourceIsNotOverwrittenByThePreviousSourcesPendingLoad() throws {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.source: .text(remote),
+        ], kind: .image, frame: Frame(x: 0, y: 0, width: 40, height: 40))
+        defer { renderer.close() }
+        // The cached remote picture is decoded and painted asynchronously;
+        // the source changes before that happens.
+        renderer.commit([[.update(id: 2, key: PamConstants.source, value: .text("pam-file:///source-switch-local.png"))]])
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let pixel = PamRenderTestSupport.pixel(PamRenderTestSupport.snapshot(view), 20, 20)
+        PamRenderTestSupport.assertColor(pixel, 0xFF0000FF, tolerance: 40)
+    }
+}

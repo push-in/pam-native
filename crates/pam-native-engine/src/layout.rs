@@ -8450,6 +8450,95 @@ mod css_flex_tests {
         assert_eq!(position[&8].y + position[&8].height, 500.0);
     }
 
+    /// A keyboard dock: a padding `KeyboardAvoidingView` measured from its own
+    /// laid-out frame. `keyboardVerticalOffset` is the gap above the keyboard;
+    /// the resting bottom (a safe-area padding around it, or a frame that
+    /// ends below the window inside scrolled content) needs no measuring.
+    fn modal_dock(container: Vec<(PropKey, PropValue)>) -> Tree {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        vec![
+                            (PropKey::ModalPresentation, PropValue::Integer(1)),
+                            (PropKey::ModalStatusBarTranslucent, PropValue::Boolean(true)),
+                        ],
+                    ),
+                ),
+                (3, node(3, 2, 0, NodeKind::View, container)),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::KeyboardAvoidingView,
+                        vec![
+                            (PropKey::KeyboardBehavior, PropValue::Integer(3)),
+                            (PropKey::KeyboardVerticalOffset, f(8.0)),
+                            (PropKey::FlexGrow, f(1.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(5, 4, 0, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (
+                    6,
+                    node(6, 4, 1, NodeKind::View, vec![(PropKey::Height, f(100.0))]),
+                ),
+            ]),
+        }
+    }
+
+    #[test]
+    fn padding_keyboard_dock_rests_on_its_frame_and_sits_its_gap_above_the_keyboard() {
+        // Resting above a 34 dp safe-area bottom.
+        let safe = modal_dock(vec![
+            (PropKey::FlexGrow, f(1.0)),
+            (PropKey::PaddingBottom, f(34.0)),
+        ]);
+        let closed = surface_keyboard_layout(&safe, &[]);
+        assert_eq!(
+            closed[&6].y + closed[&6].height,
+            766.0,
+            "rests on the safe area"
+        );
+        let open = surface_keyboard_layout(&safe, &[(2, 300.0)]);
+        assert_eq!(
+            open[&6].y + open[&6].height,
+            492.0,
+            "8 dp above the keyboard"
+        );
+
+        // Inside scrolled content the dock may end below the window.
+        let below = modal_dock(vec![
+            (PropKey::Height, f(900.0)),
+            (PropKey::FlexShrink, f(0.0)),
+        ]);
+        let open = surface_keyboard_layout(&below, &[(2, 300.0)]);
+        assert_eq!(
+            open[&6].y + open[&6].height,
+            492.0,
+            "still 8 dp above the keyboard"
+        );
+    }
+
     #[test]
     fn surface_keyboard_changes_only_relayout_surfaces_that_avoid_it() {
         let tree = modal_composer(3, None);

@@ -46,4 +46,18 @@ class PamStatusBarAppearanceTest {
             ),
         )
     }
+
+    @Test
+    fun authoredStatusBarStyleAlsoStylesTheNavigationBar() {
+        // light-content over the light theme (dark viewer): light buttons.
+        assertFalse(useDarkNavigationBarIcons(authoredDarkIcons = false, themeDarkIcons = true))
+        // dark-content over the dark theme: dark buttons.
+        assertTrue(useDarkNavigationBarIcons(authoredDarkIcons = true, themeDarkIcons = false))
+    }
+
+    @Test
+    fun withoutAuthoredStyleTheNavigationBarFollowsTheTheme() {
+        assertTrue(useDarkNavigationBarIcons(authoredDarkIcons = null, themeDarkIcons = true))
+        assertFalse(useDarkNavigationBarIcons(authoredDarkIcons = null, themeDarkIcons = false))
+    }
 }

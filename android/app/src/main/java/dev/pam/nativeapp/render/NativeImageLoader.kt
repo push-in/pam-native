@@ -45,6 +45,12 @@ internal data class NativeImageRequest(
     val mediaCacheMaxBytes: Long = 0,
     val mediaCacheChecksum: String? = null,
     val repeat: Boolean = false,
+    /**
+     * Drop the decoded bitmap while the view is hidden even when the memory
+     * cache is not used (a media poster under its painted video); it is
+     * decoded again from the disk cache when the view shows again.
+     */
+    val releaseWhenHidden: Boolean = false,
 ) {
     /**
      * Identity of a request. Every field is an immutable value, so the data
@@ -126,6 +132,61 @@ internal fun mediaStoreKind(source: String): Int {
 }
 
 /**
+ * A `content://media` source that may be a video (a video row, or a Files row
+ * whose media type is read from the provider). A video is never read as image
+ * bytes: at any view size it draws the platform thumbnail (its poster frame),
+ * so a preview-sized still of a gallery video works like a grid cell.
+ */
+internal fun isMediaStoreVideoPosterCandidate(source: String, targetWidth: Int, targetHeight: Int): Boolean {
+    if (targetWidth <= 0 || targetHeight <= 0) return false
+    val uri = runCatching { URI(source) }.getOrNull() ?: return false
+    if (!uri.scheme.equals("content", ignoreCase = true) || !uri.authority.equals("media", ignoreCase = true)) return false
+    val kind = mediaStoreKind(source)
+    return kind == MEDIA_STORE_VIDEO || kind == MEDIA_STORE_FILE
+}
+
+/** Where a MediaStore thumbnail comes from on this API level. */
+internal enum class MediaStoreThumbnailSource {
+    /** Android 10+: the provider's typed image stream (any image MIME type) at the requested size (cancellable). */
+    PROVIDER_STREAM,
+
+    /** Android 8-9: the provider's cached MINI_KIND thumbnail; never a decoded video frame. */
+    LEGACY_MINI_KIND,
+}
+
+internal fun mediaStoreThumbnailSource(sdk: Int): MediaStoreThumbnailSource =
+    if (sdk >= 29) MediaStoreThumbnailSource.PROVIDER_STREAM else MediaStoreThumbnailSource.LEGACY_MINI_KIND
+
+/**
+ * A MediaStore row without a platform thumbnail: photos fall back to the
+ * sampled file decode; videos fail the load instead of reading (up to 16 MiB
+ * of) the container per cell and failing to decode it.
+ */
+internal fun mediaStoreFallsBackToFileDecode(video: Boolean): Boolean = !video
+
+/**
+ * Gallery stills are opaque: RGB_565 halves every thumbnail bitmap (heap on
+ * API 26-27, the GPU buffer of the HARDWARE copy on API 28+).
+ */
+internal val MEDIA_STORE_THUMBNAIL_STORAGE = NativeBitmapStorage.RGB_565
+
+internal fun NativeBitmapStorage.decodeConfig(): Bitmap.Config = when (this) {
+    NativeBitmapStorage.HARDWARE -> Bitmap.Config.HARDWARE
+    NativeBitmapStorage.RGB_565 -> Bitmap.Config.RGB_565
+    NativeBitmapStorage.ARGB_8888 -> Bitmap.Config.ARGB_8888
+}
+
+/** inSampleSize (power of two) so the decoded thumbnail still covers the requested box. */
+internal fun thumbnailSampleSize(sourceWidth: Int, sourceHeight: Int, targetWidth: Int, targetHeight: Int): Int {
+    if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) return 1
+    var sample = 1
+    while (sourceWidth / (sample * 2) >= targetWidth && sourceHeight / (sample * 2) >= targetHeight) {
+        sample *= 2
+    }
+    return sample
+}
+
+/**
  * The platform thumbnail fits inside the requested box; a cell crops its image
  * (cover). A square box whose edge is the cell's longer side times the item's
  * aspect ratio yields a thumbnail whose shorter side still covers the cell,
@@ -161,6 +222,20 @@ internal fun coverScaledThumbnail(bitmap: Bitmap, targetWidth: Int, targetHeight
     if (scaled !== bitmap) bitmap.recycle()
     return scaled
 }
+
+/**
+ * Whether a hidden view may give its decoded pixels back: it is restored
+ * from the memory cache, or from the disk cache for `releaseWhenHidden`.
+ */
+internal fun isReleasableImageRequest(request: NativeImageRequest): Boolean =
+    !isInlineImageSource(request.source) &&
+        request.cachePolicy != IMAGE_CACHE_RELOAD &&
+        request.cachePolicy != IMAGE_CACHE_NONE &&
+        request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+        (
+            request.releaseWhenHidden ||
+                (request.mediaCachePolicy != MEDIA_CACHE_DISK && request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST)
+        )
 
 internal fun isInlineImageSource(source: String): Boolean =
     source.regionMatches(0, "data:image/", 0, "data:image/".length, ignoreCase = true)
@@ -230,6 +305,9 @@ internal class NativeImageLoader(
     }
     private val inFlight = InFlightImageLoads<NativeImageResult>()
     private val active = WeakHashMap<PamImageView, ActiveRequest>()
+    // Provider thumbnail work per decoded key: a recycled or rebound gallery
+    // cell cancels it so MediaProvider stops generating for a gone tile.
+    private val thumbnailSignals = ConcurrentHashMap<String, android.os.CancellationSignal>()
     private val generation = AtomicLong()
     private val closed = AtomicBoolean()
     private val connections =
@@ -265,6 +343,8 @@ internal class NativeImageLoader(
             return
         }
 
+        // A rebound (recycled) cell no longer wants its previous image.
+        val previousKey = current?.takeIf { !it.finished }?.decodedKey
         val token = generation.incrementAndGet()
         val pending = ActiveRequest(
             token = token,
@@ -284,6 +364,7 @@ internal class NativeImageLoader(
             showPlaceholder(view, pending)
         }
         begin(view, token, view.width, view.height)
+        previousKey?.let(::cancelOrphanThumbnail)
     }
 
     /**
@@ -302,10 +383,17 @@ internal class NativeImageLoader(
 
     fun cancel(view: PamImageView) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        active.remove(view)
+        active.remove(view)?.takeIf { !it.finished }?.decodedKey?.let(::cancelOrphanThumbnail)
         view.onImageSizeChanged = null
         view.onShownChanged = null
         view.setImageDrawable(null)
+    }
+
+    /** Main thread: no view waits for [key] any more, so its provider thumbnail work stops. */
+    private fun cancelOrphanThumbnail(key: String) {
+        if (!thumbnailSignals.containsKey(key)) return
+        if (active.values.any { it.decodedKey == key && !it.finished }) return
+        thumbnailSignals.remove(key)?.cancel()
     }
 
     fun trimMemory(critical: Boolean) {
@@ -437,6 +525,7 @@ internal class NativeImageLoader(
                     supply@{
                         mediaStoreThumbnail(
                             source,
+                            key,
                             pending.request,
                             measuredWidth,
                             measuredHeight,
@@ -625,13 +714,7 @@ internal class NativeImageLoader(
         begin(view, pending.token, view.width, view.height)
     }
 
-    private fun isReleasable(request: NativeImageRequest): Boolean =
-        !isInlineImageSource(request.source) &&
-            request.cachePolicy != IMAGE_CACHE_RELOAD &&
-            request.cachePolicy != IMAGE_CACHE_NONE &&
-            request.mediaCachePolicy != MEDIA_CACHE_NONE &&
-            request.mediaCachePolicy != MEDIA_CACHE_DISK &&
-            request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
+    private fun isReleasable(request: NativeImageRequest): Boolean = isReleasableImageRequest(request)
 
     private fun endRestore(pending: ActiveRequest) {
         pending.restoringCallbacks?.let { original ->
@@ -764,41 +847,54 @@ internal class NativeImageLoader(
      * from the platform thumbnail cache at the cell size instead of reading
      * and decoding the whole file: a 4-column grid otherwise reads megabytes
      * per photo (and up to 16 MiB of every video, which then fails to decode)
-     * into the heap while scrolling. Videos get a frame. Returns null for any
-     * other source, a full-size or unresized request, or when the platform has
-     * no thumbnail, so the regular byte decode runs.
+     * into the heap while scrolling. Videos get the provider's thumbnail at any
+     * view size (a preview still too) and never a decoded frame per cell or a
+     * file read. Thumbnails decode as RGB_565 (opaque stills). Returns null
+     * for any other source, a full-size photo request, or a photo without a
+     * platform thumbnail, so the regular byte decode runs; a video without one
+     * fails the load.
      */
     private fun mediaStoreThumbnail(
         source: String,
+        key: String,
         request: NativeImageRequest,
         targetWidth: Int,
         targetHeight: Int,
     ): DecodedBitmap? {
-        if (!isMediaStoreThumbnailCandidate(source, request.resizeMethod, targetWidth, targetHeight)) {
+        val cell = isMediaStoreThumbnailCandidate(source, request.resizeMethod, targetWidth, targetHeight)
+        if (!cell && !isMediaStoreVideoPosterCandidate(source, targetWidth, targetHeight)) {
             return null
         }
         val item = mediaStoreItem(android.net.Uri.parse(source)) ?: return null
-        val bitmap = runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.loadThumbnail(
-                    item.uri,
-                    thumbnailRequestSize(item.width, item.height, targetWidth, targetHeight),
-                    null,
-                )
-            } else if (item.video) {
-                val retriever = android.media.MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(context, item.uri)
-                    retriever.getFrameAtTime(0)
-                } finally {
-                    retriever.release()
+        if (!cell && !item.video) return null
+        val signal = android.os.CancellationSignal()
+        thumbnailSignals[key] = signal
+        val bitmap = try {
+            runCatching {
+                when (mediaStoreThumbnailSource(Build.VERSION.SDK_INT)) {
+                    MediaStoreThumbnailSource.PROVIDER_STREAM -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        providerThumbnail(
+                            item.uri,
+                            thumbnailRequestSize(item.width, item.height, targetWidth, targetHeight),
+                            targetWidth,
+                            targetHeight,
+                            signal,
+                        )
+                    } else {
+                        null
+                    }
+                    MediaStoreThumbnailSource.LEGACY_MINI_KIND -> legacyThumbnail(item)
                 }
-            } else {
-                null
-            }
-        }.getOrNull() ?: return null
+            }.getOrNull()
+        } finally {
+            thumbnailSignals.remove(key, signal)
+        }
+        if (bitmap == null) {
+            if (mediaStoreFallsBackToFileDecode(item.video)) return null
+            error(if (signal.isCanceled) "Image load was cancelled." else "Video thumbnail is unavailable.")
+        }
         val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight).let { scaled ->
-            // Same storage as a regular decode: GPU-only on API 28+.
+            // GPU-only on API 28+, keeping the 16-bit format of the decode.
             if (
                 nativeBitmapStorage(
                     sdk = Build.VERSION.SDK_INT,
@@ -820,6 +916,62 @@ internal class NativeImageLoader(
             item.width.takeIf { it > 0 } ?: bitmap.width,
             item.height.takeIf { it > 0 } ?: bitmap.height,
         )
+    }
+
+    /**
+     * Android 10+: the thumbnail MediaProvider keeps for gallery apps
+     * (`openTypedAssetFileDescriptor` with `EXTRA_SIZE`, what
+     * `ContentResolver.loadThumbnail` calls), a small JPEG decoded as RGB_565
+     * and sampled to the box. Cancelled through [signal] when the cell goes.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun providerThumbnail(
+        uri: android.net.Uri,
+        size: android.util.Size,
+        targetWidth: Int,
+        targetHeight: Int,
+        signal: android.os.CancellationSignal,
+    ): Bitmap? {
+        val extras = android.os.Bundle().apply {
+            putParcelable(android.content.ContentResolver.EXTRA_SIZE, android.graphics.Point(size.width, size.height))
+        }
+        val bytes = context.contentResolver.openTypedAssetFileDescriptor(uri, "image/*", extras, signal)
+            ?.use { descriptor -> descriptor.createInputStream().use(::readBounded) }
+            ?: return null
+        signal.throwIfCanceled()
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = MEDIA_STORE_THUMBNAIL_STORAGE.decodeConfig()
+            inSampleSize = thumbnailSampleSize(bounds.outWidth, bounds.outHeight, targetWidth, targetHeight)
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }
+
+    /**
+     * Android 8-9: the MINI_KIND thumbnail the provider caches (512 px), as
+     * RGB_565. For videos this replaces `MediaMetadataRetriever.getFrameAtTime`,
+     * a full-resolution frame decoded on every bind.
+     */
+    @Suppress("DEPRECATION")
+    private fun legacyThumbnail(item: MediaStoreItem): Bitmap? {
+        val id = android.content.ContentUris.parseId(item.uri)
+        val options = BitmapFactory.Options().apply { inPreferredConfig = MEDIA_STORE_THUMBNAIL_STORAGE.decodeConfig() }
+        return if (item.video) {
+            android.provider.MediaStore.Video.Thumbnails.getThumbnail(
+                context.contentResolver,
+                id,
+                android.provider.MediaStore.Video.Thumbnails.MINI_KIND,
+                options,
+            )
+        } else {
+            android.provider.MediaStore.Images.Thumbnails.getThumbnail(
+                context.contentResolver,
+                id,
+                android.provider.MediaStore.Images.Thumbnails.MINI_KIND,
+                options,
+            )
+        }
     }
 
     private class MediaStoreItem(

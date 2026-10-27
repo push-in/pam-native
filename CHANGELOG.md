@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+- Android navigation bar buttons follow the authored `<StatusBar barStyle>`
+  (as React Native apps do when every StatusBar style change also styles the
+  navigation bar): over the transparent edge-to-edge bar, `light-content`
+  gives light buttons and `dark-content` dark ones, so an always-dark viewer
+  in the light theme no longer hides the buttons, and light screens in the
+  dark theme get dark ones. Without a StatusBar style the theme's
+  `pam_light_navigation_bar` still applies. An edge-to-edge modal (Android
+  10+) uses the StatusBar declared inside it; opaque bars keep the theme's
+  buttons. iOS has no navigation bar (the home indicator adapts itself).
+- `MediaPlayer` background suspension (Android and iOS): when the app goes
+  to the background (Android `onStop`, iOS `didEnterBackground`) every player
+  without `keepAliveWhenCovered` releases its decoder, player and video
+  surface, keeping its position and play intent. On resume only a player
+  with play intent (autoPlay or a native play) is prepared again; a paused
+  one, such as a warm neighbour in a vertical video pager, is restored on
+  demand (play or seek). A player given a source while the app is in the
+  background allocates nothing until it is active again, and its progress
+  polling stops meanwhile. Before, background only paused the players, so a
+  real-world app's pager kept two hardware decoders and their buffers alive
+  while hidden. No protocol change.
+- `MediaPlayer` poster (`thumbnail`): its decoded bitmap is released while
+  the painted video covers it and decoded again from the cache when the
+  poster must show (player released, error), also with `cache="disk"`
+  (Android kept those posters decoded under the video). No protocol change.
+- iOS Image: switching a view's `source` to a local file (`pam-file://`,
+  `file://`, `asset://`, `data:`) now cancels the photo-library or network
+  load started for its previous source. That load used to finish afterwards
+  and paint the previous picture over the new one, so a recycled thumbnail
+  cell (a video timeline whose posters are local files) showed gallery
+  photos. Android already discarded stale loads per view.
+- Keyboard dock contract (engine test): a padding `KeyboardAvoidingView` in a
+  modal rests where its own frame ends (a safe-area padding around it, or
+  below the window inside scrolled content) and keeps its content exactly
+  `keyboardVerticalOffset` above the keyboard. See `docs/keyboard.md`.
+- WebView: pages written for react-native-webview work unchanged:
+  `window.ReactNativeWebView.postMessage(text)` exists from document start
+  (Android `addJavascriptInterface`, iOS document-start script, main frame
+  only), next to `window.PamNative.postMessage`. `onMessage` handlers get the
+  posting page URL as a second argument (one-argument handlers keep
+  working). A loaded page runs each new `injectedJavaScript` once, so the
+  host can answer the page. `scrollEnabled(false)` / `overScrollMode(Never)`
+  on the existing scroll keys give a fixed page (no scroll, bounce, pinch or
+  over-scroll). Hardened defaults: no link previews, data detectors,
+  back/forward swipes, popups, file/content access, mixed content,
+  geolocation, third-party cookies or zoom controls. Android pauses a
+  WebView whose route is covered (not only in the background). No protocol
+  change.
+- Android device gallery images (MediaStore `content://media/...`): thumbnails
+  come from the provider's typed `image/*` stream at the cell size (Android
+  10+, cancelled when the cell is recycled or rebound) or its cached MINI_KIND
+  thumbnail (Android 8-9), decoded as RGB_565 (half the bitmap, also for the
+  HARDWARE copy). A video is never decoded frame by frame per cell nor read
+  as image bytes: at any view size (a preview still too) it draws the
+  platform thumbnail, and without one the load fails instead of reading the
+  container. No protocol change.
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
@@ -115,6 +170,39 @@
   - Packaged `asset://` images of at most 16 KiB (icon masks) decode once and
     stay in the inline glyph cache, like Android's synchronous small assets.
   - XCTest: `PamAnimatedImageTests`, `PamMediaParityTests`.
+- iOS push: Firebase is configured once at install without probing
+  `FirebaseApp.app()` first (that probe logs I-COR000003 before
+  `configure()`), and `registerForRemoteNotifications()` is asked at most
+  once per process: concurrent `Notifications::registerPush()` calls share
+  the registration in flight and a cached token no longer re-registers on
+  every call. A failed or cancelled registration may ask again. Android needs
+  no change (Firebase initializes from google-services and has no APNs step).
+
+- iOS push parity with Android: a `GoogleService-Info.plist` (`.pam/` or the
+  project root) turns on Firebase Messaging in the generated iOS plugin
+  package, like `google-services.json` on Android. `registerPush()` then
+  answers with the FCM token and `PushProvider::Fcm` instead of the raw APNs
+  token, so FCM-only servers reach iOS. New public hook
+  `PamPushTokenProvider` / `PamPushNotifications.tokenProvider` (plus
+  `didRefresh(token:provider:)`); `unregisterPush()` deletes the provider
+  token. The host signs `aps-environment` per configuration through
+  `$(PAM_APS_ENVIRONMENT)` (Debug `development`, Release `production`),
+  replacing fixed plugin values. A cached token no longer skips
+  `registerForRemoteNotifications()` on later launches. Tests:
+  `PamPushTokenProviderTests` (XCTest) and the CLI
+  `ios_push_entitlement_follows_the_build_configuration` /
+  `ios_firebase_config_compiles_the_fcm_token_bridge`.
+
+- iOS manifest: `ios.developmentRegion` (BCP 47, e.g. `pt-BR`) and
+  `ios.localizations`. The CLI writes them to the Xcode project
+  (`developmentRegion`, `knownRegions`) and to the app Info.plist
+  (`CFBundleDevelopmentRegion`, `CFBundleLocalizations`), so system UI (photo
+  picker, share sheet, default alert buttons) follows the app's language
+  instead of English. Omitted, the host template keeps `en`. Test:
+  `ios_development_region_and_localizations_reach_info_plist_and_project`.
+- Push rendering: route aliases let a screen known by several route ids
+  suppress the pushes of any of them while it is shown (a real-world app's
+  conversation reached by more than one route).
 
 ## 1.44.0 - 2026-10-26
 - iOS runtime: OPcache is now enabled in the embedded PHP (JIT stays off: iOS

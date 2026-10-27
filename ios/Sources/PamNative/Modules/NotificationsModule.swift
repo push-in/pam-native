@@ -2,11 +2,58 @@ import Foundation
 import UserNotifications
 import UIKit
 
+/// Turns the APNs device token into the token PHP registers with
+/// `Notifications::registerPush()`. The generated plugin package installs one
+/// (Firebase Messaging) when the project ships `GoogleService-Info.plist`, so
+/// iOS reports an FCM token (`PushProvider::Fcm`) exactly like Android and the
+/// same server sends to both. Without it the raw APNs token is reported.
+public protocol PamPushTokenProvider: AnyObject {
+    /// `Pam\Native\PushProvider` value reported with the token (1 = FCM).
+    var provider: Int64 { get }
+    /// Called on the main thread with every APNs device token.
+    func token(apnsToken: Data, completion: @escaping (Result<String, Error>) -> Void)
+    /// `Notifications::unregisterPush()`: invalidate the provider token.
+    func deleteToken()
+}
+
 public enum PamPushNotifications {
+    /// `Pam\Native\PushProvider` values.
+    public static let providerFcm: Int64 = 1
+    public static let providerApns: Int64 = 2
+
+    /// Installed before PHP starts (generated `PamNativePluginRegistry.modules()`).
+    public static var tokenProvider: PamPushTokenProvider? {
+        get { PushTokenRegistry.shared.tokenProvider }
+        set { PushTokenRegistry.shared.tokenProvider = newValue }
+    }
+
     public static func didRegister(deviceToken: Data) {
-        PushTokenRegistry.shared.resolve(
-            deviceToken.map { String(format: "%02x", $0) }.joined()
-        )
+        guard let provider = tokenProvider else {
+            PushTokenRegistry.shared.resolve(Self.hex(deviceToken), provider: providerApns)
+            return
+        }
+        let kind = provider.provider
+        provider.token(apnsToken: deviceToken) { result in
+            switch result {
+            case let .success(token) where !token.isEmpty:
+                PushTokenRegistry.shared.resolve(token, provider: kind)
+            case .success:
+                PushTokenRegistry.shared.reject("Push provider returned an empty token")
+            case let .failure(error):
+                PushTokenRegistry.shared.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    /// The provider rotated its token (FCM `didReceiveRegistrationToken`):
+    /// the next `registerPush()` answers with it.
+    public static func didRefresh(token: String, provider: Int64) {
+        guard !token.isEmpty else { return }
+        PushTokenRegistry.shared.refresh(token, provider: provider)
+    }
+
+    static func hex(_ token: Data) -> String {
+        token.map { String(format: "%02x", $0) }.joined()
     }
 
     public static func didFailToRegister(error: Error) {
@@ -200,6 +247,7 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
                 PushTokenRegistry.shared.register(completion: completion)
             case "unregisterPush":
                 DispatchQueue.main.async {
+                    PamPushNotifications.tokenProvider?.deleteToken()
                     UIApplication.shared.unregisterForRemoteNotifications()
                     PushTokenRegistry.shared.unregister()
                     completion(.success, Data())
@@ -288,43 +336,100 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
     }
 }
 
-private final class PushTokenRegistry {
+final class PushTokenRegistry {
     static let shared = PushTokenRegistry()
     private let lock = NSLock()
     private var token: String?
+    private var provider = PamPushNotifications.providerApns
+    private var retainedProvider: PamPushTokenProvider?
+
+    var tokenProvider: PamPushTokenProvider? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return retainedProvider
+        }
+        set {
+            lock.lock()
+            retainedProvider = newValue
+            // A token from another provider must never be reported as this one.
+            token = nil
+            lock.unlock()
+        }
+    }
     private var waiters: [ModuleCompletion] = []
+    /// `registerForRemoteNotifications()` already asked in this process: a
+    /// second request (another `registerPush()`, a cached token) only makes
+    /// iOS and Firebase log a duplicate APNs registration.
+    private var apnsRequested = false
+    /// Asks iOS for the APNs device token (replaced in tests).
+    var requestApnsToken: () -> Void = {
+        UIApplication.shared.registerForRemoteNotifications()
+    }
     private var events: [Data] = []
     private var eventWaiter: ModuleCompletion?
+
+    /// The cached token and its `PushProvider` value.
+    func current() -> (token: String, provider: Int64)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return token.map { ($0, provider) }
+    }
 
     func register(completion: @escaping ModuleCompletion) {
         lock.lock()
         if let token {
+            let provider = provider
+            // Apple asks for a registration on every launch: a rotated APNs
+            // token still reaches the provider (and the cached token). Once
+            // per process is enough.
+            let request = !apnsRequested
+            apnsRequested = true
             lock.unlock()
-            completion(.success, payload(token))
+            completion(.success, payload(token, provider: provider))
+            if request {
+                DispatchQueue.main.async { [weak self] in self?.requestApnsToken() }
+            }
             return
         }
+        // Concurrent callers share the registration already in flight.
+        let request = waiters.isEmpty && !apnsRequested
         waiters.append(completion)
+        if request { apnsRequested = true }
         lock.unlock()
-        DispatchQueue.main.async {
-            UIApplication.shared.registerForRemoteNotifications()
+        if request {
+            DispatchQueue.main.async { [weak self] in self?.requestApnsToken() }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             self?.reject("APNs token registration timed out")
         }
     }
 
-    func resolve(_ value: String) {
+    func resolve(_ value: String, provider: Int64) {
         lock.lock()
         token = value
+        self.provider = provider
         let callbacks = waiters
         waiters.removeAll()
         lock.unlock()
-        callbacks.forEach { $0(.success, payload(value)) }
+        callbacks.forEach { $0(.success, payload(value, provider: provider)) }
+    }
+
+    func refresh(_ value: String, provider: Int64) {
+        lock.lock()
+        let pending = !waiters.isEmpty
+        if !pending {
+            token = value
+            self.provider = provider
+        }
+        lock.unlock()
+        if pending { resolve(value, provider: provider) }
     }
 
     func unregister() {
         lock.lock()
         token = nil
+        apnsRequested = false
         let callbacks = waiters
         waiters.removeAll()
         lock.unlock()
@@ -337,6 +442,8 @@ private final class PushTokenRegistry {
             lock.unlock()
             return
         }
+        // A failed or timed-out registration may be retried.
+        apnsRequested = false
         let callbacks = waiters
         waiters.removeAll()
         lock.unlock()
@@ -425,10 +532,10 @@ private final class PushTokenRegistry {
         callback?(.failure, Data("Notifications module closed".utf8))
     }
 
-    private func payload(_ value: String) -> Data {
+    func payload(_ value: String, provider: Int64) -> Data {
         (try? WireMap.encode([
             "token": .text(value),
-            "provider": .integer(2),
+            "provider": .integer(provider),
         ])) ?? Data()
     }
 }

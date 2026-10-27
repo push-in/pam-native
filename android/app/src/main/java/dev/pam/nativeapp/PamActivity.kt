@@ -455,6 +455,7 @@ class PamActivity : FragmentActivity() {
 
     override fun onStop() {
         if (runtimeStarted) {
+            runtime.onHostBackground()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_BACKGROUND.toString().toByteArray())
         }
         super.onStop()
