@@ -440,6 +440,7 @@ public final class PamRuntime {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
+                self?.renderer.setApplicationBackground()
                 self?.dispatchLifecycle(kind: NativeViewEventKind.appState.rawValue, payload: Data("3".utf8))
                 // RN/Android parity: going to background only halves the
                 // caches (moderate); memory warnings still empty them.

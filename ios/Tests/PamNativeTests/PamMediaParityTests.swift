@@ -103,6 +103,69 @@ final class PamMediaParityTests: XCTestCase {
         XCTAssertTrue(media.hasPlayer, "shown again: recreated at the same position")
     }
 
+    func testCoveredPosterReleasesItsBitmapAndComesBack() throws {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.mediaThumbnailSource: .text(poster),
+            PamConstants.mediaControls: .flag(false),
+        ], kind: .media)
+        defer { renderer.close() }
+        let media = try XCTUnwrap(view as? PamMediaView)
+        media.layoutIfNeeded()
+        XCTAssertNotNil(media.posterView.image)
+        media.setSource(try Self.makeVideo().absoluteString)
+        media.setVideoReadyForDisplay(true)
+        XCTAssertTrue(media.isPosterReleased, "the painted video covers the poster: its bitmap goes")
+        media.setSource("")
+        XCTAssertNotNil(media.posterView.image, "released player: the poster is decoded again")
+        XCTAssertTrue(media.isPosterVisible)
+    }
+
+    func testBackgroundReleasesTheDecoderAndResumeRestoresOnlyThePlayingOne() throws {
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let playing = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        let paused = PamMediaView(frame: CGRect(x: 0, y: 100, width: 160, height: 90))
+        for media in [playing, paused] {
+            media.setControls(false)
+            window.addSubview(media)
+        }
+        playing.setAutoPlay(true)
+        let url = try Self.makeVideo().absoluteString
+        playing.setSource(url)
+        paused.setSource(url)
+        XCTAssertTrue(playing.hasPlayer && paused.hasPlayer)
+
+        for media in [playing, paused] {
+            media.onHostPause()
+            media.onHostBackground()
+        }
+        XCTAssertFalse(playing.hasPlayer, "background frees every decoder")
+        XCTAssertFalse(paused.hasPlayer)
+        XCTAssertTrue(playing.releasedForBackground)
+
+        paused.setSource(url + "#other")
+        XCTAssertFalse(paused.hasPlayer, "a source set in background allocates nothing")
+
+        for media in [playing, paused] { media.onHostResume() }
+        XCTAssertTrue(playing.hasPlayer, "the playing player comes back at once")
+        XCTAssertFalse(paused.hasPlayer, "a paused neighbour waits for demand")
+        XCTAssertTrue(paused.pendingRestore)
+        paused.seek(0.5)
+        XCTAssertTrue(paused.hasPlayer, "a seek restores it")
+    }
+
+    func testKeepAlivePlayerOnlyPausesInBackground() throws {
+        let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        media.setControls(false)
+        media.setKeepAliveWhenCovered(true)
+        media.setSource(try Self.makeVideo().absoluteString)
+        media.onHostPause()
+        media.onHostBackground()
+        XCTAssertTrue(media.hasPlayer)
+        XCTAssertFalse(media.releasedForBackground)
+    }
+
     func testVisiblePlayerIsNeverReleased() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         window.isHidden = false

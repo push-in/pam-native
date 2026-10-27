@@ -849,7 +849,15 @@ class PamRenderer(
         }
     }
 
+    fun onHostBackground() {
+        PamMediaView.appInBackground = true
+        for (index in 0 until views.size()) {
+            (views.valueAt(index) as? PamMediaView)?.onHostBackground()
+        }
+    }
+
     fun onHostResume() {
+        PamMediaView.appInBackground = false
         for (index in 0 until views.size()) {
             when (val view = views.valueAt(index)) {
                 is PamMediaView -> view.onHostResume()
@@ -9218,6 +9226,8 @@ class PamRenderer(
                     mediaCacheMaxAgeMs = state.integer(PropKey.MEDIA_CACHE_MAX_AGE_MS, 0),
                     mediaCacheMaxBytes = state.integer(PropKey.MEDIA_CACHE_MAX_BYTES, 0),
                     mediaCacheChecksum = null,
+                    // Released while the painted video covers it (decoded again on show).
+                    releaseWhenHidden = true,
                 )
             },
         )

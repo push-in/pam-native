@@ -226,6 +226,13 @@ final class PamMediaView: UIView {
     private var resumeSource = ""
     private var resumeAt: Double = 0
     private var resumePlaying = false
+    /// Background suspension (Android parity): the decoder is released while
+    /// the app is not active and only a player with play intent comes back
+    /// on resume; a paused one is restored on demand (play, seek).
+    private(set) var releasedForBackground = false
+    private(set) var pendingRestore = false
+    /// Set by the renderer between `didEnterBackground` and `didBecomeActive`.
+    static var appInBackground = false
     private var coverageObserver: NSObjectProtocol?
     /// Views bound to this player's `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer.
     var boundViews: (() -> [UIView])?
@@ -295,18 +302,28 @@ final class PamMediaView: UIView {
         guard covered != releasedForCover else { return }
         releasedForCover = covered
         if covered {
-            if let player, player.currentItem?.status == .readyToPlay {
-                resumeSource = source
-                resumeAt = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
-                resumePlaying = player.timeControlStatus != .paused
-            }
+            rememberResumePoint()
             sourceGeneration &+= 1
             releasePlayer()
-        } else {
-            let current = source
-            source = ""
-            setSource(current)
+        } else if !releasedForBackground {
+            restorePlayer()
         }
+    }
+
+    /// Keeps the position and play intent of the player about to be released.
+    private func rememberResumePoint() {
+        guard let player, player.currentItem?.status == .readyToPlay else { return }
+        resumeSource = source
+        resumeAt = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
+        resumePlaying = player.timeControlStatus != .paused
+    }
+
+    /// Prepares the current source again (at the remembered position).
+    private func restorePlayer() {
+        pendingRestore = false
+        let current = source
+        source = ""
+        setSource(current)
     }
 
     private func bindingTargets() -> [UIView] {
@@ -360,7 +377,14 @@ final class PamMediaView: UIView {
         }
         sourceGeneration &+= 1
         releasePlayer()
+        pendingRestore = false
         guard !value.isEmpty else { return }
+        // A suspended app never allocates a decoder; resume prepares it.
+        if Self.appInBackground, !keepAliveWhenCovered { releasedForBackground = true }
+        if releasedForBackground {
+            pendingRestore = true
+            return
+        }
         // A covered route prepares its player when it is visible again.
         if window != nil, !keepAliveWhenCovered, PamRouteCoverage.isCovered(self) {
             releasedForCover = true
@@ -582,6 +606,10 @@ final class PamMediaView: UIView {
 
     func setAutoPlay(_ value: Bool) {
         autoPlay = value
+        if value, pendingRestore, !releasedForBackground, !releasedForCover {
+            restorePlayer()
+            return
+        }
         guard player?.currentItem?.status == .readyToPlay else { return }
         if value { play() } else { pause() }
     }
@@ -665,9 +693,27 @@ final class PamMediaView: UIView {
 
     /// The poster covers the video until its first frame (Android hides it in
     /// `onSurfaceTextureUpdated`) and comes back when the player is released.
+    ///
+    /// While the painted video covers it the poster bitmap is released (the
+    /// decoded image is the largest allocation of a full-screen cell); it is
+    /// decoded again from the media cache whenever it must cover the surface.
     private func updatePoster() {
-        posterView.isHidden = posterView.image == nil || (player != nil && videoReadyForDisplay)
+        if player != nil && videoReadyForDisplay {
+            posterView.isHidden = true
+            if posterView.image != nil {
+                posterView.image = nil
+                thumbnailLoaded = false
+            }
+            return
+        }
+        posterView.isHidden = posterView.image == nil
+        if posterView.image == nil, thumbnail != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0 {
+            loadThumbnail()
+        }
     }
+
+    /// True once the covered poster gave its bitmap back (tests, diagnostics).
+    var isPosterReleased: Bool { thumbnail != nil && posterView.image == nil && !thumbnailLoaded }
 
     var isPosterVisible: Bool { !posterView.isHidden }
 
@@ -687,7 +733,7 @@ final class PamMediaView: UIView {
         }
         posterView.image = nil
         updatePoster()
-        if next != nil, bounds.width > 0, bounds.height > 0 {
+        if next != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0 {
             loadThumbnail()
         }
     }
@@ -797,6 +843,13 @@ final class PamMediaView: UIView {
     }
     func seek(_ seconds: Double) {
         currentTime = max(seconds, 0)
+        if pendingRestore, !releasedForBackground, !releasedForCover {
+            // A seek on a suspended paused player draws that frame on demand.
+            resumeSource = source
+            resumeAt = currentTime
+            restorePlayer()
+            return
+        }
         guard let player else { return }
         let time = CMTime(seconds: currentTime, preferredTimescale: 600)
         if player.timeControlStatus == .paused {
@@ -815,15 +868,46 @@ final class PamMediaView: UIView {
         player?.playImmediately(atRate: playbackRate)
     }
 
+    /// App no longer active (system UI over it): the player only pauses.
     func onHostPause() {
-        resumeAfterPause = player?.timeControlStatus == .playing
+        resumeAfterPause = resumeAfterPause || player?.timeControlStatus == .playing
         player?.pause()
     }
 
+    /// App in background: unless `keepAliveWhenCovered`, the decoder is
+    /// released, keeping position and play intent (Android parity).
+    func onHostBackground() {
+        guard !keepAliveWhenCovered, !releasedForBackground else { return }
+        releasedForBackground = true
+        guard !source.isEmpty else { return }
+        if !releasedForCover {
+            rememberResumePoint()
+            if resumeSource != source {
+                resumeSource = source
+                resumeAt = currentTime
+            }
+            resumePlaying = resumeAfterPause
+            sourceGeneration &+= 1
+            releasePlayer()
+        }
+        resumeAfterPause = false
+        pendingRestore = true
+    }
+
+    /// App active again: only a player that was playing (or asked to play)
+    /// is prepared now; a paused one waits for play or seek.
     func onHostResume() {
-        if resumeAfterPause {
-            resumeAfterPause = false
-            play()
+        guard releasedForBackground else {
+            if resumeAfterPause {
+                resumeAfterPause = false
+                play()
+            }
+            return
+        }
+        releasedForBackground = false
+        guard pendingRestore, !releasedForCover, !source.isEmpty else { return }
+        if autoPlay || resumePlaying {
+            restorePlayer()
         }
     }
 

@@ -110,6 +110,16 @@ internal class PamMediaView(
     private var resumeSource = ""
     private var resumeAtSeconds = 0.0
 
+    /**
+     * Background suspension: while the app is in background the decoder,
+     * player and video surface are released (keeping position and play
+     * intent). On resume only a player with play intent is prepared again;
+     * a paused one is restored on demand (play, seek). A view created or
+     * given a source in background allocates nothing until then.
+     */
+    private var suspended = false
+    private var pendingRestore = false
+
     /** Views bound to a player `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer. */
     var boundViews: (() -> List<View>)? = null
 
@@ -146,8 +156,8 @@ internal class PamMediaView(
      */
     private val progress = object : Runnable {
         override fun run() {
-            // A covered player has nothing to report; restoring restarts the loop.
-            if (covered) return
+            // A covered or suspended player has nothing to report; restoring restarts the loop.
+            if (covered || suspended) return
             val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
@@ -216,9 +226,13 @@ internal class PamMediaView(
         }
         showPoster()
         sourceGeneration++
-        if (value.isEmpty() || covered) {
-            // A covered route prepares its player when it is visible again.
+        pendingRestore = false
+        if (value.isNotEmpty() && appInBackground && !keepAliveWhenCovered) suspended = true
+        if (value.isEmpty() || covered || suspended) {
+            // A covered route prepares its player when it is visible again;
+            // a suspended app when it is active again.
             releasePlayer()
+            if (suspended && value.isNotEmpty()) pendingRestore = true
         } else {
             val uri = Uri.parse(value)
             val resolved = runCatching {
@@ -297,6 +311,7 @@ internal class PamMediaView(
 
     fun setAutoPlay(value: Boolean) {
         playback.autoPlay(value)
+        if (value) restoreOnDemand()
         syncPlayback()
     }
 
@@ -341,6 +356,13 @@ internal class PamMediaView(
     }
     fun seek(seconds: Double) {
         currentTime = seconds.coerceAtLeast(0.0)
+        if (pendingRestore && !suspended && !covered) {
+            // A seek on a suspended paused player draws that frame on demand.
+            resumeSource = source
+            resumeAtSeconds = currentTime
+            restoreOnDemand()
+            return
+        }
         if (prepared) seekTo((currentTime * 1_000).toInt())
     }
     fun setPlaybackRate(value: Float) {
@@ -366,8 +388,33 @@ internal class PamMediaView(
 
     fun onHostResume() {
         playback.hostActive(true)
+        if (suspended) {
+            suspended = false
+            // Only the player with play intent comes back now.
+            if (playback.wantsPlay) restoreOnDemand()
+        }
         syncVisibility()
     }
+
+    /** App in background: frees the decoder unless `keepAliveWhenCovered`. */
+    fun onHostBackground() {
+        if (keepAliveWhenCovered || suspended) return
+        suspended = true
+        if (source.isEmpty()) return
+        if (!covered) releaseDecoder()
+        pendingRestore = true
+    }
+
+    private fun restoreOnDemand() {
+        if (!pendingRestore || suspended || covered || source.isEmpty()) return
+        restoreAfterCover()
+    }
+
+    /** True while background suspension holds this player released (tests, diagnostics). */
+    internal val releasedForBackground: Boolean get() = suspended
+
+    /** True while a released paused player waits for play or seek (tests, diagnostics). */
+    internal val awaitingRestore: Boolean get() = pendingRestore
 
     private fun syncVisibility() {
         playback.visibility(isAttachedToWindow, isShown && windowVisibility == VISIBLE)
@@ -379,11 +426,11 @@ internal class PamMediaView(
         val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
         if (nowCovered == covered) return
         covered = nowCovered
-        if (nowCovered) releaseForCover() else restoreAfterCover()
+        if (nowCovered) releaseDecoder() else if (!suspended) restoreAfterCover()
     }
 
-    /** Frees the decoder, player and video surface of a covered route, keeping its position. */
-    private fun releaseForCover() {
+    /** Frees the decoder, player and video surface (covered route, background), keeping its position. */
+    private fun releaseDecoder() {
         main.removeCallbacks(progress)
         if (source.isNotEmpty() && prepared) {
             resumeSource = source
@@ -397,6 +444,7 @@ internal class PamMediaView(
     }
 
     private fun restoreAfterCover() {
+        pendingRestore = false
         ensureVideoAttached()
         main.removeCallbacks(progress)
         main.post(progress)
@@ -787,6 +835,7 @@ internal class PamMediaView(
 
     override fun start() {
         playback.request(true)
+        restoreOnDemand()
         syncPlayback()
     }
 
@@ -841,7 +890,7 @@ internal class PamMediaView(
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered) {
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !suspended) {
             val current = source
             source = ""
             setSource(current)
@@ -868,7 +917,15 @@ internal class PamMediaView(
         releasePlayer()
         videoSurface?.release()
         videoSurface = null
+        pendingRestore = false
+        suspended = false
         super.onDetachedFromWindow()
+    }
+
+    internal companion object {
+        /** Set by the renderer between Activity stop and resume (main thread). */
+        @JvmStatic
+        var appInBackground = false
     }
 }
 
