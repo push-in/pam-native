@@ -441,6 +441,7 @@ public final class PamRenderer: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.setApplicationActive(active) }
             return
         }
+        if active { PamMediaView.appInBackground = false }
         for view in views.values {
             if let media = view as? PamMediaView {
                 if active {
@@ -449,6 +450,18 @@ public final class PamRenderer: @unchecked Sendable {
                     media.onHostPause()
                 }
             }
+        }
+    }
+
+    /// The app entered the background: players release their decoders.
+    public func setApplicationBackground() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.setApplicationBackground() }
+            return
+        }
+        PamMediaView.appInBackground = true
+        for view in views.values {
+            (view as? PamMediaView)?.onHostBackground()
         }
     }
 

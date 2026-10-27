@@ -439,6 +439,11 @@ class PamRuntime(
         renderer.onHostResume()
     }
 
+    /** Activity stopped (app in background): media players release their decoders. */
+    fun onHostBackground() {
+        renderer.onHostBackground()
+    }
+
     fun dispatchEvent(nodeId: Long, kind: Int, payload: ByteArray = ByteArray(0)) {
         if (payload.size > MAX_PAYLOAD_BYTES) return
         if (kind >= 42) {
