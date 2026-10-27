@@ -2772,7 +2772,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(nodeId)
         case PamConstants.onLayout:
             layoutEvents.queue(nodeId)
-        case PamConstants.scrollKeyboardInset:
+        case PamConstants.scrollKeyboardInset, PamConstants.keyboardVerticalOffset:
             configureKeyboardInset(view: view, nodeId: nodeId)
         case PamConstants.blurRadius, PamConstants.filterColorMatrix:
             applyFilter(view: view, nodeId: nodeId)
@@ -3270,7 +3270,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(nodeId)
         case PamConstants.onLayout:
             layoutEvents.forget(nodeId)
-        case PamConstants.scrollKeyboardInset:
+        case PamConstants.scrollKeyboardInset, PamConstants.keyboardVerticalOffset:
             configureKeyboardInset(view: view, nodeId: nodeId)
         case PamConstants.blurRadius, PamConstants.filterColorMatrix:
             applyFilter(view: view, nodeId: nodeId)
@@ -3951,9 +3951,11 @@ public final class PamRenderer: @unchecked Sendable {
     private func configureKeyboardInset(view: UIView, nodeId: Int64) {
         let enabled = nodes[nodeId]?.properties[PamConstants.scrollKeyboardInset]?.boolOrNil() ?? false
         if enabled, let scroll = view as? UIScrollView {
-            if keyboardInsetObservers[nodeId] == nil {
-                keyboardInsetObservers[nodeId] = PamKeyboardInsetObserver(scrollView: scroll)
-            }
+            let observer = keyboardInsetObservers[nodeId] ?? PamKeyboardInsetObserver(scrollView: scroll)
+            keyboardInsetObservers[nodeId] = observer
+            observer.extraInset = CGFloat(
+                nodes[nodeId]?.properties[PamConstants.keyboardVerticalOffset]?.decimalOrNil() ?? 0
+            )
         } else {
             keyboardInsetObservers.removeValue(forKey: nodeId)?.reset()
         }

@@ -190,11 +190,24 @@ final class PamStickyRegistry {
 }
 
 /// `<ScrollView keyboardInset>`: insets the content bottom by the part of the
-/// software keyboard that overlaps the scroll view.
+/// software keyboard that overlaps the scroll view, plus `keyboardVerticalOffset`
+/// while it overlaps, and keeps the focused editor visible above it with the
+/// same clearance as Android's `PamScrollKeyboardInset`.
 final class PamKeyboardInsetObserver {
+    static let targetClearance: CGFloat = 24
+
     private weak var scrollView: UIScrollView?
     private var tokens: [NSObjectProtocol] = []
     private var applied: CGFloat = 0
+    private var overlap: CGFloat = 0
+
+    /// `keyboardVerticalOffset` in points, added only while the keyboard overlaps.
+    var extraInset: CGFloat = 0 {
+        didSet {
+            guard oldValue != extraInset, overlap > 0 else { return }
+            apply(overlap + max(0, extraInset), duration: 0)
+        }
+    }
 
     init(scrollView: UIScrollView) {
         self.scrollView = scrollView
@@ -213,6 +226,14 @@ final class PamKeyboardInsetObserver {
         ) { [weak self] notification in
             self?.keyboardChanged(notification, hiding: true)
         })
+        // Focus moving between editors under an unchanged keyboard posts no
+        // keyboard frame change; the newly focused one is revealed here.
+        for name in [UITextField.textDidBeginEditingNotification, UITextView.textDidBeginEditingNotification] {
+            tokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let self, self.applied > 0, let editor = notification.object as? UIView else { return }
+                self.revealFocused(editor, retry: true)
+            })
+        }
     }
 
     deinit {
@@ -221,6 +242,7 @@ final class PamKeyboardInsetObserver {
     }
 
     func reset() {
+        overlap = 0
         guard let scrollView, applied != 0 else { return }
         scrollView.contentInset.bottom -= applied
         scrollView.verticalScrollIndicatorInsets.bottom -= applied
@@ -232,20 +254,88 @@ final class PamKeyboardInsetObserver {
         return max(0, viewInWindow.maxY - max(keyboard.minY, viewInWindow.minY))
     }
 
+    /// Content offset that shows `target` (content coordinates) between the
+    /// top inset and the covered bottom of the viewport, with Android's
+    /// clearance; nil when it is already visible.
+    static func revealOffset(
+        target: CGRect,
+        current: CGFloat,
+        viewport: CGFloat,
+        topInset: CGFloat,
+        obscured: CGFloat,
+        maxOffset: CGFloat
+    ) -> CGFloat? {
+        let extent = max(0, viewport - topInset - obscured)
+        let clearance = min(targetClearance, max(0, extent - target.height) / 2)
+        let visibleStart = current + topInset
+        let visibleEnd = visibleStart + extent
+        let next: CGFloat
+        if target.maxY + clearance > visibleEnd {
+            next = current + target.maxY + clearance - visibleEnd
+        } else if target.minY - clearance < visibleStart {
+            next = current - (visibleStart - (target.minY - clearance))
+        } else {
+            return nil
+        }
+        let bounded = min(max(next, -topInset), max(-topInset, maxOffset))
+        return abs(bounded - current) > 0.5 ? bounded : nil
+    }
+
     private func keyboardChanged(_ notification: Notification, hiding: Bool) {
         guard let scrollView, let window = scrollView.window else { return }
         let end = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = scrollView.convert(scrollView.bounds, to: window)
-        let next = hiding ? 0 : Self.overlap(keyboard: keyboard, viewInWindow: frame)
-        guard next != applied else { return }
+        overlap = hiding ? 0 : Self.overlap(keyboard: keyboard, viewInWindow: frame)
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+        apply(overlap > 0 ? overlap + max(0, extraInset) : 0, duration: duration)
+    }
+
+    private func apply(_ next: CGFloat, duration: TimeInterval) {
+        // Repeated unchanged insets must not undo a user's manual scroll.
+        guard let scrollView, next != applied else { return }
         let delta = next - applied
         applied = next
         UIView.animate(withDuration: PamMotionPolicy.isReduced ? 0 : duration) {
             scrollView.contentInset.bottom += delta
             scrollView.verticalScrollIndicatorInsets.bottom += delta
         }
+        if next > 0, let focused = Self.firstResponder(in: scrollView) {
+            revealFocused(focused, retry: true)
+        }
+    }
+
+    private func revealFocused(_ editor: UIView, retry: Bool) {
+        DispatchQueue.main.async { [weak self, weak editor] in
+            guard let self, let scrollView = self.scrollView, let editor,
+                  self.applied > 0, editor.isFirstResponder,
+                  editor.isDescendant(of: scrollView), scrollView.window != nil else { return }
+            let target = editor.convert(editor.bounds, to: scrollView)
+            let insets = scrollView.adjustedContentInset
+            if let next = Self.revealOffset(
+                target: target,
+                current: scrollView.contentOffset.y,
+                viewport: scrollView.bounds.height,
+                topInset: insets.top,
+                obscured: self.applied,
+                maxOffset: scrollView.contentSize.height + insets.bottom - scrollView.bounds.height
+            ) {
+                scrollView.setContentOffset(
+                    CGPoint(x: scrollView.contentOffset.x, y: next),
+                    animated: !PamMotionPolicy.isReduced
+                )
+            }
+            // Layout driven by the inset can settle on the next frame.
+            if retry { self.revealFocused(editor, retry: false) }
+        }
+    }
+
+    private static func firstResponder(in root: UIView) -> UIView? {
+        if root.isFirstResponder { return root }
+        for child in root.subviews {
+            if let found = firstResponder(in: child) { return found }
+        }
+        return nil
     }
 }
 

@@ -127,6 +127,34 @@ final class PamLayoutParityTests: XCTestCase {
         XCTAssertEqual(PamKeyboardInsetObserver.overlap(keyboard: CGRect(x: 0, y: 844, width: 390, height: 0), viewInWindow: view), 0)
     }
 
+    /// Android `PamScrollContainer.ensureKeyboardTargetVisible`: the focused
+    /// editor ends `clearance` (24pt) above the covered part of the viewport.
+    func testKeyboardRevealScrollsTheFocusedEditorAboveTheCoveredPart() {
+        // Viewport 800, keyboard + offset cover 456: visible content is 0..344.
+        let below = PamKeyboardInsetObserver.revealOffset(
+            target: CGRect(x: 0, y: 500, width: 300, height: 50),
+            current: 0, viewport: 800, topInset: 0, obscured: 456, maxOffset: 2_000
+        )
+        XCTAssertEqual(below ?? -1, 500 + 50 + 24 - 344, accuracy: 0.5)
+        XCTAssertNil(PamKeyboardInsetObserver.revealOffset(
+            target: CGRect(x: 0, y: 100, width: 300, height: 50),
+            current: 0, viewport: 800, topInset: 0, obscured: 456, maxOffset: 2_000
+        ), "an editor already visible keeps the user's offset")
+        let above = PamKeyboardInsetObserver.revealOffset(
+            target: CGRect(x: 0, y: 40, width: 300, height: 50),
+            current: 300, viewport: 800, topInset: 0, obscured: 456, maxOffset: 2_000
+        )
+        XCTAssertEqual(above ?? -1, 16, accuracy: 0.5)
+    }
+
+    func testKeyboardVerticalOffsetAddsToTheOverlapInset() {
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let observer = PamKeyboardInsetObserver(scrollView: scroll)
+        observer.extraInset = 156
+        XCTAssertEqual(scroll.contentInset.bottom, 0, "no keyboard, no inset")
+        observer.reset()
+    }
+
     func testMixedCornerRadiiClipWithAPathMask() throws {
         let (_, renderer, view) = PamRenderTestSupport.render([
             PamConstants.backgroundColor: .integer(0xFF00_00FF),

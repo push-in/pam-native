@@ -652,6 +652,9 @@ public enum PamConstants {
     public static let safeAreaRight = 151
     public static let safeAreaLeft = 153
     public static let safeAreaMode = 154
+    /// `keyboardVerticalOffset`: extra clearance above the keyboard
+    /// (KeyboardAvoidingView, and `<ScrollView keyboardInset>` like Android).
+    public static let keyboardVerticalOffset = 155
     public static let textAllowFontScaling = 163
     public static let textMaxFontSizeMultiplier = 164
     public static let textAdjustsFontSizeToFit = 165
