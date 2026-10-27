@@ -82,6 +82,7 @@ import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
+import dev.pam.nativeapp.PamAppearance
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
 import dev.pam.nativeapp.views.NativeChildVisibilityHost
@@ -276,6 +277,19 @@ internal fun useDarkStatusBarIcons(
 ): Boolean = systemBarsAppearance?.let { appearance ->
     appearance and lightStatusBarMask != 0
 } ?: !darkTheme
+
+/**
+ * Navigation bar buttons over a transparent (edge-to-edge) navigation bar:
+ * an authored StatusBar style also styles the navigation bar, so a dark
+ * screen in the light theme (`light-content`) gets light buttons and a light
+ * screen in the dark theme gets dark ones; without one, the app theme's
+ * `pam_light_navigation_bar` applies. [authoredDarkIcons] is null when no
+ * mounted StatusBar declares a style.
+ */
+internal fun useDarkNavigationBarIcons(
+    authoredDarkIcons: Boolean?,
+    themeDarkIcons: Boolean,
+): Boolean = authoredDarkIcons ?: themeDarkIcons
 
 internal fun safeAreaChildCrossAxisReduction(
     mainAxisHorizontal: Boolean,
@@ -1605,7 +1619,7 @@ class PamRenderer(
             }.also { modal ->
                 // A modal mounted after the bars last changed (its own
                 // StatusBar included) still opens with them.
-                appliedStatusBar?.let { applyStatusBar(modal, it) }
+                appliedStatusBar?.let { applyStatusBar(modal, it, state?.id?.let(::modalStatusBarDarkIcons)) }
                 val id = state?.id ?: return@also
                 modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
                 modal.onKeyboardVisibility = { visible -> onKeyboardVisibility?.invoke(id, visible) }
@@ -8737,6 +8751,7 @@ class PamRenderer(
                         PropKey.STATUS_BAR_STYLE,
                         merged.appearance.toLong(),
                     ).toInt(),
+                    styleAuthored = true,
                 )
             }
             if (state.properties.containsKey(PropKey.STATUS_BAR_HIDDEN)) {
@@ -8772,17 +8787,44 @@ class PamRenderer(
         appliedStatusBar = merged
         applyStatusBarConfig(merged)
         for (id in localModalIds) {
-            (views[id] as? PamModalHost)?.let { applyStatusBar(it, merged) }
+            (views[id] as? PamModalHost)?.let {
+                applyStatusBar(it, merged, modalStatusBarDarkIcons(id))
+            }
         }
     }
 
-    private fun applyStatusBar(modal: PamModalHost, config: StatusBarConfig) {
+    /**
+     * Style of the last StatusBar declared inside modal [modalId] (a page's
+     * StatusBar under the modal does not style the modal's navigation bar).
+     */
+    private fun modalStatusBarDarkIcons(modalId: Long): Boolean? {
+        var darkIcons: Boolean? = null
+        var order = Long.MIN_VALUE
+        for (id in statusBarIds) {
+            val state = nodes[id] ?: continue
+            if (!state.properties.containsKey(PropKey.STATUS_BAR_STYLE) || state.mountOrder < order) continue
+            var parent = state.parent
+            var depth = 0
+            while (parent != 0L && parent != modalId && depth < 512) {
+                parent = nodes[parent]?.parent ?: 0L
+                depth++
+            }
+            if (parent == modalId) {
+                order = state.mountOrder
+                darkIcons = state.integer(PropKey.STATUS_BAR_STYLE, STATUS_BAR_DARK.toLong()).toInt() == STATUS_BAR_DARK
+            }
+        }
+        return darkIcons
+    }
+
+    private fun applyStatusBar(modal: PamModalHost, config: StatusBarConfig, navigationDarkIcons: Boolean?) {
         modal.applyStatusBar(
             color = config.color,
             useDarkIcons = config.appearance == STATUS_BAR_DARK,
             hidden = config.hidden,
             translucent = config.translucent,
             navigationBarHidden = config.navigationBarHidden,
+            navigationDarkIcons = navigationDarkIcons,
         )
     }
 
@@ -8841,8 +8883,41 @@ class PamRenderer(
         applyStatusBarTranslucent(config.translucent)
         applyStatusBarColor(config.color, config.animated)
         applyStatusBarAppearance(config.appearance)
+        applyNavigationBarAppearance(config)
         applyStatusBarHidden(config.hidden)
         applyNavigationBarHidden(config.navigationBarHidden)
+    }
+
+    /**
+     * The activity's navigation bar is transparent over the content, so its
+     * buttons follow the authored StatusBar style (see
+     * [useDarkNavigationBarIcons]); otherwise the app theme's.
+     */
+    @Suppress("DEPRECATION")
+    private fun applyNavigationBarAppearance(config: StatusBarConfig) {
+        val decor = activity()?.window?.decorView ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val darkIcons = useDarkNavigationBarIcons(
+            authoredDarkIcons = if (config.styleAuthored) config.appearance == STATUS_BAR_DARK else null,
+            themeDarkIcons = PamAppearance.bool(
+                context,
+                R.bool.pam_light_navigation_bar,
+                PamAppearance.isDark(context),
+            ),
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = decor.windowInsetsController ?: return
+            controller.setSystemBarsAppearance(
+                if (darkIcons) WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS else 0,
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+            )
+            return
+        }
+        decor.systemUiVisibility = if (darkIcons) {
+            decor.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        } else {
+            decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -9748,6 +9823,8 @@ class PamRenderer(
         val animated: Boolean,
         val translucent: Boolean,
         val navigationBarHidden: Boolean,
+        /** A mounted StatusBar declares `barStyle` (it then styles the navigation bar too). */
+        val styleAuthored: Boolean = false,
     )
 
     private data class NodeState(
