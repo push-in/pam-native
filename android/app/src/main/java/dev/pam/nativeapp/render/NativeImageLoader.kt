@@ -45,6 +45,12 @@ internal data class NativeImageRequest(
     val mediaCacheMaxBytes: Long = 0,
     val mediaCacheChecksum: String? = null,
     val repeat: Boolean = false,
+    /**
+     * Drop the decoded bitmap while the view is hidden even when the memory
+     * cache is not used (a media poster under its painted video); it is
+     * decoded again from the disk cache when the view shows again.
+     */
+    val releaseWhenHidden: Boolean = false,
 ) {
     /**
      * Identity of a request. Every field is an immutable value, so the data
@@ -161,6 +167,20 @@ internal fun coverScaledThumbnail(bitmap: Bitmap, targetWidth: Int, targetHeight
     if (scaled !== bitmap) bitmap.recycle()
     return scaled
 }
+
+/**
+ * Whether a hidden view may give its decoded pixels back: it is restored
+ * from the memory cache, or from the disk cache for `releaseWhenHidden`.
+ */
+internal fun isReleasableImageRequest(request: NativeImageRequest): Boolean =
+    !isInlineImageSource(request.source) &&
+        request.cachePolicy != IMAGE_CACHE_RELOAD &&
+        request.cachePolicy != IMAGE_CACHE_NONE &&
+        request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+        (
+            request.releaseWhenHidden ||
+                (request.mediaCachePolicy != MEDIA_CACHE_DISK && request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST)
+        )
 
 internal fun isInlineImageSource(source: String): Boolean =
     source.regionMatches(0, "data:image/", 0, "data:image/".length, ignoreCase = true)
@@ -625,13 +645,7 @@ internal class NativeImageLoader(
         begin(view, pending.token, view.width, view.height)
     }
 
-    private fun isReleasable(request: NativeImageRequest): Boolean =
-        !isInlineImageSource(request.source) &&
-            request.cachePolicy != IMAGE_CACHE_RELOAD &&
-            request.cachePolicy != IMAGE_CACHE_NONE &&
-            request.mediaCachePolicy != MEDIA_CACHE_NONE &&
-            request.mediaCachePolicy != MEDIA_CACHE_DISK &&
-            request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
+    private fun isReleasable(request: NativeImageRequest): Boolean = isReleasableImageRequest(request)
 
     private fun endRestore(pending: ActiveRequest) {
         pending.restoringCallbacks?.let { original ->

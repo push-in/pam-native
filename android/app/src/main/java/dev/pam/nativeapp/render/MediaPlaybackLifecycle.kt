@@ -9,6 +9,9 @@ internal class MediaPlaybackLifecycle {
     private var attached = false
     private var visible = false
 
+    /** Play intent (autoPlay or a native play request), independent of host and visibility. */
+    val wantsPlay: Boolean get() = requested
+
     @Volatile
     var mayPlay = false
         private set

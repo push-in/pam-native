@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `MediaPlayer` background suspension (Android and iOS): when the app goes
+  to the background (Android `onStop`, iOS `didEnterBackground`) every player
+  without `keepAliveWhenCovered` releases its decoder, player and video
+  surface, keeping its position and play intent. On resume only a player
+  with play intent (autoPlay or a native play) is prepared again; a paused
+  one, such as a warm neighbour in a vertical video pager, is restored on
+  demand (play or seek). A player given a source while the app is in the
+  background allocates nothing until it is active again, and its progress
+  polling stops meanwhile. Before, background only paused the players, so a
+  real-world app's pager kept two hardware decoders and their buffers alive
+  while hidden. No protocol change.
+- `MediaPlayer` poster (`thumbnail`): its decoded bitmap is released while
+  the painted video covers it and decoded again from the cache when the
+  poster must show (player released, error), also with `cache="disk"`
+  (Android kept those posters decoded under the video). No protocol change.
+
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
