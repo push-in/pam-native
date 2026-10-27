@@ -11,9 +11,10 @@
   ABI or protocol before the first frame. It also checks it while encoding,
   and throws `ProtocolMismatchException` with the property or event name
   instead of sending an ID the renderer would reject or ignore. Hosts that
-  export no contract keep working with apps that use only core IDs. Property
-  `1001` (`ListFollowEndOnResize`) is reserved as a constant on every layer;
-  its behaviour is not part of this change. The parity gate now checks the
+  export no contract keep working with apps that use only core IDs.
+  Properties `1001` (`ListFollowEndOnResize`), `1002` (`ScrollPageTransform`)
+  and `1003` (`MediaStartBufferMs`) are reserved as constants on every layer;
+  their behaviour is not part of this change. The parity gate now checks the
   extension constants, both tables' sequences and the iOS contract ceilings.
   See `docs/protocol-extension-table.md`.
 

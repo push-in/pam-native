@@ -31,11 +31,15 @@ $assert(
         && Protocol::EXTENSION_BASE === 1001 && Protocol::EXTENSION_LIMIT === 65_535,
     'The core tables close at 543/80 and the extension table starts at 1001.',
 );
-$assert(PropKey::ListFollowEndOnResize->value === 1001, 'The first extension property is ListFollowEndOnResize.');
+$assert(
+    PropKey::ListFollowEndOnResize->value === 1001 && PropKey::ScrollPageTransform->value === 1002
+        && PropKey::MediaStartBufferMs->value === 1003,
+    'The extension table starts with the port reservations 1001-1003.',
+);
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === 1001
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === 1003
         && $local->eventCeiling === max(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()))
         && $local->extensionEventCeiling === 1000,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',
