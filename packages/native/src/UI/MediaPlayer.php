@@ -87,6 +87,20 @@ final class MediaPlayer extends Element
         return $this->withProperty(PropKey::MediaKeepAliveWhenCovered, $enabled);
     }
 
+    /**
+     * Idle surface (React Native expo-video `VideoView player={null}` kept
+     * mounted): while true the player, its decoder and its network/cache
+     * work are released, the poster (`thumbnail`) covers the view, and the
+     * view with its empty video surface stays mounted, so a list cell that
+     * plays again (a vertical pager's neighbour) reuses it instead of
+     * building a new video view. Back to false, the same source is prepared
+     * again. Requires a renderer declaring property 1004.
+     */
+    public function idleSurface(bool $idle = true): self
+    {
+        return $this->withProperty(PropKey::MediaIdleSurface, $idle);
+    }
+
     public function fit(ImageFit $fit): self
     {
         return $this->withProperty(PropKey::ImageFit, $fit->value);

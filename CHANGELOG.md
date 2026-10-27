@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `MediaPlayer idleSurface` (extension property `1004`, Android and iOS):
+  while true the player, decoder and cache work are released and the poster
+  covers the view, but the view and its empty video surface stay mounted.
+  A list cell that plays again, such as a vertical pager neighbour, reuses
+  that surface instead of building a new video view. In a real-world app's
+  video pager, creating that view cost ~15 ms of a settle frame on a
+  Galaxy S10. An idle view never prepares a source, also when it is first
+  created, and gives its surface buffers back in the background. Only apps
+  that set it send `1004`, so renderers without it keep working. The Android
+  renderer's property switch also covers the reserved `1001`–`1003`, which
+  it did not compile without.
+
 - Protocol: the core identifier tables are closed (properties `1`–`543`,
   events `1`–`80`), and new identifiers go to an extension table that starts
   at `1001`. Extension IDs use the existing `u16` property field, so frames

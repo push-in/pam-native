@@ -122,6 +122,57 @@ class PamMediaPlaybackInstrumentedTest {
         awaitPlaying(media, true)
     }
 
+    @Test fun idleSurfaceReleasesThePlayerButKeepsTheSameVideoView() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        lateinit var surface: View
+        main {
+            media.onReady = { ready.countDown() }
+            media.setAutoPlay(true)
+            media.setSource(source)
+            surface = media.surfaceView
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        main {
+            media.setIdleSurface(true)
+            assertTrue("no player, no decoder", media.holdsIdleSurface)
+            assertEquals(null, field(media, "preparedPlayer"))
+            assertTrue("the empty surface stays mounted", surface.parent === media)
+        }
+        val again = CountDownLatch(1)
+        main {
+            media.onReady = { again.countDown() }
+            media.setIdleSurface(false)
+            assertTrue("the same TextureView is reused", media.surfaceView === surface && surface.parent === media)
+        }
+        assertTrue(again.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+    }
+
+    @Test fun idleSurfaceFromTheFirstPropsNeverPrepares() = withMedia { media, _, source ->
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setIdleSurface(true)
+            media.setAutoPlay(true)
+            media.setSource(source)
+        }
+        assertFalse(ready.await(400, TimeUnit.MILLISECONDS))
+        main { assertTrue(media.holdsIdleSurface) }
+    }
+
+    @Test fun idleSurfaceGivesItsBuffersBackInBackground() = withMedia { media, _, source ->
+        main {
+            media.setSource(source)
+            media.setIdleSurface(true)
+            media.onHostPause()
+            media.onHostBackground()
+            assertTrue(media.surfaceView.parent == null)
+            media.onHostResume()
+            assertTrue("back in the foreground the idle surface is mounted again", media.surfaceView.parent === media)
+            assertTrue(media.holdsIdleSurface)
+        }
+    }
+
     @Test fun keepAlivePlayerOnlyPausesInBackground() = withMedia { media, _, source ->
         val ready = CountDownLatch(1)
         main {

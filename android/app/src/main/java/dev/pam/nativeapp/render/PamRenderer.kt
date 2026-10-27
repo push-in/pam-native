@@ -3428,6 +3428,8 @@ class PamRenderer(
                 (view as? PamWebView)?.setAllowedHosts(value.text(key))
             PropKey.MEDIA_SOURCE -> (view as? PamMediaView)?.let {
                 configureMediaCache(it, state)
+                // An idle view never starts preparing its source (key order applies the source first).
+                it.setIdleSurface(state.flag(PropKey.MEDIA_IDLE_SURFACE, false))
                 it.setSource(value.text(key))
             }
             PropKey.MEDIA_TYPE -> Unit
@@ -3479,6 +3481,12 @@ class PamRenderer(
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, value.text(key))
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED ->
                 (view as? PamMediaView)?.setKeepAliveWhenCovered(value.flag())
+            PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(value.flag())
+            // Reserved extension properties whose behaviour lands with their own change.
+            PropKey.LIST_FOLLOW_END_ON_RESIZE,
+            PropKey.SCROLL_PAGE_TRANSFORM,
+            PropKey.MEDIA_START_BUFFER_MS,
+            -> Unit
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> {
@@ -4459,6 +4467,12 @@ class PamRenderer(
             }
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED -> (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
+            PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(false)
+            // Reserved extension properties whose behaviour lands with their own change.
+            PropKey.LIST_FOLLOW_END_ON_RESIZE,
+            PropKey.SCROLL_PAGE_TRANSFORM,
+            PropKey.MEDIA_START_BUFFER_MS,
+            -> Unit
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> if (

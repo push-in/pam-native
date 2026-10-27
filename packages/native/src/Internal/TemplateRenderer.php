@@ -384,6 +384,7 @@ final class TemplateRenderer
         'currentTime' => PropKey::MediaCurrentTime,
         'playbackRate' => PropKey::MediaPlaybackRate,
         'keepAliveWhenCovered' => PropKey::MediaKeepAliveWhenCovered,
+        'idleSurface' => PropKey::MediaIdleSurface,
         'mediaClock' => PropKey::MediaClock,
         'mediaClockFormat' => PropKey::MediaClockFormat,
         'mediaProgress' => PropKey::MediaProgress,
