@@ -69,6 +69,33 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
         isEnabled && !isHidden && alpha > 0.01
     }
 
+    /// RN Pressable is `accessible` and, without its own label, announces the
+    /// labels of its content (`RCTRecursiveAccessibilityLabel`), like a
+    /// focusable Android ViewGroup reading its children. A press target that
+    /// only wraps labelled content (a gesture detector around a button) must
+    /// not become an unnamed element that hides that content's label.
+    override var accessibilityLabel: String? {
+        get {
+            if let own = super.accessibilityLabel, !own.isEmpty { return own }
+            return Self.contentAccessibilityLabel(of: self)
+        }
+        set { super.accessibilityLabel = newValue }
+    }
+
+    static func contentAccessibilityLabel(of view: UIView) -> String? {
+        var parts: [String] = []
+        for child in view.subviews where !child.isHidden && child.alpha > 0.01 && !child.accessibilityElementsHidden {
+            if let label = child.accessibilityLabel, !label.isEmpty {
+                parts.append(label)
+            } else if let text = (child as? UILabel)?.text, !text.isEmpty {
+                parts.append(text)
+            } else if let nested = contentAccessibilityLabel(of: child) {
+                parts.append(nested)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard isEnabled, isUserInteractionEnabled, !isHidden, alpha > 0.01 else {
             return false
@@ -2841,6 +2868,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     func setVisible(_ value: Bool) {
+        // A backdrop tap already hid the modal before the app answered its
+        // close request with `visible = false`: repeating the hide must not
+        // restart (and then undo) the dismissal that is running.
+        if !value && !desiredVisible { return }
         visibilityGeneration += 1
         let changed = desiredVisible != value
         desiredVisible = value
@@ -3128,10 +3159,12 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         endEditing(true)
 
         let completion = {
-            guard generation == self.visibilityGeneration, !self.desiredVisible else {
+            guard !self.desiredVisible else {
                 self.present()
                 return
             }
+            // A newer dismissal owns the teardown.
+            guard generation == self.visibilityGeneration else { return }
             self.currentlyVisible = false
             self.isHidden = true
             self.resetSheetKeyboardLift()

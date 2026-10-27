@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- iOS modals: when the app answers a bottom sheet's close request (a tap on
+  the backdrop) with `visible = false` while the native dismissal runs, the
+  repeated hide no longer restarts the dismissal, whose earlier completion
+  presented the sheet again with the app's emptied content.
+- iOS Pressable without its own `accessibilityLabel` announces the labels of
+  its content, like React Native (`RCTRecursiveAccessibilityLabel`) and a
+  focusable Android ViewGroup. A `GestureDetector` around a labelled button
+  became an unnamed button that hid the inner label from VoiceOver and UI
+  tests.
+
 - Android navigation bar buttons follow the authored `<StatusBar barStyle>`
   (as React Native apps do when every StatusBar style change also styles the
   navigation bar): over the transparent edge-to-edge bar, `light-content`
