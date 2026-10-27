@@ -66,4 +66,20 @@ class PamModalNavigationBarTest {
         assertEquals(false, style.lightAppearance)
         assertEquals(MODAL_DARK_NAVIGATION_BAR, style.color)
     }
+
+    @Test
+    fun edge_to_edge_modal_buttons_follow_the_authored_status_bar_style() {
+        // Always-dark editor (light-content) in the light theme: light buttons.
+        assertEquals(false, modalNavigationBarLightAppearance(31, edgeToEdge = true, authoredDarkIcons = false, themeDarkIcons = true))
+        // Light screen (dark-content) in the dark theme: dark buttons.
+        assertEquals(true, modalNavigationBarLightAppearance(34, edgeToEdge = true, authoredDarkIcons = true, themeDarkIcons = false))
+        // No StatusBar style: the theme decides.
+        assertEquals(true, modalNavigationBarLightAppearance(31, edgeToEdge = true, authoredDarkIcons = null, themeDarkIcons = true))
+    }
+
+    @Test
+    fun opaque_or_pre_q_modal_buttons_keep_the_theme_appearance() {
+        assertEquals(true, modalNavigationBarLightAppearance(31, edgeToEdge = false, authoredDarkIcons = false, themeDarkIcons = true))
+        assertEquals(true, modalNavigationBarLightAppearance(28, edgeToEdge = true, authoredDarkIcons = false, themeDarkIcons = true))
+    }
 }
