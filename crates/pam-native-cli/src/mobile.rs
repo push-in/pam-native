@@ -9688,6 +9688,8 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).expect("test project");
+        // macOS temp dirs live behind the /var -> /private/var link.
+        let root = root.canonicalize().expect("canonical test project");
         let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
         png.extend_from_slice(&[0, 0, 0, 13]);
         png.extend_from_slice(b"IHDR");
@@ -10790,9 +10792,12 @@ mod tests {
         })
         .expect("persist and clean");
 
+        // macOS temp dirs live behind the /var -> /private/var link.
         assert_eq!(
-            built.path,
-            root.join("dist/cleanup-app-1.2.3-android-debug.apk")
+            built.path.canonicalize().expect("built APK"),
+            root.canonicalize()
+                .expect("canonical test project")
+                .join("dist/cleanup-app-1.2.3-android-debug.apk")
         );
         assert!(built.path.is_file());
         assert!(built.path.with_extension("apk.sha256").is_file());
