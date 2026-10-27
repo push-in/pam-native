@@ -4759,21 +4759,8 @@ public final class PamRenderer: @unchecked Sendable {
             guard let path = try? normalizedPamAssetPath(source) else {
                 return nil
             }
-            let resourcePath = path as NSString
-            let directory = resourcePath.deletingLastPathComponent
-            let fileName = resourcePath.lastPathComponent
-            if let url = Bundle.main.url(
-                forResource: fileName,
-                withExtension: nil,
-                subdirectory: directory
-            ) {
+            if let url = pamAssetFileURL(path) {
                 return PamInlineImages.smallAsset(source, url: url) ?? fileImage(url)
-            }
-            if let resourceRoot = Bundle.main.resourceURL {
-                let url = resourceRoot.appendingPathComponent(path, isDirectory: false)
-                if FileManager.default.fileExists(atPath: url.path) {
-                    return PamInlineImages.smallAsset(source, url: url) ?? fileImage(url)
-                }
             }
             return UIImage(named: path)
         }

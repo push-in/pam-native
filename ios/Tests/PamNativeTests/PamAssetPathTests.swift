@@ -32,4 +32,29 @@ final class PamAssetPathTests: XCTestCase {
             XCTAssertThrowsError(try normalizedPamAssetPath(source))
         }
     }
+
+    func testFindsAssetsInTheStagedPamBundleBeforeThePamLayout() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-asset-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let staged = root.appendingPathComponent("PamBundle/assets/logos/brand.png")
+        let legacy = root.appendingPathComponent("pam/assets/fonts/Inter.ttf")
+        for file in [staged, legacy] {
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data([1]).write(to: file)
+        }
+
+        XCTAssertEqual(
+            pamAssetFileURL("pam/assets/logos/brand.png", resourceRoot: root)?.standardizedFileURL,
+            staged.standardizedFileURL
+        )
+        XCTAssertEqual(
+            pamAssetFileURL("pam/assets/fonts/Inter.ttf", resourceRoot: root)?.standardizedFileURL,
+            legacy.standardizedFileURL
+        )
+        XCTAssertNil(pamAssetFileURL("pam/assets/missing.png", resourceRoot: root))
+    }
 }

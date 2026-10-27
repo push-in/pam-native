@@ -16,8 +16,8 @@ final class PamFontLoader {
         if let cached = faces[path] {
             face = cached
         } else {
-            let url = resourceRoot.appendingPathComponent(path)
-            guard let provider = CGDataProvider(url: url as CFURL),
+            guard let url = pamAssetFileURL(path, resourceRoot: resourceRoot),
+                  let provider = CGDataProvider(url: url as CFURL),
                   let loaded = CGFont(provider) else { return nil }
             faces[path] = loaded
             face = loaded
