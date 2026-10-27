@@ -3554,7 +3554,7 @@ class PamRenderer(
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setControlledRefreshing(value.flag())
             PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text(key))
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
-                (view as? PamRefreshContainer)?.setProgressBackgroundColor(
+                (view as? PamRefreshContainer)?.setProgressBackgroundArgb(
                     value.integer().toInt(),
                 )
             PropKey.REFRESH_PROGRESS_VIEW_OFFSET ->
@@ -4513,7 +4513,7 @@ class PamRenderer(
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setControlledRefreshing(false)
             PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(null)
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
-                (view as? PamRefreshContainer)?.setProgressBackgroundColor(null)
+                (view as? PamRefreshContainer)?.setProgressBackgroundArgb(null)
             PropKey.REFRESH_PROGRESS_VIEW_OFFSET ->
                 (view as? PamRefreshContainer)?.setProgressViewOffset(0f)
             PropKey.REFRESH_INDICATOR_SIZE ->

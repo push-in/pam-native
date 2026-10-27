@@ -131,7 +131,13 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
         setColorSchemeColors(*scheme)
     }
 
-    fun setProgressBackgroundColor(color: Int?) {
+    /**
+     * RN `progressBackgroundColor` as an ARGB value. Not named
+     * `setProgressBackgroundColor`: SwipeRefreshLayout's deprecated
+     * `setProgressBackgroundColor(int)` takes a colour RESOURCE id and a
+     * non-null Int argument would bind to it and throw NotFoundException.
+     */
+    fun setProgressBackgroundArgb(color: Int?) {
         setProgressBackgroundColorSchemeColor(
             color ?: resolveColor(android.R.attr.colorBackground, Color.WHITE),
         )
