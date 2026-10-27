@@ -193,6 +193,56 @@ pub fn calculate_incremental_with_text_metrics(
     Ok((result, context.visited_nodes.get()))
 }
 
+thread_local! {
+    // Window top inset while a modal surface is laid out.
+    static SHEET_TOP_INSET: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// The panel of a bottom sheet (`ModalPresentation` 3): its current snap
+/// point of the surface height below the window's top inset, resting on the
+/// bottom edge. Hosts size the panel with the same rule (iOS `sheetHeight`,
+/// Android `sheetAvailableHeight`), so content that fills the panel (a
+/// list over a composer) is laid out for the visible height instead of the
+/// whole window, which put its bottom below the screen.
+fn sheet_panel(node: &Node, inner: Layout) -> Option<Layout> {
+    if integer(node, PropKey::ModalPresentation) != Some(3) {
+        return None;
+    }
+    let Some(pam_native_protocol::PropValue::Bytes(bytes)) =
+        node.properties.get(&PropKey::BottomSheetSnapPoints)
+    else {
+        return None;
+    };
+    let count = usize::from(u16::from_le_bytes([*bytes.first()?, *bytes.get(1)?]));
+    if count == 0 || count > 16 || bytes.len() != 2 + count * 8 {
+        return None;
+    }
+    let mut points = (0..count)
+        .map(|index| {
+            let offset = 2 + index * 8;
+            let mut raw = [0_u8; 8];
+            raw.copy_from_slice(&bytes[offset..offset + 8]);
+            f64::from_le_bytes(raw)
+        })
+        .filter(|point| point.is_finite())
+        .map(|point| point.clamp(0.05, 1.0) as f32)
+        .collect::<Vec<_>>();
+    if points.is_empty() {
+        return None;
+    }
+    points.sort_by(f32::total_cmp);
+    let index = integer(node, PropKey::BottomSheetIndex)
+        .unwrap_or(0)
+        .clamp(0, points.len() as i64 - 1) as usize;
+    let available = (inner.height - SHEET_TOP_INSET.with(std::cell::Cell::get)).max(1.0);
+    let height = (available * points[index]).clamp(1.0, inner.height.max(1.0));
+    Some(Layout {
+        y: inner.y + inner.height - height,
+        height,
+        ..inner
+    })
+}
+
 /// Lays out every visible `Modal`/`BottomSheet` on its own presentation
 /// surface: the surface viewport and safe area come from the window insets
 /// and the host's [`SurfacePolicy`](crate::surface::SurfacePolicy), so a
@@ -213,7 +263,11 @@ fn layout_modal_surfaces(
         let _keyboard =
             crate::text_measure::SurfaceKeyboardScope::enter(modal.id, window.y + window.height);
         context.viewport.set(surface.viewport);
+        // Sheet snap points resolve below the window's top inset (the
+        // surface itself has none, see `modal_surface`).
+        let previous_top = SHEET_TOP_INSET.with(|top| top.replace(window_insets.map_or(0.0, |insets| insets[1])));
         let laid_out = layout_node(context, modal.id, surface.viewport, false, 0, output);
+        SHEET_TOP_INSET.with(|top| top.set(previous_top));
         context.viewport.set(window);
         laid_out?;
     }
@@ -435,7 +489,8 @@ fn layout_node(
                 continue;
             }
             if !dialog {
-                layout_node(context, child.id, inner, true, depth + 1, output)?;
+                let bounds = sheet_panel(node, inner).unwrap_or(inner);
+                layout_node(context, child.id, bounds, true, depth + 1, output)?;
                 continue;
             }
 
@@ -5946,6 +6001,58 @@ mod tests {
         assert_eq!(layouts[&4].height, 48.0);
         assert_eq!(layouts[&5].height, 48.0);
         assert!(layouts.values().all(|frame| frame.height <= 640.0));
+    }
+
+    #[test]
+    fn bottom_sheet_content_fills_the_snap_panel_not_the_window() {
+        let mut snap = 1_u16.to_le_bytes().to_vec();
+        snap.extend_from_slice(&0.82_f64.to_le_bytes());
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        [
+                            (PropKey::ModalPresentation, PropValue::Integer(3)),
+                            (PropKey::BottomSheetSnapPoints, PropValue::Bytes(snap)),
+                            (PropKey::BottomSheetIndex, PropValue::Integer(0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::Column, [(PropKey::FlexGrow, PropValue::Float(1.0))]),
+                ),
+                (
+                    4,
+                    node(4, 3, 0, NodeKind::Column, [(PropKey::FlexGrow, PropValue::Float(1.0))]),
+                ),
+                (
+                    5,
+                    node(5, 3, 1, NodeKind::Column, [(PropKey::Height, PropValue::Float(48.0))]),
+                ),
+            ]),
+        };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 402.0,
+                height: 874.0,
+            },
+        )
+        .expect("sheet layout");
+        let panel = 874.0 * 0.82;
+        assert!((layout[&3].height - panel).abs() < 0.01, "panel {:?}", layout[&3]);
+        assert!((layout[&3].y + layout[&3].height - 874.0).abs() < 0.01);
+        // The composer ends at the panel bottom, inside the visible sheet.
+        assert!((layout[&5].y + layout[&5].height - 874.0).abs() < 0.01, "composer {:?}", layout[&5]);
+        assert!((layout[&5].y - layout[&3].y - (panel - 48.0)).abs() < 0.01);
     }
 
     #[test]

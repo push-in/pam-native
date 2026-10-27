@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bottom sheets: the engine lays out a sheet's content at its current snap
+  point of the window below the top inset, the same rule iOS and Android use
+  for the panel, instead of the whole window. Content that fills the panel
+  (a list over a composer) kept its bottom below the screen.
+
 - iOS image blur (`blurRadius`, CSS `blur()`): blurred on the CPU with vImage
   (three box passes on a copy downscaled so σ stays near 4 px), like
   Android's `PamBitmapBlur`, instead of a Core Image context. A feed of
