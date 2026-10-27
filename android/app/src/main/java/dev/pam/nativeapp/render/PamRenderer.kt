@@ -830,7 +830,7 @@ class PamRenderer(
         for (index in 0 until views.size()) {
             when (val view = views.valueAt(index)) {
                 is PamMediaView -> view.onHostPause()
-                is PamWebView -> view.onPause()
+                is PamWebView -> view.onHostPause()
             }
         }
     }
@@ -839,7 +839,7 @@ class PamRenderer(
         for (index in 0 until views.size()) {
             when (val view = views.valueAt(index)) {
                 is PamMediaView -> view.onHostResume()
-                is PamWebView -> view.onResume()
+                is PamWebView -> view.onHostResume()
             }
         }
     }
@@ -3546,6 +3546,7 @@ class PamRenderer(
             PropKey.SCROLL_ENABLED -> when (view) {
                 is PamScrollContainer -> view.setScrollEnabled(value.flag())
                 is PamRecyclerList -> view.setScrollEnabled(value.flag())
+                is PamWebView -> view.setScrollEnabled(value.flag())
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
                 is PamScrollContainer -> view.setShowsScrollIndicator(value.flag())
@@ -3600,10 +3601,10 @@ class PamRenderer(
                 }
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(value.flag())
-            PropKey.SCROLL_OVER_SCROLL_MODE ->
-                (view as? PamScrollContainer)?.setOverScrollModeValue(
-                    value.integer().toInt(),
-                )
+            PropKey.SCROLL_OVER_SCROLL_MODE -> when (view) {
+                is PamScrollContainer -> view.setOverScrollModeValue(value.integer().toInt())
+                is PamWebView -> view.setOverScrollModeValue(value.integer().toInt())
+            }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(value.flag())
             PropKey.SCROLL_FADING_EDGE_LENGTH ->
@@ -4229,6 +4230,7 @@ class PamRenderer(
             PropKey.SCROLL_ENABLED -> when (view) {
                 is PamScrollContainer -> view.setScrollEnabled(true)
                 is PamRecyclerList -> view.setScrollEnabled(true)
+                is PamWebView -> view.setScrollEnabled(true)
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
                 is PamScrollContainer -> view.setShowsScrollIndicator(false)
@@ -4271,8 +4273,10 @@ class PamRenderer(
             PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)
-            PropKey.SCROLL_OVER_SCROLL_MODE ->
-                (view as? PamScrollContainer)?.setOverScrollModeValue(1)
+            PropKey.SCROLL_OVER_SCROLL_MODE -> when (view) {
+                is PamScrollContainer -> view.setOverScrollModeValue(1)
+                is PamWebView -> view.setOverScrollModeValue(1)
+            }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(true)
             PropKey.SCROLL_FADING_EDGE_LENGTH ->
@@ -4827,11 +4831,16 @@ class PamRenderer(
                 }
             } else null
             view.onMessage = if (state.properties[PropKey.ON_WEB_VIEW_MESSAGE] != null) {
-                { message ->
+                { message, pageUrl ->
                     dispatchBytes(
                         state.id,
                         EventKind.WEB_VIEW_MESSAGE.value,
-                        WireMap.encode(mapOf("message" to WireValue.Text(message))),
+                        WireMap.encode(
+                            mapOf(
+                                "message" to WireValue.Text(message),
+                                "url" to WireValue.Text(pageUrl),
+                            ),
+                        ),
                     )
                 }
             } else null
