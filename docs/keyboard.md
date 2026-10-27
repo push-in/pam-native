@@ -33,3 +33,23 @@ iOS confines notifications, lifecycle reconciliation and initial publication to
 the main thread. Resume reads the window keyboard layout guide, including
 floating keyboards, and excludes the hidden guide at the home-indicator inset.
 The guide is available on the SDK's iOS 15 minimum deployment target.
+
+## Keyboard dock
+
+A panel with a field (a text, caption or sticker form at the bottom of a
+full-screen editor) docks on the keyboard with a padding
+`KeyboardAvoidingView`:
+
+```html
+<KeyboardAvoidingView behavior="padding" keyboardVerticalOffset="8" flexGrow="1">
+    <View flexGrow="1" />            <!-- shrinks while the keyboard is open -->
+    <Column class="panel">…</Column> <!-- rests on the safe area, then 8 dp above the keyboard -->
+</KeyboardAvoidingView>
+```
+
+The overlap is computed from the view's own laid-out frame, so its resting
+bottom never needs measuring: inside a `SafeAreaView` the panel rests above
+the navigation bar or home indicator, and a dock whose frame ends below the
+window (inside scrolled content) still lands `keyboardVerticalOffset` above
+the keyboard. The layout follows every keyboard frame change and every
+relayout of the view. Inside a modal the engine applies it on Android and iOS.
