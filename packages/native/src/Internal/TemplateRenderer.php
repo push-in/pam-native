@@ -4199,7 +4199,6 @@ final class TemplateRenderer
             PropKey::ScrollMaintainVisibleContentPosition,
             PropKey::ScrollAutoScrollToEndThreshold,
             PropKey::ScrollFillViewport,
-            PropKey::ScrollOverScrollMode,
             PropKey::ScrollNestedEnabled,
             PropKey::ScrollFadingEdgeLength,
             PropKey::ScrollPersistentScrollbar,
@@ -4224,6 +4223,9 @@ final class TemplateRenderer
                 ],
                 true,
             ),
+            // A WebView takes both: a fixed page (a game) neither scrolls
+            // nor bounces / over-scrolls.
+            PropKey::ScrollOverScrollMode => in_array($kind, [NodeKind::Scroll, NodeKind::WebView], true),
             PropKey::ScrollEnabled =>
                 in_array(
                     $kind,
@@ -4232,6 +4234,7 @@ final class TemplateRenderer
                         NodeKind::List,
                         NodeKind::SectionList,
                         NodeKind::VirtualList,
+                        NodeKind::WebView,
                     ],
                     true,
                 ),

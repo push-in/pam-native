@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- WebView: pages written for react-native-webview work unchanged:
+  `window.ReactNativeWebView.postMessage(text)` exists from document start
+  (Android `addJavascriptInterface`, iOS document-start script, main frame
+  only), next to `window.PamNative.postMessage`. `onMessage` handlers get the
+  posting page URL as a second argument (one-argument handlers keep
+  working). A loaded page runs each new `injectedJavaScript` once, so the
+  host can answer the page. `scrollEnabled(false)` / `overScrollMode(Never)`
+  on the existing scroll keys give a fixed page (no scroll, bounce, pinch or
+  over-scroll). Hardened defaults: no link previews, data detectors,
+  back/forward swipes, popups, file/content access, mixed content,
+  geolocation, third-party cookies or zoom controls. Android pauses a
+  WebView whose route is covered (not only in the background). No protocol
+  change.
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
