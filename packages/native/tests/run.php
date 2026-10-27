@@ -8203,5 +8203,6 @@ require __DIR__.'/route_error_boundary.php';
 require __DIR__.'/list_window.php';
 require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
+require __DIR__.'/memory_bounds.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

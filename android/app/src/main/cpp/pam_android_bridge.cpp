@@ -1,8 +1,10 @@
 #include <jni.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <android/log.h>
 
 #include <sapi/embed/php_embed.h>
+#include <Zend/zend_alloc.h>
 #include <Zend/zend_execute.h>
 #include <Zend/zend_exceptions.h>
 
@@ -44,6 +46,9 @@ constexpr auto kFlushBudget = std::chrono::milliseconds(12);
 // Cycle collection runs when idle, not after every event.
 constexpr int kGcEventInterval = 64;
 constexpr auto kGcIdleInterval = std::chrono::seconds(2);
+// Free Zend MM chunks kept after a render peak above this are returned to
+// the system after an idle cycle collection (iOS bridge parity).
+constexpr std::size_t kIdleHeapSlackBytes = 8 * 1024 * 1024;
 
 enum class EventType : std::uint8_t {
     Ui = 1,
@@ -762,7 +767,26 @@ void set_ini(HashTable* configuration, const char* name, const std::string& valu
     zend_hash_str_update(configuration, name, std::strlen(name), &entry);
 }
 
+// Safety net only: the PHP heap of a long session must stay flat (leak
+// validators gate that). Devices with more RAM get more headroom so a burst
+// (a huge first frame, an image-heavy screen) does not kill the runtime;
+// PAM_NATIVE_MEMORY_LIMIT overrides it.
+std::string php_memory_limit() {
+    if (const char* forced = std::getenv("PAM_NATIVE_MEMORY_LIMIT"); forced != nullptr && *forced != '\0') {
+        return forced;
+    }
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const uint64_t ram_mb = pages > 0 && page_size > 0
+        ? static_cast<uint64_t>(pages) * static_cast<uint64_t>(page_size) / (1024u * 1024u)
+        : 0;
+    if (ram_mb >= 6u * 1024u) return "256M";
+    if (ram_mb >= 3u * 1024u + 512u) return "192M";
+    return "128M";
+}
+
 void apply_php_ini_defaults(HashTable* configuration) {
+    set_ini(configuration, "memory_limit", php_memory_limit());
     // OPcache keeps compiled scripts in shared memory for the life of the
     // process and in a file cache under the app state directory, so a cold
     // start reuses the opcodes compiled by the previous launch instead of
@@ -1131,6 +1155,23 @@ RequestOutcome run_php_request(RuntimeState* state) {
                     gc_collect_cycles();
                 })) {
                 return RequestOutcome::Failed;
+            }
+            // A render peak (a feed page of components) leaves free Zend MM
+            // chunks cached in the process (PSS that never came back): give
+            // them back once more than 8 MB of the heap is unused. Only runs
+            // between events, with the queue empty.
+            const std::size_t heap = zend_memory_usage(true);
+            const std::size_t used = zend_memory_usage(false);
+            if (heap > used && heap - used > kIdleHeapSlackBytes) {
+                zend_mm_gc(zend_mm_get_heap());
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "[PamNativePerf] idle PHP heap %zu KiB -> %zu KiB (used %zu KiB)",
+                    heap / 1024,
+                    zend_memory_usage(true) / 1024,
+                    used / 1024
+                );
             }
             events_since_gc = 0;
             last_gc = after;

@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- PHP heap no longer grows over a session. `TreeEncoder` kept the identity
+  memo (`identityIds`, `idIdentities`, `childPaths`) of every node ever
+  encoded, so each route instance, keyed row or sheet stayed for the life of
+  the process (a real-world app: +1.75 MB per navigation cycle, "Allowed
+  memory size of 134217728 bytes exhausted (while running Runtime::flush)"
+  after ~45 min).
+  Removed nodes are forgotten (ids are XXH3 of the identity, so a node that
+  comes back gets the same id). A retained element (remembered screen,
+  memoized row) shown under new paths kept one encoded subtree per path ever
+  used; only the 2 newest are kept. A `mount()` that throws releases what it
+  already owned (subscriptions, listeners, timers), so retried error-boundary
+  renders no longer stack listeners. Regression test: `tests/memory_bounds.php`.
+- Between frames, a PHP heap above 75% of `memory_limit` runs the cycle
+  collector at once and logs one warning. Android sets `memory_limit` from
+  device RAM as a safety net (128M; 192M from 3.5 GB; 256M from 6 GB;
+  `PAM_NATIVE_MEMORY_LIMIT` overrides it). A growing heap is still a leak.
+- Android runtime: after an idle cycle collection, free Zend MM chunks are
+  returned to the system once more than 8 MB of the PHP heap is unused (iOS
+  bridge parity). A render peak no longer leaves its pages in the process
+  PSS for the rest of the session.
+- Android: one invalid prop no longer breaks the whole tree. The renderer
+  applies each prop under a guard: a native exception is logged, the prop is
+  skipped, the rest of the batch mounts, and the host shows it as a non-fatal
+  "Native runtime error" in the debug overlay (once per node/prop/message).
+- Android `RefreshControl.progressBackgroundColor` takes an ARGB colour. The
+  container's `setProgressBackgroundColor(Int?)` resolved to
+  `SwipeRefreshLayout.setProgressBackgroundColor(@ColorRes int)` for non-null
+  values and threw `Resources.NotFoundException: Resource ID #0xff1d231e`
+  (any screen with a pull-to-refresh and that colour lost its whole layout
+  until a force-stop).
+- Android images: packaged `asset://` files up to 16 KiB (icon masks) decode
+  in the frame and live in the glyph cache like `data:` icons, so apps can ship
+  icons as files instead of ~2 KB `data:` URIs per node in every frame. The
+  shared image disk cache is capped at 256 MB (RN/Glide budget) even when a
+  request asks for more.
+- Android media: a player hidden without being covered (inactive tab kept
+  attached, GONE subtree, hidden window) releases its MediaCodec, player and
+  surface after 5 s and resumes at the same position when shown again. The
+  `PamMediaPlayer` worker thread ends after 10 s without commands. The media
+  disk cache keeps at most 256 MB (a request can still allow one file up to
+  2 GB) and never trims the file it just handed to a player.
+
 - `Storage::get()` and `Storage::set()` now pass every key through
   `Storage::safeKey()`, like `Cache\StoragePersistence` already did. Before,
   only `BoundedStore` persistence mapped keys: a direct call with a key
