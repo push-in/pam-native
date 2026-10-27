@@ -2024,6 +2024,9 @@ final class TemplateRenderer
             default => self::custom($tag, $values, $children, $scope),
             };
 
+        if ($factory !== null) {
+            $values = self::rootValues($tag, $values);
+        }
         $decorationKey = null;
         if (
             $factory !== null
@@ -3225,7 +3228,7 @@ final class TemplateRenderer
                         return $call->decorated;
                     }
 
-                    return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+                    return self::decorateComponent($call, $element, $resolvedClass, self::rootValues($tag, $values), $sheet, $data);
                 }
             }
         }
@@ -3307,7 +3310,7 @@ final class TemplateRenderer
         $element = $component->toElement();
         self::$freshElement = null;
 
-        return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+        return self::decorateComponent($call, $element, $resolvedClass, self::rootValues($tag, $values), $sheet, $data);
     }
 
     /**
@@ -7127,6 +7130,24 @@ final class TemplateRenderer
         }
 
         return $list;
+    }
+
+    /**
+     * Attributes of a compiled component tag that also apply to its root
+     * element: the component's own props (constructor parameters, public
+     * properties) are consumed as props only, like React Native props.
+     *
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function rootValues(string $tag, array $values): array
+    {
+        if (!TemplateRegistry::isCompiledComponent($tag)) {
+            return $values;
+        }
+        $props = PamPhpRegistry::propNames($tag);
+
+        return $props === [] ? $values : array_diff_key($values, $props);
     }
 
     /** @var \WeakMap<Closure, true>|null */

@@ -59,6 +59,12 @@ final class PamPhpRegistry
     /** @var array<class-string, array<string, true>|null> */
     private static array $propertyParameters = [];
 
+    /** @var array<string, class-string<Component>> compiled component class by tag */
+    private static array $tagClasses = [];
+
+    /** @var array<string, array<string, true>> */
+    private static array $tagProps = [];
+
     private static ?object $rootScope = null;
     private static bool $autoloadRegistered = false;
 
@@ -84,6 +90,8 @@ final class PamPhpRegistry
             }
             self::$components[$className] = $component;
             self::$classFiles[$className] = $component->classFile;
+            self::$tagClasses[$component->tag] = $className;
+            unset(self::$tagProps[$component->tag]);
             TemplateRegistry::compiledComponent(
                 $component->tag,
                 static fn (
@@ -121,6 +129,36 @@ final class PamPhpRegistry
             $className = $component->className;
             TemplateContractValidator::validate($className, $component->template);
         }
+    }
+
+    /**
+     * Names a compiled component declares as its own props (constructor
+     * parameters and public properties). The template renderer consumes them
+     * as props and does not also apply them as attributes of the
+     * component's root element (a `height` prop is not the root's height).
+     *
+     * @return array<string, true>
+     */
+    public static function propNames(string $tag): array
+    {
+        if (isset(self::$tagProps[$tag])) {
+            return self::$tagProps[$tag];
+        }
+        $className = self::$tagClasses[$tag] ?? null;
+        $names = [];
+        if ($className !== null && class_exists($className)) {
+            $class = new \ReflectionClass($className);
+            foreach ($class->getConstructor()?->getParameters() ?? [] as $parameter) {
+                $names[$parameter->getName()] = true;
+            }
+            foreach ($class->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+                if (!$property->isStatic() && $property->getDeclaringClass()->getName() !== Component::class) {
+                    $names[$property->getName()] = true;
+                }
+            }
+        }
+
+        return self::$tagProps[$tag] = $names;
     }
 
     public static function beginRender(): void

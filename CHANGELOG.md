@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Template components: a compiled component's declared props (constructor
+  parameters, public properties) are no longer also applied as attributes of
+  its root element. A `height` prop used as the root's `minHeight` became a
+  fixed root height, so a content-sized list cell (a real-world app's profile
+  summary) stopped growing at large Dynamic Type sizes and overlapped the
+  next row.
+
 - `<ScrollView keyboardInset>` (iOS and Android): when everything from the
   focused field to the end of the content fits above the keyboard, the whole
   tail is revealed instead of just the field, so a short form keeps the
