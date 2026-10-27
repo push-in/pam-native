@@ -16,3 +16,16 @@ for test in encoder_patches; do
   PAM_NATIVE_ENCODER=native "$php" -d extension="$work/modules/pam_tree_encoder.so" -d memory_limit=1G \
     "$root/packages/native/tests/$test.php"
 done
+# Extension IDs the renderer contract does not declare are refused natively too.
+cat > "$work/autoload.php" <<PHP
+<?php
+spl_autoload_register(static function (string \$class): void {
+    if (str_starts_with(\$class, 'Pam\\\\Native\\\\')) {
+        \$path = '$root/packages/native/src/'.str_replace('\\\\', '/', substr(\$class, 11)).'.php';
+        if (is_file(\$path)) require \$path;
+    }
+});
+PHP
+"$php" -d extension="$work/modules/pam_tree_encoder.so" -d auto_prepend_file="$work/autoload.php" \
+  "$root/packages/native/tests/protocol_extension.php"
+echo "NATIVE_PROTOCOL_EXTENSION OK"

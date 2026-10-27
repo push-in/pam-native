@@ -334,6 +334,15 @@ class PamRuntime(
                     true,
                 )
             }
+            // Renderer contract handshake: PHP refuses an incompatible
+            // renderer at boot and never sends extension IDs it lacks.
+            runCatching {
+                android.system.Os.setenv(
+                    dev.pam.nativeapp.protocol.PAM_RENDERER_CONTRACT_ENV,
+                    dev.pam.nativeapp.protocol.rendererContractJson(),
+                    true,
+                )
+            }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }

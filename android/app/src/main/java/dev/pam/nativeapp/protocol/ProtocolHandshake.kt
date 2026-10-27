@@ -45,3 +45,28 @@ fun negotiateProtocol(peer: ProtocolHandshake): CompatibilityReport {
     return CompatibilityReport(CompatibilityStatus.COMPATIBLE, maximum,
         PAM_PROTOCOL_CAPABILITIES.intersect(peer.capabilities).toSortedSet())
 }
+
+/** Highest core and extension IDs of a table, as the renderer contract declares them. */
+private fun contractCeilings(values: List<Int>): Pair<Int, Int> = Pair(
+    values.filter { it < PAM_EXTENSION_BASE }.maxOrNull() ?: 0,
+    values.filter { it >= PAM_EXTENSION_BASE }.maxOrNull() ?: (PAM_EXTENSION_BASE - 1),
+)
+
+/**
+ * What this renderer implements, exported to PHP before it starts as
+ * `PAM_RENDERER_CONTRACT`. The PHP SDK refuses an incompatible ABI/protocol at
+ * boot and never sends an extension ID above these ceilings. Canonical JSON,
+ * byte-identical to the PHP and iOS encoders.
+ */
+fun rendererContractJson(
+    properties: List<Int> = PropKey.entries.map(PropKey::value),
+    events: List<Int> = EventKind.entries.map(EventKind::value),
+): String {
+    val (property, extensionProperty) = contractCeilings(properties)
+    val (event, extensionEvent) = contractCeilings(events)
+    return "{\"abi\":$PAM_ABI_VERSION,\"events\":[$event,$extensionEvent]," +
+        "\"properties\":[$property,$extensionProperty]," +
+        "\"protocol\":[$PAM_MINIMUM_PROTOCOL_VERSION,$PAM_PROTOCOL_VERSION]}"
+}
+
+const val PAM_RENDERER_CONTRACT_ENV = "PAM_RENDERER_CONTRACT"

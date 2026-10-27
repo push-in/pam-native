@@ -38,6 +38,14 @@ class ProtocolParityTests(unittest.TestCase):
                 2: subject.Entry("SECOND_VALUE", 2),
             }, "fixture", exact=True)
 
+    def test_extension_tables_follow_the_closed_core(self):
+        self.assertEqual((3, 1000), subject.table_ceilings({1, 2, 3}, 543, 1001, "fixture"))
+        self.assertEqual((2, 1002), subject.table_ceilings({1, 2, 1001, 1002}, 543, 1001, "fixture"))
+        with self.assertRaisesRegex(ValueError, "core table"):
+            subject.table_ceilings({1, 2, 544}, 543, 1001, "fixture")
+        with self.assertRaisesRegex(ValueError, "extension table"):
+            subject.table_ceilings({1, 1002}, 543, 1001, "fixture")
+
     def test_rejects_duplicate_ids_and_names(self):
         with self.assertRaisesRegex(ValueError, "duplicates protocol ID"):
             subject.php_entries("case First = 1;\ncase Second = 1;", "fixture")

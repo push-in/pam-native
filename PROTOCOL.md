@@ -40,6 +40,14 @@ the rows on screen when a placeholder is near them; `"<first id>,<last id>"`
 callbacks. A list with `windowSize` sends no runs: every row outside its
 window is its own placeholder, keyed like the row, with the row's measured
 `Height` (and margins); hosts report the same `@first,last` rows.
+The core tables are closed at property `543` and event `80`. New
+identifiers go to the extension table, which starts at `1001` and uses the
+same `u16` property field, so no frame bytes change. Each host exports a
+renderer contract (`PAM_RENDERER_CONTRACT`) with its ABI, protocol range and
+highest core and extension IDs. PHP refuses an incompatible renderer at boot
+and never sends an extension ID the renderer did not declare; it throws
+`ProtocolMismatchException` before the frame is built. See
+[docs/protocol-extension-table.md](docs/protocol-extension-table.md).
 
 ## Frames
 

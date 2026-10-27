@@ -17,6 +17,7 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModuleTransport;
 use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
+use Pam\Native\RendererContract;
 use Pam\Native\State;
 use Pam\Native\Store\Stores;
 use Pam\Native\Diagnostics\ErrorReporter;
@@ -100,6 +101,8 @@ final class Runtime
         Profiler::enabled(BuildConfiguration::mode() !== BuildMode::Production);
         self::manageCycleCollection();
         try {
+            // Handshake: an incompatible renderer is refused before any frame.
+            RendererContract::current()->assertCompatible();
             self::render();
         } catch (Throwable $error) {
             self::reportError($error, RuntimeErrorPhase::Boot);

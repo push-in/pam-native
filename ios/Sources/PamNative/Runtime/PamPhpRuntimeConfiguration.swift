@@ -75,6 +75,8 @@ public struct PamPhpRuntimeConfiguration: Equatable {
         set(Self.opcacheMemoryVariable, "\(opcacheMemoryMegabytes)")
         set(Self.immutableSourcesVariable, immutableSources ? "1" : "0")
         if let opcacheDirectory { set(Self.opcacheDirectoryVariable, opcacheDirectory) }
+        // Renderer contract handshake (see ProtocolHandshake.swift).
+        set(PAM_RENDERER_CONTRACT_VARIABLE, pamRendererContractJSON())
     }
 
     /// The app bundle path changes on every install/update and file cache

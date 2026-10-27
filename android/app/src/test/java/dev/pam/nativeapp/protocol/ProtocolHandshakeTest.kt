@@ -17,3 +17,19 @@ class ProtocolHandshakeTest {
         assertEquals(listOf(1, 2, 3, 4), CompatibilityStatus.entries.map(CompatibilityStatus::value))
     }
 }
+
+class RendererContractTest {
+    @Test fun exportsTheCanonicalContractPhpReads() {
+        // Same golden bytes as packages/native/tests/protocol_extension.php.
+        assertEquals(
+            "{\"abi\":1,\"events\":[79,1000],\"properties\":[540,1001],\"protocol\":[1,1]}",
+            rendererContractJson((1..540).toList() + 1001, (1..79).toList()),
+        )
+        assertEquals(
+            "{\"abi\":1,\"events\":[80,1000],\"properties\":[543,1000],\"protocol\":[1,1]}",
+            rendererContractJson((1..543).toList(), (1..80).toList()),
+        )
+        val local = rendererContractJson()
+        assertEquals(true, local.contains("\"properties\":[${PropKey.entries.filter { it.value < PAM_EXTENSION_BASE }.maxOf(PropKey::value)},"))
+    }
+}

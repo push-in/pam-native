@@ -6,6 +6,10 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
 internal const val PAM_PROTOCOL_VERSION = 1
+/** Closed core tables; later IDs live in the extension table from [PAM_EXTENSION_BASE]. */
+internal const val PAM_CORE_PROPERTY_LIMIT = 543
+internal const val PAM_CORE_EVENT_LIMIT = 80
+internal const val PAM_EXTENSION_BASE = 1001
 private const val MAX_FRAME_BYTES = 16 * 1024 * 1024
 private const val MAX_MUTATIONS = 800_000
 private const val MAX_PROPERTIES = 128
@@ -703,7 +707,11 @@ enum class PropKey(val value: Int) {
     GESTURE_NATIVE_CONTENT_ASPECT(540),
     LIST_PLACEHOLDER(541),
     LIST_WINDOWED(542),
-    LIST_PLACEHOLDER_ROWS(543);
+    LIST_PLACEHOLDER_ROWS(543),
+    // Extension table (PAM_EXTENSION_BASE and up).
+    LIST_FOLLOW_END_ON_RESIZE(1001),
+    SCROLL_PAGE_TRANSFORM(1002),
+    MEDIA_START_BUFFER_MS(1003);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

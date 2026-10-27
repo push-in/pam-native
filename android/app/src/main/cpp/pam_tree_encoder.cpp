@@ -82,6 +82,7 @@ struct Encoder {
     zval refresh_hosted;    // Closure(Element): Element
     zval encode_property;   // Closure(mixed): string (reference encoder, throws)
     zval event_property;    // Closure(int): never (unknown event kinds)
+    zval require_extension; // Closure(int $id, bool $event): void (throws when undeclared), or undef
     std::unordered_set<zend_long> refresh_kinds;
 
     struct KnownIdentity {
@@ -526,8 +527,51 @@ inline bool deferrable(Encoder& encoder, zend_object* row) {
 // extra_key >= 0 adds that property as true (ListWindowed / ListPlaceholder);
 // a placeholder (no events) never uses template-encoded values, a windowed
 // list neither (TreeEncoder::encodeNode / encodePlaceholder).
+constexpr zend_long kExtensionBase = 1001;
+
+// RendererContract::requireProperty()/requireEvent() for an extension ID
+// (TreeEncoder::encodeNode): false with the exception set when undeclared.
+bool require_extension(Encoder& encoder, zend_long value, bool event) {
+    if (Z_TYPE(encoder.require_extension) != IS_OBJECT) return true;
+    zval arguments[2], ignored;
+    ZVAL_LONG(&arguments[0], value);
+    ZVAL_BOOL(&arguments[1], event);
+    const bool called = call_user_function(nullptr, nullptr, &encoder.require_extension, &ignored, 2, arguments) == SUCCESS;
+    zval_ptr_dtor(&ignored);
+    return called && !EG(exception);
+}
+
+bool encode_properties_unchecked(Encoder& encoder, zend_object* element, std::uint64_t id, NodeRecord& record,
+                                 zend_long extra_key, bool with_events);
+
 bool encode_properties(Encoder& encoder, zend_object* element, std::uint64_t id, NodeRecord& record,
                        zend_long extra_key = -1, bool with_events = true) {
+    if (with_events) {
+        zval* events = prop(element, layout.events);
+        if (Z_TYPE_P(events) == IS_ARRAY) {
+            zend_ulong kind;
+            zend_string* string_key;
+            zval* callback;
+            ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(events), kind, string_key, callback) {
+                (void) callback;
+                if (string_key == nullptr && static_cast<zend_long>(kind) >= kExtensionBase
+                    && !require_extension(encoder, static_cast<zend_long>(kind), true)) {
+                    return false;
+                }
+            } ZEND_HASH_FOREACH_END();
+        }
+    }
+    if (!encode_properties_unchecked(encoder, element, id, record, extra_key, with_events)) return false;
+    if (with_events && !record.values.empty() && record.values.back().first >= kExtensionBase) {
+        for (const auto& [key, value] : record.values) {
+            if (key >= kExtensionBase && !require_extension(encoder, key, false)) return false;
+        }
+    }
+    return true;
+}
+
+bool encode_properties_unchecked(Encoder& encoder, zend_object* element, std::uint64_t id, NodeRecord& record,
+                                 zend_long extra_key, bool with_events) {
     zval* properties = prop(element, layout.properties);
     zval* events = prop(element, layout.events);
     static zval true_value = [] {
@@ -1021,6 +1065,7 @@ void release(Encoder& encoder) {
     zval_ptr_dtor(&encoder.refresh_hosted);
     zval_ptr_dtor(&encoder.encode_property);
     zval_ptr_dtor(&encoder.event_property);
+    zval_ptr_dtor(&encoder.require_extension);
     zval_ptr_dtor(&encoder.last_root);
     zval_ptr_dtor(&encoder.last_callbacks);
     zval_ptr_dtor(&encoder.callbacks);
@@ -1034,7 +1079,8 @@ PHP_FUNCTION(pam_native_encoder_create) {
     zval* event_property;
     zval* window = nullptr;
     zval* text_scale_keys = nullptr;
-    ZEND_PARSE_PARAMETERS_START(5, 7)
+    zval* require_extension = nullptr;
+    ZEND_PARSE_PARAMETERS_START(5, 8)
         Z_PARAM_ARRAY(event_properties)
         Z_PARAM_ARRAY(refresh_kinds)
         Z_PARAM_OBJECT(refresh_hosted)
@@ -1043,6 +1089,7 @@ PHP_FUNCTION(pam_native_encoder_create) {
         Z_PARAM_OPTIONAL
         Z_PARAM_ARRAY(window)
         Z_PARAM_ARRAY(text_scale_keys)
+        Z_PARAM_OBJECT(require_extension)
     ZEND_PARSE_PARAMETERS_END();
     if (!resolve_layout()) {
         throw_logic("The native tree encoder cannot resolve the Element layout.");
@@ -1053,6 +1100,11 @@ PHP_FUNCTION(pam_native_encoder_create) {
     ZVAL_COPY(&encoder->refresh_hosted, refresh_hosted);
     ZVAL_COPY(&encoder->encode_property, encode_property);
     ZVAL_COPY(&encoder->event_property, event_property);
+    if (require_extension != nullptr) {
+        ZVAL_COPY(&encoder->require_extension, require_extension);
+    } else {
+        ZVAL_UNDEF(&encoder->require_extension);
+    }
     ZVAL_UNDEF(&encoder->last_root);
     ZVAL_UNDEF(&encoder->last_callbacks);
     ZVAL_UNDEF(&encoder->callbacks);
@@ -1443,6 +1495,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_create, 0, 5,
     ZEND_ARG_TYPE_INFO(0, eventProperty, IS_OBJECT, 0)
     ZEND_ARG_TYPE_INFO(0, window, IS_ARRAY, 0)
     ZEND_ARG_TYPE_INFO(0, textScaleKeys, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, requireExtension, IS_OBJECT, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_handle, 0, 1, IS_VOID, 0)

@@ -549,4 +549,10 @@ enum PropKey: int
     case ListPlaceholder = 541;
     case ListWindowed = 542;
     case ListPlaceholderRows = 543;
+
+    // Extension table (Protocol::EXTENSION_BASE and up). Sent only to
+    // renderers whose RendererContract declares the identifier.
+    case ListFollowEndOnResize = 1001;
+    case ScrollPageTransform = 1002;
+    case MediaStartBufferMs = 1003;
 }

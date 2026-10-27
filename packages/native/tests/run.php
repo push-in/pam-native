@@ -140,6 +140,7 @@ use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
 use Pam\Native\PropKey;
+use Pam\Native\Protocol;
 use Pam\Native\Restorable;
 use Pam\Native\State;
 use Pam\Native\Store\Attributes\Computed as StoreComputed;
@@ -922,15 +923,29 @@ $assert(
     'PAM formatter must remove empty scoped style blocks.',
 );
 
+// Two append-only tables: the closed core (1..543 / 1..80) and the
+// extension table from Protocol::EXTENSION_BASE, each sequential.
+$assertProtocolTables = static function (array $cases, int $coreLimit, string $label) use ($assert): void {
+    $expected = 1;
+    foreach ($cases as $case) {
+        if ($case->value >= Protocol::EXTENSION_BASE && $expected <= Protocol::EXTENSION_BASE) {
+            $expected = Protocol::EXTENSION_BASE;
+        }
+        $assert($case->value === $expected, "{$label} must remain sequential protocol integers.");
+        $expected++;
+    }
+    foreach ($cases as $case) {
+        $assert(
+            $case->value <= $coreLimit || $case->value >= Protocol::EXTENSION_BASE,
+            "{$label} beyond the closed core table belong to the extension table.",
+        );
+    }
+};
 foreach (NodeKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Node kinds must remain sequential protocol integers.');
 }
-foreach (PropKey::cases() as $index => $key) {
-    $assert($key->value === $index + 1, 'Property keys must remain sequential protocol integers.');
-}
-foreach (EventKind::cases() as $index => $kind) {
-    $assert($kind->value === $index + 1, 'Event kinds must remain sequential protocol integers.');
-}
+$assertProtocolTables(PropKey::cases(), Protocol::CORE_PROPERTY_LIMIT, 'Property keys');
+$assertProtocolTables(EventKind::cases(), Protocol::CORE_EVENT_LIMIT, 'Event kinds');
 
 $gesture = GestureDetector::make(
     GestureType::Pan,
@@ -8159,5 +8174,6 @@ require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
 require __DIR__.'/list_window_template.php';
 require __DIR__.'/launch_url.php';
+require __DIR__.'/protocol_extension.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

@@ -19,6 +19,14 @@ pub const MAX_NODES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 512;
 pub const MAX_PROPERTIES_PER_NODE: usize = 128;
 pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
+/// The core identifier tables are closed at property 543 and event 80. Later
+/// identifiers are appended to the extension table, which starts at 1001 and
+/// travels in the same `u16` property field (no frame change). Hosts export
+/// the highest identifiers they implement in `PAM_RENDERER_CONTRACT`, and the
+/// PHP SDK never sends an extension identifier a host did not declare.
+pub const CORE_PROPERTY_LIMIT: u16 = 543;
+pub const CORE_EVENT_LIMIT: u16 = 80;
+pub const EXTENSION_BASE: u16 = 1001;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -721,6 +729,10 @@ pub enum PropKey {
     ListPlaceholder = 541,
     ListWindowed = 542,
     ListPlaceholderRows = 543,
+    // Extension table (EXTENSION_BASE and up).
+    ListFollowEndOnResize = 1001,
+    ScrollPageTransform = 1002,
+    MediaStartBufferMs = 1003,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1271,6 +1283,9 @@ impl TryFrom<u16> for PropKey {
             541 => Ok(Self::ListPlaceholder),
             542 => Ok(Self::ListWindowed),
             543 => Ok(Self::ListPlaceholderRows),
+            1001 => Ok(Self::ListFollowEndOnResize),
+            1002 => Ok(Self::ScrollPageTransform),
+            1003 => Ok(Self::MediaStartBufferMs),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2212,6 +2227,30 @@ mod tests {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
         assert!(PropKey::try_from(544).is_err());
+        const { assert!(CORE_PROPERTY_LIMIT == 543 && CORE_EVENT_LIMIT == 80) };
+        for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
+            assert!(PropKey::try_from(value).is_err(), "gap property {value}");
+        }
+        for value in EXTENSION_BASE..=1003 {
+            assert!(
+                PropKey::try_from(value).is_ok(),
+                "missing extension {value}"
+            );
+        }
+        assert!(PropKey::try_from(1004).is_err());
+    }
+
+    #[test]
+    fn extension_properties_use_the_ordinary_u16_field() {
+        let mutations = [Mutation::Update {
+            id: 7,
+            key: PropKey::ListFollowEndOnResize,
+            value: Some(PropValue::Boolean(true)),
+        }];
+        let bytes = encode_batch(&mutations).expect("encode");
+        let needle = [0xE9, 0x03, 1, 4, 1];
+        assert!(bytes.windows(needle.len()).any(|window| window == needle));
+        assert_eq!(decode_batch(&bytes).expect("decode"), mutations);
     }
 
     #[test]
