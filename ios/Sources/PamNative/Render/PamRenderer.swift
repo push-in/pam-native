@@ -1556,6 +1556,10 @@ public final class PamRenderer: @unchecked Sendable {
             return PamWebView()
         case .media:
             let media = PamMediaView()
+            // Local poster sources (asset://, pam-file://, data:) decode like images.
+            media.localImageResolver = { [weak self] source, size in
+                self?.localImage(source, targetSize: size)
+            }
             media.boundViews = { [weak self] in
                 guard let self, !self.mediaBoundIds.isEmpty else { return [] }
                 return self.mediaBoundIds.compactMap { self.views[$0] }
@@ -2915,13 +2919,14 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheStreaming,
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
-             PamConstants.mediaCacheChecksum:
+             PamConstants.mediaCacheChecksum,
+             PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView, let state = nodes[nodeId] {
                 configureMediaCache(media, state: state)
+                configureMediaThumbnail(media, state: state)
             }
         case PamConstants.mediaCacheTags,
              PamConstants.mediaCachePreloadSeconds,
-             PamConstants.mediaThumbnailSource,
              PamConstants.mediaResizeWidth,
              PamConstants.mediaResizeHeight,
              PamConstants.mediaPriority:
@@ -3458,13 +3463,14 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheStreaming,
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
-             PamConstants.mediaCacheChecksum:
+             PamConstants.mediaCacheChecksum,
+             PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView {
                 configureMediaCache(media, state: state)
+                configureMediaThumbnail(media, state: state)
             }
         case PamConstants.mediaCacheTags,
              PamConstants.mediaCachePreloadSeconds,
-             PamConstants.mediaThumbnailSource,
              PamConstants.mediaResizeWidth,
              PamConstants.mediaResizeHeight,
              PamConstants.mediaPriority:
@@ -4684,6 +4690,17 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
+    /// `thumbnail()` poster (Android `configureMediaThumbnail`): drawn over
+    /// the video until its first frame, cached under `<cacheKey>:thumbnail`.
+    private func configureMediaThumbnail(_ view: PamMediaView, state: NodeState) {
+        view.setThumbnail(
+            state.properties[PamConstants.mediaThumbnailSource]?.textOrNil(),
+            cacheKey: state.properties[PamConstants.mediaCacheKey]?.textOrNil().map { "\($0):thumbnail" },
+            policy: Int(state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 4),
+            maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
+        )
+    }
+
     private func dispatchMediaCacheEvent(
         nodeId: Int64,
         kind: EventKind,
@@ -4706,9 +4723,6 @@ public final class PamRenderer: @unchecked Sendable {
         targetSize: CGSize,
         multiplier: CGFloat
     ) -> UIImage? {
-        guard targetSize.width > 0, targetSize.height > 0 else {
-            return UIImage(data: data)
-        }
         // Decode at the size that covers the view (both edges), not at the
         // view's longest edge: a portrait photo in a square cell kept a
         // shorter edge below the cell and was upscaled.
@@ -4732,13 +4746,16 @@ public final class PamRenderer: @unchecked Sendable {
         // Bundled photos and sandbox files decode at the view size through
         // ImageIO instead of keeping their full resolution.
         func fileImage(_ url: URL) -> UIImage? {
-            if targetSize.width > 0, targetSize.height > 0,
-               let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
+            // Animated files (any view size) and large photos go through ImageIO.
+            if let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
                 return image
             }
             return UIImage(contentsOfFile: url.path)
         }
         if source.lowercased().hasPrefix("asset://") {
+            if let cached = PamInlineImages.cachedAsset(source) {
+                return cached
+            }
             guard let path = try? normalizedPamAssetPath(source) else {
                 return nil
             }
@@ -4750,12 +4767,12 @@ public final class PamRenderer: @unchecked Sendable {
                 withExtension: nil,
                 subdirectory: directory
             ) {
-                return fileImage(url)
+                return PamInlineImages.smallAsset(source, url: url) ?? fileImage(url)
             }
             if let resourceRoot = Bundle.main.resourceURL {
                 let url = resourceRoot.appendingPathComponent(path, isDirectory: false)
                 if FileManager.default.fileExists(atPath: url.path) {
-                    return fileImage(url)
+                    return PamInlineImages.smallAsset(source, url: url) ?? fileImage(url)
                 }
             }
             return UIImage(named: path)

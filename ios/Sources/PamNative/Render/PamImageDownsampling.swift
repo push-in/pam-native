@@ -59,8 +59,15 @@ enum PamImageDownsampling {
         scale: CGFloat,
         multiplier: CGFloat
     ) -> UIImage? {
-        // Animated sources keep UIImage's own decoding (all frames).
-        guard CGImageSourceGetCount(source) <= 1 else { return nil }
+        // Animated GIF/WebP/APNG: frames decode on demand at this size.
+        if CGImageSourceGetCount(source) > 1 {
+            return PamAnimatedImage.image(
+                source: source,
+                targetSize: targetSize,
+                scale: scale,
+                multiplier: multiplier
+            )
+        }
         guard let maxPixels = coverMaxPixelSize(
             sourceSize: pixelSize(source),
             targetSize: targetSize,
