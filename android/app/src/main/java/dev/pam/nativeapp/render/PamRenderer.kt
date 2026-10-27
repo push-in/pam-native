@@ -3683,6 +3683,8 @@ class PamRenderer(
                 (view as? PamRecyclerList)?.setInverted(value.flag())
             PropKey.LIST_FOLLOW_END_ON_RESIZE ->
                 (view as? PamRecyclerList)?.setFollowEndOnResize(value.flag())
+            // Reserved extension keys whose behaviour lands with their own change.
+            PropKey.SCROLL_PAGE_TRANSFORM, PropKey.MEDIA_START_BUFFER_MS -> Unit
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(value.integer().toInt())
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->

@@ -99,13 +99,9 @@
   there; a list at offset 0 inside a sheet or modal that animates its height
   keeps offset 0, and inverted lists are never moved. New list prop
   `followEndOnResize` (`FlatList`/`SectionList`/`VirtualizedList`, template
-  attribute; default true) turns following off. Its PropKey is **pending**:
-  provisional number 544 (`AGUARDA-PROTOCOLO`), declared once per layer
-  (PHP `Internal\PendingProtocol`, Rust `pending::`, Kotlin
-  `PendingProtocol`, Swift `PamPendingProtocol`) outside the sequential
-  1–540 block, so the final number is a one-line change when the protocol
-  extension lands. iOS lists never follow the end, so the prop is a no-op
-  there.
+  attribute; default true) turns following off. It uses extension PropKey
+  `1001` (`ListFollowEndOnResize`); iOS lists never follow the end, so the
+  prop is a no-op there.
 - **Wrapping rows inside a ScrollView (engine).** A `flexWrap` row in a
   vertical scroll measures every line: the natural scroll extent uses the
   wrapped cross size at the width inside the padding, so the last lines are
@@ -122,8 +118,7 @@
   off the default focus highlight (API 26+) and leaves touch-mode focus
   after a blur, so a search field's screen no longer keeps a gray overlay.
 - Tests: engine `wrapping_row_in_a_vertical_scroll_measures_every_line`;
-  JVM `PamProtocolTest` (pending keys); PHP SDK (toast style and icon
-  payloads, pending key contract across PHP/Kotlin/Rust/Swift);
+  PHP SDK (toast style and icon payloads);
   instrumented `PamListFollowEndOnResizeInstrumentedTest`,
   `PamAssetIconInstrumentedTest`, `PamInAppToastInstrumentedTest`,
   `PamImeFocusHighlightInstrumentedTest`, `PamModalRemountInstrumentedTest`,

@@ -77,7 +77,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | next | UI polish: `asset://` icons ≤16 KiB decode in the frame | ✅ | Already on iOS (`PamInlineImages.smallAsset`); Android now matches it. |
 | next | UI polish: paused `MediaPlayer` draws the frame at `currentTime` | ✅ | Already on iOS (seek on `readyToPlay` when it will not play); Android MediaPlayer path now seeks too. |
 | next | UI polish: Modal remounted with the same key reports `on:layout` again | ✅ | Already on iOS (`layoutEvents.forget` on remove); Android now clears its layout-event caches. |
-| next | UI polish: list `followEndOnResize` (pending PropKey 544, AGUARDA-PROTOCOLO) | n/a | iOS lists never follow the end on resize; `PamConstants.listFollowEndOnResize` only names the key. |
+| next | UI polish: list `followEndOnResize` (extension PropKey 1001) | n/a | iOS lists never follow the end on resize; `PamConstants.listFollowEndOnResize` only names the key. |
 | next | UI polish: gray focus veil after the keyboard closes | n/a | Android-only (`defaultFocusHighlightEnabled`); UIKit draws no focus highlight on touch. |
 | 1.43.0 | Zoomed child keeps its tap target (Android `hasIndependentTouchTargetAt`) | n/a | Android-only cause; UIKit hit testing already applies the full transform. |
 | 1.43.0 | Bounded photo zoom (`gestureNativeBounds`, `gestureNativeContentAspect`) | ✅ (uncompiled) | `PamNativeGestureTransform.bounded/settled`: pan and pinch clamp the translation to the contained content scaled around the layer's anchor point; the last bounded gesture on the surface (`boundedGestures`) springs to rest and reports it. XCTest `testBoundedPhotoTransformKeepsTheContainedContentCoveringTheViewport`. |
