@@ -132,9 +132,9 @@ final class PamInputParityTests: XCTestCase {
             PamConstants.inputSyncMode: .integer(2),
             PamConstants.inputDebounceMs: .integer(120),
         ], kind: .input) { _, kind, payload in
-            guard kind == EventKind.change.rawValue,
-                  case let .text(value)? = try? WireMap.decode(payload)["value"] else { return }
-            values.append(value)
+            // The change payload is the plain UTF-8 text, like Android.
+            guard kind == EventKind.change.rawValue else { return }
+            values.append(String(decoding: payload, as: UTF8.self))
         }
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
@@ -156,9 +156,9 @@ final class PamInputParityTests: XCTestCase {
             PamConstants.onChange: .integer(1),
             PamConstants.inputSyncMode: .integer(3),
         ], kind: .input) { _, kind, payload in
-            guard kind == EventKind.change.rawValue,
-                  case let .text(value)? = try? WireMap.decode(payload)["value"] else { return }
-            values.append(value)
+            // The change payload is the plain UTF-8 text, like Android.
+            guard kind == EventKind.change.rawValue else { return }
+            values.append(String(decoding: payload, as: UTF8.self))
         }
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
@@ -175,9 +175,9 @@ final class PamInputParityTests: XCTestCase {
             PamConstants.onChange: .integer(1),
             PamConstants.inputSyncMode: .integer(4),
         ], kind: .input) { _, kind, payload in
-            guard kind == EventKind.change.rawValue,
-                  case let .text(value)? = try? WireMap.decode(payload)["value"] else { return }
-            values.append(value)
+            // The change payload is the plain UTF-8 text, like Android.
+            guard kind == EventKind.change.rawValue else { return }
+            values.append(String(decoding: payload, as: UTF8.self))
         }
         defer { renderer.close() }
         let field = try XCTUnwrap(view as? PamInputField)
