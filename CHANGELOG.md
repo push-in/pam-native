@@ -193,6 +193,17 @@
   `ios_push_entitlement_follows_the_build_configuration` /
   `ios_firebase_config_compiles_the_fcm_token_bridge`.
 
+- iOS manifest: `ios.developmentRegion` (BCP 47, e.g. `pt-BR`) and
+  `ios.localizations`. The CLI writes them to the Xcode project
+  (`developmentRegion`, `knownRegions`) and to the app Info.plist
+  (`CFBundleDevelopmentRegion`, `CFBundleLocalizations`), so system UI (photo
+  picker, share sheet, default alert buttons) follows the app's language
+  instead of English. Omitted, the host template keeps `en`. Test:
+  `ios_development_region_and_localizations_reach_info_plist_and_project`.
+- Push rendering: route aliases let a screen known by several route ids
+  suppress the pushes of any of them while it is shown (a real-world app's
+  conversation reached by more than one route).
+
 ## 1.44.0 - 2026-10-26
 - iOS runtime: OPcache is now enabled in the embedded PHP (JIT stays off: iOS
   forbids W^X). Compiled scripts persist in a file cache under

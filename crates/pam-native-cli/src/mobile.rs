@@ -382,6 +382,16 @@ struct IosOptions {
     /// Supported interface orientations; empty keeps the host template.
     #[serde(default)]
     orientations: Vec<IosOrientation>,
+    /// Language of the app's own texts (BCP 47, e.g. `pt-BR`). It becomes the
+    /// Xcode project's development region and `CFBundleDevelopmentRegion`, so
+    /// system UI (pickers, share sheet, alerts' default buttons) falls back to
+    /// it instead of English. `None` keeps the host template (`en`).
+    #[serde(default)]
+    development_region: Option<String>,
+    /// Languages the app is localized in (`CFBundleLocalizations` and the
+    /// project's known regions). The development region is always included.
+    #[serde(default)]
+    localizations: Vec<String>,
 }
 
 impl Default for IosOptions {
@@ -394,7 +404,30 @@ impl Default for IosOptions {
             bundle_identifier: None,
             usage_descriptions: BTreeMap::new(),
             orientations: Vec::new(),
+            development_region: None,
+            localizations: Vec::new(),
         }
+    }
+}
+
+impl IosOptions {
+    /// Every localization the app declares, development region first, without
+    /// duplicates. Empty when the app declares neither.
+    fn effective_localizations(&self) -> Vec<String> {
+        let mut values: Vec<String> = Vec::new();
+        for value in self
+            .development_region
+            .iter()
+            .chain(self.localizations.iter())
+        {
+            if !values
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(value))
+            {
+                values.push(value.clone());
+            }
+        }
+        values
     }
 }
 
@@ -1668,7 +1701,87 @@ fn validate_ios_app_options(ios: &IosOptions) -> Result<(), String> {
     if ios.orientations.iter().any(|orientation| !seen.insert(*orientation)) {
         return Err("ios.orientations must not repeat an orientation".to_owned());
     }
+    if let Some(region) = &ios.development_region
+        && !valid_language_tag(region)
+    {
+        return Err(format!(
+            "ios.developmentRegion {region:?} must be a language tag such as \"pt-BR\""
+        ));
+    }
+    if ios.localizations.len() > 64 {
+        return Err("ios.localizations is limited to 64 entries".to_owned());
+    }
+    let mut languages = HashSet::new();
+    for language in &ios.localizations {
+        if !valid_language_tag(language) || !languages.insert(language.to_ascii_lowercase()) {
+            return Err(format!(
+                "invalid or duplicate ios.localizations entry {language:?}"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// BCP 47 language tags as Xcode accepts them for regions: a 2-3 letter
+/// language, then optional script/region/variant subtags (`pt-BR`,
+/// `zh-Hans`, `es-419`).
+fn valid_language_tag(value: &str) -> bool {
+    let mut parts = value.split('-');
+    let Some(language) = parts.next() else {
+        return false;
+    };
+    value.len() <= 35
+        && (2..=3).contains(&language.len())
+        && language.bytes().all(|byte| byte.is_ascii_alphabetic())
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+}
+
+/// Sets the Xcode project's development region and known regions (the
+/// template ships `en`). `DEVELOPMENT_LANGUAGE`, used by the app and extension
+/// Info.plists, follows `developmentRegion`.
+fn apply_ios_project_regions(pbx: &str, ios: &IosOptions) -> Result<String, String> {
+    let Some(region) = &ios.development_region else {
+        if ios.localizations.is_empty() {
+            return Ok(pbx.to_owned());
+        }
+        let mut regions = vec!["en".to_owned()];
+        regions.extend(ios.localizations.iter().cloned());
+        return replace_ios_known_regions(pbx, &regions);
+    };
+    let development = "developmentRegion = en;";
+    if !pbx.contains(development) {
+        return Err("the iOS project template has no developmentRegion".to_owned());
+    }
+    let pbx = pbx.replacen(
+        development,
+        &format!("developmentRegion = \"{region}\";"),
+        1,
+    );
+    replace_ios_known_regions(&pbx, &ios.effective_localizations())
+}
+
+fn replace_ios_known_regions(pbx: &str, regions: &[String]) -> Result<String, String> {
+    let known = "knownRegions = (en, Base);";
+    if !pbx.contains(known) {
+        return Err("the iOS project template has no knownRegions".to_owned());
+    }
+    let mut values: Vec<String> = Vec::new();
+    for region in regions.iter().map(String::as_str).chain(["Base"]) {
+        if !values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(region))
+        {
+            values.push(region.to_owned());
+        }
+    }
+    let list = values
+        .iter()
+        .map(|region| format!("\"{region}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(pbx.replacen(known, &format!("knownRegions = ({list});"), 1))
 }
 
 /// Apple bundle identifiers: reverse-DNS, at least two components, only
@@ -1704,6 +1817,24 @@ fn merge_ios_app_info(ios: &IosOptions, info: &mut serde_json::Value) -> Result<
         object.insert(
             "UISupportedInterfaceOrientations~ipad".to_owned(),
             serde_json::Value::Array(values),
+        );
+    }
+    if let Some(region) = &ios.development_region {
+        object.insert(
+            "CFBundleDevelopmentRegion".to_owned(),
+            serde_json::Value::String(region.clone()),
+        );
+    }
+    let localizations = ios.effective_localizations();
+    if !localizations.is_empty() {
+        object.insert(
+            "CFBundleLocalizations".to_owned(),
+            serde_json::Value::Array(
+                localizations
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
         );
     }
     Ok(())
@@ -3582,6 +3713,15 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             ("__PAM_APP_ICON__", app_icon),
         ],
     )?;
+    {
+        let path = workspace.join("PamNativeApp.xcodeproj/project.pbxproj");
+        let pbx = fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let patched = apply_ios_project_regions(&pbx, &project.manifest.ios)?;
+        if patched != pbx {
+            write_atomic(&path, patched.as_bytes())?;
+        }
+    }
     replace_ios_placeholders(
         &workspace.join("App/PamAppDelegate.swift"),
         &[
@@ -11199,6 +11339,43 @@ mod bundle_exclusion_tests {
         assert!(validate_ios_app_options(&ios).is_err());
         let mut ios = IosOptions::default();
         ios.orientations = vec![IosOrientation::Portrait, IosOrientation::Portrait];
+        assert!(validate_ios_app_options(&ios).is_err());
+    }
+
+    #[test]
+    fn ios_development_region_and_localizations_reach_info_plist_and_project() {
+        let ios: IosOptions = serde_json::from_value(serde_json::json!({
+            "developmentRegion": "pt-BR",
+            "localizations": ["en", "pt-BR"]
+        }))
+        .unwrap();
+        validate_ios_app_options(&ios).unwrap();
+        let mut info = serde_json::json!({
+            "CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)"
+        });
+        merge_ios_app_info(&ios, &mut info).unwrap();
+        assert_eq!(info["CFBundleDevelopmentRegion"], "pt-BR");
+        assert_eq!(info["CFBundleLocalizations"], serde_json::json!(["pt-BR", "en"]));
+
+        let template = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
+        let pbx = apply_ios_project_regions(template, &ios).unwrap();
+        assert!(pbx.contains("developmentRegion = \"pt-BR\";"));
+        assert!(pbx.contains("knownRegions = (\"pt-BR\", \"en\", \"Base\");"));
+        assert!(!pbx.contains("developmentRegion = en;"));
+
+        let default = IosOptions::default();
+        assert_eq!(apply_ios_project_regions(template, &default).unwrap(), template);
+        let mut untouched = serde_json::json!({});
+        merge_ios_app_info(&default, &mut untouched).unwrap();
+        assert!(untouched.get("CFBundleLocalizations").is_none());
+
+        for tag in ["", "p", "portuguese", "pt_BR", "pt-", "pt-BR\""] {
+            let mut ios = IosOptions::default();
+            ios.development_region = Some(tag.to_owned());
+            assert!(validate_ios_app_options(&ios).is_err(), "accepted {tag:?}");
+        }
+        let mut ios = IosOptions::default();
+        ios.localizations = vec!["pt-BR".to_owned(), "pt-br".to_owned()];
         assert!(validate_ios_app_options(&ios).is_err());
     }
 
