@@ -6,6 +6,17 @@ public enum PamProtocolError: Error {
 }
 
 public let PAM_PROTOCOL_VERSION = 1
+/// Closed core tables; later IDs live in the extension table from
+/// `PAM_EXTENSION_BASE`, in the same u16 property field.
+public let PAM_CORE_PROPERTY_LIMIT = 543
+public let PAM_CORE_EVENT_LIMIT = 80
+public let PAM_EXTENSION_BASE = 1001
+/// Highest IDs this renderer implements, exported in the renderer contract.
+/// `scripts/protocol-parity.py` pins them to the PHP tables.
+public let PAM_PROPERTY_CEILING = 540
+public let PAM_EXTENSION_PROPERTY_CEILING = 1001
+public let PAM_EVENT_CEILING = 79
+public let PAM_EXTENSION_EVENT_CEILING = 1000
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
@@ -580,6 +591,8 @@ public enum PamConstants {
     public static let scrollKeyboardPersistTaps = 538
     public static let gestureNativeBounds = 539
     public static let gestureNativeContentAspect = 540
+    // Extension table (PAM_EXTENSION_BASE and up).
+    public static let listFollowEndOnResize = 1001
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

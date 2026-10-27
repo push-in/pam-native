@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Protocol: the core identifier tables are closed (properties `1`–`543`,
+  events `1`–`80`), and new identifiers go to an extension table that starts
+  at `1001`. Extension IDs use the existing `u16` property field, so frames
+  and golden bytes do not change. Android and iOS hosts export a renderer
+  contract (`PAM_RENDERER_CONTRACT`: ABI, protocol range, highest core and
+  extension IDs). The PHP SDK checks it at boot, refusing an incompatible
+  ABI or protocol before the first frame. It also checks it while encoding,
+  and throws `ProtocolMismatchException` with the property or event name
+  instead of sending an ID the renderer would reject or ignore. Hosts that
+  export no contract keep working with apps that use only core IDs. Property
+  `1001` (`ListFollowEndOnResize`) is reserved as a constant on every layer;
+  its behaviour is not part of this change. The parity gate now checks the
+  extension constants, both tables' sequences and the iOS contract ceilings.
+  See `docs/protocol-extension-table.md`.
+
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion

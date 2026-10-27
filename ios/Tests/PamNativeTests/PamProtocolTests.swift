@@ -162,6 +162,19 @@ final class PamProtocolTests: XCTestCase {
         )
     }
 
+    func testExtensionPropertyDecodesFromTheOrdinaryU16Field() throws {
+        // Update(id 7, key 1001, set, bool true): the Rust encoder's bytes.
+        let mutations = try BatchDecoder.decode(Data(hex: "504e4231010001000000030700000000000000e903010401"))
+        guard case let .update(id, key, _) = mutations.first else {
+            return XCTFail("Expected an Update mutation")
+        }
+        XCTAssertEqual(id, 7)
+        XCTAssertEqual(key, PamConstants.listFollowEndOnResize)
+        XCTAssertEqual(PAM_CORE_PROPERTY_LIMIT, 543)
+        XCTAssertEqual(PAM_CORE_EVENT_LIMIT, 80)
+        XCTAssertEqual(PAM_EXTENSION_BASE, 1001)
+    }
+
     func testRustGoldenSetRootBatchDecodesOnSwift() throws {
         let bytes = Data(hex: "504e4231010001000000060100000000000000")
         let mutations = try BatchDecoder.decode(bytes)

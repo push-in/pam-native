@@ -39,6 +39,12 @@ properties through ID `451` and events through ID `65`. IDs `450` and `451`
 describe custom accessibility actions and their handler; event `65` returns
 the selected stable action name.
 
+Core tables are closed at property `543` and event `80`. Later identifiers
+belong to the extension table, which starts at `1001` and uses the same `u16`
+field. Hosts export `PAM_RENDERER_CONTRACT`, and `RendererContract` refuses
+an incompatible renderer at boot. It also refuses, before encoding, any
+extension ID that the renderer did not declare.
+
 ## Compatibility gates
 
 Rust tests pin exact v1 tree, patch and batch bytes. PHP tests parse the PHP,

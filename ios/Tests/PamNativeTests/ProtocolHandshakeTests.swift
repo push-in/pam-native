@@ -20,4 +20,14 @@ final class ProtocolHandshakeTests: XCTestCase {
             ProtocolCompatibilityStatus.protocolMismatch.rawValue,
             ProtocolCompatibilityStatus.missingCapability.rawValue])
     }
+
+    func testExportsTheCanonicalRendererContractPhpReads() {
+        // Same golden bytes as packages/native/tests/protocol_extension.php.
+        XCTAssertEqual(
+            pamRendererContractJSON(propertyCeiling: 540, extensionPropertyCeiling: 1001,
+                                    eventCeiling: 79, extensionEventCeiling: 1000),
+            "{\"abi\":1,\"events\":[79,1000],\"properties\":[540,1001],\"protocol\":[1,1]}"
+        )
+        XCTAssertTrue(pamRendererContractJSON().contains("\"properties\":[\(PAM_PROPERTY_CEILING),\(PAM_EXTENSION_PROPERTY_CEILING)]"))
+    }
 }

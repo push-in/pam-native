@@ -25,6 +25,15 @@ actions, property `451` marks its event handler, and event `65` returns the
 selected stable action name. Android and iOS independently reject malformed,
 duplicate, oversized, or more than eight action definitions.
 
+The core tables are closed at property `543` and event `80`. New
+identifiers go to the extension table, which starts at `1001` and uses the
+same `u16` property field, so no frame bytes change. Each host exports a
+renderer contract (`PAM_RENDERER_CONTRACT`) with its ABI, protocol range and
+highest core and extension IDs. PHP refuses an incompatible renderer at boot
+and never sends an extension ID the renderer did not declare; it throws
+`ProtocolMismatchException` before the frame is built. See
+[docs/protocol-extension-table.md](docs/protocol-extension-table.md).
+
 ## Frames
 
 Every integer and floating-point value is little-endian.
