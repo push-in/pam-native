@@ -21,20 +21,33 @@ final class ViewRefModule: NativeModule {
             completion(.failure, Data("A valid nativeRef is required.".utf8))
             return
         }
+        var within = ""
+        if case let .text(value)? = values["within"] {
+            guard Self.isValidRef(value) else {
+                completion(.failure, Data("A valid nativeRef is required.".utf8))
+                return
+            }
+            within = value
+        }
         let start = Self.integer(values["start"])
         let end = Self.integer(values["end"])
         DispatchQueue.main.async {
             do {
-                completion(.success, try self.run(method: method, ref: ref, start: start, end: end))
+                completion(.success, try self.run(method: method, ref: ref, start: start, end: end, within: within))
             } catch {
                 completion(.failure, Data(error.localizedDescription.utf8))
             }
         }
     }
 
-    func run(method: String, ref: String, start: Int = 0, end: Int = 0) throws -> Data {
+    func run(method: String, ref: String, start: Int = 0, end: Int = 0, within: String = "") throws -> Data {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard let view = findView(ref) else { throw ViewRefError("No mounted view has nativeRef \(ref).") }
+        // `within`: the first `ref` under the ancestor named `within` (a ref
+        // repeated by every row of a list).
+        let target = within.isEmpty ? findView(ref) : findView(within)?.pamFindNativeRef(ref)
+        guard let view = target else {
+            throw ViewRefError("No mounted view has nativeRef \(within.isEmpty ? ref : "\(ref) within \(within)").")
+        }
         switch method {
         case "measure":
             return try WireMap.encode(try Self.frame(of: view, ref: ref).mapValues { .decimal($0) })

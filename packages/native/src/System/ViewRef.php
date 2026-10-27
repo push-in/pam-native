@@ -39,14 +39,19 @@ final class ViewRef
 {
     private const MODULE = 'view-ref';
 
-    private function __construct(public readonly string $ref)
+    private function __construct(public readonly string $ref, public readonly ?string $within = null)
     {
     }
 
-    /** @throws InvalidArgumentException for refs that are not 1-64 letters, digits, "_", ".", ":" or "-" */
-    public static function of(string $ref): self
+    /**
+     * @param string|null $within nativeRef of an ancestor to search under:
+     *        a component reused in a list (every row names its bubble
+     *        "bubble") is addressed as `ViewRef::of('bubble', within: 'row-42')`.
+     * @throws InvalidArgumentException for refs that are not 1-64 letters, digits, "_", ".", ":" or "-"
+     */
+    public static function of(string $ref, ?string $within = null): self
     {
-        return new self(Drag::ref($ref));
+        return new self(Drag::ref($ref), $within === null ? null : Drag::ref($within));
     }
 
     /**
@@ -95,7 +100,7 @@ final class ViewRef
     {
         $this->call(
             'isFocused',
-            ['ref' => $this->ref],
+            $this->target(),
             static function (NativeModuleResult $result) use ($callback): void {
                 $callback($result->succeeded() && ($result->values()['focused'] ?? false) === true);
             },
@@ -112,7 +117,7 @@ final class ViewRef
     {
         $this->call(
             'measure',
-            ['ref' => $this->ref],
+            $this->target(),
             static function (NativeModuleResult $result) use ($callback): void {
                 $result->succeeded()
                     ? $callback(ViewMeasurement::fromValues($result->values()), '')
@@ -153,7 +158,7 @@ final class ViewRef
         $ref = $this->ref;
         $this->call(
             $method,
-            ['ref' => $ref] + $payload,
+            $this->target() + $payload,
             static function (NativeModuleResult $result) use ($done, $method, $ref): void {
                 if (!$result->succeeded()) {
                     DevWarnings::warn("ViewRef {$method} failed: {$result->message()}", "nativeRef {$ref}");
@@ -161,6 +166,12 @@ final class ViewRef
                 $done?->__invoke($result->succeeded(), $result->succeeded() ? '' : $result->message());
             },
         );
+    }
+
+    /** @return array<string, string> */
+    private function target(): array
+    {
+        return $this->within === null ? ['ref' => $this->ref] : ['ref' => $this->ref, 'within' => $this->within];
     }
 
     /**

@@ -1495,8 +1495,18 @@ class PamRenderer(
         return null
     }
 
-    /** The node id and mounted view whose `nativeRef` is [ref], if any. */
-    private fun nativeRefTarget(ref: String): Pair<Long, View>? {
+    /**
+     * The node id and mounted view whose `nativeRef` is [ref], if any; with
+     * [within], the first such view inside the view whose `nativeRef` is
+     * [within] (a ref repeated by every row of a list).
+     */
+    private fun nativeRefTarget(ref: String, within: String = ""): Pair<Long, View>? {
+        if (within.isNotEmpty()) {
+            val (_, ancestor) = nativeRefTarget(within) ?: return null
+            val match = findTaggedDescendant(ancestor, ref) ?: return null
+            val index = views.indexOfValue(match)
+            return if (index >= 0) views.keyAt(index) to match else null
+        }
         for (index in 0 until views.size()) {
             val view = views.valueAt(index) ?: continue
             if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return views.keyAt(index) to view
@@ -1504,9 +1514,18 @@ class PamRenderer(
         return null
     }
 
+    private fun findTaggedDescendant(view: View, ref: String): View? {
+        if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return view
+        val group = view as? android.view.ViewGroup ?: return null
+        for (index in 0 until group.childCount) findTaggedDescendant(group.getChildAt(index), ref)?.let { return it }
+        return null
+    }
+
+    private fun describeRef(ref: String, within: String) = if (within.isEmpty()) ref else "$ref within $within"
+
     /** The text field a `nativeRef` names: the view itself or its first EditText descendant. */
-    private fun nativeRefInput(ref: String): Pair<Long, EditText> {
-        val (id, view) = nativeRefTarget(ref) ?: error("No mounted view has nativeRef $ref.")
+    private fun nativeRefInput(ref: String, within: String = ""): Pair<Long, EditText> {
+        val (id, view) = nativeRefTarget(ref, within) ?: error("No mounted view has nativeRef ${describeRef(ref, within)}.")
         val input = view as? EditText ?: firstEditText(view) ?: error("The view $ref is not a text input.")
         return id to input
     }
@@ -1525,9 +1544,15 @@ class PamRenderer(
      * window and opens the IME. Clear edits the text like the user, so the
      * input's `on:change` reports the empty value and a controlled value follows.
      */
-    internal fun nativeRefInputOperation(ref: String, operation: String, start: Int = 0, end: Int = 0) {
+    internal fun nativeRefInputOperation(
+        ref: String,
+        operation: String,
+        start: Int = 0,
+        end: Int = 0,
+        within: String = "",
+    ) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        val (id, input) = nativeRefInput(ref)
+        val (id, input) = nativeRefInput(ref, within)
         when (operation) {
             "focus" -> {
                 check(input.isShown) { "The input $ref is not visible." }
@@ -1557,7 +1582,8 @@ class PamRenderer(
     }
 
     /** Whether the input named by [ref] has focus (`ViewRef::isFocused()`). */
-    internal fun nativeRefInputFocused(ref: String): Boolean = nativeRefInput(ref).second.hasFocus()
+    internal fun nativeRefInputFocused(ref: String, within: String = ""): Boolean =
+        nativeRefInput(ref, within).second.hasFocus()
 
     /**
      * `ViewRef::measure()` / `measureInWindow()` in dp: the frame relative to
@@ -1565,9 +1591,9 @@ class PamRenderer(
      * transforms and scrolling included) and the position relative to this
      * renderer's root (React Native `pageX`/`pageY`).
      */
-    internal fun nativeRefFrame(ref: String): DoubleArray {
+    internal fun nativeRefFrame(ref: String, within: String = ""): DoubleArray {
         check(Looper.myLooper() == Looper.getMainLooper())
-        val (_, view) = nativeRefTarget(ref) ?: error("No mounted view has nativeRef $ref.")
+        val (_, view) = nativeRefTarget(ref, within) ?: error("No mounted view has nativeRef ${describeRef(ref, within)}.")
         check(view.isAttachedToWindow && view.isLaidOut) { "The view $ref has not been laid out." }
         val density = resourcesDensity().toDouble()
         val window = IntArray(2)

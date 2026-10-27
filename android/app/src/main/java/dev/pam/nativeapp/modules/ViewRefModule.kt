@@ -23,7 +23,8 @@ internal class ViewRefModule(
             return
         }
         val ref = (values["ref"] as? WireValue.Text)?.value.orEmpty()
-        if (!REF.matches(ref)) {
+        val within = (values["within"] as? WireValue.Text)?.value.orEmpty()
+        if (!REF.matches(ref) || (within.isNotEmpty() && !REF.matches(within))) {
             completion.failure("A valid nativeRef is required.")
             return
         }
@@ -32,7 +33,7 @@ internal class ViewRefModule(
                 val target = renderer() ?: error("No active surface.")
                 when (method) {
                     "focus", "blur", "clear" -> {
-                        target.nativeRefInputOperation(ref, method)
+                        target.nativeRefInputOperation(ref, method, within = within)
                         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                     }
                     "setSelection" -> {
@@ -41,14 +42,15 @@ internal class ViewRefModule(
                             method,
                             values.integer("start"),
                             values.integer("end"),
+                            within,
                         )
                         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                     }
                     "isFocused" -> completion.complete(
                         ModuleResultStatus.SUCCESS,
-                        WireMap.encode(mapOf("focused" to WireValue.Flag(target.nativeRefInputFocused(ref)))),
+                        WireMap.encode(mapOf("focused" to WireValue.Flag(target.nativeRefInputFocused(ref, within)))),
                     )
-                    "measure" -> completion.complete(ModuleResultStatus.SUCCESS, encodeFrame(target.nativeRefFrame(ref)))
+                    "measure" -> completion.complete(ModuleResultStatus.SUCCESS, encodeFrame(target.nativeRefFrame(ref, within)))
                     else -> error("Unknown view ref method $method")
                 }
             }.onFailure { completion.failure(it.message ?: "View ref $method failed.") }

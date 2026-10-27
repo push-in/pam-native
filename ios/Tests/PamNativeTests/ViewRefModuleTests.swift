@@ -34,6 +34,12 @@ final class ViewRefModuleTests: XCTestCase {
         let inputFrame = try WireMap.decode(try module.run(method: "measure", ref: "composer"))
         XCTAssertEqual(inputFrame["pageX"], .decimal(18))
         XCTAssertEqual(inputFrame["pageY"], .decimal(52))
+        card.pamNativeRef = "card"
+        field.pamNativeRef = "composer"
+        let scoped = ViewRefModule { ref in ref == "card" ? card : nil }
+        let scopedFrame = try WireMap.decode(try scoped.run(method: "measure", ref: "composer", within: "card"))
+        XCTAssertEqual(scopedFrame["width"], .decimal(180))
+        XCTAssertThrowsError(try scoped.run(method: "measure", ref: "card", within: "missing"))
         _ = try module.run(method: "clear", ref: "composer")
         XCTAssertEqual(field.text, "")
         XCTAssertEqual(changes, [""])

@@ -454,6 +454,9 @@ ViewRef::of('bubble-42')->measureInWindow(function (?ViewMeasurement $frame): vo
 - `clear()` edits the text like the user, so a controlled value follows.
 - `nativeRef` may be on the input itself or on a container; input operations
   use the first text input inside it.
+- A ref repeated by every row of a list (each row names its bubble `bubble`)
+  is addressed under a unique ancestor ref:
+  `ViewRef::of('bubble', within: 'row-42')->measureInWindow(...)`.
 - A ref that is not mounted (or a view that is not laid out) completes with
   an error: the optional `done(bool $ok, string $error)` callback receives it,
   measurement callbacks receive `null`, and development builds log it.

@@ -65,6 +65,19 @@ if (($measured[2] ?? null) !== [null, 'The view card has not been laid out.']) {
     throw new RuntimeException('A failed measurement passes null and the error.');
 }
 
+$viewRefReply = null;
+$before = count($viewRefCalls);
+ViewRef::of('bubble', within: 'row-42')->measureInWindow(static fn () => null);
+$scoped = $viewRefCalls[$before][2] ?? [];
+if (($scoped['ref'] ?? '') !== 'bubble' || ($scoped['within'] ?? '') !== 'row-42' || array_key_exists('within', $viewRefCalls[0][2])) {
+    throw new RuntimeException('A ref repeated by list rows is addressed within its row: '.json_encode($scoped));
+}
+try {
+    ViewRef::of('bubble', within: 'row 42');
+    throw new RuntimeException('An invalid within ref was accepted.');
+} catch (InvalidArgumentException) {
+}
+
 $focusedAnswers = [];
 $viewRefReply = [ModuleResultStatus::Success, Wire::map(['focused' => true])];
 ViewRef::of('composer')->isFocused(static function (bool $focused) use (&$focusedAnswers): void { $focusedAnswers[] = $focused; });
