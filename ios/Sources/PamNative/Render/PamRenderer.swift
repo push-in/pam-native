@@ -2639,6 +2639,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.borderGradient,
              PamConstants.overflow:
             applyBorder(view: view, nodeId: nodeId)
+            applyLeafPadding(view: view, nodeId: nodeId)
+        case PamConstants.padding,
+             PamConstants.paddingHorizontal,
+             PamConstants.paddingVertical,
+             PamConstants.paddingLeft,
+             PamConstants.paddingTop,
+             PamConstants.paddingRight,
+             PamConstants.paddingBottom:
+            applyLeafPadding(view: view, nodeId: nodeId)
         case PamConstants.borderRadius,
              PamConstants.borderTopLeftRadius,
              PamConstants.borderTopRightRadius,
@@ -3313,6 +3322,15 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.borderRightWidth,
              PamConstants.borderBottomWidth:
             applyBorder(view: view, nodeId: nodeId)
+            applyLeafPadding(view: view, nodeId: nodeId)
+        case PamConstants.padding,
+             PamConstants.paddingHorizontal,
+             PamConstants.paddingVertical,
+             PamConstants.paddingLeft,
+             PamConstants.paddingTop,
+             PamConstants.paddingRight,
+             PamConstants.paddingBottom:
+            applyLeafPadding(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
@@ -3662,6 +3680,38 @@ public final class PamRenderer: @unchecked Sendable {
         spec.clips = properties[PamConstants.overflow]?.integerOrNil() == 2
         spec.clipsContent = state.kind == .image && !spec.radii.isZero
         return spec
+    }
+
+    /// Leaf padding (Android `applyLeafPadding`): the engine lays out flex
+    /// children inside the padding box, but text and input content has no
+    /// child frame, so those views inset their own content by the authored
+    /// padding plus the border widths (Yoga's padding box).
+    private func applyLeafPadding(view: UIView, nodeId: Int64) {
+        guard view is PamTextView || view is PamInputField || view is PamMultilineInputField else { return }
+        let insets = nodes[nodeId].map { Self.leafContentInsets($0.properties) } ?? .zero
+        switch view {
+        case let text as PamTextView: text.contentInsets = insets
+        case let field as PamInputField: field.contentInsets = insets
+        case let field as PamMultilineInputField: field.contentInsets = insets
+        default: break
+        }
+    }
+
+    static func leafContentInsets(_ properties: [Int: PropValue]) -> UIEdgeInsets {
+        func number(_ key: Int) -> Double? { properties[key]?.pamNumber }
+        let all = number(PamConstants.padding) ?? 0
+        let horizontal = number(PamConstants.paddingHorizontal) ?? all
+        let vertical = number(PamConstants.paddingVertical) ?? all
+        let border = max(0, number(PamConstants.borderWidth) ?? 0)
+        func edge(_ padding: Int, _ fallback: Double, _ borderKey: Int) -> CGFloat {
+            CGFloat(max(0, number(padding) ?? fallback) + max(0, number(borderKey) ?? border))
+        }
+        return UIEdgeInsets(
+            top: edge(PamConstants.paddingTop, vertical, PamConstants.borderTopWidth),
+            left: edge(PamConstants.paddingLeft, horizontal, PamConstants.borderLeftWidth),
+            bottom: edge(PamConstants.paddingBottom, vertical, PamConstants.borderBottomWidth),
+            right: edge(PamConstants.paddingRight, horizontal, PamConstants.borderRightWidth)
+        )
     }
 
     private func applyBorder(view: UIView, nodeId: Int64) {

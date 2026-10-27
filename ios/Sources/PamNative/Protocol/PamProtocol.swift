@@ -620,6 +620,12 @@ public enum PamConstants {
     public static let marginBottom = 111
     public static let testId = 18
     public static let padding = 8
+    public static let paddingHorizontal = 29
+    public static let paddingVertical = 30
+    public static let paddingLeft = 104
+    public static let paddingTop = 105
+    public static let paddingRight = 106
+    public static let paddingBottom = 107
     public static let flexGrow = 7
     public static let accessibilityLabel = 17
     public static let fontWeight = 43

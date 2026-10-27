@@ -1176,6 +1176,28 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         attributedPlaceholder = NSAttributedString(string: placeholderText, attributes: attributes)
     }
 
+    /// Authored padding and border widths (Yoga padding box): text,
+    /// placeholder and caret stay inside them, like Android's leaf padding.
+    var contentInsets: UIEdgeInsets = .zero {
+        didSet {
+            guard contentInsets != oldValue else { return }
+            setNeedsLayout()
+            scheduleContentSizeUpdate()
+        }
+    }
+
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        super.textRect(forBounds: bounds.inset(by: contentInsets))
+    }
+
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        super.editingRect(forBounds: bounds.inset(by: contentInsets))
+    }
+
+    override func placeholderRect(forBounds bounds: CGRect) -> CGRect {
+        super.placeholderRect(forBounds: bounds.inset(by: contentInsets))
+    }
+
     override func caretRect(for position: UITextPosition) -> CGRect {
         caretHidden ? .zero : super.caretRect(for: position)
     }
@@ -1598,6 +1620,11 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     var verticalAlignment: PamInputVerticalAlignment = .auto {
         didSet { if verticalAlignment != oldValue { setNeedsLayout() } }
     }
+    /// Authored padding and border widths, added to the vertical-alignment
+    /// container inset (Android leaf padding).
+    var contentInsets: UIEdgeInsets = .zero {
+        didSet { if contentInsets != oldValue { setNeedsLayout() } }
+    }
     /// `minLines`: the smallest number of text lines the box keeps room for.
     var minimumLines = 1 {
         didSet { if minimumLines != oldValue { setNeedsLayout() } }
@@ -1829,13 +1856,18 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     }
 
     private func applyVerticalAlignment() {
-        let free = max(0, bounds.height - textHeight())
+        let free = max(0, bounds.height - contentInsets.top - contentInsets.bottom - textHeight())
         let top: CGFloat = switch verticalAlignment {
         case .center: (free / 2).rounded(.down)
         case .bottom: free.rounded(.down)
         case .auto, .top: 0
         }
-        let inset = UIEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+        let inset = UIEdgeInsets(
+            top: contentInsets.top + top,
+            left: contentInsets.left,
+            bottom: contentInsets.bottom,
+            right: contentInsets.right
+        )
         if textContainerInset != inset { textContainerInset = inset }
     }
 
