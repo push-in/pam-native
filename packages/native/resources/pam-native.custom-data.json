@@ -178,6 +178,7 @@
             "attributes": [
                 { "name": "estimatedRowHeight", "description": "Fallback and prefetch estimate; an explicit cell height remains authoritative." },
                 { "name": "rowHeight", "description": "Compatibility alias of estimatedRowHeight." },
+                { "name": "windowSize", "description": "React Native windowSize: PHP renders only the p-for rows within (N - 1) / 2 screens of the viewport; the others are placeholders with their measured height." },
                 { "name": "prefetch" },
                 { "name": "numColumns" },
                 { "name": "horizontal", "values": [{ "name": "true" }, { "name": "false" }] },

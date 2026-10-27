@@ -8111,5 +8111,6 @@ require __DIR__.'/framework_utilities.php';
 require __DIR__.'/route_coverage.php';
 require __DIR__.'/keyboard_persist_taps.php';
 require __DIR__.'/route_error_boundary.php';
+require __DIR__.'/list_window.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

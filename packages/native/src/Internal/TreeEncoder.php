@@ -465,6 +465,7 @@ final class TreeEncoder
         }
         foreach ($removals as $id => $_) {
             unset($committed[$id]);
+            $this->forget($id);
         }
         foreach ($diff->changed as $id => $node) {
             $committed[$id] = $node;
@@ -561,6 +562,47 @@ final class TreeEncoder
                 }
             } else {
                 $this->removed($item, $removals);
+            }
+        }
+    }
+
+    /**
+     * Drops the identity bookkeeping of a node the frame removed (its id by
+     * identity, its child placements and its placement in its parent), so
+     * long sessions that mount and unmount many rows keep these maps at the
+     * size of the live tree. Ids are derived from identities, so a node that
+     * comes back gets the same id.
+     */
+    private function forget(int $id): void
+    {
+        $identity = $this->idIdentities[$id] ?? null;
+        if ($identity === null) {
+            return;
+        }
+        unset($this->idIdentities[$id]);
+        if (($this->identityIds[$identity] ?? null) === $id) {
+            unset($this->identityIds[$identity]);
+        }
+        if (str_starts_with($identity, 'dom:')) {
+            return;
+        }
+        $bar = strrpos($identity, '|');
+        if ($bar === false) {
+            return;
+        }
+        $path = substr($identity, 0, $bar);
+        unset($this->childPaths[$path]);
+        $slash = strrpos($path, '/');
+        if ($slash === false) {
+            return;
+        }
+        $parent = substr($path, 0, $slash);
+        $segment = substr($path, $slash + 1);
+        $kind = (int) substr($identity, $bar + 1);
+        if (isset($this->childPaths[$parent][$segment][$kind])) {
+            unset($this->childPaths[$parent][$segment][$kind]);
+            if ($this->childPaths[$parent][$segment] === []) {
+                unset($this->childPaths[$parent][$segment]);
             }
         }
     }

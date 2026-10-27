@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Template `VirtualizedList windowSize="N"` (React Native FlatList
+  `windowSize`): PHP renders only the `p-for` rows within the window and keeps
+  a placeholder with the row's measured height for the others, driven by the
+  list's scroll phases (a fling is materialized up to its predicted landing).
+  The tree encoder also forgets the identities and child placements of
+  removed nodes. In a real-world app's feed after 30 swipes: PHP memory
+  51.6 MB to 33.9 MB, encoded nodes 3,688 to 742, footprint 208 MB to 184 MB
+  (iOS Simulator). No protocol change.
+- iOS UI driver (`ios-host/UITests`): `{"fling": "up"|"down"}` step, a fast
+  flick that returns while the list still decelerates (scroll QA).
+
 - Bottom sheets: the engine lays out a sheet's content at its current snap
   point of the window below the top inset, the same rule iOS and Android use
   for the panel, instead of the whole window. Content that fills the panel
