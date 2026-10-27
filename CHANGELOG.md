@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Android device gallery images (MediaStore `content://media/...`): thumbnails
+  come from the provider's typed `image/*` stream at the cell size (Android
+  10+, cancelled when the cell is recycled or rebound) or its cached MINI_KIND
+  thumbnail (Android 8-9), decoded as RGB_565 (half the bitmap, also for the
+  HARDWARE copy). A video is never decoded frame by frame per cell nor read
+  as image bytes: at any view size (a preview still too) it draws the
+  platform thumbnail, and without one the load fails instead of reading the
+  container. No protocol change.
 - `TextScalePolicy::set(maximum, display, displayFontSize)`: app-wide font
   scale caps by typographic role (React Native apps install the same rule in
   their theme). Every Text and Input without its own `maxFontSizeMultiplier`
