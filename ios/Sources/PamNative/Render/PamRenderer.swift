@@ -1431,6 +1431,14 @@ public final class PamRenderer: @unchecked Sendable {
             modal.insert(view, index: index)
             return
         }
+        // RefreshControl hosts its scrollable child in its content view and
+        // binds the UIRefreshControl to it. Inserted as a plain sibling, the
+        // child sat under the empty content view: rows got no touches, the
+        // list did not scroll and pull-to-refresh never attached.
+        if let refresh = parent as? PamRefreshContainer {
+            refresh.insert(view, index: index)
+            return
+        }
 
         parent.pamInsertManagedSubview(view, at: index)
     }
@@ -7034,10 +7042,15 @@ private extension PropValue {
         }
     }
 
+    /// Numeric value of a decimal or integer property (Android
+    /// `PropValue.decimal()`): PHP sends whole numbers such as `opacity="1"`
+    /// or `:opacity="$x ? 0 : 1"` as integers.
     func decimalOrNil() -> Double? {
         switch self {
         case let .decimal(value):
             value
+        case let .integer(value):
+            Double(value)
         default:
             nil
         }
