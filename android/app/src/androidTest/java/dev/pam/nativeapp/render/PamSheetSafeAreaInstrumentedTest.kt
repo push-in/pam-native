@@ -26,7 +26,7 @@ import org.junit.runner.RunWith
  * Safe area by default, on the real engine, renderer and windows, with
  * three-button navigation (48 dp bar) and gesture navigation (handle):
  *
- * - a bottom sheet without any SafeAreaView or bottom padding (the Zé Chat
+ * - a bottom sheet without any SafeAreaView or bottom padding (a real-world app's
  *   "Anexar" sheet shape) ends its last card above the navigation bar, both
  *   sized to fit its content and with a fixed detent; its background still
  *   reaches the screen bottom;

@@ -26,7 +26,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Zé Chat: after the keyboard closed, the whole screen stayed ~8% darker. The
+ * A real-world app: after the keyboard closed, the whole screen stayed ~8% darker. The
  * root host absorbs the blurred input's focus and, out of touch mode, Android
  * 8+ painted its default focus highlight over it.
  */
