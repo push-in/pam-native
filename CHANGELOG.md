@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.46.2 - 2026-10-28
+
+Fixes and one addition on top of 1.46.1, no protocol change (core and extension identifiers as in 1.46.1).
+
 - `Image::prefetch()` accepts packaged `asset://` images: each is decoded once
   per process at full resolution, off the UI thread, and kept (a GPU bitmap on
   Android 9+; at most 8 images / 48 MiB, dropped on a critical memory trim or
