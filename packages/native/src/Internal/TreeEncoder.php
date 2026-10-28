@@ -12,9 +12,11 @@ use Pam\Native\EventKind;
 use Pam\Native\NodeKind;
 use Pam\Native\Protocol;
 use Pam\Native\PropKey;
+use Pam\Native\RendererContract;
 use Pam\Native\TextScalePolicy;
 use WeakMap;
 
+use function array_key_last;
 use function array_slice;
 use function count;
 use function is_bool;
@@ -292,6 +294,9 @@ final class TreeEncoder
             }
         }
         foreach ($element->events as $eventKind => $callback) {
+            if ($eventKind >= Protocol::EXTENSION_BASE) {
+                RendererContract::current()->requireEvent($eventKind);
+            }
             $this->callbacks[$id.':'.$eventKind] = $callback;
             $properties[self::EVENT_PROPERTIES[$eventKind] ?? self::eventProperty($eventKind)] = true;
         }
@@ -320,6 +325,17 @@ final class TreeEncoder
             }
             $encodedProperties[$property] = $encoded;
         }
+        }
+
+        // Keys are sorted, so one comparison skips nodes without extension
+        // properties; an undeclared one never reaches the renderer.
+        if ($encodedProperties !== [] && array_key_last($encodedProperties) >= Protocol::EXTENSION_BASE) {
+            $contract = RendererContract::current();
+            foreach ($encodedProperties as $property => $_) {
+                if ($property >= Protocol::EXTENSION_BASE) {
+                    $contract->requireProperty($property);
+                }
+            }
         }
 
         $node = new EncodedNode(

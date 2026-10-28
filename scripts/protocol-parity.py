@@ -123,6 +123,69 @@ def compare(authority: dict[int, Entry], candidate: dict[int, Entry], label: str
         raise ValueError(f"{label} protocol parity failed: {'; '.join(problems)}")
 
 
+def table_ceilings(values: set[int], core_limit: int, base: int, label: str) -> tuple[int, int]:
+    """Validate the closed core table plus the extension table; return their ceilings."""
+    core = sorted(value for value in values if value < base)
+    extension = sorted(value for value in values if value >= base)
+    if core != list(range(1, len(core) + 1)) or (core and core[-1] > core_limit):
+        raise ValueError(f"{label} core table must be sequential from 1 and end at or before {core_limit}")
+    if extension != list(range(base, base + len(extension))):
+        raise ValueError(f"{label} extension table must be sequential from {base}")
+    return (core[-1] if core else 0, extension[-1] if extension else base - 1)
+
+
+def verify_extension_tables(
+    root: Path,
+    properties: dict[int, Entry],
+    events: dict[int, Entry],
+    rust_source: str,
+    kotlin_source: str,
+    swift_source: str,
+) -> None:
+    protocol_source = (root / "packages/native/src/Protocol.php").read_text(encoding="utf-8")
+    php = {
+        name: constant(protocol_source, rf"^\s*public const int {name} = ([0-9_ *]+);$", f"PHP {name}")
+        for name in ("CORE_PROPERTY_LIMIT", "CORE_EVENT_LIMIT", "EXTENSION_BASE")
+    }
+    rust = {
+        name: constant(rust_source, rf"^pub const {name}: u16 = ([0-9_ *]+);$", f"Rust {name}")
+        for name in ("CORE_PROPERTY_LIMIT", "CORE_EVENT_LIMIT", "EXTENSION_BASE")
+    }
+    kotlin = {
+        name: constant(kotlin_source, rf"^internal const val PAM_{name} = ([0-9_ *]+)$", f"Kotlin {name}")
+        for name in ("CORE_PROPERTY_LIMIT", "CORE_EVENT_LIMIT", "EXTENSION_BASE")
+    }
+    swift = {
+        name: constant(swift_source, rf"^public let PAM_{name} = ([0-9_ *]+)$", f"Swift {name}")
+        for name in ("CORE_PROPERTY_LIMIT", "CORE_EVENT_LIMIT", "EXTENSION_BASE")
+    }
+    if not (php == rust == kotlin == swift):
+        raise ValueError(f"Extension table constants differ: PHP {php}, Rust {rust}, Kotlin {kotlin}, Swift {swift}")
+    base = php["EXTENSION_BASE"]
+    if base <= php["CORE_PROPERTY_LIMIT"] or base <= php["CORE_EVENT_LIMIT"]:
+        raise ValueError("The extension table must start after both core tables")
+    expected = {
+        "PROPERTY_CEILING": 0,
+        "EXTENSION_PROPERTY_CEILING": 0,
+        "EVENT_CEILING": 0,
+        "EXTENSION_EVENT_CEILING": 0,
+    }
+    (
+        expected["PROPERTY_CEILING"],
+        expected["EXTENSION_PROPERTY_CEILING"],
+    ) = table_ceilings(set(properties), php["CORE_PROPERTY_LIMIT"], base, "PropKey")
+    (
+        expected["EVENT_CEILING"],
+        expected["EXTENSION_EVENT_CEILING"],
+    ) = table_ceilings(set(events), php["CORE_EVENT_LIMIT"], base, "EventKind")
+    declared = {
+        name: constant(swift_source, rf"^public let PAM_{name} = ([0-9_ *]+)$", f"Swift PAM_{name}")
+        for name in expected
+    }
+    if declared != expected:
+        raise ValueError(f"Swift renderer contract ceilings {declared} differ from the PHP tables {expected}")
+
+
 def verify(root: Path = ROOT) -> None:
     php = root / "packages/native/src"
     kotlin_source = (root / "android/app/src/main/java/dev/pam/nativeapp/protocol/PamProtocol.kt").read_text(encoding="utf-8")
@@ -144,6 +207,14 @@ def verify(root: Path = ROOT) -> None:
 
     rust_source = (root / "crates/pam-native-protocol/src/lib.rs").read_text(
         encoding="utf-8"
+    )
+    verify_extension_tables(
+        root,
+        properties,
+        php_entries((php / "EventKind.php").read_text(encoding="utf-8"), "PHP EventKind"),
+        rust_source,
+        kotlin_source,
+        swift_source,
     )
     protocol_source = (php / "Protocol.php").read_text(encoding="utf-8")
     wire_source = (php / "Internal/Wire.php").read_text(encoding="utf-8")

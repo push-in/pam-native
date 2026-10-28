@@ -11,11 +11,28 @@ class PamProtocolTest {
     fun protocolEnumsRemainSequentialAndAppendOnly() {
         assertEquals((1..31).toList(), NodeKind.entries.map(NodeKind::value))
         assertEquals((1..79).toList(), EventKind.entries.map(EventKind::value))
-        assertEquals((1..540).toList(), PropKey.entries.map(PropKey::value))
+        assertEquals((1..540).toList() + (1001..1003).toList(), PropKey.entries.map(PropKey::value))
+        assertEquals(543, PAM_CORE_PROPERTY_LIMIT)
+        assertEquals(80, PAM_CORE_EVENT_LIMIT)
+        assertEquals(1001, PAM_EXTENSION_BASE)
         assertEquals(
             (1..19).toList(),
             dev.pam.nativeapp.modules.NativeOperation.entries.map { it.value },
         )
+    }
+
+    @Test
+    fun extensionPropertyDecodesFromTheOrdinaryU16Field() {
+        // Update(id 7, key 1001, set, bool true): the Rust encoder's bytes.
+        val mutations = BatchDecoder.decode(
+            ByteBuffer.wrap("504e4231010001000000030700000000000000e903010401".hexBytes()),
+        )
+        assertEquals(PropKey.LIST_FOLLOW_END_ON_RESIZE, (mutations.single() as Mutation.Update).key)
+        assertThrows(Exception::class.java) {
+            BatchDecoder.decode(
+                ByteBuffer.wrap("504e4231010001000000030700000000000000ec03010401".hexBytes()),
+            )
+        }
     }
 
     @Test

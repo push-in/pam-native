@@ -61,3 +61,20 @@ public func negotiateProtocol(with peer: ProtocolHandshake) -> ProtocolCompatibi
     return .init(status: .compatible, protocolVersion: maximum,
                  capabilities: PAM_PROTOCOL_CAPABILITIES.intersection(peer.capabilities))
 }
+
+/// What this renderer implements, exported to PHP before it starts as
+/// `PAM_RENDERER_CONTRACT`. The PHP SDK refuses an incompatible ABI/protocol
+/// at boot and never sends an extension ID above these ceilings. Canonical
+/// JSON, byte-identical to the PHP and Android encoders.
+public let PAM_RENDERER_CONTRACT_VARIABLE = "PAM_RENDERER_CONTRACT"
+
+public func pamRendererContractJSON(
+    propertyCeiling: Int = PAM_PROPERTY_CEILING,
+    extensionPropertyCeiling: Int = PAM_EXTENSION_PROPERTY_CEILING,
+    eventCeiling: Int = PAM_EVENT_CEILING,
+    extensionEventCeiling: Int = PAM_EXTENSION_EVENT_CEILING
+) -> String {
+    "{\"abi\":\(PAM_ABI_VERSION),\"events\":[\(eventCeiling),\(extensionEventCeiling)],"
+        + "\"properties\":[\(propertyCeiling),\(extensionPropertyCeiling)],"
+        + "\"protocol\":[\(PAM_MINIMUM_PROTOCOL_VERSION),\(PAM_PROTOCOL_VERSION)]}"
+}
