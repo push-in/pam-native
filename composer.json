@@ -21,7 +21,8 @@
     "autoload": {
         "files": [
             "packages/native/src/Polyfill/mbstring_functions.php",
-            "packages/native/src/Routing/functions.php"
+            "packages/native/src/Routing/functions.php",
+            "packages/native/src/functions.php"
         ],
         "psr-4": {
             "Pam\\Native\\": "packages/native/src/"

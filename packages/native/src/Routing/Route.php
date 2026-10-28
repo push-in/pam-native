@@ -20,6 +20,9 @@ use Pam\Native\Renderable;
 
 use function is_string;
 
+/**
+ * @deprecated Use Pam\Native\Route (Laravel-style routes.php): Route::stack/screen/modal/group/guard map to Route::screen()/modal()/group()/middleware(), deepLink() to the path or ->alias(), identifyBy() to ->unique(). See docs/architecture-v2.md#migrating-from-routes-json-and-route-stack.
+ */
 final class Route
 {
     private static ?RouteRegistrar $registrar = null;

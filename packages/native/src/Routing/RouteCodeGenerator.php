@@ -12,6 +12,9 @@ use function is_array;
 use function is_int;
 use function is_string;
 
+/**
+ * @deprecated routes.json is replaced by routes.php: `pam-native-routes routes.php <dir>` (run by the CLI) generates RouteName/Routes from the routes themselves. See docs/architecture-v2.md.
+ */
 final class RouteCodeGenerator
 {
     /** @return array<string, string> filename => PHP source */

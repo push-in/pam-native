@@ -231,6 +231,7 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
+require __DIR__.'/../src/functions.php';
 require __DIR__.'/Fixtures/ExamplePluginProvider.php';
 require __DIR__.'/Fixtures/TemplateEnumScope.php';
 
@@ -8147,6 +8148,8 @@ require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
 require __DIR__.'/image_layers.php';
 require __DIR__.'/view_capture.php';
+require __DIR__.'/view_ref.php';
+require __DIR__.'/portal.php';
 require __DIR__.'/image_events.php';
 require __DIR__.'/encoder_patches.php';
 require __DIR__.'/framework_utilities.php';
@@ -8156,5 +8159,14 @@ require __DIR__.'/route_error_boundary.php';
 require __DIR__.'/list_window.php';
 require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
+require __DIR__.'/arch_v2_signals.php';
+require __DIR__.'/arch_v2_setup_lifecycle.php';
+require __DIR__.'/arch_v2_globals.php';
+require __DIR__.'/arch_v2_composables.php';
+require __DIR__.'/arch_v2_resource.php';
+require __DIR__.'/arch_v2_component_discovery.php';
+require __DIR__.'/arch_v2_routing.php';
+require __DIR__.'/arch_v2_route_compiler.php';
+require __DIR__.'/arch_v2_http.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

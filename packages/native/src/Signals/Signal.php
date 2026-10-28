@@ -8,8 +8,12 @@ use Closure;
 use Pam\Native\Internal\DependencyTracker;
 use WeakMap;
 
-/** @template T */
-final class Signal implements ReactiveSource
+/**
+ * @template T
+ * @implements ReadableSignal<T>
+ * @property T $value reactive read/write alias of get()/set()
+ */
+final class Signal implements ReactiveSource, ReadableSignal
 {
     /** @var WeakMap<ReactiveObserver, true> */
     private WeakMap $observers;
@@ -29,6 +33,40 @@ final class Signal implements ReactiveSource
         DependencyTracker::read($this, 'value');
         ReactiveScope::track($this);
         return $this->value;
+    }
+
+    /** @return T */
+    public function peek(): mixed
+    {
+        return $this->value;
+    }
+
+    public function __get(string $name): mixed
+    {
+        if ($name !== 'value') {
+            throw new \LogicException("Unknown signal property {$name}; use ->value.");
+        }
+
+        return $this->get();
+    }
+
+    public function __set(string $name, mixed $value): void
+    {
+        if ($name !== 'value') {
+            throw new \LogicException("Unknown signal property {$name}; use ->value.");
+        }
+        $this->set($value);
+    }
+
+    public function __isset(string $name): bool
+    {
+        return $name === 'value';
+    }
+
+    /** Number of subscribe() listeners, for leak diagnostics and tests. */
+    public function listenerCount(): int
+    {
+        return \count($this->listeners);
     }
 
     /** @param T $value */

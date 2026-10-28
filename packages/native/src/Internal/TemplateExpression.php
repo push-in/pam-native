@@ -413,11 +413,16 @@ final class TemplateExpression
 
             return $property->getValue($scope);
         }
+        if (\Pam\Native\Globals::has($name)) {
+            return \Pam\Native\Globals::get($name);
+        }
         if ($lenient) {
             return self::missing();
         }
 
-        throw new RuntimeException("Template expression \${$name} is undefined.");
+        throw new RuntimeException(
+            "Template expression \${$name} is undefined (not a loop variable, component property or App::global()).",
+        );
     }
 
     /** @internal Property step that is not a plain array key. */
@@ -428,8 +433,10 @@ final class TemplateExpression
         return match (true) {
             $value === $missing => $missing,
             is_array($value) && array_key_exists($step, $value) => $value[$step],
+            $value instanceof \Pam\Native\Signals\ReadableSignal && $step === 'value' => $value->get(),
             is_object($value) && property_exists($value, $step) =>
                 self::property($value, $step)->getValue($value),
+            is_object($value) && method_exists($value, '__get') && isset($value->{$step}) => $value->{$step},
             $lenient => $missing,
             default => throw new RuntimeException(
                 "Cannot resolve template property {$step}.",
@@ -912,16 +919,8 @@ final class TemplateExpression
         return static function (array $data, ?object $scope) use ($name, $lenient, $missing, $postfix): mixed {
             if (array_key_exists($name, $data)) {
                 $value = $data[$name];
-            } elseif ($scope !== null && property_exists($scope, $name)) {
-                $property = self::property($scope, $name);
-                if (!$property->isInitialized($scope)) {
-                    throw new RuntimeException("Template property \${$name} is not initialized.");
-                }
-                $value = $property->getValue($scope);
-            } elseif ($lenient) {
-                $value = $missing;
             } else {
-                throw new RuntimeException("Template expression \${$name} is undefined.");
+                $value = self::__pamVariable($scope, $name, $lenient);
             }
 
             return $postfix === null ? $value : $postfix($value, $data, $scope);
@@ -961,16 +960,9 @@ final class TemplateExpression
         return static function (mixed $value, array $data, ?object $scope) use ($steps, $lenient, $missing): mixed {
             foreach ($steps as [$isProperty, $step]) {
                 if ($isProperty) {
-                    $value = match (true) {
-                        $value === $missing => $missing,
-                        is_array($value) && array_key_exists($step, $value) => $value[$step],
-                        is_object($value) && property_exists($value, $step) =>
-                            self::property($value, $step)->getValue($value),
-                        $lenient => $missing,
-                        default => throw new RuntimeException(
-                            "Cannot resolve template property {$step}.",
-                        ),
-                    };
+                    $value = is_array($value) && array_key_exists($step, $value)
+                        ? $value[$step]
+                        : self::__pamPropertyStep($value, $step, $lenient);
                     continue;
                 }
                 $index = $step($data, $scope);

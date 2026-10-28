@@ -10,6 +10,9 @@ use Pam\Native\Navigation\NavigationAction;
 use Pam\Native\Navigation\NavigationActionHandler;
 use Pam\Native\Navigation\NavigationBackHandler;
 
+/**
+ * @deprecated Use navigate()/back() (or Pam\Native\Route::navigate()), which run middleware and validate params.
+ */
 final class Navigation
 {
     private static ?NavigationActionHandler $root = null;

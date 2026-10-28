@@ -251,6 +251,8 @@
         { "name": "StatusBar", "description": "Android status bar configuration." },
         { "name": "DrawerLayoutAndroid", "description": "Android-native drawer layout." },
         { "name": "InputAccessoryView", "description": "Keyboard accessory container." },
+        { "name": "Portal", "description": "Renders its children in the PortalHost named by host (default screen), outside the parent tree; name identifies it." },
+        { "name": "PortalHost", "description": "Full-size, touch-transparent layer where portals for its name (default screen) are drawn." },
         { "name": "Native", "description": "Custom Kotlin NativeViewFactory escape hatch." },
         { "name": "If", "description": "Conditional template block." },
         { "name": "Each", "description": "Template iteration block." },

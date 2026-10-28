@@ -32,6 +32,9 @@ final class App
 
     private static ?AppState $currentState = null;
 
+    /** True once components were registered explicitly or discovered by convention. */
+    private static bool $componentsConfigured = false;
+
     private function __construct()
     {
     }
@@ -46,6 +49,7 @@ final class App
     public static function run(Renderable|Closure|RouteCollection|string|int $root): void
     {
         try {
+            self::discoverConventionalComponents();
             $root = self::resolveRoot($root);
             PluginManager::boot();
             if ($root instanceof TabNavigator) {
@@ -98,6 +102,39 @@ final class App
     }
 
     /**
+     * Registers application-wide values, visible as `$name` in every template
+     * and as `$this->name` in every component. Adds to what is already
+     * registered; a repeated key overwrites. Values may be anything: a signal,
+     * a composable (`useColorScheme()`), an object, an array, a scalar or a
+     * closure. Reactive values re-render whoever reads them.
+     *
+     * ```php
+     * App::globals(['scheme' => useColorScheme(), 'insets' => useSafeAreaInsets()]);
+     * ```
+     *
+     * @param array<string, mixed> $values
+     */
+    public static function globals(array $values): void
+    {
+        Globals::merge($values);
+    }
+
+    /**
+     * Registers one global. Registering a name twice without `replace: true`
+     * is an error in development builds.
+     */
+    public static function global(string $name, mixed $value, bool $replace = false): void
+    {
+        Globals::set($name, $value, $replace);
+    }
+
+    /** Removes a global; readers re-render without it. */
+    public static function forget(string $name): void
+    {
+        Globals::forget($name);
+    }
+
+    /**
      * Creates a retained, queryable visual document that can be passed directly
      * to App::run(). The document remains the mutation handle for its lifetime.
      */
@@ -115,6 +152,7 @@ final class App
         string $path,
         ?string $cachePath = null,
     ): void {
+        self::$componentsConfigured = true;
         try {
             PamPhpRegistry::discover(
                 $path,
@@ -125,6 +163,38 @@ final class App
 
             throw $error;
         }
+    }
+
+    /**
+     * Architecture v2 convention: without an App::components() call, App::run()
+     * registers the components under `<project root>/src` with the compiled
+     * cache in `<project root>/.pam-native/components`. Call App::components()
+     * before App::run() to use other paths.
+     *
+     * @internal
+     */
+    public static function discoverConventionalComponents(?string $projectRoot = null): bool
+    {
+        if (self::$componentsConfigured) {
+            return false;
+        }
+        $root = $projectRoot ?? PluginManager::projectRoot();
+        if ($root === null) {
+            $script = $_SERVER['SCRIPT_FILENAME'] ?? null;
+            $root = is_string($script) && $script !== '' ? dirname($script) : null;
+        }
+        if ($root === null || !is_dir($root.'/src')) {
+            return false;
+        }
+        self::components($root.'/src', $root.'/.pam-native/components');
+
+        return true;
+    }
+
+    /** @internal Test hook: forget whether components were configured. */
+    public static function resetComponentDiscovery(): void
+    {
+        self::$componentsConfigured = false;
     }
 
     /** @param array<string, mixed> $props */

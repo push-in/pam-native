@@ -11,6 +11,7 @@ use LogicException;
 use Pam\Native\Component;
 use Pam\Native\Navigation\DeepLink;
 use Pam\Native\Navigation\NavigationLinkHandler;
+use Pam\Native\Navigation\NavigationEventType;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\RouteContext;
@@ -46,6 +47,9 @@ final class RouteNavigator implements NavigationLinkHandler
     /** @var list<array{0: DeepLink, 1: Route}> */
     private array $links = [];
     private ?int $linkSubscription = null;
+    /** @var array<string, Component> tab and status-bar-wrapped screens, by route name */
+    private array $tracked = [];
+    private ?Component $focused = null;
 
     public function __construct(private readonly RouteCollection $routes)
     {
@@ -85,6 +89,28 @@ final class RouteNavigator implements NavigationLinkHandler
             }
         }
         \Pam\Native\Routing\Navigation::attach($this->stack);
+        foreach ([NavigationEventType::Focus, NavigationEventType::State] as $type) {
+            $this->stack->addListener($type, fn () => $this->syncFocus());
+        }
+    }
+
+    /**
+     * The stack focuses the screens it renders itself; screens it cannot see
+     * (tabs inside a tabs entry, screens wrapped for a status bar) get
+     * onFocus/onBlur from here.
+     */
+    private function syncFocus(): void
+    {
+        $route = $this->routes->find($this->stack->currentRoute());
+        $name = $route?->routeName();
+        if ($route !== null && $route->kind === RouteKind::Tabs && isset($this->tabNavigators[$route->routeName()])) {
+            $name = $this->tabNavigators[$route->routeName()]->selectedTab();
+        }
+        $next = $name === null ? null : ($this->tracked[$name] ?? null);
+        if ($next === $this->focused) return;
+        $this->focused?->__pamNavigationFocus(false);
+        $this->focused = $next;
+        $next?->__pamNavigationFocus(true);
     }
 
     /** The native stack, for pre-v2 APIs that take a Navigator. */
@@ -242,7 +268,9 @@ final class RouteNavigator implements NavigationLinkHandler
             $result = $screen(...RouteArguments::resolve(new ReflectionFunction($screen), $params, $name, strict: false, services: $services));
         } elseif (is_string($screen)) {
             $result = RouteArguments::instantiate($screen, $params, $name, $services);
-            if (!$result instanceof Component && method_exists($result, 'setup')) {
+            if ($result instanceof Component) {
+                $result->__pamRouteParams($params, $services[1]);
+            } elseif (method_exists($result, 'setup')) {
                 $result->setup(...RouteArguments::for($result));
             }
         } else {
@@ -252,6 +280,11 @@ final class RouteNavigator implements NavigationLinkHandler
             throw new InvalidArgumentException("Route {$name} screen must be Renderable, ".get_debug_type($result).' given.');
         }
         $style = $route->statusBarStyle();
+        if ($style === null && $route->kind !== RouteKind::Tab) return $result;
+        if ($result instanceof Component) {
+            $this->tracked[$name] = $result;
+            $this->syncFocus();
+        }
         if ($style === null) return $result;
 
         return Screen::make(StatusBar::make(null, $style, $route->statusBarHidden()), $result);
@@ -276,7 +309,10 @@ final class RouteNavigator implements NavigationLinkHandler
         if ($group->presentation !== null) $router = $router->presentation($group->presentation);
         if ($group->backBehavior !== null) $router = $router->behavior($group->backBehavior);
 
-        return $this->tabNavigators[$name] = $router->build();
+        $navigator = $this->tabNavigators[$name] = $router->build();
+        $navigator->addListener(NavigationEventType::State, fn () => $this->syncFocus());
+
+        return $navigator;
     }
 
     /** Ionicons glyph when the app ships the font; label-only tabs otherwise. */
