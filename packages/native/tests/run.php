@@ -8227,6 +8227,7 @@ require __DIR__.'/hot_reload_state.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/keyboard_visibility.php';
 require __DIR__.'/native_capabilities.php';
+require __DIR__.'/i18n.php';
 require __DIR__.'/text_whitespace.php';
 require __DIR__.'/typography_parity.php';
 require __DIR__.'/gestures_animations.php';

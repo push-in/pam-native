@@ -256,6 +256,15 @@
   like `@gorhom/portal`. A portal lives while its component renders it and is
   removed on re-render without it or unmount.
 
+- `Pam\Native\I18n\I18n`: message catalogs per locale (lazy loaders), a
+  source-locale fallback, `{name}` interpolation with locale number grouping,
+  `_zero`/`_one`/`_other` plurals (French `n < 2`, pluggable rules) and
+  locale resolution by language subtag. Templates get a `t()` built-in.
+  `DeviceInfo::$locale` carries the system language (BCP 47). See `docs/i18n.md`.
+- `DeviceInfo` exposes the installed `appVersion` (Android `versionName`, iOS
+  `CFBundleShortVersionString`) and `buildNumber` (Android `versionCode`, iOS
+  `CFBundleVersion`), so an app can enforce a minimum supported version
+  (forced-update screen) without a plugin. Both are `''` when unknown.
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion

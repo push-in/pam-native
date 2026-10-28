@@ -360,6 +360,9 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                         "powerSaveMode" to WireValue.Flag(
                             context.getSystemService(android.os.PowerManager::class.java)?.isPowerSaveMode == true,
                         ),
+                        "appVersion" to WireValue.Text(installedAppVersion()),
+                        "buildNumber" to WireValue.Text(installedBuildNumber()),
+                        "locale" to WireValue.Text(java.util.Locale.getDefault().toLanguageTag()),
                         "safeAreaTop" to WireValue.Decimal(
                             safeTop / density.toDouble(),
                         ),
@@ -605,4 +608,28 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         const val APP_STATE_BACKGROUND = 3
         const val DESTRUCTIVE_COLOR = 0xFFD32F2F.toInt()
     }
+
+    /** versionName of the installed package ('' when the package manager has no answer). */
+    private fun installedAppVersion(): String = runCatching {
+        installedPackage()?.versionName.orEmpty()
+    }.getOrDefault("")
+
+    /** versionCode of the installed package as text ('' when unknown). */
+    private fun installedBuildNumber(): String = runCatching {
+        val info = installedPackage() ?: return@runCatching ""
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            info.longVersionCode.toString()
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toString()
+        }
+    }.getOrDefault("")
+
+    private fun installedPackage(): android.content.pm.PackageInfo? =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
 }

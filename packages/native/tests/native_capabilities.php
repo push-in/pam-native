@@ -313,6 +313,15 @@ $assert(
     $device instanceof DeviceInfo && $device->memoryClassMb === 128 && $device->lowRamDevice && $device->powerSaveMode && $device->constrained(),
     'DeviceInfo must expose memory class, low-RAM and power-save state.',
 );
+$assert($device->appVersion === '' && $device->buildNumber === '', 'A runtime without the version keys reports an unknown version.');
+$device = null;
+DeviceInfo::get(static function (DeviceInfo $info) use (&$device): void { $device = $info; });
+Runtime::dispatchModuleResult(
+    TestDiagnostics::$typedCall['requestId'],
+    ModuleResultStatus::Success->value,
+    Wire::map(['width' => 360.0, 'height' => 800.0, 'density' => 3.0, 'appearance' => 1, 'appState' => 1, 'appVersion' => ' 1.0.121 ', 'buildNumber' => '121', 'locale' => 'pt-BR']),
+);
+$assert($device instanceof DeviceInfo && $device->appVersion === '1.0.121' && $device->buildNumber === '121' && $device->locale === 'pt-BR', 'DeviceInfo must expose the installed app version, build number and system locale.');
 $assert((new DeviceStatusValue(1.0, false, NetworkType::Wifi, false, true))->powerSaveMode(), 'DeviceStatus must expose power-save mode.');
 
 // 7. Image prefetch.

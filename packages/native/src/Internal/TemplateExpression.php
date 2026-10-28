@@ -1081,6 +1081,19 @@ final class TemplateExpression
         if (isset(self::STRING_HELPERS[$builtIn])) {
             return self::invokeStringHelper($builtIn, $arguments);
         }
+        // t('namespace.key', [params]): the message catalog, unless the
+        // component declares its own t().
+        if ($builtIn === 't' && ($scope === null || !method_exists($scope, $name))) {
+            if (
+                count($arguments) < 1 || count($arguments) > 2
+                || !is_string($arguments[0])
+                || (isset($arguments[1]) && !is_array($arguments[1]))
+            ) {
+                throw new RuntimeException('Template t() expects a message key and an optional parameter array.');
+            }
+
+            return \Pam\Native\I18n\I18n::t($arguments[0], $arguments[1] ?? []);
+        }
         $method = $scope === null ? null : (self::$scopeMethods[$scope::class][$name] ?? null);
         if ($method === null && ($scope === null || !method_exists($scope, $name))) {
             throw new RuntimeException("Template method {$name} does not exist.");

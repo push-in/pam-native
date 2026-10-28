@@ -148,6 +148,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                         "memoryClassMb": .integer(Int64(os_proc_available_memory() / 1_048_576)),
                         "lowRamDevice": .flag(ProcessInfo.processInfo.physicalMemory < 3 * 1_073_741_824),
                         "powerSaveMode": .flag(ProcessInfo.processInfo.isLowPowerModeEnabled),
+                        "appVersion": .text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""),
+                        "buildNumber": .text(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""),
+                        "locale": .text(Locale.preferredLanguages.first ?? Locale.current.identifier),
                     ])
                     completion(.success, payload)
                 } catch {

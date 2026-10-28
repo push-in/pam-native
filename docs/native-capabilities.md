@@ -743,7 +743,10 @@ RTL direction, velocity completion and cancellation.
 network state with `NetworkType` (`powerSaveMode()` aliases `lowPowerMode`).
 `DeviceInfo` adds `memoryClassMb` (Android heap class; iOS available process
 memory), `lowRamDevice`, `powerSaveMode` and `constrained()` to scale caches,
-prefetching and animation down on weak devices.
+prefetching and animation down on weak devices. `appVersion` and
+`buildNumber` carry the installed version (Android `versionName`/`versionCode`,
+iOS `CFBundleShortVersionString`/`CFBundleVersion`; `''` when unknown), e.g.
+for a minimum-supported-version gate.
 
 ## Permissions
 
