@@ -28,6 +28,13 @@ public enum PamLinking {
         callback?(.success, payload)
     }
 
+    /// The launch URL without consuming it (exported to PHP at boot).
+    public static func launchURL() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return initialURL
+    }
+
     fileprivate static func initial(_ completion: @escaping ModuleCompletion) {
         lock.lock()
         let value = initialURL

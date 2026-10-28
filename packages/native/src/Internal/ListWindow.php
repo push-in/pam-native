@@ -4,202 +4,262 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
-use Pam\Native\Component;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\LayoutEvent;
+use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
-use Pam\Native\ScrollPhaseEvent;
 use Pam\Native\UI\View;
+use stdClass;
 use WeakMap;
 use WeakReference;
 
-use function array_sum;
+use function ceil;
 use function count;
-use function abs;
-use function array_intersect_key;
-use function hash;
+use function intdiv;
+use function is_float;
+use function is_int;
 use function is_string;
+use function ksort;
 use function max;
-use function min;
-use function strlen;
+use function usort;
 
 /**
- * PHP side of a template `<VirtualizedList windowSize="N">` whose rows come
- * from a `p-for` loop (React Native FlatList `windowSize`).
+ * The window of a `VirtualizedList` with `windowSize` (React Native FlatList
+ * `windowSize`), kept across renders for one list of one component.
  *
- * Only the rows within `(N - 1) / 2` screens above and below the viewport
- * are rendered; the others become one childless placeholder view each, with
- * the row's last measured height (or the list's estimated row height), so
- * the content height, the scroll position and the native cell recycling
- * stay put. Their components unmount and the encoder forgets their nodes.
+ * The rows are materialized by the tree encoders like any windowed list
+ * (rows outside the window are `ListPlaceholder` nodes and the hosts report
+ * the rows on screen with `ListWindow` events when a placeholder comes
+ * near), but this window is sized in screens instead of rows: it keeps
+ * `(windowSize - 1) / 2` screens of rows above and below the visible ones,
+ * a screen being the rows the host reports visible. Rows that leave it go
+ * back to placeholders and their components unmount.
  *
- * The viewport comes from the list's own scroll phase events (drag start,
- * release with its fling velocity, momentum end), never from per-frame
- * scroll events: a fling is materialized up to its predicted landing as
- * soon as the finger lifts. Row heights and the offset of the first row
- * come from each row's layout event, reported once per row mount.
+ * Each placeholder has the height its row last measured (one layout event
+ * per row mount), or the list's estimate before that, plus the row's own
+ * margins, so the content height and the scroll position do not move when
+ * rows above the viewport are released. A scroll request to an offset
+ * materializes the rows around it before the list gets there.
  *
  * @internal
  */
 final class ListWindow
 {
-    /** Viewport height used until the list reports its own. */
+    /** Viewport height used to plan rows before the host reports any. */
     private const VIEWPORT_FALLBACK = 900.0;
 
-    /**
-     * Seconds of release velocity a fling travels (UIScrollView normal
-     * deceleration covers ~0.5 s of it, Android's OverScroller a little
-     * more), capped in screens.
-     */
-    private const FLING_SECONDS = 0.6;
-    private const FLING_MAX_SCREENS = 16.0;
+    private const MARGIN_KEYS = [
+        PropKey::Margin->value => true,
+        PropKey::MarginVertical->value => true,
+        PropKey::MarginTop->value => true,
+        PropKey::MarginBottom->value => true,
+    ];
 
-    /** @var WeakMap<Component, array<string, self>>|null */
+    /** @var WeakMap<object, array<string, self>>|null */
     private static ?WeakMap $windows = null;
 
-    /** @var WeakReference<Component> */
-    private WeakReference $scope;
+    private static ?stdClass $detached = null;
+
+    /** @var array<int, WeakReference<self>> windows by the node id of their list */
+    private static array $lists = [];
 
     private int $size = 5;
     private float $estimate = 600.0;
-    private float $viewport = 0.0;
-    private float $low = 0.0;
-    private float $high = 0.0;
-    private ?float $jump = null;
+
+    /** @var list<array{0: int, 1: int}>|null materialized [start, end) rows */
+    private ?array $ranges = null;
+
     private ?int $request = null;
-    private float $base = 0.0;
 
-    /** @var array<int|string, array<int, float>> measured heights by row identity and part */
-    private array $heights = [];
+    /** Whether the host reported its rows yet (until then the top is planned). */
+    private bool $reported = false;
 
-    /** @var list<int|string> row identities of the last render, in order */
+    /** @var list<string> row keys of the last encode, in order */
     private array $keys = [];
 
-    /** @var array<int|string, true> rows the last render mounted */
-    private array $mounted = [];
+    /** @var array<int, true> rows always materialized (list header and footer) */
+    private array $fixed = [];
 
-    /** @var array<int|string, array{0: float, 1: Element}> */
+    /** @var array<string, float> measured row heights by key */
+    private array $heights = [];
+
+    /** @var array<string, array<int, mixed>> margin properties of each row's root */
+    private array $margins = [];
+
+    /** @var array<string, array{0: float, 1: Element}> */
     private array $placeholders = [];
 
-    /** @var WeakMap<Element, Element> rendered rows with their layout observer */
+    /** @var WeakMap<Element, Element> built rows with their layout observer */
     private WeakMap $observed;
 
-    private function __construct(Component $scope, public readonly string $path)
+    private function __construct()
     {
-        $this->scope = WeakReference::create($scope);
         $this->observed = new WeakMap();
     }
 
-    public static function for(Component $scope, string $path): self
+    /** The window of list $path rendered by $owner (null: outside any component). */
+    public static function for(?object $owner, string $path): self
     {
+        $owner ??= self::$detached ??= new stdClass();
         self::$windows ??= new WeakMap();
-        $windows = self::$windows[$scope] ?? [];
+        $windows = self::$windows[$owner] ?? [];
         $window = $windows[$path] ?? null;
         if ($window === null) {
-            $window = new self($scope, $path);
+            $window = new self();
             $windows[$path] = $window;
-            self::$windows[$scope] = $windows;
+            self::$windows[$owner] = $windows;
         }
 
         return $window;
     }
 
-    /**
-     * Applies the list's attributes of this render. A new scroll request
-     * with a target offset also materializes the rows around that offset
-     * until the next scroll phase.
-     */
-    public function configure(int $size, float $estimate, ?int $request, float $targetOffset): void
+    /** The window last encoded as list node $listId. */
+    public static function forList(int $listId): ?self
+    {
+        return (self::$lists[$listId] ?? null)?->get();
+    }
+
+    public function configure(int $size): void
     {
         $this->size = max(1, $size);
-        if ($estimate > 0.0) {
-            $this->estimate = $estimate;
+    }
+
+    public function size(): int
+    {
+        return $this->size;
+    }
+
+    /**
+     * Called by the encoders for list node $listId: the rows to materialize
+     * now, or null when the list is not windowed (horizontal lists).
+     *
+     * @return list<array{0: int, 1: int}>|null
+     */
+    public function ranges(int $listId, Element $list): ?array
+    {
+        $properties = $list->properties;
+        if ($list->kind !== NodeKind::VirtualList || ($properties[PropKey::ListHorizontal->value] ?? false) === true) {
+            return null;
         }
-        if ($request !== null && $request !== $this->request) {
-            if ($this->request !== null && $targetOffset >= 0.0) {
-                $this->jump = $targetOffset;
+        if ((self::$lists[$listId] ?? null)?->get() !== $this) {
+            foreach (self::$lists as $id => $reference) {
+                if ($reference->get() === null) {
+                    unset(self::$lists[$id]);
+                }
+            }
+            self::$lists[$listId] = WeakReference::create($this);
+        }
+        $estimate = $properties[PropKey::ListRowHeight->value] ?? null;
+        if ((is_float($estimate) || is_int($estimate)) && $estimate > 0) {
+            $this->estimate = (float) $estimate;
+        }
+        $this->keys = $list->lazyRows?->keys ?? [];
+        $this->fixed = $list->lazyRows?->fixed ?? [];
+        if (!$this->reported) {
+            // Rows joining before the host reports any (a list growing in
+            // chunks, measured headers) are planned from the top again.
+            $this->ranges = [$this->rowsAround(0.0)];
+        }
+        $request = $properties[PropKey::ScrollRequest->value] ?? null;
+        if (is_int($request) && $request !== $this->request) {
+            $target = $properties[PropKey::ScrollTargetOffset->value] ?? -1.0;
+            if ($this->request !== null && (is_float($target) || is_int($target)) && $target >= 0) {
+                [$start, $end] = $this->rowsAround((float) $target);
+                $this->ranges = self::addRange($this->ranges, $start, $end);
+                $this->reported = true;
             }
             $this->request = $request;
         }
+        $ranges = $this->ranges;
+        foreach ($this->fixed as $row => $_) {
+            $ranges = self::addRange($ranges, $row, $row + 1);
+        }
+
+        return $ranges;
     }
 
     /**
-     * The rows to render among $identities (the loop's rows in order).
+     * The rows a first frame of $rows materializes (or the current window
+     * once planned), for LazyRows::shown().
      *
-     * @param list<int|string> $identities
-     * @return array<int|string, true>
+     * @return list<array{0: int, 1: int}>
      */
-    public function plan(array $identities): array
+    public function firstRows(LazyRows $rows): array
     {
-        $this->keys = $identities;
-        if (count($this->heights) > count($identities) || count($this->placeholders) > count($identities)) {
-            $present = [];
-            foreach ($identities as $identity) {
-                $present[$identity] = true;
+        if ($this->ranges === null || !$this->reported) {
+            $this->keys = $rows->keys;
+            $this->fixed = $rows->fixed;
+            $ranges = [$this->rowsAround(0.0)];
+        } else {
+            $ranges = $this->ranges;
+        }
+        foreach ($rows->fixed as $row => $_) {
+            $ranges = self::addRange($ranges, $row, $row + 1);
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * The host shows rows $first..$last: keeps `(windowSize - 1) / 2` of
+     * those screens materialized on each side. True when the window moved.
+     */
+    public function extend(int $first, int $last): bool
+    {
+        if ($first < 0 || $last < 0) {
+            return false;
+        }
+        if ($last < $first) {
+            [$first, $last] = [$last, $first];
+        }
+        $this->reported = true;
+        $margin = (int) ceil(($this->size - 1) / 2 * ($last - $first + 1));
+        $start = max(0, $first - $margin);
+        $end = $last + $margin + 1;
+        // Half a margin of slack each way: rows are built and released in
+        // batches, not on every row the host scrolls past.
+        $slack = intdiv($margin, 2);
+        if ($this->ranges !== null && count($this->ranges) === 1) {
+            [$from, $to] = $this->ranges[0];
+            if (
+                $from <= max(0, $first - $slack) && $to >= $last + $slack + 1
+                && $from >= $start - $slack && $to <= $end + $slack
+            ) {
+                return false;
             }
-            $this->heights = array_intersect_key($this->heights, $present);
-            $this->placeholders = array_intersect_key($this->placeholders, $present);
         }
+        $this->ranges = [[$start, $end]];
 
-        return $this->mounted = $this->compute();
+        return true;
     }
 
-    /** Scroll phase of the list: `ScrollBeginDrag`, `ScrollEndDrag` or `MomentumScrollEnd`. */
-    public function phase(EventKind $kind, string $payload): void
-    {
-        $event = ScrollPhaseEvent::fromPayload($payload);
-        $y = $event->y;
-        $land = $y;
-        if ($kind === EventKind::ScrollEndDrag) {
-            $limit = self::FLING_MAX_SCREENS * $this->viewportHeight();
-            $land = $y + max(-$limit, min($limit, $event->velocityY * self::FLING_SECONDS));
-        }
-        $this->low = min($y, $land);
-        $this->high = max($y, $land);
-        $this->jump = null;
-        $this->update();
-    }
-
-    /** Layout of the list itself: its height is the viewport. */
-    public function viewport(string $payload): void
-    {
-        $height = LayoutEvent::fromPayload($payload)->height;
-        if ($height <= 0.0 || abs($height - $this->viewport) < 1.0) {
-            return;
-        }
-        $this->viewport = $height;
-        $this->update();
-    }
-
-    /** Layout of a rendered row (part $part of the row's output). */
-    public function layout(int|string $identity, int $part, string $payload): void
-    {
-        $event = LayoutEvent::fromPayload($payload);
-        if ($event->height <= 0.0) {
-            return;
-        }
-        $this->heights[$identity][$part] = $event->height;
-        if ($part === 0 && ($this->keys[0] ?? null) === $identity) {
-            $this->base = $event->y;
-        }
-    }
-
-    /** The rendered row element with this window's layout observer. */
-    public function observe(Element $row, int|string $identity, int $part): Element
+    /** The built row with this window's layout observer. */
+    public function observe(Element $row, string $key): Element
     {
         $observed = $this->observed[$row] ?? null;
         if ($observed !== null) {
             return $observed;
         }
-        $window = $this;
+        $margins = [];
+        foreach ($row->properties as $property => $value) {
+            if (isset(self::MARGIN_KEYS[$property])) {
+                $margins[$property] = $value;
+            }
+        }
+        if ($margins === []) {
+            unset($this->margins[$key]);
+        } else {
+            $this->margins[$key] = $margins;
+        }
+        $window = WeakReference::create($this);
         $inner = $row->events()[EventKind::Layout->value] ?? null;
         $observer = $inner === null
-            ? #[\Pam\Native\Attributes\PureHandler] static function (mixed $payload = '') use ($window, $identity, $part): void {
-                $window->layout($identity, $part, is_string($payload) ? $payload : '');
+            ? #[\Pam\Native\Attributes\PureHandler] static function (mixed $payload = '') use ($window, $key): void {
+                $window->get()?->measured($key, is_string($payload) ? $payload : '');
             }
-            : static function (mixed $payload = '') use ($window, $identity, $part, $inner): mixed {
-                $window->layout($identity, $part, is_string($payload) ? $payload : '');
+            : static function (mixed $payload = '') use ($window, $key, $inner): mixed {
+                $window->get()?->measured($key, is_string($payload) ? $payload : '');
 
                 return $inner($payload);
             };
@@ -209,81 +269,93 @@ final class ListWindow
         return $observed;
     }
 
-    /** The childless stand-in of a row outside the window. */
-    public function placeholder(int|string $identity): Element
+    /** Layout of a materialized row. */
+    public function measured(string $key, string $payload): void
     {
-        $height = $this->height($identity);
-        $cached = $this->placeholders[$identity] ?? null;
+        $height = LayoutEvent::fromPayload($payload)->height;
+        if ($height > 0.0) {
+            $this->heights[$key] = $height;
+        }
+    }
+
+    /** The childless stand-in of a row outside the window. */
+    public function placeholder(string $key): Element
+    {
+        $height = $this->heights[$key] ?? $this->estimate;
+        $cached = $this->placeholders[$key] ?? null;
         if ($cached !== null && $cached[0] === $height) {
             return $cached[1];
         }
-        $key = (string) $identity;
-        $key = strlen($key) > 100 ? 'pam-window#'.hash('xxh3', $key) : 'pam-window:'.$key;
-        $element = View::make()
-            ->key($key)
-            ->__pamWithProperties([
-                PropKey::Height->value => $height,
-                PropKey::FlexShrink->value => 0.0,
-            ]);
-        $this->placeholders[$identity] = [$height, $element];
+        $properties = [
+            PropKey::Height->value => $height,
+            PropKey::ListPlaceholder->value => true,
+        ] + ($this->margins[$key] ?? []);
+        ksort($properties);
+        $element = View::__pamCreate(NodeKind::View, [], $properties, null, $key);
+        if (count($this->placeholders) > 2 * max(64, count($this->keys))) {
+            // Keys of items that left the list.
+            $this->placeholders = [];
+            $this->heights = array_intersect_key($this->heights, array_flip($this->keys));
+            $this->margins = array_intersect_key($this->margins, $this->heights);
+        }
+        $this->placeholders[$key] = [$height, $element];
 
         return $element;
     }
 
-    /** @return array<int|string, true> */
-    private function compute(): array
+    /**
+     * Rows within the window around a viewport whose top is at $offset.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function rowsAround(float $offset): array
     {
-        $viewport = $this->viewportHeight();
-        $margin = ($this->size - 1) / 2 * $viewport;
-        $ranges = [[$this->low - $margin, $this->high + $viewport + $margin]];
-        if ($this->jump !== null) {
-            $ranges[] = [$this->jump - $margin, $this->jump + $viewport + $margin];
-        }
-        $mounted = [];
-        $top = $this->base;
-        foreach ($this->keys as $identity) {
-            $bottom = $top + $this->height($identity);
-            foreach ($ranges as [$from, $to]) {
-                if ($bottom >= $from && $top <= $to) {
-                    $mounted[$identity] = true;
-                    break;
-                }
+        $margin = ($this->size - 1) / 2 * self::VIEWPORT_FALLBACK;
+        $from = $offset - $margin;
+        $to = $offset + self::VIEWPORT_FALLBACK + $margin;
+        $start = null;
+        $end = 0;
+        $top = 0.0;
+        foreach ($this->keys as $row => $key) {
+            if ($top > $to) {
+                break;
+            }
+            // The header and footer count only once measured.
+            $bottom = $top + ($this->heights[$key] ?? (isset($this->fixed[$row]) ? 0.0 : $this->estimate));
+            if ($bottom >= $from) {
+                $start ??= $row;
+                $end = $row + 1;
             }
             $top = $bottom;
         }
 
-        return $mounted;
+        return [$start ?? 0, max($end, ($start ?? 0) + 1)];
     }
 
-    private function update(): void
+    /**
+     * @param list<array{0: int, 1: int}> $ranges
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function addRange(array $ranges, int $start, int $end): array
     {
-        $next = $this->compute();
-        if ($next === $this->mounted) {
-            return;
+        $ranges[] = [$start, $end];
+        usort($ranges, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        $merged = [];
+        foreach ($ranges as [$from, $to]) {
+            $last = count($merged) - 1;
+            if ($last >= 0 && $from <= $merged[$last][1]) {
+                $merged[$last][1] = max($merged[$last][1], $to);
+            } else {
+                $merged[] = [$from, $to];
+            }
         }
-        $this->mounted = $next;
-        $scope = $this->scope->get();
-        if ($scope !== null) {
-            DependencyTracker::markDirty($scope);
-            Runtime::scheduleRender();
-        }
+
+        return $merged;
     }
 
-    private function height(int|string $identity): float
-    {
-        $parts = $this->heights[$identity] ?? null;
-
-        return $parts === null ? $this->estimate : (float) array_sum($parts);
-    }
-
-    private function viewportHeight(): float
-    {
-        return $this->viewport > 0.0 ? $this->viewport : self::VIEWPORT_FALLBACK;
-    }
-
-    /** @internal Test hook: [mounted rows, viewport, base]. */
+    /** @internal Test hook: [materialized ranges, measured heights by key]. */
     public function state(): array
     {
-        return [$this->mounted, $this->viewportHeight(), $this->base];
+        return [$this->ranges, $this->heights];
     }
 }

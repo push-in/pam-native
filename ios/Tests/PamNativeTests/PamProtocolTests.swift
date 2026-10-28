@@ -72,10 +72,14 @@ final class PamProtocolTests: XCTestCase {
         ]
         XCTAssertEqual(events.map(\.rawValue), events.map(\.rawValue).sorted())
         // Event kinds are append-only and dense (1.5.0 added 70-75).
-        for raw in 1...79 {
+        for raw in 1...80 {
             XCTAssertNotNil(EventKind(rawValue: raw), "missing event kind \(raw)")
         }
-        XCTAssertNil(EventKind(rawValue: 80))
+        XCTAssertNil(EventKind(rawValue: 81))
+        XCTAssertEqual(EventKind.listWindow.rawValue, 80)
+        XCTAssertEqual(PamConstants.listPlaceholder, 541)
+        XCTAssertEqual(PamConstants.listWindowed, 542)
+        XCTAssertEqual(PamConstants.listPlaceholderRows, 543)
         XCTAssertEqual(EventKind.pageChange.rawValue, 77)
         XCTAssertEqual(EventKind.routeCovered.rawValue, 78)
         XCTAssertEqual(EventKind.routeFocused.rawValue, 79)

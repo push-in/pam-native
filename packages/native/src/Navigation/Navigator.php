@@ -830,6 +830,22 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         return true;
     }
 
+    /**
+     * @internal Routes the URL the app was launched with, before its first
+     * frame: like React Navigation's initial state from a deep link, the
+     * route is simply there (no transition, so the screens under it are not
+     * rendered until they are shown again).
+     */
+    public function openInitial(string $uri): bool
+    {
+        if (!$this->open($uri)) {
+            return false;
+        }
+        $this->finalizeOutgoingRoute();
+
+        return true;
+    }
+
     public function open(string $uri): bool
     {
         if ($uri === '' || strlen($uri) > 8_192) return false;

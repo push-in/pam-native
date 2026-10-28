@@ -34,6 +34,24 @@ The worklet API and its safety limits are documented in
 [Platform runtime](platform-runtime.md#worklet-bytecode); image pipeline policies
 and cache behavior are documented in [Native media cache](media-cache.md).
 
+## Native tree encoder
+
+On Android and iOS the hosts register `pam_native_encoder_*`, a C++ port of
+`Internal\TreeEncoder` (`android/app/src/main/cpp/pam_tree_encoder.cpp`,
+compiled into the iOS bridge as well). `TreeEncoder` delegates to it
+automatically: the same node ids (XXH3 of the identity path), the same
+property bytes (including template-encoded properties), the same full frames,
+the same patch operations in the same order, the same callbacks and the same
+errors. Apps change nothing. The PHP encoder remains the reference and the
+fallback (`PAM_NATIVE_ENCODER=php` forces it).
+
+`scripts/native-encoder-test.sh` builds the encoder as a host PHP extension
+and runs `packages/native/tests/native_encoder_equivalence.php` (full frames,
+patches, random trees with reused subtrees, DOM ids, holes, events, binary
+and float values, refresh hosts, template-encoded properties, identity
+collisions and invalid values: byte-for-byte equal) plus the patch-replay
+fuzz `encoder_patches.php` with the native encoder.
+
 ## Modes
 
 Set `PAM_NATIVE_MODE` to:

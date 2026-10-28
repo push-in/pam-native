@@ -2,339 +2,264 @@
 
 declare(strict_types=1);
 
-use Pam\Native\App;
 use Pam\Native\EventKind;
-use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\EncodedNode;
 use Pam\Native\Internal\TreeEncoder;
-use Pam\Native\Internal\Wire;
+use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\UI\Column;
 use Pam\Native\UI\Text;
-use Pam\Native\UI\View as WindowView;
-use Pam\Native\UI\VirtualizedList as WindowList;
+use Pam\Native\UI\VirtualizedList;
 
-$assert ??= static function (bool $condition, string $message): void {
-    if (!$condition) throw new RuntimeException($message);
-};
-
-// --- Encoder: identity maps follow the live tree ----------------------------
-$encoder = new TreeEncoder();
-$rows = static fn (int $count): WindowList => WindowList::make(...array_map(
-    static fn (int $row): WindowView => WindowView::make(Text::make("row {$row}"))->key("row-{$row}"),
-    range(1, $count),
-));
-$encoder->encode($rows(200));
-$sizes = static function (TreeEncoder $encoder): array {
-    $read = static fn (string $name): int => count((new ReflectionProperty(TreeEncoder::class, $name))->getValue($encoder));
-    $placements = 0;
-    foreach ((new ReflectionProperty(TreeEncoder::class, 'childPaths'))->getValue($encoder) as $segments) {
-        $placements += count($segments);
-    }
-
-    return [$read('identityIds'), $read('idIdentities'), $read('childPaths'), $placements];
-};
-[$identitiesBefore, , $pathsBefore] = $sizes($encoder);
-$encoder->encode($rows(10));
-[$identities, $ids, $paths, $placements] = $sizes($encoder);
-$assert($identitiesBefore >= 400 && $pathsBefore >= 200, 'The encoder learns the identities of a long list.');
+// 1.44.0: windowed materialization of long virtualized lists.
 $assert(
-    $identities <= 32 && $ids <= 32 && $paths <= 12 && $placements <= 22,
-    "Removed nodes leave the encoder's identity maps (identities {$identities}, ids {$ids}, paths {$paths}, placements {$placements}).",
-);
-$frame = $encoder->encode($rows(30))['frame'];
-$assert(is_string($frame) && str_starts_with($frame, 'PNP1'), 'Rows that come back are patched in, not a full frame.');
-$again = new TreeEncoder();
-$again->encode($rows(30));
-$assert(
-    (new ReflectionProperty(TreeEncoder::class, 'identityIds'))->getValue($encoder)
-        == (new ReflectionProperty(TreeEncoder::class, 'identityIds'))->getValue($again),
-    'Pruned nodes get the same ids when they come back.',
+    PropKey::ListPlaceholder->value === 541 && PropKey::ListWindowed->value === 542
+        && PropKey::ListPlaceholderRows->value === 543
+        && EventKind::ListWindow->value === 80,
+    'List window protocol ids must be appended in order.',
 );
 
-// --- Template VirtualizedList windowSize --------------------------------------
-if (!function_exists('pam_native_commit')) {
-    function pam_native_commit(string $frame): bool
-    {
-        $GLOBALS['pamIdentityFrames'][] = $frame;
+$windowRow = static fn (int $i) => Column::make(Text::make("Row {$i}"), Text::make("Detail {$i}"))->key("row-{$i}");
 
-        return true;
-    }
-}
-$GLOBALS['pamIdentityFrames'] = [];
-$windowTree = new class {
-    /** @var array<int, array{parent: int, index: int, kind: int, props: array<int, string>}> */
-    public array $nodes = [];
-    public int $root = 0;
-    private string $bytes = '';
-    private int $offset = 0;
-
-    public function apply(string $frame): void
-    {
-        $this->bytes = $frame;
-        $this->offset = 6;
-        if (str_starts_with($frame, 'PNT1')) {
-            $this->nodes = [];
-            $this->root = $this->int('P', 8);
-            for ($count = $this->int('V', 4); $count > 0; $count--) {
-                $this->node();
-            }
-
-            return;
-        }
-        for ($count = $this->int('V', 4); $count > 0; $count--) {
-            $operation = ord($this->bytes[$this->offset++]);
-            if ($operation === 1) {
-                $this->node();
-            } elseif ($operation === 2) {
-                unset($this->nodes[$this->int('P', 8)]);
-            } elseif ($operation === 3) {
-                $id = $this->int('P', 8);
-                $key = $this->int('v', 2);
-                if (ord($this->bytes[$this->offset++]) === 1) {
-                    $this->nodes[$id]['props'][$key] = $this->value();
-                } else {
-                    unset($this->nodes[$id]['props'][$key]);
-                }
-            } elseif ($operation === 4) {
-                $id = $this->int('P', 8);
-                $this->nodes[$id]['parent'] = $this->int('P', 8);
-                $this->nodes[$id]['index'] = $this->int('V', 4);
-            } elseif ($operation === 5) {
-                $this->root = $this->int('P', 8);
-            }
+/**
+ * @param array<int, EncodedNode> $nodes
+ * @return array{0: EncodedNode, 1: list<EncodedNode>}
+ */
+$windowRows = static function (array $nodes): array {
+    $list = null;
+    foreach ($nodes as $node) {
+        if ($node->kind === NodeKind::VirtualList->value) {
+            $list = $node;
         }
     }
+    \assert($list instanceof EncodedNode);
+    $rows = array_values(array_filter($nodes, static fn (EncodedNode $node): bool => $node->parent === $list->id));
+    usort($rows, static fn (EncodedNode $a, EncodedNode $b): int => $a->index <=> $b->index);
 
-    /** @return list<int> child ids of $id in order */
-    public function children(int $id): array
-    {
-        $children = [];
-        foreach ($this->nodes as $child => $node) {
-            if ($node['parent'] === $id && $child !== $id) {
-                $children[$node['index']] = $child;
-            }
-        }
-        ksort($children);
-
-        return array_values($children);
-    }
-
-    public function with(int $property): ?int
-    {
-        foreach ($this->nodes as $id => $node) {
-            if (isset($node['props'][$property])) {
-                return $id;
-            }
-        }
-
-        return null;
-    }
-
-    private function node(): void
-    {
-        $id = $this->int('P', 8);
-        $parent = $this->int('P', 8);
-        $index = $this->int('V', 4);
-        $kind = ord($this->bytes[$this->offset++]);
-        $props = [];
-        for ($count = $this->int('v', 2); $count > 0; $count--) {
-            $key = $this->int('v', 2);
-            $props[$key] = $this->value();
-        }
-        $this->nodes[$id] = ['parent' => $parent, 'index' => $index, 'kind' => $kind, 'props' => $props];
-    }
-
-    private function int(string $format, int $size): int
-    {
-        $value = unpack($format, $this->bytes, $this->offset)[1];
-        $this->offset += $size;
-
-        return $value;
-    }
-
-    private function value(): string
-    {
-        $start = $this->offset;
-        $type = ord($this->bytes[$this->offset++]);
-        $this->offset += match ($type) {
-            1, 5 => 4 + unpack('V', $this->bytes, $this->offset)[1],
-            2, 3 => 8,
-            4 => 1,
-        };
-
-        return substr($this->bytes, $start, $this->offset - $start);
-    }
+    return [$list, $rows];
 };
-
-$windowDirectory = sys_get_temp_dir().'/pam-native-list-window-'.getmypid();
-if (!is_dir($windowDirectory) && !mkdir($windowDirectory, 0o755, true) && !is_dir($windowDirectory)) {
-    throw new RuntimeException('Cannot create the list window fixture directory.');
-}
-file_put_contents($windowDirectory.'/WindowRow.pam.php', <<<'PAM'
-<?php
-
-declare(strict_types=1);
-
-namespace Pam\Native\Tests\ListWindow;
-
-use Pam\Native\Component;
-
-final class WindowRow extends Component
-{
-    /** @var array<int, true> */
-    public static array $live = [];
-
-    public function __construct(public int $row = 0)
-    {
-    }
-
-    public function mount(): void
-    {
-        self::$live[$this->row] = true;
-    }
-
-    public function unmount(): void
-    {
-        unset(self::$live[$this->row]);
-    }
-}
-?>
-
-<template>
-    <Column height="100" :accessibilityLabel="'row-'.$row">
-        <Text>{{ 'Row '.$row }}</Text>
-        <Text>{{ 'Detail '.$row }}</Text>
-    </Column>
-</template>
-PAM);
-file_put_contents($windowDirectory.'/WindowHost.pam.php', <<<'PAM'
-<?php
-
-declare(strict_types=1);
-
-namespace Pam\Native\Tests\ListWindow;
-
-use Pam\Native\Component;
-use Pam\Native\ScrollPhaseEvent;
-
-final class WindowHost extends Component
-{
-    /** @var list<int> */
-    public array $rows = [];
-
-    public int $request = 0;
-
-    /** @var list<float> */
-    public array $drags = [];
-
-    public function __construct()
-    {
-        $this->rows = range(0, 49);
-    }
-
-    #[\Pam\Native\Attributes\PureHandler]
-    public function dragged(ScrollPhaseEvent $event): void
-    {
-        $this->drags[] = $event->y;
-    }
-}
-?>
-
-<template>
-    <VirtualizedList windowSize="3" estimatedRowHeight="100" :scrollRequest="$request" :scrollTargetOffset="0" on:scrollEndDrag="dragged">
-        <Text>Header</Text>
-        <WindowRow p-for="$row in $rows" :key="'row-'.$row" :row="$row" />
-    </VirtualizedList>
-</template>
-PAM);
-App::components($windowDirectory, $windowDirectory.'/.cache');
-$windowRow = 'Pam\\Native\\Tests\\ListWindow\\WindowRow';
-$windowHost = App::make('Pam\\Native\\Tests\\ListWindow\\WindowHost');
-App::run($windowHost);
-$syncWindow = static function () use ($windowTree): void {
-    foreach ($GLOBALS['pamIdentityFrames'] as $frame) {
-        $windowTree->apply($frame);
-    }
-    $GLOBALS['pamIdentityFrames'] = [];
+$isPlaceholder = static fn (EncodedNode $node): bool => isset($node->properties[PropKey::ListPlaceholder->value]);
+$childCount = static function (array $nodes, EncodedNode $row): int {
+    return count(array_filter($nodes, static fn (EncodedNode $node): bool => $node->parent === $row->id));
 };
-$syncWindow();
-$live = static function () use ($windowRow): array {
-    $rows = array_keys($windowRow::$live);
-    sort($rows);
+/** Rows a list child stands for (a placeholder run covers several). */
+$rowsOf = static function (EncodedNode $node): int {
+    $rows = $node->properties[PropKey::ListPlaceholderRows->value] ?? null;
+
+    return $rows === null ? 1 : unpack('P', substr($rows, 1, 8))[1];
+};
+/**
+ * The list child covering each row index.
+ *
+ * @param list<EncodedNode> $children sorted by index
+ * @return array<int, EncodedNode>
+ */
+$byRow = static function (array $children) use ($rowsOf): array {
+    $rows = [];
+    foreach ($children as $child) {
+        for ($row = $child->index, $end = $child->index + $rowsOf($child); $row < $end; $row++) {
+            $rows[$row] = $child;
+        }
+    }
 
     return $rows;
 };
-$listId = $windowTree->with(PropKey::OnScrollBeginDrag->value);
-$assert($listId !== null, 'A windowed list listens to its scroll phases.');
-$rowNodes = static fn (): array => array_slice($windowTree->children($listId), 1);
-$assert(count($rowNodes()) === 50, 'Every row keeps a native cell: mounted rows and placeholders.');
-// Default viewport (900) and windowSize 3: one screen above and below.
-$assert($live() === range(0, 18), 'Only the rows within the window mount (got '.implode(',', $live()).').');
-$placeholder = $windowTree->nodes[$rowNodes()[30]];
+
+// A 10,000-row list ships 48 materialized rows and one placeholder node per
+// run of rows outside the window (sized rows x the estimate by the engine).
+$rows = [];
+for ($i = 0; $i < 10_000; $i++) {
+    $rows[] = $windowRow($i);
+}
+$sticky = Column::make(Text::make('Pinned'))->key('pinned')->stickyHeader();
+$rows[5_000] = $sticky;
+$list = VirtualizedList::make(...$rows)->estimatedRowHeight(64)->toElement();
+$encoder = new TreeEncoder();
+$first = $encoder->encode($list);
+$nodes = $encoder->frameNodes();
+[$listNode, $listChildren] = $windowRows($nodes);
+$listRows = $byRow($listChildren);
+$runs = array_values(array_filter($listChildren, $isPlaceholder));
 $assert(
-    $windowTree->children($rowNodes()[30]) === []
-        && $placeholder['props'][PropKey::Height->value] === TreeEncoder::encodeProperty(100.0),
-    'A row outside the window is a childless placeholder with the estimated height.',
+    $first['full'] === true
+        && isset($listNode->properties[PropKey::ListWindowed->value])
+        && count($listRows) === 10_000
+        && count($listChildren) === 48 + 1 + 2
+        && count($runs) === 2 && $runs[0]->index === 48 && $rowsOf($runs[0]) === 4_952
+        && $runs[1]->index === 5_001 && $rowsOf($runs[1]) === 4_999
+        && $runs[0]->kind === NodeKind::View->value && $childCount($nodes, $runs[0]) === 0
+        && !$isPlaceholder($listRows[47]) && $childCount($nodes, $listRows[47]) === 2
+        && $isPlaceholder($listRows[48])
+        && !$isPlaceholder($listRows[5_000]) && $childCount($nodes, $listRows[5_000]) === 1
+        && count($nodes) === 1 + 51 + 48 * 2 + 1
+        && strlen((string) $first['frame']) < 20_000,
+    'Long lists must encode a window of rows plus placeholder runs; sticky headers stay materialized.',
 );
 
-$phase = static fn (float $y, float $velocity = 0.0): string => Wire::map([
-    'x' => 0.0, 'y' => $y, 'velocityX' => 0.0, 'velocityY' => $velocity, 'page' => 0,
-]);
-$layout = static fn (float $y, float $height): string => Wire::map([
-    'x' => 0.0, 'y' => $y, 'width' => 390.0, 'height' => $height,
-]);
-// The list reports its viewport; the first row its offset (below the header).
-Runtime::dispatchEvent($listId, EventKind::Layout->value, $layout(0.0, 500.0));
-Runtime::dispatchEvent($rowNodes()[0], EventKind::Layout->value, $layout(40.0, 100.0));
-$syncWindow();
-$assert($live() === range(0, 10), 'The measured viewport narrows the window (got '.implode(',', $live()).').');
-
-// A drag far down: the rows above leave, their components unmount.
-$encoderSizes = static fn (): array => $sizes((new ReflectionProperty(Runtime::class, 'encoder'))->getValue());
-Runtime::dispatchEvent($listId, EventKind::ScrollBeginDrag->value, $phase(3000.0));
-$syncWindow();
-$assert($live() === range(24, 39), 'The window follows a drag (got '.implode(',', $live()).').');
-$row24 = $rowNodes()[24];
-Runtime::dispatchEvent($row24, EventKind::Layout->value, $layout(2440.0, 180.0));
-$assert($windowTree->children($rowNodes()[5]) === [], 'Rows behind the window become placeholders.');
-[$identitiesDeep] = $encoderSizes();
-$committedDeep = count((new ReflectionProperty(TreeEncoder::class, 'committed'))->getValue((new ReflectionProperty(Runtime::class, 'encoder'))->getValue()));
-$assert($identitiesDeep <= $committedDeep + 4, "The encoder forgets unmounted rows ({$identitiesDeep} identities for {$committedDeep} nodes).");
-
-// The release velocity materializes the whole fling at once; the app's own
-// handler still runs.
-Runtime::dispatchEvent($listId, EventKind::ScrollEndDrag->value, $phase(3000.0, 2500.0));
-$syncWindow();
-$assert($live() === range(24, 49), 'A fling mounts every row up to its landing (got '.implode(',', $live()).').');
-$assert($windowHost->drags === [3000.0], "The template's scrollEndDrag handler still receives the phase.");
-Runtime::dispatchEvent($listId, EventKind::MomentumScrollEnd->value, $phase(4500.0));
-$syncWindow();
-$assert($live() === range(38, 49), 'The window shrinks to the landing (got '.implode(',', $live()).').');
-$placeholder = $windowTree->nodes[$rowNodes()[24]];
+// Native shows rows 900-910 (inside a run, reported by row index): the
+// window grows 64 rows (the minimum margin) around them.
 $assert(
-    $placeholder['props'][PropKey::Height->value] === TreeEncoder::encodeProperty(180.0),
-    'A placeholder keeps the height its row measured.',
+    $encoder->extendWindowRows($listNode->id, 900, 910) === true
+        && $encoder->extendWindowRows($listNode->id, 902, 908) === false
+        && $encoder->extendWindow($listNode->id, $listRows[10]->id, $listRows[12]->id) === false
+        && $encoder->extendWindowRows(123_456, 1, 2) === false,
+    'extendWindow must grow once for uncovered rows and ignore covered rows and unknown lists.',
+);
+$second = $encoder->encode($list);
+$nodes = $encoder->frameNodes();
+[, $listChildren] = $windowRows($nodes);
+$listRows = $byRow($listChildren);
+$assert(
+    $second['full'] === false && $second['frame'] !== null && count($listRows) === 10_000
+        && !$isPlaceholder($listRows[836]) && !$isPlaceholder($listRows[974])
+        && $isPlaceholder($listRows[835]) && $isPlaceholder($listRows[975])
+        && $listRows[835] !== $listRows[975]
+        && $childCount($nodes, $listRows[900]) === 2
+        && !$isPlaceholder($listRows[10]) && $isPlaceholder($listRows[300])
+        && count($listChildren) === 48 + (975 - 836) + 1 + 3,
+    'A grown window must split the run around the new rows, keeping the head.',
+);
+$assert($encoder->encode($list)['frame'] === null, 'An unchanged list and window must not produce a frame.');
+
+// Short and horizontal lists are encoded completely, as before.
+$short = [];
+for ($i = 0; $i < 96; $i++) {
+    $short[] = $windowRow($i);
+}
+$shortEncoder = new TreeEncoder();
+$shortEncoder->encode(VirtualizedList::make(...$short)->toElement());
+[$shortList, $shortRows] = $windowRows($shortEncoder->frameNodes());
+$horizontalEncoder = new TreeEncoder();
+$horizontalEncoder->encode(VirtualizedList::make(...$rows)->horizontal()->toElement());
+[$horizontalList, $horizontalRows] = $windowRows($horizontalEncoder->frameNodes());
+$assert(
+    !isset($shortList->properties[PropKey::ListWindowed->value])
+        && array_filter($shortRows, $isPlaceholder) === []
+        && !isset($horizontalList->properties[PropKey::ListWindowed->value])
+        && array_filter($horizontalRows, $isPlaceholder) === [],
+    'Lists up to 96 rows and horizontal lists must not be windowed.',
 );
 
-// Rows that come back remount with their content, at the same position.
-Runtime::dispatchEvent($listId, EventKind::ScrollBeginDrag->value, $phase(0.0));
-$syncWindow();
-$assert($live() === range(0, 9), 'Scrolling back remounts the first rows (got '.implode(',', $live()).').');
-$assert(count($windowTree->children($rowNodes()[0])) === 2, 'A remounted row has its content again.');
+// Grids keep one placeholder per cell (runs would break the column flow).
+$gridEncoder = new TreeEncoder();
+$gridEncoder->encode(VirtualizedList::make(...$rows)->columns(3)->toElement());
+[, $gridChildren] = $windowRows($gridEncoder->frameNodes());
+$assert(
+    count($gridChildren) === 10_000 && count(array_filter($gridChildren, $isPlaceholder)) === 10_000 - 48 - 1,
+    'Multi-column lists must keep one placeholder per cell.',
+);
 
-// A scroll request with a target offset mounts the rows around it at once.
-Runtime::dispatchEvent($listId, EventKind::MomentumScrollEnd->value, $phase(4500.0));
-$windowHost->request++;
-Runtime::requestRender();
-Runtime::render();
-$syncWindow();
-$assert(in_array(0, $live(), true) && in_array(45, $live(), true), 'A scroll request to the top mounts the top rows before the list gets there.');
+// initialScrollIndex materializes the rows around it too.
+$initialEncoder = new TreeEncoder();
+$initialEncoder->encode(VirtualizedList::make(...$rows)->initialScrollIndex(7_000)->toElement());
+[, $initialChildren] = $windowRows($initialEncoder->frameNodes());
+$initialRows = $byRow($initialChildren);
+$assert(
+    !$isPlaceholder($initialRows[0]) && !$isPlaceholder($initialRows[6_936])
+        && !$isPlaceholder($initialRows[7_047]) && $isPlaceholder($initialRows[7_048])
+        && $isPlaceholder($initialRows[6_935]),
+    'initialScrollIndex must be inside the first window.',
+);
 
-// Removed items drop their measurements; the window plans the new rows.
-$windowHost->rows = range(100, 109);
-Runtime::requestRender();
-Runtime::render();
-$syncWindow();
-$assert(count($rowNodes()) === 10 && $live() === range(100, 109), 'New rows are planned with the window.');
-Runtime::shutdown();
-$GLOBALS['pamIdentityFrames'] = [];
-echo "LIST_WINDOW_OK rows=50 window=3 fling=landing encoder=pruned\n";
+// Filtering the rows (a new, shorter tree) keeps working on the same window.
+$filtered = VirtualizedList::make(...array_slice($rows, 0, 200))->estimatedRowHeight(64)->toElement();
+$filteredFrame = $encoder->encode($filtered);
+[, $filteredChildren] = $windowRows($encoder->frameNodes());
+$filteredRows = $byRow($filteredChildren);
+$assert(
+    $filteredFrame['frame'] !== null && count($filteredRows) === 200
+        && !$isPlaceholder($filteredRows[47]) && $isPlaceholder($filteredRows[48])
+        && $rowsOf($filteredRows[48]) === 152,
+    'A changed row set must keep the window and patch rows in place.',
+);
+
+// Data-driven lists (VirtualizedList::of): only the window is ever built.
+$built = [];
+$lazyList = VirtualizedList::of(
+    range(0, 9_999),
+    static function (int $item, int $index) use (&$built, $windowRow) {
+        $built[$index] = true;
+
+        return $windowRow($item);
+    },
+    static fn (int $item): string => "item-{$item}",
+)->estimatedRowHeight(64)->toElement();
+$lazyEncoder = new TreeEncoder();
+$lazyFrame = $lazyEncoder->encode($lazyList);
+$lazyNodes = $lazyEncoder->frameNodes();
+[$lazyListNode, $lazyChildren] = $windowRows($lazyNodes);
+$lazyRows = $byRow($lazyChildren);
+$assert(
+    count($built) === 48
+        && count($lazyRows) === 10_000 && count($lazyChildren) === 49
+        && $lazyRows[48]->kind === NodeKind::View->value
+        && $lazyRows[48]->properties === [
+            PropKey::ListPlaceholder->value => "\x04\x01",
+            PropKey::ListPlaceholderRows->value => "\x02".pack('P', 9_952),
+        ]
+        && !$isPlaceholder($lazyRows[47]) && $childCount($lazyNodes, $lazyRows[47]) === 2
+        && count($lazyNodes) === 1 + 49 + 48 * 2,
+    'VirtualizedList::of must build only the window and send one placeholder run for the rest.',
+);
+$assert(
+    $lazyEncoder->extendWindowRows($lazyListNode->id, 5_000, 5_010) === true,
+    'A lazy window must grow from the rows native reports.',
+);
+$lazyPatch = $lazyEncoder->encode($lazyList);
+[, $lazyChildren] = $windowRows($lazyEncoder->frameNodes());
+$lazyRows = $byRow($lazyChildren);
+$assert(
+    $lazyPatch['frame'] !== null
+        && count($built) === 48 + (5_075 - 4_936)
+        && !$isPlaceholder($lazyRows[5_000]) && $isPlaceholder($lazyRows[4_935]) && $isPlaceholder($lazyRows[5_075])
+        && count($lazyRows) === 10_000,
+    'Growing a lazy window must build exactly the new rows.',
+);
+// The window slides: rows far from the visible ones return to placeholders.
+$assert(
+    $lazyEncoder->extendWindowRows($lazyListNode->id, 9_000, 9_010) === true,
+    'A lazy window must grow far down the list.',
+);
+$lazyEncoder->encode($lazyList);
+[, $lazyChildren] = $windowRows($lazyEncoder->frameNodes());
+$lazyRows = $byRow($lazyChildren);
+$materialized = array_keys(array_filter($lazyRows, static fn (EncodedNode $node): bool => !$isPlaceholder($node)));
+$assert(
+    !$isPlaceholder($lazyRows[0]) && $isPlaceholder($lazyRows[100]) && $isPlaceholder($lazyRows[5_000]) && !$isPlaceholder($lazyRows[9_005])
+        && count($lazyRows) === 10_000 && min(array_filter($materialized, static fn (int $row): bool => $row >= 48)) >= 9_000 - 64 * 4 && max($materialized) < 9_010 + 64 * 4 + 1,
+    'Rows far from the visible ones must go back to placeholders ('.count($materialized).' materialized).',
+);
+$shortLazy = new TreeEncoder();
+$shortLazy->encode(VirtualizedList::of([['id' => 'a'], ['id' => 'b']], static fn (array $item) => Text::make($item['id']))->toElement());
+[, $shortRows] = $windowRows($shortLazy->frameNodes());
+$assert(
+    count($shortRows) === 2 && array_filter($shortRows, $isPlaceholder) === [],
+    'Short lazy lists build every row (keys default to the item id).',
+);
+
+// VirtualizedList::make() with closure rows (or a generator of them) defers
+// them like ::of(): only the window is built, rows keyed by position.
+$closureBuilt = 0;
+$closureRows = [];
+for ($i = 0; $i < 5_000; $i++) {
+    $closureRows[] = static function () use ($i, &$closureBuilt, $windowRow) {
+        $closureBuilt++;
+
+        return $windowRow($i);
+    };
+}
+$closureEncoder = new TreeEncoder();
+$closureEncoder->encode(VirtualizedList::make(...$closureRows)->estimatedRowHeight(64)->toElement());
+[, $closureListRows] = $windowRows($closureEncoder->frameNodes());
+$assert(
+    $closureBuilt === 48 && count($byRow($closureListRows)) === 5_000
+        && count(array_filter($closureListRows, $isPlaceholder)) === 1,
+    "Closure rows must be built only inside the window (built {$closureBuilt}).",
+);
+$closureBuilt = 0;
+$generator = (static function () use ($closureRows) {
+    yield from $closureRows;
+})();
+$generatorEncoder = new TreeEncoder();
+$generatorEncoder->encode(VirtualizedList::make($generator)->toElement());
+$assert($closureBuilt === 48, "A generator of closure rows must be deferred too (built {$closureBuilt}).");

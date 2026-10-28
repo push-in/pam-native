@@ -58,6 +58,12 @@ public final class PamRenderer: @unchecked Sendable {
     private var parkedCells = Set<Int64>()
     /// Active keyed section each list last showed.
     private var appliedListSections: [Int64: String] = [:]
+    /// Last ListWindow request per windowed list ("firstId,lastId", time).
+    private var listWindowRequests: [Int64: (request: String, at: CFTimeInterval)] = [:]
+    /// Row at the top of each windowed list and its content offset, as of the
+    /// last sync: a placeholder run splitting into rows (or rows going back
+    /// to placeholders) above it must not move what is on screen.
+    private var listRowAnchors: [Int64: (cell: Int64, row: Int, top: CGFloat)] = [:]
     /// Scroll offset of each switched-away section, per list.
     private var listSectionOffsets: [Int64: [String: CGFloat]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
@@ -654,6 +660,8 @@ public final class PamRenderer: @unchecked Sendable {
         parkedCells.remove(id)
         appliedListSections[id] = nil
         listSectionOffsets[id] = nil
+        listWindowRequests[id] = nil
+        listRowAnchors[id] = nil
         frames[id] = nil
         children[id] = nil
         imageLoadContexts = imageLoadContexts.filter { _, context in
@@ -968,15 +976,47 @@ public final class PamRenderer: @unchecked Sendable {
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
+        let windowed = nodes[id]?.properties[PamConstants.listWindowed]?.pamFlag == true
+            && !horizontal && !list.pamInverted
+        // The same cell when it is still there, else the cell now holding
+        // its row (a run that split, a row that became a placeholder).
+        if windowed, let anchor = listRowAnchors[id],
+           let top = localFrames.first(where: { $0.0 == anchor.cell && rowSpan($0.0).rows == 1 })?.1.minY
+               ?? rowTop(anchor.row, frames: localFrames) {
+            // Android `restoreRowAnchor`: keep the top row where it was.
+            let delta = top - anchor.top
+            if abs(delta) >= 0.5 {
+                let maximum = max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                list.contentOffset.y = min(maximum, max(-list.adjustedContentInset.top, list.contentOffset.y + delta))
+            }
+        }
         // `initialScrollIndex`: the first sync that knows the item starts
         // lands on the index (Android `applyInitialPosition`); a scroll
         // request applied earlier in the same commit already marked it.
+        // Windowed lists count rows (a placeholder run holds several).
         if !list.pamInitialScrollIndexApplied, !list.pamItemStarts.isEmpty {
             list.pamInitialScrollIndexApplied = true
             if list.pamInitialScrollIndex > 0 {
-                let index = min(list.pamInitialScrollIndex, list.pamItemStarts.count - 1)
-                list.scrollToLogicalOffset(list.pamItemStarts[index])
+                if windowed, let top = rowTop(list.pamInitialScrollIndex, frames: localFrames) {
+                    list.scrollToLogicalOffset(top)
+                } else {
+                    let index = min(list.pamInitialScrollIndex, list.pamItemStarts.count - 1)
+                    list.scrollToLogicalOffset(list.pamItemStarts[index])
+                }
             }
+        }
+        if windowed {
+            let edge = list.contentOffset.y + list.adjustedContentInset.top
+            // A list at its top stays at its top (nothing to anchor).
+            if edge > 0.5, let entry = localFrames.first(where: { $0.1.minY <= edge && $0.1.maxY > edge }) {
+                let row = rowAt(entry, edge: edge)
+                let cell = rowSpan(entry.0).rows == 1 ? entry.0 : 0
+                listRowAnchors[id] = rowTop(row, frames: [entry]).map { (cell: cell, row: row, top: $0) }
+            } else {
+                listRowAnchors[id] = nil
+            }
+        } else {
+            listRowAnchors[id] = nil
         }
         if let previousSection, previousSection != activeSection {
             switchListSection(
@@ -1004,6 +1044,9 @@ public final class PamRenderer: @unchecked Sendable {
             }) {
                 visible.insert(pinned.0)
             }
+        }
+        if nodes[id]?.properties[PamConstants.listWindowed]?.pamFlag == true {
+            requestListWindow(id, list: list, frames: localFrames, window: visible, horizontal: horizontal)
         }
         // A list nobody sees yet (a screen mounted ahead, hidden under the
         // visible one) creates its cells a few per frame within a budget.
@@ -1043,6 +1086,71 @@ public final class PamRenderer: @unchecked Sendable {
                 invertedListsWithMirroredCells.remove(id)
             }
         }
+    }
+
+    /// First row and row count of a windowed list's cell (a placeholder run
+    /// stands for `ListPlaceholderRows` rows of equal height).
+    private func rowSpan(_ cellId: Int64) -> (start: Int, rows: Int) {
+        let start = nodes[cellId]?.index ?? 0
+        let rows = max(1, Int(nodes[cellId]?.properties[PamConstants.listPlaceholderRows]?.pamInteger ?? 1))
+        return (start, rows)
+    }
+
+    /// Row index at vertical content offset `edge` inside `entry`.
+    private func rowAt(_ entry: (Int64, CGRect), edge: CGFloat) -> Int {
+        let (start, rows) = rowSpan(entry.0)
+        guard rows > 1, entry.1.height > 0 else { return start }
+        let into = edge - entry.1.minY
+        return start + min(rows - 1, max(0, Int(into / (entry.1.height / CGFloat(rows)))))
+    }
+
+    /// Content offset of the top of row `row`, if a cell holds it.
+    private func rowTop(_ row: Int, frames localFrames: [(Int64, CGRect)]) -> CGFloat? {
+        for entry in localFrames {
+            let (start, rows) = rowSpan(entry.0)
+            guard row >= start, row < start + rows else { continue }
+            return entry.1.minY + CGFloat(row - start) * entry.1.height / CGFloat(rows)
+        }
+        return nil
+    }
+
+    /// A windowed list (long VirtualizedList) ships rows outside PHP's window
+    /// as placeholders. When one enters the overscanned window, report the
+    /// rows on screen so PHP materializes ahead of the scroll (Android:
+    /// `PamRenderer.requestListWindow`). One request per range, re-sent after
+    /// 250 ms when no commit answered it.
+    private func requestListWindow(
+        _ listId: Int64,
+        list: PamVirtualListView,
+        frames localFrames: [(Int64, CGRect)],
+        window: Set<Int64>,
+        horizontal: Bool
+    ) {
+        guard window.contains(where: { nodes[$0]?.properties[PamConstants.listPlaceholder] != nil }) else { return }
+        let viewport = CGRect(origin: list.contentOffset, size: list.bounds.size)
+        let onScreen = localFrames
+            .filter { $0.1.intersects(viewport) }
+            .sorted { horizontal ? $0.1.minX < $1.1.minX : $0.1.minY < $1.1.minY }
+        guard let first = onScreen.first, let last = onScreen.last else { return }
+        // Row indexes ("@first,last"): a placeholder run (ListPlaceholderRows)
+        // stands for several rows of equal height and has no node per row.
+        func row(_ entry: (Int64, CGRect), at edge: CGFloat) -> Int {
+            let start = nodes[entry.0]?.index ?? 0
+            let rows = max(1, Int(nodes[entry.0]?.properties[PamConstants.listPlaceholderRows]?.pamInteger ?? 1))
+            let extent = horizontal ? entry.1.width : entry.1.height
+            guard rows > 1, extent > 0 else { return start }
+            let into = edge - (horizontal ? entry.1.minX : entry.1.minY)
+            return start + min(rows - 1, max(0, Int(into / (extent / CGFloat(rows)))))
+        }
+        let firstRow = row(first, at: horizontal ? viewport.minX : viewport.minY)
+        let lastRow = row(last, at: (horizontal ? viewport.maxX : viewport.maxY) - 1)
+        let request = "@\(firstRow),\(lastRow)"
+        let now = CACurrentMediaTime()
+        if let previous = listWindowRequests[listId], previous.request == request, now - previous.at < 0.25 {
+            return
+        }
+        listWindowRequests[listId] = (request, now)
+        dispatchEvent(listId, EventKind.listWindow.rawValue, Data(request.utf8))
     }
 
     /// Saves the switched-away section's offset and restores the switched-in

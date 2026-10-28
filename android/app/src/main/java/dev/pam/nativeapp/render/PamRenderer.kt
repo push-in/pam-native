@@ -760,11 +760,11 @@ class PamRenderer(
     }
     private var appliedStatusBar: StatusBarConfig? = null
     private var appliedHostBackground: Int? = null
-    private val nodes = LongSparseArray<NodeState>()
+    private val nodes = PamLongMap<NodeState>(256)
 
     /** True while [id] is part of the committed tree (events for removed nodes are stale). */
     fun hasNode(id: Long): Boolean = nodes.indexOfKey(id) >= 0
-    private val frames = LongSparseArray<Frame>()
+    private val frames = PamLongMap<Frame>(256)
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
     private val mediaCache = NativeMediaFileCache(context)
@@ -991,7 +991,9 @@ class PamRenderer(
             val parent = nodes[id]?.parent ?: return
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
+        deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
+            try {
             batches.forEach { batch ->
                 batch.forEach { mutation ->
                     when (mutation) {
@@ -1063,6 +1065,9 @@ class PamRenderer(
                         }
                     }
                 }
+            }
+            } finally {
+                flushRowOrder()
             }
         }
         val mutationsNanos = if (profileCommit) {
@@ -1190,13 +1195,23 @@ class PamRenderer(
     private fun syncLocalModalTriggers() {
         val modals = HashMap<String, PamModalHost>()
         val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
+        // Position of a node among all node ids in ascending order (what
+        // LongSparseArray.indexOfKey returned), computed only when needed.
+        var sortedIds: LongArray? = null
+        fun keyRank(id: Long): Int {
+            val ids = sortedIds ?: LongArray(nodes.size()) { nodes.keyAt(it) }.also {
+                it.sort()
+                sortedIds = it
+            }
+            return java.util.Arrays.binarySearch(ids, id)
+        }
         for (id in localModalIds) {
             val state = nodes[id] ?: continue
             val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
             if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[id] as? PamModalHost)?.let { modal ->
                     modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = modal
-                    orderedModals += nodes.indexOfKey(id) to modal
+                    orderedModals += keyRank(id) to modal
                 }
             }
         }
@@ -1235,7 +1250,7 @@ class PamRenderer(
         orderedModals.sortBy { it.first }
         val orderedInputs = ArrayList<Pair<Int, EditText>>(inputIds.size)
         for (id in inputIds) {
-            (views[id] as? EditText)?.let { orderedInputs += nodes.indexOfKey(id) to it }
+            (views[id] as? EditText)?.let { orderedInputs += keyRank(id) to it }
         }
         orderedInputs.sortBy { it.first }
         orderedInputs.forEach { (inputPosition, input) ->
@@ -1965,6 +1980,11 @@ class PamRenderer(
             // loading header changes its adapter index. RecyclerView's diff
             // positions that holder; detaching here would cancel every image
             // and empty all visible rows before the adapter can reconcile.
+            if (deferRowOrder) {
+                state.index = index
+                pendingRowOrder += parent
+                return
+            }
             removeChild(parent, id)
             state.index = index
             addChild(parent, id)
@@ -2085,9 +2105,53 @@ class PamRenderer(
         return false
     }
 
+    /**
+     * Rows of virtual lists removed or reordered during the commit's mutation
+     * pass. Keeping a 10,000-row child list sorted after every Remove/Move
+     * (O(n) remove plus an O(n log n) sort with a node lookup per comparison)
+     * froze the UI thread for seconds when a filter changed most rows; the
+     * list is now rebuilt once per commit ([flushRowOrder]).
+     */
+    private val pendingRowRemovals = HashMap<Long, HashSet<Long>>()
+    private val pendingRowOrder = HashSet<Long>()
+    private var deferRowOrder = false
+
+    private fun defersRows(parent: Long): Boolean =
+        deferRowOrder && nodes[parent]?.kind == NodeKind.VIRTUAL_LIST
+
+    private fun flushRowOrder() {
+        deferRowOrder = false
+        if (pendingRowRemovals.isEmpty() && pendingRowOrder.isEmpty()) return
+        val parents = HashSet<Long>(pendingRowRemovals.keys).apply { addAll(pendingRowOrder) }
+        for (parent in parents) {
+            val siblings = children[parent] ?: continue
+            pendingRowRemovals[parent]?.let { removed -> siblings.removeAll(removed) }
+            if (parent !in pendingRowOrder || siblings.size < 2) continue
+            // One node lookup per row, then a primitive sort (stable by index).
+            val keyed = LongArray(siblings.size)
+            val order = IntArray(siblings.size)
+            for (position in siblings.indices) {
+                order[position] = nodes[siblings[position]]?.index ?: Int.MAX_VALUE
+                keyed[position] = (order[position].toLong() shl 32) or position.toLong()
+            }
+            keyed.sort()
+            val sorted = ArrayList<Long>(siblings.size)
+            for (entry in keyed) sorted += siblings[(entry and 0xFFFFFFFFL).toInt()]
+            siblings.clear()
+            siblings.addAll(sorted)
+        }
+        pendingRowRemovals.clear()
+        pendingRowOrder.clear()
+    }
+
     private fun addChild(parent: Long, id: Long, fresh: Boolean = false) {
         if (parent == 0L) return
         val siblings = children[parent] ?: ArrayList<Long>().also { children.put(parent, it) }
+        if (defersRows(parent) && (parent in pendingRowOrder || parent in pendingRowRemovals || !fresh)) {
+            if (fresh || !siblings.contains(id)) siblings += id
+            pendingRowOrder += parent
+            return
+        }
         val index = nodes[id]?.index ?: Int.MAX_VALUE
         if (fresh) {
             // Creation streams arrive in sibling order: append without the
@@ -2117,6 +2181,10 @@ class PamRenderer(
 
     private fun removeChild(parent: Long, id: Long) {
         if (parent == 0L) return
+        if (defersRows(parent)) {
+            pendingRowRemovals.getOrPut(parent, ::HashSet) += id
+            return
+        }
         children[parent]?.remove(id)
     }
 
@@ -2165,6 +2233,20 @@ class PamRenderer(
                 }
             }?.coerceAtLeast(0f) ?: fallbackExtent
         }
+        // Windowed list: rows are known by index; a placeholder run stands
+        // for LIST_PLACEHOLDER_ROWS rows. The row at the top stays put while
+        // runs split into rows around it.
+        val windowed = state.properties[PropKey.LIST_WINDOWED] != null
+        list.rowSpan = if (windowed) {
+            { item ->
+                nodes[item]?.let { row ->
+                    intArrayOf(row.index, row.integerOrNull(PropKey.LIST_PLACEHOLDER_ROWS)?.toInt() ?: 1)
+                }
+            }
+        } else {
+            null
+        }
+        val rowAnchor = if (windowed && list.isLaidOut) list.rowAnchor() else null
         list.setRichItems(
             ids = itemIds,
             extents = itemExtents,
@@ -2198,12 +2280,16 @@ class PamRenderer(
                 }
             }
         }
+        rowAnchor?.let(list::restoreRowAnchor)
         list.setFullSpanIds(
             itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
         )
         list.setStickyIds(
             itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.STICKY_HEADER, false) == true },
         )
+        // Windowed list: a tall viewport (or a jump) can show placeholders
+        // before any scroll; report the visible rows once laid out.
+        if (state.properties[PropKey.LIST_WINDOWED] != null) list.post { list.reportViewport() }
     }
 
     private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
@@ -2952,8 +3038,11 @@ class PamRenderer(
         // Within a commit each ancestor is invalidated once: a mount of a
         // few hundred views otherwise walked (and invalidated) the full
         // ancestor chain of every view, O(views x depth).
+        // Only when this view's frame changed: re-applying an unchanged
+        // layout (safe-area insets dispatched again, a parent re-laid out)
+        // must not redraw the screen.
         val invalidated = layoutInvalidatedAncestors
-        var ancestor = view.parent
+        var ancestor = if (layoutChanged) view.parent else null
         while (ancestor is View) {
             if (invalidated != null && !invalidated.add(ancestor)) break
             ancestor.invalidate()
@@ -4009,7 +4098,12 @@ class PamRenderer(
             PropKey.LIST_FULL_SPAN,
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
+            PropKey.LIST_PLACEHOLDER,
+            PropKey.LIST_PLACEHOLDER_ROWS,
             -> Unit
+            // A list that crosses the windowing threshold starts (or stops)
+            // reporting its visible rows.
+            PropKey.LIST_WINDOWED -> (view as? PamRecyclerList)?.let { installListEvents(it, state) }
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -4735,7 +4829,12 @@ class PamRenderer(
             PropKey.LIST_FULL_SPAN,
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
+            PropKey.LIST_PLACEHOLDER,
+            PropKey.LIST_PLACEHOLDER_ROWS,
             -> Unit
+            // A list that crosses the windowing threshold starts (or stops)
+            // reporting its visible rows.
+            PropKey.LIST_WINDOWED -> (view as? PamRecyclerList)?.let { installListEvents(it, state) }
             PropKey.TEXT_SPANS,
             PropKey.ON_SPAN_PRESS,
             -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
@@ -6595,7 +6694,8 @@ class PamRenderer(
         val scroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
         val pageChange = state.properties[PropKey.ON_PAGE_CHANGE] != null
-        if (!scroll && !endReached && !pageChange) {
+        val windowed = state.properties[PropKey.LIST_WINDOWED] != null
+        if (!scroll && !endReached && !pageChange && !windowed) {
             list.setOnViewportChanged(null)
             return
         }
@@ -6607,6 +6707,7 @@ class PamRenderer(
                 totalItemCount,
             ->
             if (pageChange) dispatchPageChange(state, list.pageIndex())
+            if (windowed) requestListWindow(list, state, firstVisibleItem, visibleItemCount, totalItemCount)
             if (scroll) {
                 state.pendingScrollOffset = offset
                 if (!state.scrollScheduled) {
@@ -6633,6 +6734,44 @@ class PamRenderer(
                 }
             }
         }
+    }
+
+    /**
+     * A windowed list (long VirtualizedList) ships rows outside PHP's window
+     * as placeholders. When placeholders come within a screen of the visible
+     * rows, report the visible rows so PHP materializes ahead of the scroll.
+     * At most one request per range, re-sent after [LIST_WINDOW_RETRY_MS]
+     * if no commit answered it.
+     */
+    private fun requestListWindow(
+        list: PamRecyclerList,
+        state: NodeState,
+        firstVisible: Int,
+        visibleCount: Int,
+        total: Int,
+    ) {
+        if (total <= 0) return
+        val first = firstVisible.coerceIn(0, total - 1)
+        val last = (first + max(visibleCount, 1) - 1).coerceIn(first, total - 1)
+        val margin = max(LIST_WINDOW_MARGIN_ROWS, last - first + 1)
+        var placeholderNear = false
+        for (position in (first - margin).coerceAtLeast(0)..(last + margin).coerceAtMost(total - 1)) {
+            val id = list.richIdAt(position) ?: continue
+            if (nodes[id]?.properties?.get(PropKey.LIST_PLACEHOLDER) != null) {
+                placeholderNear = true
+                break
+            }
+        }
+        if (!placeholderNear) return
+        // Row indexes ("@first,last"): rows inside a placeholder run have no
+        // node of their own.
+        val rows = list.visibleRows() ?: return
+        val request = "@${rows[0]},${rows[1]}"
+        val now = SystemClock.uptimeMillis()
+        if (request == state.listWindowRequest && now - state.listWindowRequestedAt < LIST_WINDOW_RETRY_MS) return
+        state.listWindowRequest = request
+        state.listWindowRequestedAt = now
+        dispatch(state.id, EVENT_LIST_WINDOW, request)
     }
 
     private fun dispatchInput(state: NodeState) {
@@ -7423,11 +7562,14 @@ class PamRenderer(
     private fun applyTextAlignment(view: TextView, state: NodeState) {
         if (view is PamEditText) return
         val authored = state.properties[PropKey.TEXT_ALIGN]?.integer()?.toInt()
-        view.justificationMode = if (authored == TEXT_ALIGN_JUSTIFY) {
+        val justification = if (authored == TEXT_ALIGN_JUSTIFY) {
             android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
         } else {
             android.text.Layout.JUSTIFICATION_MODE_NONE
         }
+        // TextView.setJustificationMode() drops the text layout and requests
+        // a layout even for the same mode; this runs on every frame update.
+        if (view.justificationMode != justification) view.justificationMode = justification
         val horizontal = when (authored) {
             2 -> Gravity.CENTER_HORIZONTAL
             3 -> Gravity.END
@@ -8031,10 +8173,22 @@ class PamRenderer(
         } else {
             safeAreaInsetsForView(raw, target)
         }
+        if (
+            state.safeAreaInsetsApplied &&
+            state.safeAreaLeftInset == resolved.left &&
+            state.safeAreaTopInset == resolved.top &&
+            state.safeAreaRightInset == resolved.right &&
+            state.safeAreaBottomInset == resolved.bottom
+        ) {
+            // The same insets dispatched again (window focus, a sibling
+            // window): nothing to re-lay out.
+            return
+        }
         state.safeAreaLeftInset = resolved.left
         state.safeAreaTopInset = resolved.top
         state.safeAreaRightInset = resolved.right
         state.safeAreaBottomInset = resolved.bottom
+        state.safeAreaInsetsApplied = true
         applySafeAreaLayout(target, state)
     }
 
@@ -10039,75 +10193,292 @@ class PamRenderer(
         val mountOrder: Long,
         var updating: Boolean = false,
         var applyingInitialProperties: Boolean = false,
-        var initialTextUpdates: PamInitialTextUpdates? = null,
-        var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null,
-        var pressableConfiguredDuringInitialization: Boolean = false,
-        var textWatcherInstalled: Boolean = false,
-        var pendingChange: Runnable? = null,
-        var nativeValue: String = "",
-        var nativeValueAcknowledged: Boolean = true,
-        var deferredInputValue: String? = null,
-        var baseText: String = "",
-        var spanPressInstalled: Boolean = false,
-        var pressOpacity: Float = 0.72f,
-        var pressScale: Float = 1f,
-        var scrollScheduled: Boolean = false,
-        var pendingScrollOffset: Float = 0f,
-        var endReachedSent: Boolean = false,
-        val pageTracker: PamPageTracker = PamPageTracker(),
-        var virtualListItemIds: List<Long> = emptyList(),
-        /** Active keyed section the list last showed (null before the first sync). */
-        var appliedListSection: String? = null,
-        var keyboardBehavior: Int = KEYBOARD_RESIZE,
-        var safeBottomInset: Int = 0,
-        var safeAreaLeftInset: Int = 0,
-        var safeAreaTopInset: Int = 0,
-        var safeAreaRightInset: Int = 0,
-        var safeAreaBottomInset: Int = 0,
-        var keyboardInset: Int = 0,
-        var keyboardAnimating: Boolean = false,
-        var keyboardBaseHeight: Int = 0,
-        var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
-        var legacyKeyboardSubscription: AutoCloseable? = null,
-        /** Set while the KAV lives in a Modal/BottomSheet window: that window's IME feed. */
-        var modalKeyboardSubscription: AutoCloseable? = null,
-        var keyboardModalHost: PamModalHost? = null,
-        var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
-        val inputInFlight: ArrayDeque<Pair<String, Long>> = ArrayDeque(),
-        var keyboardViewportReconcileGeneration: Int = 0,
-        var keyboardAvoidingScrollId: Long = 0L,
-        var keyboardAvoidingViewportInset: Int = 0,
-        var keyboardFocusedInput: EditText? = null,
-        var defaultHighlightColor: Int = Color.TRANSPARENT,
-        var propertyAnimator: ObjectAnimator? = null,
-        var keyframeAnimator: ValueAnimator? = null,
-        var motionRunner: PamMotionRunner? = null,
-        var motionProgramId: Long = Long.MIN_VALUE,
-        var motionRestartKey: Long = Long.MIN_VALUE,
-        var transitionRules: Map<String, PamTransitionRule> = emptyMap(),
-        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>? = null,
-        var dragSnapRequest: Long = Long.MIN_VALUE,
-        var textLayoutSignature: String = "",
-        var textLayoutListener: View.OnLayoutChangeListener? = null,
-        var workletAnimator: ValueAnimator? = null,
-        var loadingDrawable: PamButtonLoadingDrawable? = null,
-        var filterLayer: Boolean = false,
         var virtual: Boolean = false,
-        var imageLoading: Boolean = false,
-        var imageProgressScheduled: Boolean = false,
-        var imageProgressLoaded: Long = 0L,
-        var imageProgressTotal: Long = 0L,
-        var inputSelectionScheduled: Boolean = false,
-        var directiveLayoutListener: View.OnLayoutChangeListener? = null,
-        var intersectionObserver: PamIntersectionObserver? = null,
-        var nativeInteractionsInstalled: Boolean = false,
-        var outsidePointerObserver: ((MotionEvent) -> Unit)? = null,
-        var lastDirectiveIntersection: Boolean? = null,
-        var inputSelectionStart: Int = 0,
-        var inputSelectionEnd: Int = 0,
-        var inputDeleting: Boolean = false,
-        var inputDigitsBeforeChange: Int = 0,
     ) {
+        // Members most nodes never touch live in [NodeExtras], allocated on
+        // the first write: a list placeholder or plain row stays a few words.
+        private var extras: NodeExtras? = null
+
+        private fun extras(): NodeExtras = extras ?: NodeExtras().also { extras = it }
+
+        var initialTextUpdates: PamInitialTextUpdates?
+            get() = extras?.initialTextUpdates
+            set(value) { extras().initialTextUpdates = value }
+
+        var initialBackgroundUpdate: PamInitialBackgroundUpdate?
+            get() = extras?.initialBackgroundUpdate
+            set(value) { extras().initialBackgroundUpdate = value }
+
+        var pressableConfiguredDuringInitialization: Boolean
+            get() = extras?.pressableConfiguredDuringInitialization ?: false
+            set(value) { extras().pressableConfiguredDuringInitialization = value }
+
+        var textWatcherInstalled: Boolean
+            get() = extras?.textWatcherInstalled ?: false
+            set(value) { extras().textWatcherInstalled = value }
+
+        var pendingChange: Runnable?
+            get() = extras?.pendingChange
+            set(value) { extras().pendingChange = value }
+
+        var nativeValue: String
+            get() = extras?.nativeValue ?: ""
+            set(value) { extras().nativeValue = value }
+
+        var nativeValueAcknowledged: Boolean
+            get() = extras?.nativeValueAcknowledged ?: true
+            set(value) { extras().nativeValueAcknowledged = value }
+
+        var deferredInputValue: String?
+            get() = extras?.deferredInputValue
+            set(value) { extras().deferredInputValue = value }
+
+        var baseText: String
+            get() = extras?.baseText ?: ""
+            set(value) { extras().baseText = value }
+
+        var spanPressInstalled: Boolean
+            get() = extras?.spanPressInstalled ?: false
+            set(value) { extras().spanPressInstalled = value }
+
+        var pressOpacity: Float
+            get() = extras?.pressOpacity ?: 0.72f
+            set(value) { extras().pressOpacity = value }
+
+        var pressScale: Float
+            get() = extras?.pressScale ?: 1f
+            set(value) { extras().pressScale = value }
+
+        var scrollScheduled: Boolean
+            get() = extras?.scrollScheduled ?: false
+            set(value) { extras().scrollScheduled = value }
+
+        var pendingScrollOffset: Float
+            get() = extras?.pendingScrollOffset ?: 0f
+            set(value) { extras().pendingScrollOffset = value }
+
+        var endReachedSent: Boolean
+            get() = extras?.endReachedSent ?: false
+            set(value) { extras().endReachedSent = value }
+
+        /** Last ListWindow request ("firstId,lastId") and when it was sent. */
+        var listWindowRequest: String?
+            get() = extras?.listWindowRequest
+            set(value) { extras().listWindowRequest = value }
+
+        var listWindowRequestedAt: Long
+            get() = extras?.listWindowRequestedAt ?: 0L
+            set(value) { extras().listWindowRequestedAt = value }
+
+        var virtualListItemIds: List<Long>
+            get() = extras?.virtualListItemIds ?: emptyList()
+            set(value) { extras().virtualListItemIds = value }
+
+        /** Active keyed section the list last showed (null before the first sync). */
+        var appliedListSection: String?
+            get() = extras?.appliedListSection
+            set(value) { extras().appliedListSection = value }
+
+        var keyboardBehavior: Int
+            get() = extras?.keyboardBehavior ?: KEYBOARD_RESIZE
+            set(value) { extras().keyboardBehavior = value }
+
+        var safeBottomInset: Int
+            get() = extras?.safeBottomInset ?: 0
+            set(value) { extras().safeBottomInset = value }
+
+        var safeAreaLeftInset: Int
+            get() = extras?.safeAreaLeftInset ?: 0
+            set(value) { extras().safeAreaLeftInset = value }
+
+        var safeAreaTopInset: Int
+            get() = extras?.safeAreaTopInset ?: 0
+            set(value) { extras().safeAreaTopInset = value }
+
+        var safeAreaRightInset: Int
+            get() = extras?.safeAreaRightInset ?: 0
+            set(value) { extras().safeAreaRightInset = value }
+
+        var safeAreaBottomInset: Int
+            get() = extras?.safeAreaBottomInset ?: 0
+            set(value) { extras().safeAreaBottomInset = value }
+
+        /** Safe-area insets were applied at least once (see refreshSafeAreaLayout). */
+        var safeAreaInsetsApplied: Boolean
+            get() = extras?.safeAreaInsetsApplied ?: false
+            set(value) { extras().safeAreaInsetsApplied = value }
+
+        var keyboardInset: Int
+            get() = extras?.keyboardInset ?: 0
+            set(value) { extras().keyboardInset = value }
+
+        var keyboardAnimating: Boolean
+            get() = extras?.keyboardAnimating ?: false
+            set(value) { extras().keyboardAnimating = value }
+
+        var keyboardBaseHeight: Int
+            get() = extras?.keyboardBaseHeight ?: 0
+            set(value) { extras().keyboardBaseHeight = value }
+
+        var keyboardLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.keyboardLayoutListener
+            set(value) { extras().keyboardLayoutListener = value }
+
+        var legacyKeyboardSubscription: AutoCloseable?
+            get() = extras?.legacyKeyboardSubscription
+            set(value) { extras().legacyKeyboardSubscription = value }
+
+        /** Set while the KAV lives in a Modal/BottomSheet window: that window's IME feed. */
+        var modalKeyboardSubscription: AutoCloseable?
+            get() = extras?.modalKeyboardSubscription
+            set(value) { extras().modalKeyboardSubscription = value }
+
+        var keyboardModalHost: PamModalHost?
+            get() = extras?.keyboardModalHost
+            set(value) { extras().keyboardModalHost = value }
+
+        var keyboardSelfLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.keyboardSelfLayoutListener
+            set(value) { extras().keyboardSelfLayoutListener = value }
+
+        var keyboardViewportReconcileGeneration: Int
+            get() = extras?.keyboardViewportReconcileGeneration ?: 0
+            set(value) { extras().keyboardViewportReconcileGeneration = value }
+
+        var keyboardAvoidingScrollId: Long
+            get() = extras?.keyboardAvoidingScrollId ?: 0L
+            set(value) { extras().keyboardAvoidingScrollId = value }
+
+        var keyboardAvoidingViewportInset: Int
+            get() = extras?.keyboardAvoidingViewportInset ?: 0
+            set(value) { extras().keyboardAvoidingViewportInset = value }
+
+        var keyboardFocusedInput: EditText?
+            get() = extras?.keyboardFocusedInput
+            set(value) { extras().keyboardFocusedInput = value }
+
+        var defaultHighlightColor: Int
+            get() = extras?.defaultHighlightColor ?: Color.TRANSPARENT
+            set(value) { extras().defaultHighlightColor = value }
+
+        var propertyAnimator: ObjectAnimator?
+            get() = extras?.propertyAnimator
+            set(value) { extras().propertyAnimator = value }
+
+        var keyframeAnimator: ValueAnimator?
+            get() = extras?.keyframeAnimator
+            set(value) { extras().keyframeAnimator = value }
+
+        var motionRunner: PamMotionRunner?
+            get() = extras?.motionRunner
+            set(value) { extras().motionRunner = value }
+
+        var motionProgramId: Long
+            get() = extras?.motionProgramId ?: Long.MIN_VALUE
+            set(value) { extras().motionProgramId = value }
+
+        var motionRestartKey: Long
+            get() = extras?.motionRestartKey ?: Long.MIN_VALUE
+            set(value) { extras().motionRestartKey = value }
+
+        var transitionRules: Map<String, PamTransitionRule>
+            get() = extras?.transitionRules ?: emptyMap()
+            set(value) { extras().transitionRules = value }
+
+        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>?
+            get() = extras?.transitionRunners
+            set(value) { extras().transitionRunners = value }
+
+        var dragSnapRequest: Long
+            get() = extras?.dragSnapRequest ?: Long.MIN_VALUE
+            set(value) { extras().dragSnapRequest = value }
+
+        var textLayoutSignature: String
+            get() = extras?.textLayoutSignature ?: ""
+            set(value) { extras().textLayoutSignature = value }
+
+        var textLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.textLayoutListener
+            set(value) { extras().textLayoutListener = value }
+
+        var workletAnimator: ValueAnimator?
+            get() = extras?.workletAnimator
+            set(value) { extras().workletAnimator = value }
+
+        var loadingDrawable: PamButtonLoadingDrawable?
+            get() = extras?.loadingDrawable
+            set(value) { extras().loadingDrawable = value }
+
+        var filterLayer: Boolean
+            get() = extras?.filterLayer ?: false
+            set(value) { extras().filterLayer = value }
+
+        var imageLoading: Boolean
+            get() = extras?.imageLoading ?: false
+            set(value) { extras().imageLoading = value }
+
+        var imageProgressScheduled: Boolean
+            get() = extras?.imageProgressScheduled ?: false
+            set(value) { extras().imageProgressScheduled = value }
+
+        var imageProgressLoaded: Long
+            get() = extras?.imageProgressLoaded ?: 0L
+            set(value) { extras().imageProgressLoaded = value }
+
+        var imageProgressTotal: Long
+            get() = extras?.imageProgressTotal ?: 0L
+            set(value) { extras().imageProgressTotal = value }
+
+        var inputSelectionScheduled: Boolean
+            get() = extras?.inputSelectionScheduled ?: false
+            set(value) { extras().inputSelectionScheduled = value }
+
+        var directiveLayoutListener: View.OnLayoutChangeListener?
+            get() = extras?.directiveLayoutListener
+            set(value) { extras().directiveLayoutListener = value }
+
+        var intersectionObserver: PamIntersectionObserver?
+            get() = extras?.intersectionObserver
+            set(value) { extras().intersectionObserver = value }
+
+        var nativeInteractionsInstalled: Boolean
+            get() = extras?.nativeInteractionsInstalled ?: false
+            set(value) { extras().nativeInteractionsInstalled = value }
+
+        var outsidePointerObserver: ((MotionEvent) -> Unit)?
+            get() = extras?.outsidePointerObserver
+            set(value) { extras().outsidePointerObserver = value }
+
+        var lastDirectiveIntersection: Boolean?
+            get() = extras?.lastDirectiveIntersection
+            set(value) { extras().lastDirectiveIntersection = value }
+
+        var inputSelectionStart: Int
+            get() = extras?.inputSelectionStart ?: 0
+            set(value) { extras().inputSelectionStart = value }
+
+        var inputSelectionEnd: Int
+            get() = extras?.inputSelectionEnd ?: 0
+            set(value) { extras().inputSelectionEnd = value }
+
+        var inputDeleting: Boolean
+            get() = extras?.inputDeleting ?: false
+            set(value) { extras().inputDeleting = value }
+
+        var inputDigitsBeforeChange: Int
+            get() = extras?.inputDigitsBeforeChange ?: 0
+            set(value) { extras().inputDigitsBeforeChange = value }
+
+        // Allocated on first use: most nodes (list rows, placeholders) never
+        // page or edit text.
+        private var pageTrackerOrNull: PamPageTracker? = null
+        val pageTracker: PamPageTracker
+            get() = pageTrackerOrNull ?: PamPageTracker().also { pageTrackerOrNull = it }
+
+        private var inputInFlightOrNull: ArrayDeque<Pair<String, Long>>? = null
+        val inputInFlight: ArrayDeque<Pair<String, Long>>
+            get() = inputInFlightOrNull ?: ArrayDeque<Pair<String, Long>>().also { inputInFlightOrNull = it }
+
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
 
         fun inputDebounceMs(): Long =
@@ -10155,6 +10526,76 @@ class PamRenderer(
             callback.takeIf { properties[key] != null }
     }
 
+    /** The rarely used members of a [NodeState] (see NodeState.extras). */
+    private class NodeExtras {
+        var initialTextUpdates: PamInitialTextUpdates? = null
+        var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null
+        var pressableConfiguredDuringInitialization: Boolean = false
+        var textWatcherInstalled: Boolean = false
+        var pendingChange: Runnable? = null
+        var nativeValue: String = ""
+        var nativeValueAcknowledged: Boolean = true
+        var deferredInputValue: String? = null
+        var baseText: String = ""
+        var spanPressInstalled: Boolean = false
+        var pressOpacity: Float = 0.72f
+        var pressScale: Float = 1f
+        var scrollScheduled: Boolean = false
+        var pendingScrollOffset: Float = 0f
+        var endReachedSent: Boolean = false
+        var listWindowRequest: String? = null
+        var listWindowRequestedAt: Long = 0L
+        var virtualListItemIds: List<Long> = emptyList()
+        var appliedListSection: String? = null
+        var keyboardBehavior: Int = KEYBOARD_RESIZE
+        var safeBottomInset: Int = 0
+        var safeAreaLeftInset: Int = 0
+        var safeAreaTopInset: Int = 0
+        var safeAreaRightInset: Int = 0
+        var safeAreaBottomInset: Int = 0
+        var safeAreaInsetsApplied: Boolean = false
+        var keyboardInset: Int = 0
+        var keyboardAnimating: Boolean = false
+        var keyboardBaseHeight: Int = 0
+        var keyboardLayoutListener: View.OnLayoutChangeListener? = null
+        var legacyKeyboardSubscription: AutoCloseable? = null
+        var modalKeyboardSubscription: AutoCloseable? = null
+        var keyboardModalHost: PamModalHost? = null
+        var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null
+        var keyboardViewportReconcileGeneration: Int = 0
+        var keyboardAvoidingScrollId: Long = 0L
+        var keyboardAvoidingViewportInset: Int = 0
+        var keyboardFocusedInput: EditText? = null
+        var defaultHighlightColor: Int = Color.TRANSPARENT
+        var propertyAnimator: ObjectAnimator? = null
+        var keyframeAnimator: ValueAnimator? = null
+        var motionRunner: PamMotionRunner? = null
+        var motionProgramId: Long = Long.MIN_VALUE
+        var motionRestartKey: Long = Long.MIN_VALUE
+        var transitionRules: Map<String, PamTransitionRule> = emptyMap()
+        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>? = null
+        var dragSnapRequest: Long = Long.MIN_VALUE
+        var textLayoutSignature: String = ""
+        var textLayoutListener: View.OnLayoutChangeListener? = null
+        var workletAnimator: ValueAnimator? = null
+        var loadingDrawable: PamButtonLoadingDrawable? = null
+        var filterLayer: Boolean = false
+        var imageLoading: Boolean = false
+        var imageProgressScheduled: Boolean = false
+        var imageProgressLoaded: Long = 0L
+        var imageProgressTotal: Long = 0L
+        var inputSelectionScheduled: Boolean = false
+        var directiveLayoutListener: View.OnLayoutChangeListener? = null
+        var intersectionObserver: PamIntersectionObserver? = null
+        var nativeInteractionsInstalled: Boolean = false
+        var outsidePointerObserver: ((MotionEvent) -> Unit)? = null
+        var lastDirectiveIntersection: Boolean? = null
+        var inputSelectionStart: Int = 0
+        var inputSelectionEnd: Int = 0
+        var inputDeleting: Boolean = false
+        var inputDigitsBeforeChange: Int = 0
+    }
+
     private data class AccessibilityActionSpec(val name: String, val label: String)
 
     private companion object {
@@ -10184,6 +10625,10 @@ class PamRenderer(
         const val EVENT_REFRESH = 10
         const val EVENT_TOGGLE = 11
         const val EVENT_END_REACHED = 12
+        const val EVENT_LIST_WINDOW = 80
+        /** Rows around the visible ones checked for placeholders (at least a screen). */
+        const val LIST_WINDOW_MARGIN_ROWS = 12
+        const val LIST_WINDOW_RETRY_MS = 250L
         const val EVENT_DRAWER_OPEN = 13
         const val EVENT_DRAWER_CLOSE = 14
         const val EVENT_NATIVE = 15

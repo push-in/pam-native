@@ -160,7 +160,8 @@ enum class EventKind(val value: Int) {
     KEYBOARD_VISIBILITY(76),
     PAGE_CHANGE(77),
     ROUTE_COVERED(78),
-    ROUTE_FOCUSED(79);
+    ROUTE_FOCUSED(79),
+    LIST_WINDOW(80);
 }
 
 enum class PropKey(val value: Int) {
@@ -704,6 +705,9 @@ enum class PropKey(val value: Int) {
     SCROLL_KEYBOARD_PERSIST_TAPS(538),
     GESTURE_NATIVE_BOUNDS(539),
     GESTURE_NATIVE_CONTENT_ASPECT(540),
+    LIST_PLACEHOLDER(541),
+    LIST_WINDOWED(542),
+    LIST_PLACEHOLDER_ROWS(543),
     // Extension table (PAM_EXTENSION_BASE and up).
     LIST_FOLLOW_END_ON_RESIZE(1001),
     SCROLL_PAGE_TRANSFORM(1002),

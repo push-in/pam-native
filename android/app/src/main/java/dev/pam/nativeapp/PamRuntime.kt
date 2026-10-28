@@ -5,6 +5,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.Trace
 import android.util.Log
 import android.view.Choreographer
@@ -112,6 +113,16 @@ class PamRuntime(
      * toggle) still land in the frame that asked for them.
      */
     private var commitAfterFrameScheduled = false
+
+    /**
+     * Uptime of the last discrete user event (press, text change, submit…)
+     * sent to PHP. Its answer is what the user is waiting for: it lands in
+     * the first frame after it arrives even when it is heavy (a filter that
+     * rebuilds a list), unless a list is scrolling. Deferring it past that
+     * frame cost one full frame of touch/key-to-pixel latency.
+     */
+    @Volatile
+    private var lastInteractionUptime = Long.MIN_VALUE / 2
     private val commitAfterFrame = Runnable {
         commitAfterFrameScheduled = false
         flushBatches()
@@ -122,7 +133,11 @@ class PamRuntime(
         if (commitAfterFrameScheduled) return true
         if (pendingBatches.isEmpty() || surfaceAwaitingFirstFrame || closed.get()) return false
         if (pendingBatches.any(PendingBatch::remount)) return false
-        if (pendingBatches.sumOf { it.mutations.size } < HEAVY_COMMIT_MUTATIONS && !renderer.isListScrolling()) {
+        val scrolling = renderer.isListScrolling()
+        if (!scrolling && SystemClock.uptimeMillis() - lastInteractionUptime <= INTERACTION_COMMIT_WINDOW_MS) {
+            return false
+        }
+        if (pendingBatches.sumOf { it.mutations.size } < HEAVY_COMMIT_MUTATIONS && !scrolling) {
             return false
         }
         commitAfterFrameScheduled = true
@@ -314,6 +329,15 @@ class PamRuntime(
                     true,
                 )
             }
+            // A deep-linked cold start: PHP routes the launch URL before its
+            // first frame (Linking::routeLaunchUrl()).
+            runCatching {
+                android.system.Os.setenv(
+                    "PAM_NATIVE_LAUNCH_URL",
+                    dev.pam.nativeapp.modules.PamDeepLinks.launchUrl().orEmpty(),
+                    true,
+                )
+            }
             // Renderer contract handshake: PHP refuses an incompatible
             // renderer at boot and never sends extension IDs it lacks.
             runCatching {
@@ -480,6 +504,7 @@ class PamRuntime(
     }
 
     private fun dispatchEventImmediately(nodeId: Long, kind: Int, payload: ByteArray) {
+        if (kind in INTERACTION_EVENTS) lastInteractionUptime = SystemClock.uptimeMillis()
         synchronized(handleLock) {
             val active = handle
             if (active != 0L && readyForEvents) {
@@ -616,10 +641,15 @@ class PamRuntime(
             Trace.endSection()
         }
         val decodeNanos = System.nanoTime() - decodeStarted
-        main.post {
+        // The answer to a press/keystroke is what the user waits for: it jumps
+        // the main queue and mounts at once, so the next traversal draws it
+        // (like a native click handler). Waiting for a frame callback cost a
+        // full frame whenever the post landed right after a vsync.
+        val interactive = SystemClock.uptimeMillis() - lastInteractionUptime <= INTERACTION_COMMIT_WINDOW_MS
+        val deliver = Runnable {
             if (closed.get() || awaitingRemount || !attachedSurface) {
                 releaseBatch(batchHandle)
-                return@post
+                return@Runnable
             }
             pendingBatches.addLast(
                 PendingBatch(
@@ -629,7 +659,18 @@ class PamRuntime(
                 ),
             )
             markReadyForEvents()
-            if (surfaceAwaitingFirstFrame) flushFirstFrame() else scheduleFrame()
+            when {
+                surfaceAwaitingFirstFrame -> flushFirstFrame()
+                interactive && !commitAfterFrameScheduled && !renderer.isListScrolling() -> flushBatches()
+                else -> scheduleFrame()
+            }
+        }
+        if (interactive) {
+            val message = android.os.Message.obtain(main, deliver)
+            message.isAsynchronous = true
+            main.sendMessageAtFrontOfQueue(message)
+        } else {
+            main.post(deliver)
         }
         return true
     }
@@ -1093,6 +1134,15 @@ class PamRuntime(
         private const val MAX_PENDING_EVENTS = 256
         private const val PERFORMANCE_LOG_TAG = "PamNativePerf"
         private const val HEAVY_COMMIT_MUTATIONS = 32
+        /** A batch answering a user event within this window commits in-frame. */
+        private const val INTERACTION_COMMIT_WINDOW_MS = 250L
+        private val INTERACTION_EVENTS = setOf(
+            1, // press
+            2, // change (text input, toggles)
+            5, // long press
+            8, // submit
+            11, // toggle
+        )
         private val COALESCED_EVENTS = setOf(
             9, // scroll
             17, // dimensions

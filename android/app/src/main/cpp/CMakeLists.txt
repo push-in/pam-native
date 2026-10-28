@@ -51,6 +51,7 @@ list(REMOVE_ITEM PAM_PHP_DEPENDENCIES "${PAM_PHP_LIBRARY}")
 
 add_library(pam_native_android SHARED
     pam_android_bridge.cpp
+    pam_tree_encoder.cpp
 )
 
 target_compile_definitions(pam_native_android PRIVATE

@@ -13,9 +13,9 @@ public let PAM_CORE_EVENT_LIMIT = 80
 public let PAM_EXTENSION_BASE = 1001
 /// Highest IDs this renderer implements, exported in the renderer contract.
 /// `scripts/protocol-parity.py` pins them to the PHP tables.
-public let PAM_PROPERTY_CEILING = 540
+public let PAM_PROPERTY_CEILING = 543
 public let PAM_EXTENSION_PROPERTY_CEILING = 1005
-public let PAM_EVENT_CEILING = 79
+public let PAM_EVENT_CEILING = 80
 public let PAM_EXTENSION_EVENT_CEILING = 1000
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
@@ -153,6 +153,7 @@ public enum EventKind: Int {
     case pageChange = 77
     case routeCovered = 78
     case routeFocused = 79
+    case listWindow = 80
 }
 
 public enum PropValue {
@@ -591,6 +592,9 @@ public enum PamConstants {
     public static let scrollKeyboardPersistTaps = 538
     public static let gestureNativeBounds = 539
     public static let gestureNativeContentAspect = 540
+    public static let listPlaceholder = 541
+    public static let listWindowed = 542
+    public static let listPlaceholderRows = 543
     // Extension table (PAM_EXTENSION_BASE and up).
     public static let listFollowEndOnResize = 1001
     public static let scrollPageTransform = 1002

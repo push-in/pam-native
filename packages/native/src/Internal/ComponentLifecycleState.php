@@ -40,4 +40,7 @@ final class ComponentLifecycleState
      * @var list<ComponentLifecycleState>|null
      */
     public ?array $retained = null;
+
+    /** ComponentLifecycle::$lazyJoins when $retained was collected. */
+    public int $retainedJoins = 0;
 }

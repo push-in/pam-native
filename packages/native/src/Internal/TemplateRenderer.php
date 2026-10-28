@@ -842,62 +842,18 @@ final class TemplateRenderer
             $plan = $node->pamPlan ??= self::nodePlan($node);
 
             if ($plan['for'] !== null) {
-                $listWindow = $data['__pamListWindow'] ?? null;
-                if ($listWindow instanceof ListWindow && $listWindow->path === $parentPath) {
-                    self::windowedLoop($output, $plan['for'], $node, $listWindow, $scope, $data, $slot);
-                    $branchMatched = false;
-                    continue;
-                }
-                [$variable, $source, $keyExpression, $staticKey, $indexName, $indexValid, $loopNode] = $plan['for'];
-                $items = TemplateExpression::evaluate($source, $scope, $data);
-                if (is_int($items)) {
-                    $items = $items > 0 ? range(1, $items) : [];
-                } elseif ($items instanceof Traversable) {
-                    $items = iterator_to_array($items);
-                }
-                if (!is_array($items)) {
-                    throw new RuntimeException(
-                        'p-for source must resolve to an integer, array, or Traversable.',
-                    );
-                }
-                if (!$indexValid) {
-                    throw new RuntimeException('p-index must be a safe variable name.');
-                }
-                if (
-                    $keyExpression === null
-                    && $staticKey === null
-                    && count($items) > 1
-                ) {
-                    DevWarnings::warn(
-                        'p-for children should declare p-key (or :key) so native identities follow items, not positions',
-                        $node->source.':'.$node->line.':'.$node->column,
-                    );
-                }
-                $seenKeys = [];
-                $loopPath = $data['__pamNodePath'].'.';
-                foreach ($items as $itemIndex => $item) {
-                    $iterationData = $data;
-                    $iterationData[$variable] = $item;
-                    $iterationData[$indexName] = $itemIndex;
-                    $identity = $itemIndex;
-                    if ($keyExpression !== null || $staticKey !== null) {
-                        $identity = $keyExpression !== null
-                            ? self::dynamicValue($keyExpression, $scope, $iterationData)
-                            : self::value($staticKey, $scope, $iterationData);
-                        if (!is_string($identity) && !is_int($identity)) {
-                            throw new RuntimeException('p-key must resolve to a string or integer.');
-                        }
-                        $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
-                        if (isset($seenKeys[$fingerprint])) {
-                            throw new RuntimeException("Duplicate p-key {$identity} in loop.");
-                        }
-                        $seenKeys[$fingerprint] = true;
-                    }
-                    $iterationData['__pamNodePath'] = $loopPath.$identity;
-                    foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
-                        $output[] = $rendered;
+                $listLoop = $data['__pamListLoop'] ?? null;
+                if (is_array($listLoop) && $listLoop[0] === $parentPath) {
+                    // A row source of a VirtualizedList/VirtualGrid: its rows
+                    // are built when the list window reaches them.
+                    $rows = self::lazyLoop($plan['for'], $node, $scope, $data, $slot, $listLoop[1]);
+                    if ($rows !== null) {
+                        $output[] = $rows;
+                        $branchMatched = false;
+                        continue;
                     }
                 }
+                self::eagerLoop($output, $plan['for'], $node, self::loopItems($plan['for'], $scope, $data), $scope, $data, $slot);
                 $branchMatched = false;
                 continue;
             }
@@ -973,6 +929,194 @@ final class TemplateRenderer
         }
 
         return $output;
+    }
+
+    /**
+     * The items of a p-for loop.
+     *
+     * @param array<int, mixed> $for the loop plan (nodePlan()['for'])
+     * @param array<string, mixed> $data
+     * @return array<array-key, mixed>
+     */
+    private static function loopItems(array $for, ?object $scope, array $data): array
+    {
+        $items = TemplateExpression::evaluate($for[1], $scope, $data);
+        if (is_int($items)) {
+            $items = $items > 0 ? range(1, $items) : [];
+        } elseif ($items instanceof Traversable) {
+            $items = iterator_to_array($items);
+        }
+        if (!is_array($items)) {
+            throw new RuntimeException(
+                'p-for source must resolve to an integer, array, or Traversable.',
+            );
+        }
+        if (!$for[5]) {
+            throw new RuntimeException('p-index must be a safe variable name.');
+        }
+
+        return $items;
+    }
+
+    /**
+     * The identity of each loop item: its p-key (unique), or its index.
+     *
+     * @param array<int, mixed> $for
+     * @param array<array-key, mixed> $items
+     * @param array<string, mixed> $data
+     * @return array<array-key, int|string> by item index
+     */
+    private static function loopIdentities(
+        array $for,
+        CompiledTemplateNode $node,
+        array $items,
+        ?object $scope,
+        array $data,
+    ): array {
+        [$variable, , $keyExpression, $staticKey, $indexName] = $for;
+        if ($keyExpression === null && $staticKey === null) {
+            if (count($items) > 1) {
+                DevWarnings::warn(
+                    'p-for children should declare p-key (or :key) so native identities follow items, not positions',
+                    $node->source.':'.$node->line.':'.$node->column,
+                );
+            }
+            $identities = [];
+            foreach ($items as $itemIndex => $_) {
+                $identities[$itemIndex] = $itemIndex;
+            }
+
+            return $identities;
+        }
+        $identities = [];
+        $seenKeys = [];
+        foreach ($items as $itemIndex => $item) {
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $identity = $keyExpression !== null
+                ? self::dynamicValue($keyExpression, $scope, $iterationData)
+                : self::value($staticKey, $scope, $iterationData);
+            if (!is_string($identity) && !is_int($identity)) {
+                throw new RuntimeException('p-key must resolve to a string or integer.');
+            }
+            $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
+            if (isset($seenKeys[$fingerprint])) {
+                throw new RuntimeException("Duplicate p-key {$identity} in loop.");
+            }
+            $seenKeys[$fingerprint] = true;
+            $identities[$itemIndex] = $identity;
+        }
+
+        return $identities;
+    }
+
+    /**
+     * Renders every item of a p-for loop into $output.
+     *
+     * @param list<Element|string> $output
+     * @param array<int, mixed> $for
+     * @param array<array-key, mixed> $items
+     * @param array<string, mixed> $data with __pamNodePath set to the loop's path
+     */
+    private static function eagerLoop(
+        array &$output,
+        array $for,
+        CompiledTemplateNode $node,
+        array $items,
+        ?object $scope,
+        array $data,
+        string $slot,
+    ): void {
+        [$variable, , , , $indexName, , $loopNode] = $for;
+        $identities = self::loopIdentities($for, $node, $items, $scope, $data);
+        $loopPath = $data['__pamNodePath'].'.';
+        foreach ($items as $itemIndex => $item) {
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $identity = $identities[$itemIndex];
+            $iterationData['__pamNodePath'] = $loopPath.$identity;
+            foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
+                $output[] = $rendered;
+            }
+        }
+    }
+
+    /**
+     * The rows of a p-for loop that is a row source of a VirtualizedList /
+     * VirtualGrid, built only when the list window reaches them, each
+     * exactly as the eager loop renders it. Loops of a `windowSize` list are
+     * always deferred, other loops when they are long. Null renders the loop
+     * eagerly (short loop, nested loop or condition on the row, keys that
+     * are not usable as element keys).
+     *
+     * @param array<int, mixed> $for the loop plan (nodePlan()['for'])
+     * @param array<string, mixed> $data with __pamNodePath set to the loop's path
+     */
+    private static function lazyLoop(
+        array $for,
+        CompiledTemplateNode $node,
+        ?object $scope,
+        array $data,
+        string $slot,
+        bool $windowed,
+    ): ?LazyRows {
+        $loopNode = $for[6];
+        $rowPlan = $loopNode->pamPlan ??= self::nodePlan($loopNode);
+        // A control-flow row (`<If p-for>` choosing the row's component) is
+        // deferred in a `windowSize` list; it must render one element.
+        if ($rowPlan['for'] !== null || ($rowPlan['control'] && !$windowed)) {
+            return null;
+        }
+        $items = self::loopItems($for, $scope, $data);
+        if (!$windowed && count($items) <= TreeEncoder::WINDOW_MIN_ROWS) {
+            return null;
+        }
+        $identities = self::loopIdentities($for, $node, $items, $scope, $data);
+        $indexes = array_keys($items);
+        $keys = [];
+        foreach ($identities as $identity) {
+            $key = (string) $identity;
+            if ($key === '' || strlen($key) > 128) {
+                return null;
+            }
+            $keys[] = $key;
+        }
+        [$variable, , , , $indexName] = $for;
+        $loopPath = $data['__pamNodePath'].'.';
+        $render = static function (mixed $item, int $row) use (
+            $variable,
+            $indexName,
+            $loopNode,
+            $scope,
+            $data,
+            $slot,
+            $indexes,
+            $keys,
+            $loopPath,
+        ): ?Element {
+            $itemIndex = $indexes[$row];
+            $identity = $keys[$row];
+            $iterationData = $data;
+            $iterationData[$variable] = $item;
+            $iterationData[$indexName] = $itemIndex;
+            $iterationData['__pamNodePath'] = $loopPath.$identity;
+            $element = null;
+            foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
+                if (is_string($rendered) && trim($rendered) === '') {
+                    continue;
+                }
+                if (!$rendered instanceof Element || $element !== null) {
+                    throw new RuntimeException('Each virtualized row must render exactly one element (rows of a long or windowSize list are built one by one).');
+                }
+                $element = $rendered;
+            }
+
+            return $element;
+        };
+
+        return new LazyRows(array_values($items), $keys, $render);
     }
 
     /**
@@ -1701,25 +1845,41 @@ final class TemplateRenderer
             [$defaultNodes, $slotNodes] = self::componentSlotNodes($childNodes);
         }
         $listWindow = null;
-        if (
-            $factory === null
-            && $tag === 'VirtualizedList'
-            && isset($values['windowSize'])
-            && $scope instanceof Component
-        ) {
-            // RN FlatList windowSize: the p-for rows render only within the
-            // window; the rest stay as placeholders (ListWindow).
+        $listLoop = false;
+        if ($factory === null && $slotNodes === [] && ($tag === 'VirtualizedList' || $tag === 'VirtualGrid')) {
+            // `<VirtualizedList><Row p-for="...">` renders only the rows the
+            // list window materializes, like FlatList's renderItem: with
+            // `windowSize` (RN FlatList), or automatically for long loops.
             $listPath = $data['__pamNodePath'] ?? $tag;
-            $listWindow = ListWindow::for($scope, is_string($listPath) || is_int($listPath) ? (string) $listPath : $tag);
-            $listWindow->configure(
-                self::intValue($values['windowSize'], 'VirtualizedList windowSize'),
-                self::floatValue($values['estimatedRowHeight'] ?? $values['rowHeight'] ?? 0.0, 'VirtualizedList estimatedRowHeight'),
-                isset($values['scrollRequest']) ? self::intValue($values['scrollRequest'], 'VirtualizedList scrollRequest') : null,
-                isset($values['scrollTargetOffset']) ? self::floatValue($values['scrollTargetOffset'], 'VirtualizedList scrollTargetOffset') : -1.0,
-            );
-            $childData['__pamListWindow'] = $listWindow;
+            $listPath = is_string($listPath) || is_int($listPath) ? (string) $listPath : $tag;
+            if (isset($values['windowSize'])) {
+                $listWindow = ListWindow::for($scope instanceof Component ? $scope : null, $listPath);
+                $listWindow->configure(self::intValue($values['windowSize'], 'VirtualizedList windowSize'));
+            }
+            $childData['__pamListLoop'] = [$listPath, $listWindow !== null];
+            $listLoop = true;
         }
         $renderedChildren = $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
+        $lazyRows = null;
+        if ($listLoop) {
+            $parts = [];
+            $deferred = false;
+            foreach ($renderedChildren as $rendered) {
+                if ($rendered instanceof LazyRows) {
+                    $deferred = true;
+                    $parts[] = $rendered;
+                } elseif ($rendered instanceof Element) {
+                    $parts[] = $rendered;
+                }
+            }
+            if ($deferred || $listWindow !== null) {
+                $lazyRows = LazyRows::compose($parts);
+                if ($lazyRows === null) {
+                    throw new RuntimeException("{$tag} rows need distinct keys.");
+                }
+                $renderedChildren = array_values(array_filter($renderedChildren, is_string(...)));
+            }
+        }
         $children = [];
         $text = '';
         foreach ($renderedChildren as $rendered) {
@@ -1880,16 +2040,23 @@ final class TemplateRenderer
             'FlatList', 'NativeList' => FlatList::make(
                 self::stringItems($values['items'] ?? []),
             ),
-            'VirtualizedList' => $children === []
-                ? FlatList::make(self::stringItems($values['items'] ?? []))
-                : VirtualizedList::make(...$children),
-            'VirtualGrid' => VirtualGrid::make(
-                max(1, self::intValue(
+            'VirtualizedList' => $lazyRows !== null
+                ? VirtualizedList::__pamRows($lazyRows)
+                : ($children === []
+                    ? FlatList::make(self::stringItems($values['items'] ?? []))
+                    : VirtualizedList::make(...$children)),
+            'VirtualGrid' => $lazyRows !== null
+                ? VirtualizedList::__pamRows($lazyRows)->columns(max(1, self::intValue(
                     $values['columns'] ?? $values['numColumns'] ?? 2,
                     'VirtualGrid columns',
-                )),
-                ...$children,
-            ),
+                )))
+                : VirtualGrid::make(
+                    max(1, self::intValue(
+                        $values['columns'] ?? $values['numColumns'] ?? 2,
+                        'VirtualGrid columns',
+                    )),
+                    ...$children,
+                ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
             'Swipeable' => self::swipeable($values, $children),
@@ -1897,8 +2064,10 @@ final class TemplateRenderer
                 self::gestureType($values['gestureType'] ?? 'tap'),
                 self::singleChild($children, $tag),
             ),
-            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
-            'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
+            'Pressable', 'TouchableNativeFeedback' => Pressable::make(...$children),
+            // The press feedback of the builder classes (TouchableOpacity::make()...).
+            'TouchableOpacity', 'TouchableHighlight', 'TouchableWithoutFeedback' => Pressable::make(...$children)
+                ->pressedOpacity(self::TOUCHABLE_OPACITY[$tag]),
             'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
                 $values['animating'] ?? $values['visible'] ?? true,
                 'ActivityIndicator animating',
@@ -2127,7 +2296,7 @@ final class TemplateRenderer
         }
 
         if ($listWindow !== null && $element instanceof VirtualizedList) {
-            $element = self::listWindowEvents($element, $listWindow);
+            $element = $element->__pamWindow($listWindow, $listWindow->size());
         }
 
         if (isset($values['model'])) {
@@ -2218,6 +2387,13 @@ final class TemplateRenderer
     }
 
     /** Native tags rendered by fastTag() when their entry allows it. */
+    /** Pressed opacity of TouchableOpacity/Highlight/WithoutFeedback (as their make()). */
+    private const TOUCHABLE_OPACITY = [
+        'TouchableOpacity' => 0.65,
+        'TouchableHighlight' => 0.82,
+        'TouchableWithoutFeedback' => 1.0,
+    ];
+
     private const FAST_TAGS = [
         'View' => true,
         'Column' => true,
@@ -2651,6 +2827,8 @@ final class TemplateRenderer
             $base[PropKey::Source->value] = $source;
         } elseif ($tag === 'Grid') {
             $base[PropKey::GridColumns->value] = 12;
+        } elseif (isset(self::TOUCHABLE_OPACITY[$tag])) {
+            $base[PropKey::PressOpacity->value] = self::TOUCHABLE_OPACITY[$tag];
         }
         $prebuilt = null;
         if ($richParts !== null) {
@@ -6908,13 +7086,16 @@ final class TemplateRenderer
                 self::$componentMethods[$scope::class.'::'.$raw] = $method;
             }
 
-            $pure = self::pureMethod($method);
+            $declared = self::pureMethod($method);
+            $pure = $declared || HandlerPurity::inferred($method);
             $handler = static function (mixed $payload = null) use (
                 $method,
                 $scope,
+                $declared,
                 $pure,
             ): void {
-                if ($scope instanceof Component && !$pure) {
+                $skips = $pure && ($declared || !$scope instanceof Component || HandlerPurity::plainState($scope));
+                if ($scope instanceof Component && !$skips) {
                     DependencyTracker::markDirty($scope);
                 }
                 try {
@@ -6924,8 +7105,8 @@ final class TemplateRenderer
                         $method->invoke($scope, $payload);
                     }
                 } finally {
-                    if ($pure) {
-                        self::settlePureHandler($scope);
+                    if ($skips) {
+                        self::settlePureHandler($scope, $declared ? null : $method);
                     }
                 }
             };
@@ -7013,9 +7194,12 @@ final class TemplateRenderer
         if ($cached !== null) {
             return $cached;
         }
-        $pure = self::pureMethod($method);
-        $handler = static function (mixed $payload = '') use ($kind, $method, $scope, $pure): void {
-            if (!$pure) {
+        $declared = self::pureMethod($method);
+        $pure = $declared || HandlerPurity::inferred($method);
+        $handler = static function (mixed $payload = '') use ($kind, $method, $scope, $declared, $pure): void {
+            // Inferred pure (static analysis of the method): only while the
+            // component's state is plain, so the snapshot sees every change.
+            if (!$pure || (!$declared && $scope instanceof Component && !HandlerPurity::plainState($scope))) {
                 if ($scope instanceof Component) {
                     DependencyTracker::markDirty($scope);
                 }
@@ -7026,7 +7210,7 @@ final class TemplateRenderer
             try {
                 self::invokeMethodHandler($kind, $method, $scope, $payload);
             } finally {
-                self::settlePureHandler($scope);
+                self::settlePureHandler($scope, $declared ? null : $method);
             }
         };
         if ($pure) {
@@ -7035,119 +7219,6 @@ final class TemplateRenderer
         }
 
         return $scope instanceof Component ? $scope->__pamRememberHandler($handlerKey, $handler) : $handler;
-    }
-
-    /**
-     * A p-for loop that is the row source of a windowed VirtualizedList:
-     * rows inside the window render exactly as the eager loop renders them
-     * (with a layout observer), the others become ListWindow placeholders.
-     *
-     * @param list<Element|string> $output
-     * @param array<int, mixed> $for the loop plan (nodePlan()['for'])
-     * @param array<string, mixed> $data with __pamNodePath set to the loop's path
-     */
-    private static function windowedLoop(
-        array &$output,
-        array $for,
-        CompiledTemplateNode $node,
-        ListWindow $window,
-        ?object $scope,
-        array $data,
-        string $slot,
-    ): void {
-        [$variable, $source, $keyExpression, $staticKey, $indexName, $indexValid, $loopNode] = $for;
-        $items = TemplateExpression::evaluate($source, $scope, $data);
-        if (is_int($items)) {
-            $items = $items > 0 ? range(1, $items) : [];
-        } elseif ($items instanceof Traversable) {
-            $items = iterator_to_array($items);
-        }
-        if (!is_array($items)) {
-            throw new RuntimeException('p-for source must resolve to an integer, array, or Traversable.');
-        }
-        if (!$indexValid) {
-            throw new RuntimeException('p-index must be a safe variable name.');
-        }
-        if ($keyExpression === null && $staticKey === null && count($items) > 1) {
-            DevWarnings::warn(
-                'p-for children should declare p-key (or :key) so native identities follow items, not positions',
-                $node->source.':'.$node->line.':'.$node->column,
-            );
-        }
-        $identities = [];
-        $seenKeys = [];
-        foreach ($items as $itemIndex => $item) {
-            $identity = $itemIndex;
-            if ($keyExpression !== null || $staticKey !== null) {
-                $iterationData = $data;
-                $iterationData[$variable] = $item;
-                $iterationData[$indexName] = $itemIndex;
-                $identity = $keyExpression !== null
-                    ? self::dynamicValue($keyExpression, $scope, $iterationData)
-                    : self::value($staticKey, $scope, $iterationData);
-                if (!is_string($identity) && !is_int($identity)) {
-                    throw new RuntimeException('p-key must resolve to a string or integer.');
-                }
-                $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
-                if (isset($seenKeys[$fingerprint])) {
-                    throw new RuntimeException("Duplicate p-key {$identity} in loop.");
-                }
-                $seenKeys[$fingerprint] = true;
-            }
-            $identities[$itemIndex] = $identity;
-        }
-        $mounted = $window->plan(array_values($identities));
-        $loopPath = $data['__pamNodePath'].'.';
-        foreach ($items as $itemIndex => $item) {
-            $identity = $identities[$itemIndex];
-            if (!isset($mounted[$identity])) {
-                $output[] = $window->placeholder($identity);
-                continue;
-            }
-            $iterationData = $data;
-            $iterationData[$variable] = $item;
-            $iterationData[$indexName] = $itemIndex;
-            $iterationData['__pamNodePath'] = $loopPath.$identity;
-            $part = 0;
-            foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
-                $output[] = $rendered instanceof Element ? $window->observe($rendered, $identity, $part++) : $rendered;
-            }
-        }
-    }
-
-    /**
-     * Feeds a windowed list's scroll phases and height to its ListWindow,
-     * then to the template's own handlers. A wrapper around pure (or no)
-     * handlers stays pure: it re-renders only when the window moved.
-     */
-    private static function listWindowEvents(VirtualizedList $list, ListWindow $window): VirtualizedList
-    {
-        $events = $list->events();
-        foreach ([EventKind::ScrollBeginDrag, EventKind::ScrollEndDrag, EventKind::MomentumScrollEnd, EventKind::Layout] as $kind) {
-            $observe = $kind === EventKind::Layout
-                ? static function (string $payload) use ($window): void {
-                    $window->viewport($payload);
-                }
-                : static function (string $payload) use ($window, $kind): void {
-                    $window->phase($kind, $payload);
-                };
-            $inner = $events[$kind->value] ?? null;
-            $handler = $inner === null || self::isPureHandler($inner)
-                || (new \ReflectionFunction($inner))->getAttributes(\Pam\Native\Attributes\PureHandler::class) !== []
-                ? #[\Pam\Native\Attributes\PureHandler] static function (mixed $payload = '') use ($observe, $inner): mixed {
-                    $observe(is_string($payload) ? $payload : '');
-
-                    return $inner === null ? null : $inner($payload);
-                }
-                : static function (mixed $payload = '') use ($observe, $inner): mixed {
-                    $observe(is_string($payload) ? $payload : '');
-
-                    return $inner($payload);
-                };
-            $list = $list->on($kind, $handler);
-        }
-
-        return $list;
     }
 
     /**
@@ -7186,14 +7257,17 @@ final class TemplateRenderer
             ??= $method->getAttributes(\Pam\Native\Attributes\PureHandler::class) !== [];
     }
 
-    /** A pure handler re-renders its component only when its own state really changed. */
-    private static function settlePureHandler(object $scope): void
+    /**
+     * A pure handler re-renders its component only when its own state really
+     * changed. A render an inferred-pure handler ($inferred) skips is still
+     * done in development builds and verified (HandlerPurity::verify()).
+     */
+    private static function settlePureHandler(object $scope, ?ReflectionMethod $inferred = null): void
     {
-        if (
-            $scope instanceof Component
-            && !DependencyTracker::isDirty($scope)
-            && $scope->__pamStateChanged()
-        ) {
+        if (!$scope instanceof Component || DependencyTracker::isDirty($scope)) {
+            return;
+        }
+        if ($scope->__pamStateChanged() || ($inferred !== null && HandlerPurity::skipped($inferred))) {
             DependencyTracker::markDirty($scope);
         }
     }

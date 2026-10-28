@@ -85,4 +85,5 @@ enum EventKind: int
     case PageChange = 77;
     case RouteCovered = 78;
     case RouteFocused = 79;
+    case ListWindow = 80;
 }

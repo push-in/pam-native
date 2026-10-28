@@ -68,6 +68,21 @@ final class DependencyTracker
         }
     }
 
+    /** Tracks reads for $component again, keeping what it already read (lazy list rows). */
+    public static function resume(Component $component): void
+    {
+        self::$stack[] = $component;
+    }
+
+    public static function suspend(Component $component): void
+    {
+        $current = array_pop(self::$stack);
+        if ($current !== $component) {
+            self::$stack = [];
+            throw new \LogicException('Component dependency tracking stack is corrupted.');
+        }
+    }
+
     public static function read(object $source, string $key): void
     {
         $last = array_key_last(self::$stack);

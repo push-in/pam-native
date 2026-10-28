@@ -1,0 +1,286 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Internal;
+
+use Closure;
+use InvalidArgumentException;
+use Pam\Native\Component;
+use Pam\Native\Element;
+use Pam\Native\NodeKind;
+use Pam\Native\PropKey;
+use Pam\Native\Renderable;
+use Pam\Native\UI\View;
+use WeakReference;
+
+/**
+ * @internal The rows of a data-driven list (VirtualizedList::of()): the
+ * items, their keys, and the row builder, called only for the rows the
+ * encoders materialize (the window). A built row is kept for the life of
+ * this object, so re-encoding the same list never rebuilds it.
+ */
+final class LazyRows
+{
+    /** @var array<int, Element|false> */
+    private array $built = [];
+
+    /** @var array<int, list<Component>> components each built row rendered */
+    private array $components = [];
+
+    /** @var array<int, true> rows asked for since the last settle() */
+    private array $touched = [];
+
+    /** @var WeakReference<Component>|null the component whose render created these rows */
+    private ?WeakReference $owner;
+
+    /** Whether an encoder walked these rows (settle() ran). */
+    private bool $settled = false;
+
+    /** @var WeakReference<self>|null the themed copy the encoder built (mapped()) */
+    private ?WeakReference $themed = null;
+
+    /**
+     * @param list<mixed> $items
+     * @param list<string> $keys one unique key per item
+     * @param Closure(mixed, int): (Renderable|false|null) $render
+     * @param (Closure(Element): Element)|null $transform applied to each built row
+     * @param ListWindow|null $window the list's `windowSize` window: it plans
+     *        the materialized rows, measures them and sizes their placeholders
+     * @param array<int, true> $fixed rows always materialized (the static
+     *        children around a template loop: list header and footer)
+     */
+    public function __construct(
+        public readonly array $items,
+        public readonly array $keys,
+        private readonly Closure $render,
+        private readonly ?Closure $transform = null,
+        ?Component $owner = null,
+        public readonly ?ListWindow $window = null,
+        public readonly array $fixed = [],
+    ) {
+        $owner ??= ComponentLifecycle::current();
+        $this->owner = $owner === null ? null : WeakReference::create($owner);
+    }
+
+    /**
+     * The same rows with $transform applied to each one when it is built
+     * (theme defaults reach rows that do not exist yet).
+     *
+     * @param Closure(Element): Element $transform
+     */
+    public function mapped(Closure $transform): self
+    {
+        $previous = $this->transform;
+
+        $copy = new self(
+            $this->items,
+            $this->keys,
+            $this->render,
+            $previous === null ? $transform : static fn (Element $row): Element => $transform($previous($row)),
+            $this->owner?->get(),
+            $this->window,
+            $this->fixed,
+        );
+        $this->themed = WeakReference::create($copy);
+
+        return $copy;
+    }
+
+    /**
+     * The rows as the encoder last sent them, for tests and dev tools: each
+     * built row, or the placeholder standing for it. Rows no encoder walked
+     * yet (a render outside the runtime) are built as the first frame
+     * would: the window's first rows, or the first 48 of a long list.
+     *
+     * @return list<Element>
+     */
+    public function shown(): array
+    {
+        $rows = $this->themed?->get() ?? $this;
+        if (!$rows->settled) {
+            $count = count($this->keys);
+            $ranges = $this->window?->firstRows($this)
+                ?? [[0, $count > TreeEncoder::WINDOW_MIN_ROWS ? TreeEncoder::WINDOW_INITIAL_ROWS : $count]];
+            foreach ($ranges as [$from, $to]) {
+                for ($index = max(0, $from); $index < min($to, $count); $index++) {
+                    $rows->row($index);
+                }
+            }
+        }
+        $shown = [];
+        foreach ($this->keys as $index => $_) {
+            $built = $rows->built[$index] ?? null;
+            if ($built === false) {
+                continue;
+            }
+            $shown[] = $built ?? $rows->placeholder($index);
+        }
+
+        return $shown;
+    }
+
+    /** The same rows planned by $window (`windowSize`). */
+    public function windowed(ListWindow $window): self
+    {
+        return new self($this->items, $this->keys, $this->render, $this->transform, $this->owner?->get(), $window, $this->fixed);
+    }
+
+    /**
+     * Rows built from children already rendered (kept as they are) and lazy
+     * segments (a template `p-for`, built on demand), in order: one list of
+     * rows, keyed by the child's key (`#<row>` without one) or the segment's
+     * keys. Null when two rows would share a key. With a segment, the other
+     * children are the list's header and footer: like React Native's
+     * ListHeaderComponent/ListFooterComponent they stay materialized.
+     *
+     * @param list<Element|self> $parts
+     */
+    public static function compose(array $parts, ?ListWindow $window = null): ?self
+    {
+        $items = [];
+        $keys = [];
+        $seen = [];
+        $fixed = [];
+        $segments = false;
+        foreach ($parts as $part) {
+            $segments = $segments || $part instanceof self;
+        }
+        foreach ($parts as $part) {
+            if ($part instanceof self) {
+                foreach ($part->items as $index => $item) {
+                    $items[] = [$part->render, $item, $index];
+                    $keys[] = $key = $part->keys[$index];
+                    if (isset($seen[$key])) {
+                        return null;
+                    }
+                    $seen[$key] = true;
+                }
+                continue;
+            }
+            $key = $part->elementKey ?? '#'.count($keys);
+            if (isset($seen[$key])) {
+                return null;
+            }
+            $seen[$key] = true;
+            if ($segments) {
+                $fixed[count($keys)] = true;
+            }
+            $items[] = $part;
+            $keys[] = $key;
+        }
+
+        return new self(
+            $items,
+            $keys,
+            static fn (Element|array $item): Renderable|false|null => $item instanceof Element
+                ? $item
+                : ($item[0])($item[1], $item[2]),
+            null,
+            null,
+            $window,
+            $fixed,
+        );
+    }
+
+    public function count(): int
+    {
+        return count($this->keys);
+    }
+
+    /** @var array<int, Element> */
+    private array $placeholders = [];
+
+    /**
+     * The stand-in of a row that is not built: a childless View keyed like
+     * the row and flagged ListPlaceholder (sized by the list estimate).
+     */
+    public function placeholder(int $index): Element
+    {
+        if ($this->window !== null) {
+            // Sized like the row last measured (scroll position stays put).
+            return $this->window->placeholder($this->keys[$index]);
+        }
+
+        return $this->placeholders[$index] ??= View::__pamCreate(
+            NodeKind::View,
+            [],
+            [PropKey::ListPlaceholder->value => true],
+            null,
+            $this->keys[$index],
+        );
+    }
+
+    /** The row at $index (keyed with its item key), or null for a hole. */
+    public function row(int $index): ?Element
+    {
+        $this->touched[$index] = true;
+        $built = $this->built[$index] ?? null;
+        if ($built !== null) {
+            return $built === false ? null : $built;
+        }
+        // Rendered as part of the owner's render: its components mount as
+        // the owner's children and state reads subscribe the owner.
+        $render = $this->render;
+        $item = $this->items[$index];
+        [$element, $components] = ComponentLifecycle::renderFor(
+            $this->owner?->get(),
+            static function () use ($render, $item, $index): ?Element {
+                $rendered = $render($item, $index);
+                if ($rendered === null || $rendered === false) {
+                    return null;
+                }
+                if (!$rendered instanceof Renderable) {
+                    throw new InvalidArgumentException('A list row must be renderable by Pam Native.');
+                }
+
+                return $rendered->toElement();
+            },
+        );
+        if ($components !== []) {
+            $this->components[$index] = $components;
+        }
+        if ($element === null) {
+            $this->built[$index] = false;
+
+            return null;
+        }
+        if ($element->elementKey !== $this->keys[$index]) {
+            $element = $element->key($this->keys[$index]);
+        }
+        if ($this->transform !== null) {
+            $element = ($this->transform)($element);
+        }
+        if ($this->window !== null) {
+            $element = $this->window->observe($element, $this->keys[$index]);
+        }
+
+        return $this->built[$index] = $element;
+    }
+
+    /**
+     * Called by the encoders after they encoded the list: rows built before
+     * but not asked for this time left the window, so they are dropped and
+     * their components unmount (their instances stay keyed with the owner
+     * while it is reused, so state survives a return to the window).
+     */
+    public function settle(): void
+    {
+        if (count($this->touched) !== count($this->built)) {
+            $owner = $this->owner?->get();
+            foreach ($this->built as $index => $_) {
+                if (isset($this->touched[$index])) {
+                    continue;
+                }
+                unset($this->built[$index]);
+                $components = $this->components[$index] ?? null;
+                if ($components !== null) {
+                    unset($this->components[$index]);
+                    ComponentLifecycle::release($owner, $components);
+                }
+            }
+        }
+        $this->touched = [];
+        $this->settled = true;
+    }
+}

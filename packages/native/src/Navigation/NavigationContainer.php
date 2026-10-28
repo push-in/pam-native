@@ -116,6 +116,9 @@ final class NavigationContainer extends Component
      */
     public function linking(?Closure $callback = null): self
     {
+        if (!$this->systemLinkingEnabled) {
+            Linking::routeLaunchUrl($this->root);
+        }
         $this->systemLinkingEnabled = true;
         $this->onLink = $callback;
         return $this;

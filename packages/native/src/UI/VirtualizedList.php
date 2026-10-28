@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\Internal\BinaryValue;
+use Pam\Native\Internal\LazyRows;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
@@ -32,9 +33,23 @@ final class VirtualizedList extends Element
      *
      * Assign stable keys to stateful or reorderable children. Null and false
      * items are holes that keep the following siblings' identities stable.
+     *
+     * Rows may also be closures returning the row (or a generator / iterable
+     * of rows and closures): a closure row is called only when the list
+     * window reaches it, and is identified by its position.
+     *
+     * @param Renderable|Closure(): (Renderable|false|null)|iterable<Renderable|Closure|false|null>|array<string>|false|null ...$items
      */
-    public static function make(Renderable|array|false|null ...$items): self
+    public static function make(Renderable|Closure|iterable|false|null ...$items): self
     {
+        if (count($items) === 1 && $items[0] instanceof \Traversable) {
+            $items = iterator_to_array($items[0], false);
+        }
+        foreach ($items as $item) {
+            if ($item instanceof Closure) {
+                return self::deferred($items);
+            }
+        }
         if (count($items) === 1 && is_array($items[0])) {
             $strings = [];
             foreach ($items[0] as $item) {
@@ -55,6 +70,137 @@ final class VirtualizedList extends Element
 
         /** @var list<Renderable|false|null> $items */
         return (new self(NodeKind::VirtualList))->withChildren($items);
+    }
+
+    /**
+     * A list driven by data, like React Native's FlatList/FlashList `data` +
+     * `renderItem` + `keyExtractor`: `$row($item, $index)` is called only for
+     * the rows that are shown (and a margin around them), never for all of
+     * them up front. Keys default to the item's `key` or `id` (array key or
+     * public property), then to its index.
+     *
+     * @param iterable<mixed> $items
+     * @param Closure(mixed, int): (Renderable|false|null) $row
+     * @param (Closure(mixed, int): (string|int))|null $key
+     */
+    public static function of(iterable $items, Closure $row, ?Closure $key = null): self
+    {
+        $values = is_array($items) ? array_values($items) : iterator_to_array($items, false);
+        $keys = [];
+        foreach ($values as $index => $item) {
+            $value = $key !== null ? $key($item, $index) : self::defaultKey($item, $index);
+            $keys[] = (string) $value;
+        }
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = new LazyRows($values, $keys, $row);
+
+        return $list;
+    }
+
+    /**
+     * Closure rows are built when the window reaches them; the other rows
+     * are kept as given (keyed by their key, or by position).
+     *
+     * @param array<int|string, mixed> $items
+     */
+    private static function deferred(array $items): self
+    {
+        $rows = [];
+        $keys = [];
+        $seen = [];
+        foreach (array_values($items) as $index => $item) {
+            if ($item === null || $item === false) {
+                continue;
+            }
+            if (!$item instanceof Closure && !$item instanceof Renderable) {
+                throw new InvalidArgumentException('VirtualizedList rows must be renderable or closures returning one.');
+            }
+            $key = $item instanceof Element && $item->elementKey !== null ? $item->elementKey : '#'.$index;
+            if (isset($seen[$key])) {
+                throw new InvalidArgumentException("Duplicate VirtualizedList row key {$key}.");
+            }
+            $seen[$key] = true;
+            $rows[] = $item;
+            $keys[] = $key;
+        }
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = new LazyRows(
+            $rows,
+            $keys,
+            static fn (Renderable|Closure $row): Renderable|false|null => $row instanceof Closure ? $row() : $row,
+        );
+
+        return $list;
+    }
+
+    /**
+     * React Native FlatList `windowSize`: only the rows within
+     * `($size - 1) / 2` screens above and below the visible ones are built
+     * and mounted (21 in React Native; 5 suits tall media rows). The other
+     * rows are childless placeholders with the height each row last
+     * measured, or the estimate (`estimatedRowHeight`) before it was ever
+     * shown, so the content height and the scroll position do not move.
+     * Rows leaving the window unmount their components (local state is
+     * lost, as in React Native). Closure and data-driven rows
+     * ({@see self::of()}) are only built inside the window.
+     *
+     * Without `windowSize`, vertical lists of more than 96 rows are windowed
+     * automatically by rows (see docs/components.md). Several windowed lists
+     * rendered by one component need distinct keys.
+     */
+    public function windowSize(int $size): self
+    {
+        $window = \Pam\Native\Internal\ListWindow::for(
+            \Pam\Native\Internal\ComponentLifecycle::current(),
+            'list:'.($this->elementKey ?? ''),
+        );
+
+        return $this->__pamWindow($window, $size);
+    }
+
+    /** @internal Applies a `windowSize` window (template and builder). */
+    public function __pamWindow(\Pam\Native\Internal\ListWindow $window, int $size): self
+    {
+        $window->configure($size);
+        $rows = $this->lazyRows ?? LazyRows::compose(array_values(array_filter(
+            $this->children,
+            static fn (mixed $child): bool => $child instanceof Element,
+        )));
+        if ($rows === null) {
+            throw new InvalidArgumentException('VirtualizedList rows with windowSize need distinct keys.');
+        }
+        $copy = $this->withChildren([]);
+        $copy->lazyRows = $rows->windowed($window);
+
+        return $copy;
+    }
+
+    /** @internal Rows built by the encoders on demand (template p-for, see TemplateRenderer). */
+    public static function __pamRows(LazyRows $rows): self
+    {
+        $list = new self(NodeKind::VirtualList);
+        $list->lazyRows = $rows;
+
+        return $list;
+    }
+
+    private static function defaultKey(mixed $item, int $index): string|int
+    {
+        if (is_array($item)) {
+            foreach (['key', 'id'] as $field) {
+                if (isset($item[$field]) && (is_string($item[$field]) || is_int($item[$field]))) {
+                    return $item[$field];
+                }
+            }
+        } elseif (is_object($item)) {
+            foreach (['key', 'id'] as $field) {
+                if (isset($item->{$field}) && (is_string($item->{$field}) || is_int($item->{$field}))) {
+                    return $item->{$field};
+                }
+            }
+        }
+
+        return $index;
     }
 
     public function rowHeight(float $height): self

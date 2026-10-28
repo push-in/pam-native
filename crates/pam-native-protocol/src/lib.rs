@@ -726,6 +726,9 @@ pub enum PropKey {
     ScrollKeyboardPersistTaps = 538,
     GestureNativeBounds = 539,
     GestureNativeContentAspect = 540,
+    ListPlaceholder = 541,
+    ListWindowed = 542,
+    ListPlaceholderRows = 543,
     // Extension table (EXTENSION_BASE and up).
     ListFollowEndOnResize = 1001,
     ScrollPageTransform = 1002,
@@ -1279,6 +1282,9 @@ impl TryFrom<u16> for PropKey {
             538 => Ok(Self::ScrollKeyboardPersistTaps),
             539 => Ok(Self::GestureNativeBounds),
             540 => Ok(Self::GestureNativeContentAspect),
+            541 => Ok(Self::ListPlaceholder),
+            542 => Ok(Self::ListWindowed),
+            543 => Ok(Self::ListPlaceholderRows),
             1001 => Ok(Self::ListFollowEndOnResize),
             1002 => Ok(Self::ScrollPageTransform),
             1003 => Ok(Self::MediaStartBufferMs),
@@ -2221,10 +2227,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=540 {
+        for value in 1..=543 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(541).is_err());
+        assert!(PropKey::try_from(544).is_err());
         const { assert!(CORE_PROPERTY_LIMIT == 543 && CORE_EVENT_LIMIT == 80) };
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
