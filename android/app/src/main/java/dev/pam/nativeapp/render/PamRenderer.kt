@@ -1890,7 +1890,6 @@ class PamRenderer(
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
         pamImageView(view)?.let(imageLoader::cancel)
-        (view as? NativePropertyView)?.releaseHost()
         view?.let(nativeViews::release)
         view?.let(::clearHitSlop)
         state.directiveLayoutListener?.let { listener ->
@@ -2589,7 +2588,6 @@ class PamRenderer(
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         pamImageView(view)?.let(imageLoader::cancel)
-        (view as? NativePropertyView)?.releaseHost()
         view.let(nativeViews::release)
         clearHitSlop(view)
         val navigationParent = views[state.parent] as? PamNavigationHost
