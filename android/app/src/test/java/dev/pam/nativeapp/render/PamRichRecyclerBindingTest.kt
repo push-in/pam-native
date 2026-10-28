@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import androidx.recyclerview.widget.RecyclerView
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -46,5 +47,12 @@ class PamRichRecyclerBindingTest {
             virtualCellHostingRepair(isCellRoot = false, cellMounted = true, cellRootHosted = false) ==
                 VirtualCellHostingRepair.REMOUNT_CELL,
         )
+    }
+
+    @Test
+    fun exactOffsetSumsTheRowsAboveTheFirstVisibleOne() {
+        assertEquals(0, exactListScrollOffset(emptyList(), 0))
+        assertEquals(324 + 2168 + 40, exactListScrollOffset(listOf(324, 2168), -40))
+        assertEquals(0, exactListScrollOffset(emptyList(), 12))
     }
 }

@@ -72,10 +72,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         updateLayoutManager()
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                // Rows bound mid-fling before their content existed are
+                // retried once the list rests (O(visible rows)).
+                if (newState == SCROLL_STATE_IDLE) repairEmptyRichHolders()
                 val listener = scrollPhase ?: return
                 val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
-                val x = computeHorizontalScrollOffset() / density
-                val y = computeVerticalScrollOffset() / density
+                val x = (if (horizontal) logicalScrollOffsetPx() else computeHorizontalScrollOffset()) / density
+                val y = (if (horizontal) computeVerticalScrollOffset() else logicalScrollOffsetPx()) / density
                 when (newState) {
                     SCROLL_STATE_DRAGGING -> {
                         phaseDragging = true
@@ -1025,12 +1028,32 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         val last = layout.findLastVisibleItemPosition()
         val visible = if (last >= first) last - first + 1 else 0
         val total = adapter?.itemCount ?: 0
-        val offset = if (horizontal) {
-            computeHorizontalScrollOffset()
-        } else {
-            computeVerticalScrollOffset()
-        } / resources.displayMetrics.density
+        val offset = logicalScrollOffsetPx() / resources.displayMetrics.density
         viewportChanged?.invoke(offset, first, visible, total)
+    }
+
+    /**
+     * Scroll offset along the list axis. RecyclerView's own value is an
+     * average-row estimate (smooth scrollbar): with rows of very different
+     * heights a windowed list mounted rows far from the visible ones after a
+     * fling. Rich rows have known extents, so the offset is their exact sum.
+     */
+    private fun logicalScrollOffsetPx(): Int {
+        val estimated = if (horizontal) computeHorizontalScrollOffset() else computeVerticalScrollOffset()
+        return exactRichScrollOffsetPx() ?: estimated
+    }
+
+    private fun exactRichScrollOffsetPx(): Int? {
+        if (inverted || richIds.isEmpty()) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        if (manager is GridLayoutManager) return null
+        val first = manager.findFirstVisibleItemPosition()
+        if (first == NO_POSITION || first >= richIds.size) return null
+        val view = manager.findViewByPosition(first) ?: return null
+        return exactListScrollOffset(
+            extents = richIds.subList(0, first).map { richExtents[it] ?: return null },
+            firstStart = if (horizontal) view.left - paddingLeft else view.top - paddingTop,
+        )
     }
 
     private fun repairEmptyRichHolders() {
@@ -1389,6 +1412,10 @@ private class RichRecyclerAdapter(
 
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
         if (ids == next && extents == nextExtents) {
+            // The rows' content changed (a windowed list mounted rows a fling
+            // left empty): every empty holder may retry, not only those never
+            // attempted, or a row tried while still empty stays blank.
+            emptyRemountAttempts.clear()
             remountEmptyHolders()
             return
         }
@@ -1657,6 +1684,10 @@ internal fun virtualCellHostingRepair(
     } else {
         VirtualCellHostingRepair.REMOUNT_CELL
     }
+
+/** Offset of a list whose first visible row starts at [firstStart] px, after rows of [extents]. */
+internal fun exactListScrollOffset(extents: List<Int>, firstStart: Int): Int =
+    (extents.sum() - firstStart).coerceAtLeast(0)
 
 internal fun richHolderNeedsFullBind(boundId: Long, requestedId: Long, childCount: Int): Boolean =
     boundId != requestedId || childCount == 0
