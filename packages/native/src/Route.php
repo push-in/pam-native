@@ -182,6 +182,12 @@ final class Route
         return RouteCollection::current()->path($route, $params);
     }
 
+    /** The registered route definition (by name or screen class). */
+    public static function get(string|BackedEnum $route): self
+    {
+        return RouteCollection::current()->get($route);
+    }
+
     public static function has(string|BackedEnum $route): bool
     {
         return RouteCollection::current()->find($route) !== null;

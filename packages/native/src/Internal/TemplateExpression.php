@@ -254,10 +254,81 @@ final class TemplateExpression
         return self::compileTree($expression);
     }
 
+    /**
+     * @internal `{ id: x, title: $t }` (JavaScript-style object literal, as in
+     * `<Link :params="{ id: x }">`) becomes `['id' => $x, 'title' => $t]`.
+     * Bare identifiers as values (and `{ id }` shorthand) read template data.
+     * Any other expression is returned unchanged.
+     */
+    public static function normalizeObjectLiteral(string $expression): string
+    {
+        $trimmed = trim($expression);
+        if (strlen($trimmed) < 2 || $trimmed[0] !== '{' || $trimmed[strlen($trimmed) - 1] !== '}') return $expression;
+        $body = trim(substr($trimmed, 1, -1));
+        if ($body === '') return '[]';
+        $entries = [];
+        foreach (self::splitTopLevel($body) as $entry) {
+            $entry = trim($entry);
+            if ($entry === '') continue;
+            if (preg_match('/^\$?([A-Za-z_][A-Za-z0-9_]*)$/D', $entry, $shorthand) === 1) {
+                $entries[] = "'{$shorthand[1]}' => \${$shorthand[1]}";
+                continue;
+            }
+            if (preg_match('/^(?:([A-Za-z_][A-Za-z0-9_]*)|\'([^\']*)\'|"([^"]*)")\s*:(?!:)\s*(.+)$/Ds', $entry, $match) !== 1) {
+                throw new RuntimeException("Invalid object literal entry \"{$entry}\" in template expression.");
+            }
+            $key = $match[1] !== '' ? $match[1] : ($match[2] !== '' ? $match[2] : $match[3]);
+            $value = trim($match[4]);
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $value) === 1
+                && !in_array(strtolower($value), ['true', 'false', 'null'], true)) {
+                $value = '$'.$value;
+            } elseif ($value !== '' && $value[0] === '{') {
+                $value = self::normalizeObjectLiteral($value);
+            }
+            $entries[] = var_export($key, true).' => '.$value;
+        }
+
+        return '['.implode(', ', $entries).']';
+    }
+
+    /** @return list<string> */
+    private static function splitTopLevel(string $body): array
+    {
+        $parts = [];
+        $depth = 0;
+        $quote = null;
+        $start = 0;
+        $length = strlen($body);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $body[$index];
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    $index++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '\'' || $character === '"') {
+                $quote = $character;
+            } elseif (str_contains('([{', $character)) {
+                $depth++;
+            } elseif (str_contains(')]}', $character)) {
+                $depth--;
+            } elseif ($character === ',' && $depth === 0) {
+                $parts[] = substr($body, $start, $index - $start);
+                $start = $index + 1;
+            }
+        }
+        $parts[] = substr($body, $start);
+
+        return $parts;
+    }
+
     /** @return Closure(array<string, mixed>, ?object): mixed */
     private static function compileTree(string $expression): Closure
     {
-        $parser = new self($expression);
+        $parser = new self(self::normalizeObjectLiteral($expression));
         $compiled = $parser->ternary();
 
         if ($parser->peek() !== null) {

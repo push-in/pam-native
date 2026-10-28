@@ -209,7 +209,12 @@ final class RouteNavigator implements NavigationLinkHandler
         $screen = $route->screen;
         $name = $route->routeName();
         if ($screen instanceof Closure) {
-            $result = $screen(...RouteArguments::resolve(new ReflectionFunction($screen), $params, $name, strict: false));
+            $reflection = new ReflectionFunction($screen);
+            $first = $reflection->getParameters()[0] ?? null;
+            $type = $first?->getType();
+            $result = $type instanceof \ReflectionNamedType && $type->getName() === RouteContext::class
+                ? $screen(new RouteContext($name, $params))
+                : $screen(...RouteArguments::resolve($reflection, $params, $name, strict: false));
         } elseif (is_string($screen)) {
             $result = RouteArguments::instantiate($screen, $params, $name);
             if (!$result instanceof Component && method_exists($result, 'setup')) {

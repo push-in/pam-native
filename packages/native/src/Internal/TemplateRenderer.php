@@ -1886,6 +1886,12 @@ final class TemplateRenderer
             ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
+            'Link' => \Pam\Native\UI\Link::make(
+                self::linkRoute($values['route'] ?? $values['to'] ?? null),
+                self::linkParams($values['params'] ?? []),
+                \Pam\Native\UI\Link::mode($values['mode'] ?? null),
+                ...$children,
+            ),
             'Swipeable' => self::swipeable($values, $children),
             'GestureDetector' => GestureDetector::make(
                 self::gestureType($values['gestureType'] ?? 'tap'),
@@ -2055,6 +2061,9 @@ final class TemplateRenderer
 
         if ($factory === null && $tag === 'Icon') {
             unset($values['name'], $values['font'], $values['size'], $values['color']);
+        }
+        if ($factory === null && $tag === 'Link') {
+            unset($values['route'], $values['to'], $values['params'], $values['mode']);
         }
 
         if ($resolvedClass !== null) {
@@ -7783,6 +7792,28 @@ final class TemplateRenderer
             2, 'light', 'light-content' => StatusBarAppearance::Light,
             default => StatusBarAppearance::Dark,
         };
+    }
+
+    private static function linkRoute(mixed $route): string|\BackedEnum|\Pam\Native\Routing\TypedRoute
+    {
+        if (is_string($route) && $route !== '' || $route instanceof \BackedEnum || $route instanceof \Pam\Native\Routing\TypedRoute) {
+            return $route;
+        }
+
+        throw new RuntimeException('Link requires a route="name" (or :route="Routes::name(...)") attribute.');
+    }
+
+    /** @return array<string, string|int|float|bool|null> */
+    private static function linkParams(mixed $params): array
+    {
+        if (!is_array($params)) throw new RuntimeException('Link :params must be an array or { key: value } object.');
+        foreach ($params as $key => $value) {
+            if (!is_string($key) || !($value === null || is_scalar($value))) {
+                throw new RuntimeException('Link :params must map names to scalar values.');
+            }
+        }
+
+        return $params;
     }
 
     /** @param array<string, mixed> $values */

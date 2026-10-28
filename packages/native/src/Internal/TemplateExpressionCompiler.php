@@ -56,7 +56,7 @@ final class TemplateExpressionCompiler
      */
     public static function closureSource(string $expression): string
     {
-        $compiler = new self(TemplateExpression::__pamTokens($expression));
+        $compiler = new self(TemplateExpression::__pamTokens(TemplateExpression::normalizeObjectLiteral($expression)));
         $result = $compiler->ternary();
         if ($compiler->peek() !== null) {
             throw new RuntimeException(
@@ -81,7 +81,7 @@ final class TemplateExpressionCompiler
     public static function classListSource(string $expression): ?string
     {
         try {
-            $compiler = new self(TemplateExpression::__pamTokens($expression));
+            $compiler = new self(TemplateExpression::__pamTokens(TemplateExpression::normalizeObjectLiteral($expression)));
             if (!$compiler->take('[')) {
                 return null;
             }
