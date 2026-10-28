@@ -553,4 +553,5 @@ enum PropKey: int
     case ScrollPageTransform = 1002;
     case MediaStartBufferMs = 1003;
     case MediaIdleSurface = 1004;
+    case ScrollOffsetAnimationMs = 1005;
 }

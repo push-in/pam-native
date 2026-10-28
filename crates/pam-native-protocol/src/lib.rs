@@ -731,6 +731,7 @@ pub enum PropKey {
     ScrollPageTransform = 1002,
     MediaStartBufferMs = 1003,
     MediaIdleSurface = 1004,
+    ScrollOffsetAnimationMs = 1005,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1282,6 +1283,7 @@ impl TryFrom<u16> for PropKey {
             1002 => Ok(Self::ScrollPageTransform),
             1003 => Ok(Self::MediaStartBufferMs),
             1004 => Ok(Self::MediaIdleSurface),
+            1005 => Ok(Self::ScrollOffsetAnimationMs),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2227,13 +2229,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1004 {
+        for value in EXTENSION_BASE..=1005 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1005).is_err());
+        assert!(PropKey::try_from(1006).is_err());
     }
 
     #[test]

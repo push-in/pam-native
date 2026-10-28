@@ -164,6 +164,27 @@ final class PamMotionTests: XCTestCase {
         XCTAssertNil(PamTapEffect.parse("ref=heart"))
     }
 
+    func testTapEffectDefaultsToDoubleTapAtTheTouchAndParsesPopOptions() throws {
+        let program = "\npam-motion 1 id=3 iterations=1\n0 scale timing(0.82,70,ease-out-quad,0)"
+        let heart = try XCTUnwrap(PamTapEffect.parse("ref=heart;tilt=13" + program))
+        XCTAssertEqual(heart.origin, .touch)
+        XCTAssertTrue(heart.plays(on: .doubleTap))
+        XCTAssertFalse(heart.plays(on: .tap))
+
+        let pop = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap" + program))
+        XCTAssertEqual(pop.origin, .anchor)
+        XCTAssertTrue(pop.plays(on: .tap))
+        XCTAssertFalse(pop.plays(on: .doubleTap))
+
+        let disarmed = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=center;trigger=tap;armed=0" + program))
+        XCTAssertEqual(disarmed.origin, .center)
+        XCTAssertFalse(disarmed.plays(on: .tap))
+
+        let toggle = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap;when=unselected" + program))
+        XCTAssertTrue(toggle.plays(on: .tap, selected: false))
+        XCTAssertFalse(toggle.plays(on: .tap, selected: true))
+    }
+
     // iOS-specific coverage.
 
     func testMotionTargetComposesTransformComponents() {

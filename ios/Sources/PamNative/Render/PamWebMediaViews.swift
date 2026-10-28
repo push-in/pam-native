@@ -266,6 +266,11 @@ final class PamMediaView: UIView {
     /// `preloadSeconds`: `AVPlayerItem.preferredForwardBufferDuration`
     /// (0 = the system chooses), the same forward buffer as Android.
     private var forwardBufferSeconds: Double = 0
+    /// `startBufferMs`: playback starts once this much media is loaded ahead
+    /// of the playhead (ExoPlayer `bufferForPlaybackMs`); 0 = play at once.
+    private var startBufferSeconds: Double = 0
+    /// KVO on `loadedTimeRanges` while a play waits for the start buffer.
+    private var startBufferObservation: NSKeyValueObservation?
     /// Natural width/height (pixels) and duration (seconds) — `MediaReadyEvent`.
     var onReady: ((Int, Int, Double) -> Void)?
     var onLoadStart: (() -> Void)?
@@ -610,6 +615,15 @@ final class PamMediaView: UIView {
         player?.currentItem?.preferredForwardBufferDuration = value
     }
 
+    /// `startBufferMs`, applied to the next play.
+    func setStartBufferMs(_ milliseconds: Int64) {
+        startBufferSeconds = Double(min(max(milliseconds, 0), 30_000)) / 1_000
+        if startBufferSeconds == 0, startBufferObservation != nil {
+            cancelStartBuffer()
+            play()
+        }
+    }
+
     private func installPlayer(_ item: AVPlayerItem) {
         releasePlayer()
         item.preferredForwardBufferDuration = forwardBufferSeconds
@@ -952,13 +966,53 @@ final class PamMediaView: UIView {
     }
 
     private func play() {
-        player?.playImmediately(atRate: playbackRate)
+        guard let player else { return }
+        guard startBufferSeconds > 0, let item = player.currentItem,
+              pamBufferedAhead(item.loadedTimeRanges.map(\.timeRangeValue), at: item.currentTime().seconds)
+                < startBufferSeconds,
+              !item.isPlaybackBufferFull else {
+            cancelStartBuffer()
+            player.playImmediately(atRate: playbackRate)
+            return
+        }
+        // Wait for the start buffer (event-driven, no polling); the stall is
+        // reported like any other buffering.
+        guard startBufferObservation == nil else { return }
+        if !buffering {
+            buffering = true
+            onBuffering?(true)
+        }
+        startBufferObservation = item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                guard let self, self.player?.currentItem === item, self.startBufferObservation != nil else { return }
+                let ahead = pamBufferedAhead(item.loadedTimeRanges.map(\.timeRangeValue), at: item.currentTime().seconds)
+                guard ahead >= self.startBufferSeconds || item.isPlaybackBufferFull else { return }
+                self.cancelStartBuffer()
+                self.player?.playImmediately(atRate: self.playbackRate)
+            }
+        }
+    }
+
+    /// Pauses the player (and a play still waiting for its start buffer).
+    private func pause() {
+        if startBufferObservation != nil, buffering {
+            buffering = false
+            onBuffering?(false)
+        }
+        cancelStartBuffer()
+        player?.pause()
+    }
+
+    private func cancelStartBuffer() {
+        startBufferObservation?.invalidate()
+        startBufferObservation = nil
     }
 
     /// App no longer active (system UI over it): the player only pauses.
     func onHostPause() {
         resumeAfterPause = resumeAfterPause || player?.timeControlStatus == .playing
-        player?.pause()
+            || startBufferObservation != nil
+        pause()
     }
 
     /// App in background: unless `keepAliveWhenCovered`, the decoder is
@@ -999,6 +1053,7 @@ final class PamMediaView: UIView {
     }
 
     private func releasePlayer() {
+        cancelStartBuffer()
         if photoVideoRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(photoVideoRequestId)
             photoVideoRequestId = PHInvalidImageRequestID
@@ -1032,4 +1087,20 @@ struct PamMediaThumbnail: Equatable, Sendable {
     let cacheKey: String?
     let policy: Int
     let maxAgeMs: Int64
+}
+
+/// Seconds of media loaded contiguously ahead of [position] in [ranges]
+/// (`AVPlayerItem.loadedTimeRanges`); 0 when the playhead is outside them.
+func pamBufferedAhead(_ ranges: [CMTimeRange], at position: Double) -> Double {
+    let playhead = position.isFinite ? max(0, position) : 0
+    for range in ranges {
+        let start = range.start.seconds
+        let end = (range.start + range.duration).seconds
+        guard start.isFinite, end.isFinite else { continue }
+        // A small tolerance: the playhead sits a frame before the range start after a seek.
+        if playhead >= start - 0.05 && playhead < end {
+            return end - playhead
+        }
+    }
+    return 0
 }

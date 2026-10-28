@@ -3483,6 +3483,7 @@ class PamRenderer(
             PropKey.MEDIA_CACHE_PIN_OFFLINE,
             PropKey.MEDIA_CACHE_STREAMING,
             PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_START_BUFFER_MS,
             PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
             PropKey.MEDIA_CACHE_MAX_BYTES,
             PropKey.MEDIA_THUMBNAIL_SOURCE,
@@ -3515,11 +3516,6 @@ class PamRenderer(
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED ->
                 (view as? PamMediaView)?.setKeepAliveWhenCovered(value.flag())
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(value.flag())
-            // Reserved extension properties whose behaviour lands with their own change.
-            PropKey.LIST_FOLLOW_END_ON_RESIZE,
-            PropKey.SCROLL_PAGE_TRANSFORM,
-            PropKey.MEDIA_START_BUFFER_MS,
-            -> Unit
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> {
@@ -3686,6 +3682,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setSnapInterval(
                     value.decimal().toFloat(),
                 )
+            PropKey.SCROLL_PAGE_TRANSFORM ->
+                (view as? PamScrollContainer)?.setPageTransform(value.integer().toInt())
+            PropKey.SCROLL_OFFSET_ANIMATION_MS ->
+                (view as? PamScrollContainer)?.setOffsetAnimationMs(value.integer())
             PropKey.SCROLL_DECELERATION_RATE ->
                 (view as? PamScrollContainer)?.setDecelerationRate(
                     value.decimal().toFloat(),
@@ -3718,8 +3718,6 @@ class PamRenderer(
                 (view as? PamRecyclerList)?.setInverted(value.flag())
             PropKey.LIST_FOLLOW_END_ON_RESIZE ->
                 (view as? PamRecyclerList)?.setFollowEndOnResize(value.flag())
-            // Reserved extension keys whose behaviour lands with their own change.
-            PropKey.SCROLL_PAGE_TRANSFORM, PropKey.MEDIA_START_BUFFER_MS -> Unit
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(value.integer().toInt())
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
@@ -3752,6 +3750,7 @@ class PamRenderer(
                     else -> View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 }
             PropKey.ACCESSIBILITY_SELECTED -> {
+                (view as? PamPressable)?.tapEffectSelected = value.flag()
                 configureAccessibilityDelegate(view, state)
                 notifyAccessibilityChanged(view)
             }
@@ -4252,6 +4251,7 @@ class PamRenderer(
                 view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
             }
             PropKey.ACCESSIBILITY_SELECTED -> {
+                (view as? PamPressable)?.tapEffectSelected = false
                 configureAccessibilityDelegate(view, state)
                 notifyAccessibilityChanged(view)
             }
@@ -4360,6 +4360,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setSnapInterval(0f)
             PropKey.SCROLL_DECELERATION_RATE ->
                 (view as? PamScrollContainer)?.setDecelerationRate(0.985f)
+            PropKey.SCROLL_PAGE_TRANSFORM ->
+                (view as? PamScrollContainer)?.setPageTransform(PamPageTransformKind.NONE)
+            PropKey.SCROLL_OFFSET_ANIMATION_MS ->
+                (view as? PamScrollContainer)?.setOffsetAnimationMs(0L)
             PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
                 (view as? PamScrollContainer)?.setKeyboardDismissMode(1)
             PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)
@@ -4460,6 +4464,7 @@ class PamRenderer(
             PropKey.MEDIA_CACHE_PIN_OFFLINE,
             PropKey.MEDIA_CACHE_STREAMING,
             PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_START_BUFFER_MS,
             PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
             PropKey.MEDIA_CACHE_MAX_BYTES,
             PropKey.MEDIA_THUMBNAIL_SOURCE,
@@ -4506,11 +4511,6 @@ class PamRenderer(
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED -> (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(false)
-            // Reserved extension properties whose behaviour lands with their own change.
-            PropKey.LIST_FOLLOW_END_ON_RESIZE,
-            PropKey.SCROLL_PAGE_TRANSFORM,
-            PropKey.MEDIA_START_BUFFER_MS,
-            -> Unit
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> if (
@@ -5018,7 +5018,10 @@ class PamRenderer(
 
     private fun configureMediaCache(view: PamMediaView, state: NodeState) {
         // `preloadSeconds`: the forward buffer (ExoPlayer above 0 seconds).
-        view.setForwardBufferSeconds(state.integer(PropKey.MEDIA_CACHE_PRELOAD_SECONDS, 0).toInt())
+        view.setBufferTargets(
+            state.integer(PropKey.MEDIA_CACHE_PRELOAD_SECONDS, 0).toInt(),
+            state.integer(PropKey.MEDIA_START_BUFFER_MS, 0).toInt(),
+        )
         view.setCacheRequest(
             MediaCacheRequest(
                 source = state.textOrNull(PropKey.MEDIA_SOURCE).orEmpty(),

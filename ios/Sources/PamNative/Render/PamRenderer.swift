@@ -1828,15 +1828,18 @@ public final class PamRenderer: @unchecked Sendable {
         let pressOutDelayMs = state.properties[PamMotionKeys.pressDelayOutMs]?.integerOrNil() ?? 0
         let longPressMs = pressInDelayMs +
             (state.properties[PamMotionKeys.pressDelayLongMs]?.integerOrNil() ?? 500)
-        let tapEffect: (CGPoint) -> Void = { [weak self, weak view] point in
+        let tapEffect: (CGPoint, PamTapEffect.Trigger) -> Void = { [weak self, weak view] point, gesture in
             guard let self, let view else { return }
             self.motion.playTapEffect(
                 nodeId: nodeId,
                 pressable: view,
                 source: self.nodes[nodeId]?.properties[PamConstants.pressTapEffect]?.textOrNil(),
-                point: point
+                point: point,
+                gesture: gesture,
+                selected: self.nodes[nodeId]?.properties[PamConstants.accessibilitySelected]?.boolOrNil() ?? false
             )
         }
+        let hasTapEffect = state.properties[PamConstants.pressTapEffect] != nil
 
         if let button = view as? UIButton {
             if eventProperties.contains(PamConstants.onPress) || hasDoubleTap {
@@ -1847,7 +1850,7 @@ public final class PamRenderer: @unchecked Sendable {
                     emitsPress: eventProperties.contains(PamConstants.onPress),
                     delayMs: doubleTapDelayMs
                 )
-                bridge.onDoubleTapEffect = hasDoubleTap ? tapEffect : nil
+                bridge.onTapEffect = hasTapEffect ? tapEffect : nil
                 eventBridges[nodeId]?[EventKind.press.rawValue] = bridge
             }
 
@@ -1888,7 +1891,7 @@ public final class PamRenderer: @unchecked Sendable {
                 emitsPress: eventProperties.contains(PamConstants.onPress),
                 delayMs: doubleTapDelayMs
             )
-            bridge.onDoubleTapEffect = hasDoubleTap ? tapEffect : nil
+            bridge.onTapEffect = hasTapEffect ? tapEffect : nil
             eventBridges[nodeId]?[EventKind.press.rawValue] = bridge
         }
 
@@ -3065,6 +3068,7 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
              PamConstants.mediaCacheChecksum,
+             PamConstants.mediaStartBufferMs,
              PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView, let state = nodes[nodeId] {
                 configureMediaCache(media, state: state)
@@ -3159,6 +3163,13 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.scrollKeyboardDismissMode:
             (view as? UIScrollView)?.keyboardDismissMode =
                 keyboardDismissMode(Int(value.integerOrNil() ?? 1))
+        case PamConstants.scrollPageTransform:
+            if let scroll = view as? PamAnchoredScrollView {
+                scroll.pamPageTransformer.setKind(Int(value.integerOrNil() ?? 0), on: scroll)
+                scroll.setNeedsLayout()
+            }
+        case PamConstants.scrollOffsetAnimationMs:
+            (view as? PamAnchoredScrollView)?.pamOffsetAnimationMs = Int(min(max(value.integerOrNil() ?? 0, 0), 2_000))
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = value.boolOrNil() ?? false
             (view as? PamVirtualListView)?.pamPagingEnabled = value.boolOrNil() ?? false
@@ -3627,6 +3638,7 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.mediaCacheDownloadWhilePlaying,
              PamConstants.mediaCacheMaxBytes,
              PamConstants.mediaCacheChecksum,
+             PamConstants.mediaStartBufferMs,
              PamConstants.mediaThumbnailSource:
             if let media = view as? PamMediaView {
                 configureMediaCache(media, state: state)
@@ -3704,6 +3716,12 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? UIScrollView)?.keyboardDismissMode = .none
         case PamConstants.scrollIndicatorStyle:
             (view as? UIScrollView)?.indicatorStyle = PamScrollIndicatorStyle.auto.native
+        case PamConstants.scrollPageTransform:
+            if let scroll = view as? PamAnchoredScrollView {
+                scroll.pamPageTransformer.setKind(PamPageTransformKind.none.rawValue, on: scroll)
+            }
+        case PamConstants.scrollOffsetAnimationMs:
+            (view as? PamAnchoredScrollView)?.pamOffsetAnimationMs = 0
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
             (view as? PamVirtualListView)?.pamPagingEnabled = false
@@ -4895,6 +4913,8 @@ public final class PamRenderer: @unchecked Sendable {
         view.setForwardBufferSeconds(
             Double(state.properties[PamConstants.mediaCachePreloadSeconds]?.integerOrNil() ?? 0)
         )
+        // `startBufferMs`: playback waits for that much media (ExoPlayer bufferForPlaybackMs).
+        view.setStartBufferMs(state.properties[PamConstants.mediaStartBufferMs]?.integerOrNil() ?? 0)
         view.setCache(
             policy: Int(
                 state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 1
@@ -5747,7 +5767,8 @@ public final class PamRenderer: @unchecked Sendable {
         private var lastTapPoint: CGPoint?
         private var lastTapTime: TimeInterval = 0
         private var pendingSingleTap: DispatchWorkItem?
-        var onDoubleTapEffect: ((CGPoint) -> Void)?
+        /// TapEffect hook: (point, gesture); the effect itself checks its trigger and `armed`.
+        var onTapEffect: ((CGPoint, PamTapEffect.Trigger) -> Void)?
         private var pressInDelay: TimeInterval = 0
         private var pressOutDelay: TimeInterval = 0
         private var pendingPressIn: DispatchWorkItem?
@@ -6278,7 +6299,7 @@ public final class PamRenderer: @unchecked Sendable {
             pendingPressIn = nil
             pressInEmitted = false
             lastTapPoint = nil
-            onDoubleTapEffect = nil
+            onTapEffect = nil
             drag = nil
             dragRelease = nil
             if let control {
@@ -7049,6 +7070,7 @@ public final class PamRenderer: @unchecked Sendable {
         private func handleTap(point: CGPoint, page: CGPoint) {
             let payload = Self.pointerPayload(point: point, page: page)
             guard doubleTapEnabled else {
+                onTapEffect?(point, .tap)
                 if emitsSinglePress { dispatchEvent(nodeId, kind, payload) }
                 return
             }
@@ -7059,7 +7081,7 @@ public final class PamRenderer: @unchecked Sendable {
                 pendingSingleTap?.cancel()
                 pendingSingleTap = nil
                 lastTapPoint = nil
-                onDoubleTapEffect?(point)
+                onTapEffect?(point, .doubleTap)
                 dispatchEvent(nodeId, EventKind.doubleTap.rawValue, payload)
                 return
             }
@@ -7070,6 +7092,7 @@ public final class PamRenderer: @unchecked Sendable {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.pendingSingleTap = nil
+                self.onTapEffect?(point, .tap)
                 self.dispatchEvent(self.nodeId, self.kind, payload)
             }
             pendingSingleTap = work

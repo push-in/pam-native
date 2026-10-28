@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
@@ -11,6 +12,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ScrollView
@@ -51,6 +53,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private var hasRequestedOffsetX = false
     private var hasRequestedOffsetY = false
     private var offsetScheduled = false
+    /** `contentOffsetAnimationMs`: a changed contentOffset glides instead of jumping. */
+    private var offsetAnimationMs = 0L
+    private var offsetAnimator: ValueAnimator? = null
+    private var offsetAppliedOnce = false
     private var offsetAwaitsLayout = false
     private var previousPrimaryMaxOffset = 0
     private var primaryMaxOffsetBeforeLastLayout = 0
@@ -70,6 +76,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         applyRequestedOffset()
     }
     private var viewportChanged: ((Float, Float) -> Unit)? = null
+    private val pageTransformer = PamPageTransformer()
     private val stickyChildren = LinkedHashSet<View>()
     private val content = object : FrameLayout(context) {
         init {
@@ -87,6 +94,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
             super.onLayout(changed, left, top, right, bottom)
             updateStickyChildren()
+            applyPageTransform()
         }
     }.apply {
         clipChildren = false
@@ -248,6 +256,17 @@ internal class PamScrollContainer @JvmOverloads constructor(
         replaceActiveScroll()
     }
 
+    /** `ScrollPageTransform` of a horizontal pager (0 = none, 1 = cube). */
+    fun setPageTransform(value: Int) {
+        pageTransformer.setKind(value)
+        applyPageTransform()
+    }
+
+    private fun applyPageTransform() {
+        if (pageTransformer.kind == PamPageTransformKind.NONE || !horizontal) return
+        pageTransformer.apply(content, activeScroll.scrollX, activeScroll.width)
+    }
+
     fun setPagingEnabled(value: Boolean) {
         pagingEnabled = value
         configurable().pagingEnabled = value
@@ -276,6 +295,46 @@ internal class PamScrollContainer @JvmOverloads constructor(
         requestedOffsetX = dp(value.coerceAtLeast(0f))
         hasRequestedOffsetX = true
         requestOffsetApplication()
+    }
+
+    fun setOffsetAnimationMs(value: Long) {
+        offsetAnimationMs = value.coerceIn(0L, MAX_OFFSET_ANIMATION_MS)
+        if (offsetAnimationMs == 0L) finishOffsetAnimation(jump = true)
+    }
+
+    /**
+     * Glides the viewport to (x, y) in [offsetAnimationMs] (RN `withTiming`
+     * ease-in-out), one scrollTo per frame, so scroll listeners and the page
+     * transform run during the glide. A finger down completes it at once, so
+     * a pager is never left between two pages.
+     */
+    private fun animateOffset(x: Int, y: Int) {
+        offsetAnimator?.cancel()
+        val startX = scrollXOf(activeScroll)
+        val startY = scrollYOf(activeScroll)
+        offsetAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = offsetAnimationMs
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val fraction = it.animatedValue as Float
+                activeScroll.scrollTo(
+                    pamLerpOffset(startX, x, fraction),
+                    pamLerpOffset(startY, y, fraction),
+                )
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (offsetAnimator === animation) offsetAnimator = null
+                }
+            })
+            start()
+        }
+    }
+
+    private fun finishOffsetAnimation(jump: Boolean) {
+        val animator = offsetAnimator ?: return
+        offsetAnimator = null
+        if (jump) animator.end() else animator.cancel()
     }
 
     fun setContentOffsetY(value: Float) {
@@ -614,6 +673,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        finishOffsetAnimation(jump = true)
         stopMomentumWatch()
         removeCallbacks(applyOffsetRunnable)
         offsetScheduled = false
@@ -631,6 +691,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private fun createHorizontalScroll(): ViewGroup =
         PamHorizontalScrollView(indicatorContext(), ::dismissKeyboard).apply {
             setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
+                applyPageTransform()
                 dispatchViewport(scrollX, scrollY)
             }
         }
@@ -677,6 +738,20 @@ internal class PamScrollContainer @JvmOverloads constructor(
         offsetAwaitsLayout = false
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
+        val glide = offsetAnimationMs > 0L && offsetAppliedOnce && !pointerDown &&
+            isAttachedToWindow && ValueAnimator.areAnimatorsEnabled() &&
+            (x != scrollXOf(activeScroll) || y != scrollYOf(activeScroll))
+        offsetAppliedOnce = true
+        if (glide) {
+            // The request is consumed by the glide (a relayout must not restart it).
+            hasRequestedOffsetX = false
+            hasRequestedOffsetY = false
+            animateOffset(x, y)
+            return
+        }
+        if (offsetAnimator != null && (hasRequestedOffsetX || hasRequestedOffsetY)) {
+            finishOffsetAnimation(jump = false)
+        }
         activeScroll.scrollTo(x, y)
         // A reached request is one-shot. Leaving it armed would replay the
         // initial offset after the user reaches the end and a child relayouts.
@@ -736,6 +811,9 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && scrollPhase == null) {
+            finishOffsetAnimation(jump = true)
+        }
         if (scrollPhase != null) observeScrollTouch(event)
         if (keyboardTaps?.observe(event) == true) {
             // keyboardShouldPersistTaps="never": the tap only dismissed the
@@ -763,6 +841,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stopMomentumWatch()
+                finishOffsetAnimation(jump = true)
                 pointerDown = true
                 dragging = false
                 velocity?.recycle()
@@ -1257,6 +1336,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         const val KEYBOARD_DISMISS_NONE = 1
         const val KEYBOARD_DISMISS_INTERACTIVE = 3
         const val NORMAL_DECELERATION_RATE = 0.985f
+        const val MAX_OFFSET_ANIMATION_MS = 2_000L
         // Material supporting text (helper/error/counter) occupies 20dp with a
         // 4dp top gap. Keeping this full strip visible prevents focused fields
         // from touching the IME and hiding their validation state.
@@ -1321,6 +1401,10 @@ internal fun pamOnePageTarget(
  * and spans [extent]: pinned at the viewport top once scrolled past, pushed
  * away by the next sticky margin box at [nextTop].
  */
+/** Offset at [fraction] of a glide from [from] to [to], rounded to whole pixels. */
+internal fun pamLerpOffset(from: Int, to: Int, fraction: Float): Int =
+    (from + (to - from) * fraction.coerceIn(0f, 1f)).roundToInt()
+
 internal fun stickyPinOffset(
     scrollOffset: Int,
     top: Int,
