@@ -11,14 +11,22 @@ final class ViewRefModuleTests: XCTestCase {
         window.rootViewController = root
         window.makeKeyAndVisible()
         let card = UIView(frame: CGRect(x: 10, y: 40, width: 200, height: 120))
-        let field = UITextField(frame: CGRect(x: 8, y: 12, width: 180, height: 48))
+        let field = RecordingField(frame: CGRect(x: 8, y: 12, width: 180, height: 48))
         field.text = "olá mundo"
-        var changes: [String] = []
-        let target = ChangeTarget { changes.append(field.text ?? "") }
-        field.addTarget(target, action: #selector(ChangeTarget.changed), for: .editingChanged)
+        // A view that holds no input anywhere in its subtree (a ref on an
+        // input host resolves its descendant input, like Android).
+        let badge = UILabel(frame: CGRect(x: 10, y: 200, width: 80, height: 20))
         card.addSubview(field)
         root.view.addSubview(card)
-        let module = ViewRefModule { ref in ref == "card" ? card : (ref == "composer" ? field : nil) }
+        root.view.addSubview(badge)
+        let module = ViewRefModule { ref in
+            switch ref {
+            case "card": return card
+            case "composer": return field
+            case "badge": return badge
+            default: return nil
+            }
+        }
 
         _ = try module.run(method: "focus", ref: "composer")
         XCTAssertTrue(field.isFirstResponder)
@@ -42,18 +50,26 @@ final class ViewRefModuleTests: XCTestCase {
         XCTAssertThrowsError(try scoped.run(method: "measure", ref: "card", within: "missing"))
         _ = try module.run(method: "clear", ref: "composer")
         XCTAssertEqual(field.text, "")
-        XCTAssertEqual(changes, [""])
+        // SwiftPM runs without UIApplicationMain, so the control never
+        // delivers its actions; assert the edit event that on:change listens to.
+        XCTAssertEqual(field.sent, [.editingChanged])
         _ = try module.run(method: "blur", ref: "composer")
         XCTAssertFalse(field.isFirstResponder)
-        XCTAssertThrowsError(try module.run(method: "focus", ref: "card"))
+        XCTAssertThrowsError(try module.run(method: "focus", ref: "badge"))
+        _ = try module.run(method: "focus", ref: "card")
+        XCTAssertTrue(field.isFirstResponder, "a ref on an input host focuses its input")
+        _ = try module.run(method: "blur", ref: "card")
         XCTAssertThrowsError(try module.run(method: "measure", ref: "missing"))
         XCTAssertFalse(ViewRefModule.isValidRef("bad ref"))
         window.isHidden = true
     }
 }
 
-private final class ChangeTarget: NSObject {
-    let action: () -> Void
-    init(_ action: @escaping () -> Void) { self.action = action }
-    @objc func changed() { action() }
+private final class RecordingField: UITextField {
+    private(set) var sent: [UIControl.Event] = []
+
+    override func sendActions(for controlEvents: UIControl.Event) {
+        sent.append(controlEvents)
+        super.sendActions(for: controlEvents)
+    }
 }
