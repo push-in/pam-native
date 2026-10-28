@@ -522,6 +522,88 @@ class PamNavigationHostInstrumentedTest {
     }
 
     @Test
+    fun predictiveBackTheAppConsumedSettlesBackWithoutPopping() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val cancelled = CountDownLatch(1)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var first: View
+            lateinit var second: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    layout(0, 0, 1_080, 1_920)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    setGestureNavigation(
+                        enabled = true,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = null,
+                        onTransitionEnd = null,
+                        onGestureStart = null,
+                        onGestureEnd = null,
+                        onGestureCancel = { cancelled.countDown() },
+                    )
+                }
+                activity.host.addView(navigation)
+                first = View(activity)
+                second = View(activity)
+                navigation.insert(first, 0)
+                navigation.insert(second, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                // A key Back: started and released at progress 0, then a
+                // frame with no navigation (the app closed a panel).
+                assertTrue(navigation.startPredictiveBack())
+                navigation.commitPredictiveBack()
+                assertEquals(0f, second.translationX, 0.001f)
+                navigation.resolvePredictiveBack()
+            }
+            assertTrue(cancelled.await(1, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(second))
+                assertEquals(View.VISIBLE, second.visibility)
+                assertEquals(View.INVISIBLE, first.visibility)
+                assertEquals(0f, second.translationX, 0.001f)
+                // A dragged one that the app consumed returns to rest too.
+                assertTrue(navigation.startPredictiveBack())
+                navigation.updatePredictiveBack(0.5f)
+                navigation.commitPredictiveBack()
+                assertTrue(second.translationX > 0f)
+                navigation.resolvePredictiveBack()
+            }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(400)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(second))
+                assertEquals(View.VISIBLE, second.visibility)
+                assertEquals(0f, second.translationX, 0.001f)
+                // A key Back that pops: the pop that follows completes it.
+                assertTrue(navigation.startPredictiveBack())
+                navigation.commitPredictiveBack()
+                navigation.operation = OPERATION_POP
+                navigation.navigate(2)
+                navigation.resolvePredictiveBack()
+            }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(400)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(first))
+                assertEquals(View.VISIBLE, first.visibility)
+                assertEquals(0f, first.translationX, 0.001f)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun sharedElementsFollowPredictiveBackAndRestoreOriginalViews() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         assumeTrue(

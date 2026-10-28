@@ -167,6 +167,7 @@ class PamActivity : FragmentActivity() {
         val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {
             devTools.update(it)
             errorOverlay?.onFrameCommitted()
+            if (::rootHost.isInitialized) rootHost.resolvePredictiveBack()
             recoveryAttempts = 0
             recoveryRunnable?.let(window.decorView::removeCallbacks)
             recoveryRunnable = null

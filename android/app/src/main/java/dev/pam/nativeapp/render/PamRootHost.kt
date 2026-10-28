@@ -373,6 +373,11 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         activeNavigationHost()?.commitPredictiveBack()
     }
 
+    /** A runtime frame was committed: a released predictive back that no pop followed settles back. */
+    fun resolvePredictiveBack() {
+        activeNavigationHost()?.resolvePredictiveBack()
+    }
+
     private fun activeNavigationHost(): PamNavigationHost? = findNavigationHost(this)
 
     private fun findNavigationHost(parent: ViewGroup): PamNavigationHost? {

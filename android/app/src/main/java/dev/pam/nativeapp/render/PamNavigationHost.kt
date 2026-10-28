@@ -98,6 +98,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var predictiveBackActive = false
     private var predictiveBackCommitted = false
     private var predictiveBackProgress = 0f
+    /**
+     * A released predictive back waits for the runtime's verdict: Back may
+     * be consumed by the app (closing a panel, a selection, a search) and pop
+     * nothing. The gesture keeps its frame until the next committed frame
+     * says whether a pop followed; without one it settles back.
+     */
+    private var predictiveBackAwaiting = false
+    private var predictiveBackNavigated = false
+    private val predictiveBackTimeout = Runnable { resolvePredictiveBack() }
     private data class SharedElementConfig(
         val durationMs: Long = 500L,
         val easing: Int = 2,
@@ -361,6 +370,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     fun navigate(nextRevision: Long) {
         if (nextRevision == revision) return
         revision = nextRevision
+        if (predictiveBackAwaiting) predictiveBackNavigated = true
         scheduleTransition()
     }
 
@@ -419,13 +429,64 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         predictiveBackProgress = 0f
     }
 
+    /**
+     * The user released a predictive back. The routes stay where the gesture
+     * left them until the runtime answers: a pop completes it, while a Back
+     * the app consumed (a frame with no navigation, see resolvePredictiveBack)
+     * settles them back like a cancelled gesture. A key Back starts at
+     * progress 0, so a consumed one changes nothing on screen.
+     */
     fun commitPredictiveBack() {
         if (!predictiveBackActive) return
         predictiveBackActive = false
+        predictiveBackAwaiting = true
+        predictiveBackNavigated = false
+        removeCallbacks(predictiveBackTimeout)
+        postDelayed(predictiveBackTimeout, PREDICTIVE_BACK_VERDICT_TIMEOUT_MS)
+    }
+
+    /**
+     * Called once a runtime frame is committed. A released predictive back
+     * that no navigation followed was consumed by the app: settle back.
+     */
+    fun resolvePredictiveBack() {
+        if (!predictiveBackAwaiting || predictiveBackNavigated) return
+        predictiveBackAwaiting = false
+        removeCallbacks(predictiveBackTimeout)
+        settleGesture(
+            predictiveBackProgress,
+            complete = false,
+            rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL,
+        )
+    }
+
+    private fun takePredictiveBackVerdict() {
+        if (!predictiveBackAwaiting) return
+        predictiveBackAwaiting = false
+        predictiveBackNavigated = false
+        removeCallbacks(predictiveBackTimeout)
+        if (operation != OPERATION_POP) return
+        if (predictiveBackProgress <= 0f) {
+            // A key Back (no drag): the pop plays its own transition, like
+            // a Back on a stack with no predictive gesture.
+            dropPreparedGesture()
+            return
+        }
         predictiveBackCommitted = true
         predictiveBackProgress = 1f
-        applyGestureProgress(1f, layoutDirection == View.LAYOUT_DIRECTION_RTL)
         onGestureEnd?.invoke()
+    }
+
+    /** Puts the routes of a prepared, never dragged gesture back at rest. */
+    private fun dropPreparedGesture() {
+        val incoming = gestureIncoming
+        val outgoing = gestureOutgoing
+        gesturePrepared = false
+        gestureIncoming = null
+        gestureOutgoing = null
+        incoming?.let(::reset)
+        outgoing?.let(::reset)
+        clearSharedElements()
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -637,6 +698,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun abortGesture() {
         stopTracking()
         endGestureSettle()
+        if (predictiveBackAwaiting) {
+            predictiveBackAwaiting = false
+            predictiveBackNavigated = false
+            removeCallbacks(predictiveBackTimeout)
+        }
         val wasPrepared = gesturePrepared || predictiveBackActive
         val incoming = gestureIncoming
         val outgoing = gestureOutgoing
@@ -730,6 +796,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         // previous transition ends on its destination and a back gesture in
         // progress (or settling) is dropped, so no route keeps its frame.
         running?.cancel()
+        takePredictiveBackVerdict()
         abortGesture()
         if (childCount == 0) {
             restoreIdleRoutes()
@@ -1261,6 +1328,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
         const val OPERATION_REPLACE = 4
+        const val PREDICTIVE_BACK_VERDICT_TIMEOUT_MS = 1_000L
 
         const val TRANSITION_PLATFORM_DEFAULT = 1
         const val TRANSITION_SLIDE_FROM_RIGHT = 2
