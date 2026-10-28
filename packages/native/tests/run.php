@@ -8280,5 +8280,6 @@ require __DIR__.'/arch_v2_routing.php';
 require __DIR__.'/arch_v2_route_compiler.php';
 require __DIR__.'/arch_v2_http.php';
 require __DIR__.'/arch_v2_promise.php';
+require __DIR__.'/arch_v2_locale.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

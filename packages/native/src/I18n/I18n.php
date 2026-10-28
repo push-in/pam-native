@@ -33,6 +33,13 @@ final class I18n
     private static array $pluralRules = [];
     private static string $source = 'en';
     private static ?string $locale = null;
+    /** The tag given to use() ("pt-BR"), before it was resolved to a catalog. */
+    private static ?string $preferred = null;
+    /** IANA time zone override (useTimezone()); null follows the device. */
+    private static ?string $timezone = null;
+    /** @var array<int, Closure(): void> */
+    private static array $listeners = [];
+    private static int $nextListener = 1;
 
     private function __construct()
     {
@@ -70,9 +77,72 @@ final class I18n
         return $locales;
     }
 
-    public static function use(string $locale): void
+    /**
+     * Overrides the language (the app's preference over the system one).
+     * `null` removes the override; useLocale() then follows the device again.
+     */
+    public static function use(?string $locale): void
     {
-        self::$locale = self::resolve($locale);
+        $tag = $locale === null ? null : trim($locale);
+        if ($tag === '') $tag = null;
+        $resolved = $tag === null ? null : self::resolve($tag);
+        if ($resolved === self::$locale && $tag === self::$preferred) return;
+        self::$locale = $resolved;
+        self::$preferred = $tag;
+        self::notify();
+    }
+
+    /** The tag given to use() ("pt-BR"), or null when no override is set. */
+    public static function preferredLocale(): ?string
+    {
+        return self::$preferred;
+    }
+
+    /**
+     * Overrides the time zone useTimezone() reports (an IANA name such as
+     * "America/Sao_Paulo"); `null` follows the device again.
+     */
+    public static function useTimezone(?string $timezone): void
+    {
+        if ($timezone !== null) {
+            try {
+                $timezone = (new \DateTimeZone($timezone))->getName();
+            } catch (\Exception) {
+                throw new InvalidArgumentException("Unknown time zone '{$timezone}'.");
+            }
+        }
+        if ($timezone === self::$timezone) return;
+        self::$timezone = $timezone;
+        self::notify();
+    }
+
+    public static function timezone(): ?string
+    {
+        return self::$timezone;
+    }
+
+    /**
+     * Called after use() or useTimezone() changes an override (useLocale()
+     * and useTimezone() subscribe through one shared listener).
+     *
+     * @param Closure(): void $listener
+     */
+    public static function onChange(Closure $listener): int
+    {
+        $id = self::$nextListener++;
+        self::$listeners[$id] = $listener;
+
+        return $id;
+    }
+
+    public static function offChange(int $subscription): void
+    {
+        unset(self::$listeners[$subscription]);
+    }
+
+    private static function notify(): void
+    {
+        foreach (self::$listeners as $listener) $listener();
     }
 
     public static function locale(): string
@@ -186,7 +256,11 @@ final class I18n
         self::$loaded = [];
         self::$pluralRules = [];
         self::$source = 'en';
+        $changed = self::$locale !== null || self::$preferred !== null || self::$timezone !== null;
         self::$locale = null;
+        self::$preferred = null;
+        self::$timezone = null;
+        if ($changed) self::notify();
     }
 
     /** @param array<string, scalar|null> $params */
@@ -258,7 +332,8 @@ final class I18n
         }, $text);
     }
 
-    private static function language(string $tag): string
+    /** @internal Language subtag of a tag ("pt-BR" -> "pt"). */
+    public static function language(string $tag): string
     {
         $parts = preg_split('/[-_@.]/', strtolower(trim($tag))) ?: [''];
 

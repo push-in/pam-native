@@ -21,9 +21,11 @@ use Pam\Native\Composables\AppStateRef;
 use Pam\Native\Composables\ColorScheme;
 use Pam\Native\Composables\FontScale;
 use Pam\Native\Composables\KeyboardState;
+use Pam\Native\Composables\LocaleState;
 use Pam\Native\Composables\NetworkState;
 use Pam\Native\Composables\Resource;
 use Pam\Native\Composables\SafeAreaInsets;
+use Pam\Native\Composables\TimezoneState;
 use Pam\Native\Composables\Sources;
 use Pam\Native\Composables\WindowDimensions;
 use Pam\Native\Signals\ComputedSignal;
@@ -204,6 +206,32 @@ if (!\function_exists('Pam\Native\useNetwork')) {
         $source->acquireForScope();
 
         return new NetworkState($source);
+    }
+}
+
+if (!\function_exists('Pam\Native\useLocale')) {
+    /** `->value` ("pt-BR"), `->language`, `->region`, `->device`, `->known`, `->overridden`, `->set(?string)`. */
+    function useLocale(): LocaleState
+    {
+        $device = Sources::device();
+        $device->acquireForScope();
+        $overrides = Sources::i18n();
+        $overrides->acquireForScope();
+
+        return new LocaleState($device, $overrides);
+    }
+}
+
+if (!\function_exists('Pam\Native\useTimezone')) {
+    /** `->value` ("America/Sao_Paulo"), `->device`, `->known`, `->overridden`, `->zone()`, `->now()`, `->set(?string)`. */
+    function useTimezone(): TimezoneState
+    {
+        $device = Sources::device();
+        $device->acquireForScope();
+        $overrides = Sources::i18n();
+        $overrides->acquireForScope();
+
+        return new TimezoneState($device, $overrides);
     }
 }
 

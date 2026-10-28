@@ -22,6 +22,13 @@ if (!function_exists('pam_native_call')) {
     }
 }
 
+if (!function_exists('pam_native_call_typed')) {
+    function pam_native_call_typed(int $requestId, int $operation, string $payload): void
+    {
+        $GLOBALS['pamArchV2TypedCalls'][] = [$requestId, $operation, $payload];
+    }
+}
+
 return static function (bool $condition, string $message): void {
     if (!$condition) {
         throw new RuntimeException($message);

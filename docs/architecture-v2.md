@@ -181,11 +181,22 @@ example in `index.php` for `App::globals()`, lives as long as the app.
 | `useKeyboard()` | `visible`, `height`, `durationMs`, `dismiss()` | `Keyboard::onChange` |
 | `useAppState()` | `value` (`AppState`), `active`, `background` | `App::onStateChange` |
 | `useNetwork()` | `online` (also `value`), `known`, `type` (`NetworkType`), `expensive` | `System\DeviceStatus::watch` (host pushes changes) |
+| `useLocale()` | `value` (BCP 47 tag, `'pt-BR'`), `language` (catalog, `'pt'`), `region`, `device`, `known`, `overridden`, `set(?string)` | `System\DeviceInfo` locale + `I18n::use()` override |
+| `useTimezone()` | `value` (IANA, `'America/Sao_Paulo'`), `device`, `known`, `overridden`, `zone()`, `now()`, `set(?string)` | `System\DeviceInfo` time zone + `I18n::useTimezone()` override |
 
 - Properties are read-only. They also work in templates (`$insets.bottom`) and
   convert to an array with `toArray()`.
 - `useNetwork()` assumes the app is online until the host sends its first
   status. Until then, `known` is `false`.
+- `useLocale()` and `useTimezone()` share one `DeviceInfo` request, made when
+  the first of them subscribes and again each time the app returns to the
+  foreground (the user may have changed the system language or zone). Until
+  the host answers, `known` is `false`, the locale is the I18n source locale
+  and the zone is PHP's default. `I18n::use('en-US')` (or `->set()`) and
+  `I18n::useTimezone('Europe/Lisbon')` override the device, reactively;
+  `null` follows the device again. `t()` keeps using `I18n::locale()`, so an
+  app that wants the device language calls `I18n::use($locale->value)` or
+  reads `$locale->language`.
 - `Runtime::shutdown()` (hot reload, test teardown) stops every shared
   source, including the app-lifetime ones from `index.php`. The next
   composable call starts a fresh subscription.

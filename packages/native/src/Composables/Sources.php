@@ -9,6 +9,8 @@ use Pam\Native\Appearance;
 use Pam\Native\AppearanceMode;
 use Pam\Native\AppState;
 use Pam\Native\DeviceStatus;
+use Pam\Native\I18n\I18n;
+use Pam\Native\System\DeviceInfo;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\KeyboardMetrics;
@@ -107,9 +109,74 @@ final class Sources
         );
     }
 
+    /** @var DeviceInfo|null last device info the host reported (locale, time zone) */
+    private static ?DeviceInfo $lastDevice = null;
+
+    /**
+     * Device locale and time zone. Asked once when the first consumer
+     * subscribes and again each time the app returns to the foreground (the
+     * user may have changed them in the system settings), never polled.
+     *
+     * @return SharedSource<DeviceInfo|null>
+     */
+    public static function device(): SharedSource
+    {
+        return SharedSource::named(
+            'device',
+            static fn (): ?DeviceInfo => self::$lastDevice,
+            static function (\Closure $push): \Closure {
+                $running = true;
+                $ask = static function () use (&$running, $push): void {
+                    DeviceInfo::get(static function (DeviceInfo $info) use (&$running, $push): void {
+                        if (!$running) return;
+                        self::$lastDevice = $info;
+                        $push($info);
+                    }, static function (): void {
+                        // Keep the last known values; the next foreground asks again.
+                    });
+                };
+                $ask();
+                $id = App::onStateChange(static function (AppState $state) use ($ask): void {
+                    if ($state === AppState::Active) $ask();
+                });
+
+                return static function () use (&$running, $id): void {
+                    $running = false;
+                    App::offStateChange($id);
+                };
+            },
+        );
+    }
+
+    /** @internal Tests: the device locale and time zone as if the host reported them. */
+    public static function reportDevice(DeviceInfo $info): void
+    {
+        self::$lastDevice = $info;
+        self::device()->signal->set($info);
+    }
+
+    /**
+     * Locale and time zone overrides (I18n::use(), I18n::useTimezone()).
+     *
+     * @return SharedSource<array{0: ?string, 1: ?string}>
+     */
+    public static function i18n(): SharedSource
+    {
+        return SharedSource::named(
+            'i18n',
+            static fn (): array => [I18n::preferredLocale(), I18n::timezone()],
+            static function (\Closure $push): \Closure {
+                $id = I18n::onChange(static fn () => $push([I18n::preferredLocale(), I18n::timezone()]));
+
+                return static fn () => I18n::offChange($id);
+            },
+        );
+    }
+
     /** @internal */
     public static function reset(): void
     {
+        self::$lastDevice = null;
         self::$lastStatus = null;
         SharedSource::reset();
     }

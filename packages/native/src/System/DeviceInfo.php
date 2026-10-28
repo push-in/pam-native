@@ -46,14 +46,22 @@ final readonly class DeviceInfo
             || ($this->memoryClassMb > 0 && $this->memoryClassMb <= 128);
     }
 
-    /** @param Closure(self): void $callback */
-    public static function get(Closure $callback): int
+    /**
+     * @param Closure(self): void $callback
+     * @param (Closure(string): void)|null $failure receives the host's message; without one, a failure is thrown (reported as a module error)
+     */
+    public static function get(Closure $callback, ?Closure $failure = null): int
     {
         return Runtime::callNative(
             NativeOperation::DeviceInfo,
             '',
-            static function (ModuleResultStatus $status, string $payload) use ($callback): void {
+            static function (ModuleResultStatus $status, string $payload) use ($callback, $failure): void {
                 if ($status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($payload);
+
+                        return;
+                    }
                     throw new RuntimeException($payload);
                 }
 
