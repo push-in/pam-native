@@ -358,6 +358,14 @@ pub(crate) fn content(
             continue;
         }
         if is_scroll(node) {
+            if !horizontal_scroll(node) && flag(node, PropKey::ScrollPagingEnabled) {
+                // A vertical pager is full-bleed: every page snaps to the
+                // list frame and is one viewport tall (React Native's
+                // pagingEnabled FlatList/ScrollView, Android's pager), so
+                // padding its container would shrink every page and clip
+                // the bottom of each one. The pages pad their own chrome.
+                continue;
+            }
             if horizontal_scroll(node) {
                 if node_children.iter().any(|child| visible(child)) {
                     output.push(ContentRect {

@@ -10763,6 +10763,82 @@ mod auto_safe_area_tests {
         assert!(!violations(&tree, &layouts, BUTTONS).is_empty());
     }
 
+    /// A full-screen vertical pager (RN pagingEnabled list, the real-world
+    /// app's video loops): pages are one viewport tall and snap to the list
+    /// frame, so the container is not padded and the list keeps the whole
+    /// window; a stretched chrome overlay keeps its frame too.
+    fn pager_screen(paging: bool) -> Tree {
+        let mut nodes = BTreeMap::from([
+            n(1, 0, 0, NodeKind::Screen, &[]),
+            n(2, 1, 0, NodeKind::View, &[(PropKey::FlexGrow, f(1.0))]),
+            n(
+                3,
+                2,
+                0,
+                NodeKind::VirtualList,
+                &[
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::MinHeight, f(0.0)),
+                    (PropKey::ScrollPagingEnabled, PropValue::Boolean(paging)),
+                ],
+            ),
+            n(
+                4,
+                2,
+                1,
+                NodeKind::View,
+                &[
+                    (PropKey::PositionType, PropValue::Integer(2)),
+                    (PropKey::Top, f(0.0)),
+                    (PropKey::Bottom, f(0.0)),
+                    (PropKey::Left, f(0.0)),
+                    (PropKey::Right, f(0.0)),
+                ],
+            ),
+            n(5, 4, 0, NodeKind::Pressable, &[(PropKey::Height, f(44.0))]),
+        ]);
+        for page in 0..3_u64 {
+            nodes.insert(
+                100 + page,
+                n(
+                    100 + page,
+                    3,
+                    page as u32,
+                    NodeKind::View,
+                    &[(PropKey::Height, f(800.0))],
+                )
+                .1,
+            );
+            nodes.insert(
+                200 + page,
+                n(
+                    200 + page,
+                    100 + page,
+                    0,
+                    NodeKind::Text,
+                    &[(PropKey::Height, f(20.0))],
+                )
+                .1,
+            );
+        }
+        Tree { root: 1, nodes }
+    }
+
+    #[test]
+    fn a_full_screen_vertical_pager_keeps_the_whole_window() {
+        for insets in [BUTTONS, GESTURES] {
+            let layouts = layout_with(&pager_screen(true), insets);
+            assert_eq!(layouts[&3].y, 0.0, "pager starts at the window top");
+            assert_eq!(layouts[&3].height, 800.0, "a page is the window height");
+            assert_eq!(layouts[&4].y, 0.0);
+            assert_eq!(bottom(layouts[&4]), 800.0, "stretched overlay keeps its frame");
+            // A plain (non-paging) list still ends above the bars.
+            let layouts = layout_with(&pager_screen(false), insets);
+            assert_eq!(layouts[&3].y, insets[1]);
+            assert_eq!(bottom(layouts[&3]), 800.0 - insets[3]);
+        }
+    }
+
     #[test]
     fn scrolling_sheet_ends_its_last_row_above_the_bar() {
         let mut snap = Vec::new();
