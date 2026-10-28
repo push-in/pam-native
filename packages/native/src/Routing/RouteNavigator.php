@@ -311,7 +311,7 @@ final class RouteNavigator implements NavigationLinkHandler
                 if ($params === null) continue;
                 $accepted = $this->acceptedNames($route);
                 foreach ($query as $key => $value) {
-                    if (is_string($key) && is_scalar($value) && !array_key_exists($key, $params) && in_array($key, $accepted, true)) {
+                    if (is_string($key) && is_scalar($value) && !array_key_exists($key, $params) && ($accepted === null || in_array($key, $accepted, true))) {
                         $params[$key] = (string) $value;
                     }
                 }
@@ -454,15 +454,23 @@ final class RouteNavigator implements NavigationLinkHandler
         return RouteArguments::validate($route->screen, $params, $route->routeName(), $route->pathParameters());
     }
 
-    /** @return list<string> */
-    private function acceptedNames(Route $route): array
+    /** @return list<string>|null null: every query key */
+    private function acceptedNames(Route $route): ?array
     {
         $names = $route->pathParameters();
         if (is_string($route->screen) && class_exists($route->screen)) {
             foreach (RouteArguments::signature($route->screen) as $parameter) $names[] = $parameter['name'];
+        } elseif ($route->screen instanceof Closure) {
+            // Same rule as the compiler: scalar closure parameters are route
+            // params, services are not; a closure taking the RouteContext reads
+            // any param itself, so every query key is kept (pre-v2 behaviour).
+            if (RouteArguments::readsContext($route->screen)) return null;
+            foreach ((new ReflectionFunction($route->screen))->getParameters() as $parameter) {
+                if (!RouteArguments::injectable($parameter)) $names[] = $parameter->getName();
+            }
         }
 
-        return $names;
+        return array_values(array_unique($names));
     }
 
     private function bootRoute(): Route

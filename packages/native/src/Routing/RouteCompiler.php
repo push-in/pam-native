@@ -108,6 +108,8 @@ final class RouteCompiler
                 'middleware' => array_values(array_filter($route->middleware(), is_string(...))),
                 'params' => $params,
                 'pathParams' => $route->pathParameters(),
+                // A closure taking the RouteContext reads any param: names are not checked.
+                'open' => $route->screen instanceof Closure && RouteArguments::readsContext($route->screen),
                 'aliases' => $route->aliases(),
             ];
         }
@@ -250,7 +252,7 @@ final class RouteCompiler
         foreach ($params as $name => $literal) {
             $param = $declared[$name] ?? null;
             if ($param === null) {
-                $errors[] = "route {$route['name']} has no parameter {$name}.";
+                if (!($route['open'] ?? false)) $errors[] = "route {$route['name']} has no parameter {$name}.";
                 continue;
             }
             if ($literal === null || $param['type'] === 'mixed') continue;

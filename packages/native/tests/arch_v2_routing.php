@@ -172,6 +172,31 @@ $assert(RouteArguments::signature(ArchV2LegacyChat::class) === [
     ['name' => 'title', 'type' => 'string', 'nullable' => true, 'required' => false, 'default' => null, 'enum' => null],
 ], 'Injected services are not route parameters.');
 
+// --- deep-link query keys reach closure routes (same params as the compiler reads)
+Route::flush();
+$closureArgs = null;
+Route::screen('/', ArchV2Home::class)->name('home');
+Route::screen('/search', static function (Navigator $navigator, ?string $initialQuery = null, int $start = 0) use (&$closureArgs): Renderable {
+    $closureArgs = [$initialQuery, $start];
+    return new ArchV2Home();
+})->name('search');
+Route::screen('/call/{callId}', static function (RouteContext $route) use (&$closureArgs): Renderable {
+    $closureArgs = $route->all();
+    return new ArchV2Home();
+})->name('call');
+$router = new RouteNavigator(RouteCollection::current());
+RouteCollection::activate($router);
+$assert($router->open('app://search?initialQuery=oi&start=5&utm=x') && $router->root()->current()->all() === ['initialQuery' => 'oi', 'start' => '5'], 'Closure routes keep the query keys their parameters declare: '.json_encode($router->root()->current()->all()));
+$router->make(RouteCollection::current()->get('search'), $router->root()->current()->all());
+$assert($closureArgs === ['oi', 5], 'Closure params arrive typed from link strings.');
+$manifestParams = array_column(\Pam\Native\Routing\RouteCompiler::manifest(RouteCollection::current())['routes'][1]['params'], 'name');
+$assert($manifestParams === ['initialQuery', 'start'], 'Runtime and compiler agree on closure params.');
+$assert($router->open('https://example.com/call/9?incoming=1&callType=video') && $router->root()->current()->all() === ['callId' => '9', 'incoming' => '1', 'callType' => 'video'], 'A closure taking the RouteContext keeps every query key, as before v2.');
+$router->make(RouteCollection::current()->get('call'), $router->root()->current()->all());
+$assert($closureArgs === ['callId' => '9', 'incoming' => '1', 'callType' => 'video'], 'The RouteContext closure reads the query params.');
+$callManifest = \Pam\Native\Routing\RouteCompiler::manifest(RouteCollection::current())['routes'][2];
+$assert($callManifest['open'] === true && $callManifest['params'][0]['name'] === 'callId', 'The compiler marks RouteContext closures as open.');
+
 // --- Link element and template tag ({ key: value } object literal)
 Route::flush();
 Route::screen('/', ArchV2Home::class)->name('home');

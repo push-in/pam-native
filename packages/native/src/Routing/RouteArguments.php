@@ -143,6 +143,17 @@ final class RouteArguments
         return $constructor !== null && $constructor->getNumberOfParameters() > 0 ? $constructor : null;
     }
 
+    /** True when a screen closure takes the RouteContext (it reads arbitrary params itself). */
+    public static function readsContext(\Closure $closure): bool
+    {
+        foreach ((new \ReflectionFunction($closure))->getParameters() as $parameter) {
+            $type = $parameter->getType();
+            if ($type instanceof ReflectionNamedType && is_a($type->getName(), \Pam\Native\Navigation\RouteContext::class, true)) return true;
+        }
+
+        return false;
+    }
+
     /** Class-typed (non-enum) parameters are services injected by type, not route params. */
     public static function injectable(ReflectionParameter $parameter): bool
     {
