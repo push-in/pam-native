@@ -46,6 +46,7 @@ I18n::catalog('pt', ['app' => ['hi' => 'Oi']]);
 I18n::catalog('es', ['app' => ['hi' => 'Hola']]);
 $defaultZone = date_default_timezone_get();
 
+$beforeSubscribe = $lastDeviceCall();
 $values = [];
 $scope = effectScope(static function () use (&$values): void {
     $values['locale'] = useLocale();
@@ -53,6 +54,7 @@ $scope = effectScope(static function () use (&$values): void {
 });
 $locale = $values['locale'];
 $zone = $values['zone'];
+$assert($lastDeviceCall() === $beforeSubscribe, 'Subscribing must not ask the host for DeviceInfo (lazy until read).');
 $assert(
     SharedSource::active() === ['device' => 2, 'i18n' => 2],
     'useLocale() and useTimezone() must share one device source and one override source: '.json_encode(SharedSource::active()),
@@ -68,7 +70,9 @@ $watcher = watch(static fn (): string => $locale->value.'|'.$zone->value, static
     $seen[] = $next;
 });
 $first = $lastDeviceCall();
-$assert($first !== null, 'useLocale() must ask the host for DeviceInfo once.');
+$assert($first !== null && $first !== $beforeSubscribe, 'The first read must ask the host for DeviceInfo.');
+$zone->value;
+$assert($lastDeviceCall() === $first, 'Later reads must not ask again.');
 $answer($first, 'pt-BR', 'America/Sao_Paulo');
 $assert(
     $locale->known && $locale->value === 'pt-BR' && $locale->language === 'pt' && $locale->region === 'BR'

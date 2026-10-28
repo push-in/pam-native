@@ -112,10 +112,15 @@ final class Sources
     /** @var DeviceInfo|null last device info the host reported (locale, time zone) */
     private static ?DeviceInfo $lastDevice = null;
 
+    /** Asks the host for DeviceInfo while the device source runs; null when stopped. */
+    private static ?\Closure $askDevice = null;
+    private static bool $deviceAsked = false;
+
     /**
-     * Device locale and time zone. Asked once when the first consumer
-     * subscribes and again each time the app returns to the foreground (the
-     * user may have changed them in the system settings), never polled.
+     * Device locale and time zone. Lazy: nothing is asked until a reader
+     * first reads a value (requestDevice()); then once more each time the
+     * app returns to the foreground (the user may have changed them in the
+     * system settings). Never polled.
      *
      * @return SharedSource<DeviceInfo|null>
      */
@@ -135,17 +140,28 @@ final class Sources
                         // Keep the last known values; the next foreground asks again.
                     });
                 };
-                $ask();
+                self::$askDevice = $ask;
+                self::$deviceAsked = false;
                 $id = App::onStateChange(static function (AppState $state) use ($ask): void {
-                    if ($state === AppState::Active) $ask();
+                    if ($state === AppState::Active && self::$deviceAsked) $ask();
                 });
 
                 return static function () use (&$running, $id): void {
                     $running = false;
+                    self::$askDevice = null;
+                    self::$deviceAsked = false;
                     App::offStateChange($id);
                 };
             },
         );
+    }
+
+    /** @internal Called by useLocale()/useTimezone() reads: the first one asks the host. */
+    public static function requestDevice(): void
+    {
+        if (self::$deviceAsked || self::$askDevice === null) return;
+        self::$deviceAsked = true;
+        (self::$askDevice)();
     }
 
     /** @internal Tests: the device locale and time zone as if the host reported them. */
@@ -177,6 +193,8 @@ final class Sources
     public static function reset(): void
     {
         self::$lastDevice = null;
+        self::$askDevice = null;
+        self::$deviceAsked = false;
         self::$lastStatus = null;
         SharedSource::reset();
     }

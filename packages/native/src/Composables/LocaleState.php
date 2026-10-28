@@ -38,6 +38,7 @@ final class LocaleState extends ReactiveObject
 
     protected function read(string $name): mixed
     {
+        Sources::requestDevice();
         $info = $this->device->signal->get();
         [$override] = $this->overrides->signal->get();
         $device = $info?->locale ?? '';
