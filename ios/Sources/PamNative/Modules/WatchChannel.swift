@@ -1,12 +1,15 @@
 import Foundation
 
-final class WatchChannel {
+/// Bounded single-reader channel for native observations; public so plugin modules stream values like core modules.
+public final class WatchChannel {
+    public init() {}
+
     private let lock = NSLock()
     private var values: [Data] = []
     private var waiter: ModuleCompletion?
     private var closed = false
 
-    func next(_ completion: @escaping ModuleCompletion) {
+    public func next(_ completion: @escaping ModuleCompletion) {
         lock.lock()
         if closed {
             lock.unlock()
@@ -24,7 +27,7 @@ final class WatchChannel {
         }
     }
 
-    func offer(_ value: Data) {
+    public func offer(_ value: Data) {
         lock.lock()
         guard !closed else {
             lock.unlock()
@@ -41,7 +44,7 @@ final class WatchChannel {
         callback?(.success, value)
     }
 
-    func close() {
+    public func close() {
         lock.lock()
         guard !closed else {
             lock.unlock()

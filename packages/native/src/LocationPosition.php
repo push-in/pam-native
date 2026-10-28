@@ -4,16 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-final readonly class LocationPosition
-{
-    public function __construct(
-        public float $latitude,
-        public float $longitude,
-        public float $accuracy,
-        public float $altitude,
-        public float $speed,
-        public float $bearing,
-        public int $timestamp,
-    ) {
-    }
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+/*
+ * Deprecated since 1.46.0: LocationPosition moved to the pushinbr/pam-native-location plugin as
+ * \Pam\Native\Location\LocationPosition. This shim aliases the old name while the plugin is
+ * installed and is removed in 1.47.0.
+ */
+MovedToPlugin::alias('Pam\\Native\\LocationPosition', 'Pam\\Native\\Location\\LocationPosition', 'pushinbr/pam-native-location');

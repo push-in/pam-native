@@ -4,10 +4,8 @@ import UIKit
 import AVFoundation
 import Photos
 import AudioToolbox
-import CoreMotion
 
 public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
-    private let motion = CMMotionManager()
     /// Choice alerts on screen (main thread only); dismissed with -1 on close.
     private var openChoices: [ObjectIdentifier: (alert: UIAlertController, completion: ModuleCompletion)] = [:]
     public init() {}
@@ -101,7 +99,8 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "clipboardHasText":
             clipboardHasText(completion: completion)
         case "sensorRead":
-            sensorRead(payload: payload, completion: completion)
+            // Sensors moved to the pushinbr/pam-native-sensors plugin in 1.46.
+            completion(.failure, Data("Sensors moved to the pushinbr/pam-native-sensors plugin".utf8))
         case "deviceInfo":
             DispatchQueue.main.async {
                 do {
@@ -204,9 +203,6 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
     }
 
     public func close() {
-        motion.stopAccelerometerUpdates()
-        motion.stopGyroUpdates()
-        motion.stopMagnetometerUpdates()
         DispatchQueue.main.async {
             let open = self.openChoices
             self.openChoices.removeAll()
@@ -242,143 +238,6 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case .clipboardHasText: return "clipboardHasText"
         case .sensorRead: return "sensorRead"
         default: return ""
-        }
-    }
-
-    private func sensorRead(payload: Data, completion: @escaping ModuleCompletion) {
-        do {
-            let values = try WireMap.decode(payload)
-            guard case let .integer(type)? = values["type"] else {
-                throw RuntimeError("Missing sensor type")
-            }
-            let timeoutMs: Int
-            if case let .integer(value)? = values["timeoutMs"] {
-                timeoutMs = min(max(Int(value), 100), 10_000)
-            } else {
-                timeoutMs = 2_000
-            }
-            let state = SensorCompletion(completion)
-            let timeout = DispatchWorkItem { [weak self] in
-                guard state.finishFailure("Sensor read timed out") else { return }
-                self?.stopSensor(Int(type))
-            }
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + .milliseconds(timeoutMs),
-                execute: timeout
-            )
-            let handler: (Double, Double, Double, TimeInterval) -> Void = {
-                [weak self] x, y, z, timestamp in
-                guard state.finish(x: x, y: y, z: z, timestamp: timestamp) else { return }
-                timeout.cancel()
-                self?.stopSensor(Int(type))
-            }
-            switch Int(type) {
-            case 1:
-                guard motion.isAccelerometerAvailable else {
-                    throw RuntimeError("Requested sensor is unavailable")
-                }
-                motion.startAccelerometerUpdates(to: .main) { data, _ in
-                    guard let data else { return }
-                    handler(
-                        data.acceleration.x,
-                        data.acceleration.y,
-                        data.acceleration.z,
-                        data.timestamp
-                    )
-                }
-            case 2:
-                guard motion.isGyroAvailable else {
-                    throw RuntimeError("Requested sensor is unavailable")
-                }
-                motion.startGyroUpdates(to: .main) { data, _ in
-                    guard let data else { return }
-                    handler(
-                        data.rotationRate.x,
-                        data.rotationRate.y,
-                        data.rotationRate.z,
-                        data.timestamp
-                    )
-                }
-            case 3:
-                guard motion.isMagnetometerAvailable else {
-                    throw RuntimeError("Requested sensor is unavailable")
-                }
-                motion.startMagnetometerUpdates(to: .main) { data, _ in
-                    guard let data else { return }
-                    handler(
-                        data.magneticField.x,
-                        data.magneticField.y,
-                        data.magneticField.z,
-                        data.timestamp
-                    )
-                }
-            case 4:
-                guard motion.isDeviceMotionAvailable else {
-                    throw RuntimeError("Requested sensor is unavailable")
-                }
-                motion.startDeviceMotionUpdates(to: .main) { data, _ in
-                    guard let data else { return }
-                    handler(
-                        data.attitude.roll,
-                        data.attitude.pitch,
-                        data.attitude.yaw,
-                        data.timestamp
-                    )
-                }
-            default:
-                throw RuntimeError("Unknown sensor type \(type)")
-            }
-        } catch {
-            completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
-        }
-    }
-
-    private func stopSensor(_ type: Int) {
-        switch type {
-        case 1: motion.stopAccelerometerUpdates()
-        case 2: motion.stopGyroUpdates()
-        case 3: motion.stopMagnetometerUpdates()
-        case 4: motion.stopDeviceMotionUpdates()
-        default: break
-        }
-    }
-
-    private final class SensorCompletion: @unchecked Sendable {
-        private let lock = NSLock()
-        private var completed = false
-        private let completion: ModuleCompletion
-
-        init(_ completion: @escaping ModuleCompletion) {
-            self.completion = completion
-        }
-
-        func finish(x: Double, y: Double, z: Double, timestamp: TimeInterval) -> Bool {
-            guard claim() else { return false }
-            do {
-                completion(.success, try WireMap.encode([
-                    "x": .decimal(x),
-                    "y": .decimal(y),
-                    "z": .decimal(z),
-                    "timestamp": .integer(Int64(timestamp * 1_000)),
-                ]))
-            } catch {
-                completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
-            }
-            return true
-        }
-
-        func finishFailure(_ message: String) -> Bool {
-            guard claim() else { return false }
-            completion(.failure, message.data(using: .utf8) ?? Data())
-            return true
-        }
-
-        private func claim() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            guard !completed else { return false }
-            completed = true
-            return true
         }
     }
 

@@ -2,7 +2,11 @@ package dev.pam.nativeapp.modules
 
 import java.util.ArrayDeque
 
-internal class WatchChannel {
+/**
+ * Bounded single-reader channel for native observations (watch/next/stop).
+ * Part of the plugin API so plugin modules stream values the same way core modules do.
+ */
+class WatchChannel {
     private val queue = ArrayDeque<ByteArray>()
     private var waiter: ModuleCompletion? = null
     private var closed = false

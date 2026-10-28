@@ -4,15 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-final readonly class AudioRecording
-{
-    public function __construct(
-        public string $uri,
-        public string $fileName,
-        public string $mimeType,
-        public int $durationMs,
-        public int $size,
-        public string $relativePath = '',
-    ) {
-    }
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+/*
+ * Deprecated since 1.46.0: AudioRecording moved to the pushinbr/pam-native-audio plugin as
+ * \Pam\Native\Audio\AudioRecording. This shim aliases the old name while the plugin is
+ * installed and is removed in 1.47.0.
+ */
+MovedToPlugin::alias('Pam\\Native\\AudioRecording', 'Pam\\Native\\Audio\\AudioRecording', 'pushinbr/pam-native-audio');

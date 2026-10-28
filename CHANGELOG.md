@@ -17,6 +17,35 @@
   behind it); `cache: ['store' => $adapter]` reads and writes an app's own
   cache instead of a second copy; `onSettled()` and `onPage()` events;
   `manual: true` never loads by itself, only on `load()` / `reload()`.
+- Core slimming (the core keeps only runtime, protocol, renderer/layout,
+  primitives, navigation, state, basic HTTP, gestures/a11y, storage and the
+  generic hooks plugins need). Moved to plugins, each with its native
+  module, permissions and dependencies:
+  - `System\Location` and `LocationError`/`LocationPosition`/
+    `LocationServicesResult` → `pushinbr/pam-native-location`
+    (`Pam\Native\Location\*`). Play Services Location and the location
+    permissions leave the core Android build.
+  - `System\Contacts`, `Contact` and `System\Sms` →
+    `pushinbr/pam-native-contacts` (`Pam\Native\Contacts\*`); the
+    contacts permission leaves the core manifest.
+  - `System\Sensors`, `SensorReading`, `SensorType` →
+    `pushinbr/pam-native-sensors` (`Pam\Native\Sensors\*`); the core
+    `NativeOperation::SensorRead` (19) stays reserved and answers a failure
+    that names the plugin.
+  - `System\AudioRecorder`, `AudioRecording`, `AudioRecordingProgress` →
+    `pushinbr/pam-native-audio` (`Pam\Native\Audio\*`).
+  - `System\ImageEditor`, `ImageCropRatio`, `ImageFilterType`,
+    `ImageTextLayerStyle` → the media editor plugin
+    (`Pam\Native\MediaEditor\*`).
+  Migration: every old class name is a deprecated shim for 1.46 only. With
+  the plugin installed it is an alias of the plugin class (same class, so
+  `instanceof`, enum cases and type hints keep working); without it the
+  autoload throws `PluginException` with the exact `composer require`. The
+  plugins are listed under `suggest`. The shims are removed in 1.47.
+- Plugin API (generic hooks the moved modules need): `WatchChannel`
+  (bounded watch/next/stop channel) moves to the Android plugin API and is
+  public on iOS; Android `ActivityResultHost` (implemented by the PAM
+  activity) lets a plugin module start a system screen and get its result.
 
 - Android navigation: a transition or back gesture never leaves a route
   faded, moved or scaled. Every exit path restores the routes it touched:
