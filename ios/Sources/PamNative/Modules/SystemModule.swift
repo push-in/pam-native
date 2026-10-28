@@ -32,10 +32,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 completion(.failure, (error.localizedDescription).data(using: .utf8) ?? Data())
             }
         case "toast":
-            if let values = try? WireMap.decode(payload) {
-                PamToastPresenter.show(PamToastSpec.decode(values))
-            }
-            completion(.success, Data())
+            completion(.failure, Data("Install pushinbr/pam-native-toast and use its module transport".utf8))
         case "share":
             do {
                 let values = try WireMap.decode(payload)

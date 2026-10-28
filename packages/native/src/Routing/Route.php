@@ -8,7 +8,8 @@ use BackedEnum;
 use Closure;
 use LogicException;
 use Pam\Native\Navigation\NavigationTransition;
-use Pam\Native\Navigation\DrawerNavigator;
+use Pam\Native\Navigation\NavigationActionHandler;
+use Pam\Native\Drawer\DrawerNavigator;
 use Pam\Native\Navigation\DrawerRouter;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\ScreenOptions;
@@ -28,7 +29,7 @@ final class Route
     private static ?RouteRegistrar $registrar = null;
     private static ?TabRegistrar $tabRegistrar = null;
     private static ?TopTabRegistrar $topTabRegistrar = null;
-    private static ?DrawerRegistrar $drawerRegistrar = null;
+    private static int $customNavigatorDepth = 0;
     private static ?Closure $errorBoundary = null;
 
     private function __construct()
@@ -106,7 +107,7 @@ final class Route
     ): void {
         $registrar = self::$topTabRegistrar
             ?? throw new LogicException('Route::topTab() must be declared inside Route::topTabs().');
-        $registrar->add(RouteName::value($name), $label, self::itemContent($name, $screen), $icon, $badge);
+        $registrar->add(RouteName::value($name), $label, self::screenContent($name, $screen), $icon, $badge);
     }
 
     /** @param null|Closure(DrawerRouter): DrawerRouter $configure */
@@ -116,18 +117,8 @@ final class Route
         Closure $routes,
         ?Closure $configure = null,
     ): DrawerNavigator {
-        $nested = self::isNested();
-        $parentRegistrar = self::$drawerRegistrar;
-        $registrar = new DrawerRegistrar($name, RouteName::value($initial));
-        self::$drawerRegistrar = $registrar;
-        try {
-            $routes();
-        } finally {
-            self::$drawerRegistrar = $parentRegistrar;
-        }
-        $navigator = $registrar->build($configure);
-        if (!$nested) Navigation::attach($navigator);
-        return $navigator;
+        class_exists(DrawerRegistrar::class);
+        return \Pam\Native\Drawer\DrawerRoutes::make($name, $initial, $routes, $configure);
     }
 
     /** @param class-string<Renderable>|Renderable|Closure $screen */
@@ -139,9 +130,8 @@ final class Route
         ?string $badge = null,
         ?string $group = null,
     ): void {
-        $registrar = self::$drawerRegistrar
-            ?? throw new LogicException('Route::drawerScreen() must be declared inside Route::drawer().');
-        $registrar->add(RouteName::value($name), $label, self::itemContent($name, $screen), $icon, $badge, $group);
+        class_exists(DrawerRegistrar::class);
+        \Pam\Native\Drawer\DrawerRoutes::screen($name, $screen, $label, $icon, $badge, $group);
     }
 
     public static function stack(
@@ -296,16 +286,30 @@ final class Route
         return new RouteTarget($name, ...$params);
     }
 
+    /** @param Closure(): (Renderable&NavigationActionHandler) $build */
+    public static function customNavigator(Closure $build): Renderable&NavigationActionHandler
+    {
+        $nested = self::isNested();
+        self::$customNavigatorDepth++;
+        try {
+            $navigator = $build();
+        } finally {
+            self::$customNavigatorDepth--;
+        }
+        if (!$nested) Navigation::attach($navigator);
+        return $navigator;
+    }
+
     private static function isNested(): bool
     {
         return self::$registrar !== null
             || self::$tabRegistrar !== null
             || self::$topTabRegistrar !== null
-            || self::$drawerRegistrar !== null;
+            || self::$customNavigatorDepth > 0;
     }
 
     /** @param class-string<Renderable>|Renderable|Closure $screen */
-    private static function itemContent(
+    public static function screenContent(
         string|BackedEnum $name,
         string|Renderable|Closure $screen,
     ): Renderable|Closure {

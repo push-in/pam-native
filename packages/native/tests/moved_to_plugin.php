@@ -32,6 +32,19 @@ foreach ([
 }
 
 foreach ([
+    'Pam\\Native\\System\\Toast' => 'pushinbr/pam-native-toast',
+    'Pam\\Native\\System\\ToastType' => 'pushinbr/pam-native-toast',
+    'Pam\\Native\\System\\ToastPosition' => 'pushinbr/pam-native-toast',
+    'Pam\\Native\\UI\\DrawerLayoutAndroid' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerNavigator' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerRouter' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\NavigationDrawerItem' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerType' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerPosition' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerBackBehavior' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerKeyboardDismissMode' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Navigation\\DrawerStatusBarAnimation' => 'pushinbr/pam-native-drawer',
+    'Pam\\Native\\Routing\\DrawerRegistrar' => 'pushinbr/pam-native-drawer',
     'Pam\\Native\\System\\Notifications' => 'pushinbr/pam-native-notifications',
     'Pam\\Native\\System\\MediaLibrary' => 'pushinbr/pam-native-media',
     'Pam\\Native\\System\\IncomingShares' => 'pushinbr/pam-native-share-extension',

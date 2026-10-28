@@ -18,7 +18,6 @@ import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
-import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -157,56 +156,8 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         }
     }
 
-    private fun toast(payload: ByteArray, completion: ModuleCompletion) {
-        val values = WireMap.decode(payload)
-        val message = values.text("message")
-        val activity = context as? Activity
-        if (values.containsKey("title") && activity != null) {
-            fun color(key: String, fallback: Long): Int =
-                ((values[key] as? WireValue.Integer)?.value ?: fallback).toInt()
-            fun number(key: String, fallback: Double): Double =
-                (values[key] as? WireValue.Decimal)?.value ?: (values[key] as? WireValue.Integer)?.value?.toDouble() ?: fallback
-            val spec = PamInAppToastSpec(
-                title = values.text("title"),
-                message = message,
-                accentColor = color("accentColor", 0xFF87CEFA),
-                backgroundColor = color("backgroundColor", 0xFFFFFFFF),
-                titleColor = color("titleColor", 0xFF000000),
-                messageColor = color("messageColor", 0xFF979797),
-                bottom = values.flag("bottom", false),
-                offsetDp = number("offset", 40.0).toFloat(),
-                durationMs = number("durationMs", 4_000.0).toLong(),
-                titleSize = number("titleSize", 12.0).toFloat(),
-                messageSize = number("messageSize", 10.0).toFloat(),
-                fontFamily = values.textOrNull("fontFamily"),
-                borderColor = (values["borderColor"] as? WireValue.Integer)?.value?.toInt(),
-                borderWidthDp = number("borderWidth", 0.0).toFloat(),
-                cornerRadiusDp = number("cornerRadius", 6.0).toFloat(),
-                accentWidthDp = number("accentWidth", 5.0).toFloat(),
-                elevationDp = number("elevation", 2.0).toFloat(),
-                paddingHorizontalDp = number("paddingHorizontal", 15.0).toFloat(),
-                paddingVerticalDp = number("paddingVertical", 10.0).toFloat(),
-                minHeightDp = number("minHeight", 60.0).toFloat(),
-                titleLines = number("titleLines", 1.0).toInt().coerceIn(1, 4),
-                fitContent = values.flag("fitContent", false),
-                iconSource = values.textOrNull("iconSource"),
-                iconGlyph = values.textOrNull("iconGlyph"),
-                iconFontFamily = values.textOrNull("iconFontFamily"),
-                iconColor = (values["iconColor"] as? WireValue.Integer)?.value?.toInt(),
-                iconSizeDp = number("iconSize", 18.0).toFloat(),
-            )
-            val typefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(activity)
-            main.post {
-                PamInAppToast.show(activity, spec) { family, weight -> typefaces.resolve(family, weight, false) }
-                completion.success()
-            }
-            return
-        }
-        val duration = if (values.flag("long", false)) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
-        main.post {
-            Toast.makeText(context, message, duration).show()
-            completion.success()
-        }
+    private fun toast(@Suppress("UNUSED_PARAMETER") payload: ByteArray, completion: ModuleCompletion) {
+        completion.complete(ModuleResultStatus.FAILURE, "Install pushinbr/pam-native-toast and use its module transport".toByteArray())
     }
 
     private fun share(payload: ByteArray, completion: ModuleCompletion) {

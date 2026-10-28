@@ -5794,21 +5794,6 @@ $assert(
         && $namedTopTabs->selectedTab() === 'following',
     'Laravel-style top tabs must expose typed registration and the complete router configurator.',
 );
-$namedDrawer = Route::drawer(
-    'named-drawer-test',
-    'inbox',
-    static function (): void {
-        Route::drawerScreen('inbox', Screen::make(Text::make('Inbox')), label: 'Inbox', badge: '3');
-        Route::drawerScreen('archive', Screen::make(Text::make('Archive')), label: 'Archive', group: 'Library');
-    },
-    static fn (\Pam\Native\Navigation\DrawerRouter $drawer): \Pam\Native\Navigation\DrawerRouter =>
-        $drawer->responsive(720.0)->gestures(edgeWidth: 40.0),
-);
-$assert(
-    NamedNavigation::navigate('archive')
-        && $namedDrawer->selectedRoute() === 'archive',
-    'Laravel-style drawers must expose grouped destinations and the complete router configurator.',
-);
 $declarativeNested = Route::stack(
     name: 'declarative-root',
     initial: 'main',
@@ -6669,108 +6654,6 @@ $assert(
     'Cold restoration must recursively rehydrate focused child stacks without eagerly mounting inactive tabs.',
 );
 $nestedStateSubscription->unsubscribe();
-$groupedDrawer = Router::drawer('overview')
-    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
-    ->route(
-        'button',
-        'Button',
-        Screen::make(Text::make('Button')),
-        group: 'Actions',
-    )
-    ->route(
-        'field',
-        'Text field',
-        Screen::make(Text::make('Text field')),
-        group: 'Forms',
-    )
-    ->persistence('test-grouped-drawer')
-    ->build();
-$assert(
-    !$groupedDrawer->isGroupExpanded('Actions')
-        && $groupedDrawer->toggleGroup('Actions')
-        && $groupedDrawer->isGroupExpanded('Actions')
-        && $groupedDrawer->navigate('field')
-        && $groupedDrawer->isGroupExpanded('Forms'),
-    'Grouped drawer routes must collapse cleanly and keep every destination navigable.',
-);
-$restoredGroupedDrawer = Router::drawer('overview')
-    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
-    ->route(
-        'button',
-        'Button',
-        Screen::make(Text::make('Button')),
-        group: 'Actions',
-    )
-    ->route(
-        'field',
-        'Text field',
-        Screen::make(Text::make('Text field')),
-        group: 'Forms',
-    )
-    ->persistence('test-grouped-drawer')
-    ->build();
-$assert(
-    $restoredGroupedDrawer->selectedRoute() === 'field'
-        && $restoredGroupedDrawer->isGroupExpanded('Actions')
-        && $restoredGroupedDrawer->isGroupExpanded('Forms'),
-    'Grouped drawer state must restore selection and expanded sections.',
-);
-
-$responsiveMetricsReader = new class extends Component {
-    public int $renders = 0;
-
-    protected function initialState(): array
-    {
-        return ['revision' => 0];
-    }
-
-    public function render(): Renderable
-    {
-        $this->renders++;
-        $this->state->revision;
-        App::windowMetrics();
-
-        return Text::make('Nested responsive navigator metrics');
-    }
-};
-App::run($responsiveMetricsReader);
-Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
-    'width' => 1_000.0,
-    'height' => 600.0,
-    'density' => 2.0,
-]));
-$nestedResponsiveDrawer = Router::drawer('overview')
-    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
-    ->route('field', 'Text field', Screen::make(Text::make('Text field')))
-    ->responsive(840.0)
-    ->persistence('test-nested-responsive-drawer-presentation')
-    ->build();
-$assert(
-    $responsiveMetricsReader->renders === 2
-        && $nestedResponsiveDrawer->resolvedType()
-        === \Pam\Native\Navigation\DrawerType::Permanent,
-    'Window-metric readers and nested responsive drawers must update without being the App root.',
-);
-Runtime::shutdown();
-
-$responsiveDrawer = Router::drawer('overview')
-    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
-    ->route('field', 'Text field', Screen::make(Text::make('Text field')))
-    ->responsive(840.0)
-    ->persistence('test-responsive-drawer-presentation')
-    ->build();
-$responsiveDrawer->dimensions(new WindowMetrics(1_000.0, 600.0, 2.0));
-$permanentDrawerElement = $responsiveDrawer->toElement();
-$permanentOpen = $permanentDrawerElement->events()[EventKind::DrawerOpen->value] ?? null;
-$permanentOpen?->__invoke();
-$responsiveDrawer->dimensions(new WindowMetrics(412.0, 915.0, 2.0));
-$compactDrawerElement = $responsiveDrawer->toElement();
-$assert(
-    $responsiveDrawer->resolvedType() === \Pam\Native\Navigation\DrawerType::Front
-        && $responsiveDrawer->getState()['open'] === false
-        && $compactDrawerElement->properties()[PropKey::DrawerOpen->value] === false,
-    'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
-);
 $assert(
     \Pam\Native\Protocol::SDK_VERSION === '1.46.5',
     'The runtime SDK contract must match the 1.46.5 release.',
@@ -7690,6 +7573,7 @@ require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
+require __DIR__.'/optional_navigation.php';
 
 require __DIR__.'/view_ref.php';
 require __DIR__.'/portal.php';
