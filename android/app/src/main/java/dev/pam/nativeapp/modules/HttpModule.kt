@@ -442,8 +442,8 @@ internal class HttpModule(
     }
 }
 
-/** Resolves a relative path strictly inside the private PAM files directory (public plugin API: notifications reads avatars with it). */
-fun resolvePrivateFile(root: File, path: String): File {
+/** Resolves a relative path strictly inside the private PAM files directory. */
+internal fun resolvePrivateFile(root: File, path: String): File {
     require(path.isNotBlank() && !File(path).isAbsolute && '\\' !in path && '\u0000' !in path) {
         "File path must be relative"
     }
