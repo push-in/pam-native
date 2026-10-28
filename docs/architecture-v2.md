@@ -189,8 +189,9 @@ example in `index.php` for `App::globals()`, lives as long as the app.
   convert to an array with `toArray()`.
 - `useNetwork()` assumes the app is online until the host sends its first
   status. Until then, `known` is `false`.
-- `useLocale()` and `useTimezone()` share one `DeviceInfo` request, made when
-  the first of them subscribes and again each time the app returns to the
+- `useLocale()` and `useTimezone()` share one `DeviceInfo` request. It is
+  lazy: subscribing asks nothing; the first read of a value asks the host,
+  and after that it is asked again each time the app returns to the
   foreground (the user may have changed the system language or zone). Until
   the host answers, `known` is `false`, the locale is the I18n source locale
   and the zone is PHP's default. `I18n::use('en-US')` (or `->set()`) and
@@ -369,8 +370,34 @@ navigate(Routes::chat(id: $id));          // generated, typed
 back();
 ```
 
-`Route::navigate($route, $params, RedirectMode::Replace|Reset|Push)` picks the
-stack action (`navigate()` goes back to an existing entry, otherwise pushes).
+Options, on `navigate()` and `Route::navigate($route, $params, $mode, $transition, $merge, $duration)`:
+
+```php
+navigate('chat', ['id' => $id], mode: 'push', transition: NavigationTransition::Fade);
+navigate('login', mode: 'reset');
+navigate('chat', ['unread' => 0], merge: true);   // keeps the entry's id
+```
+
+- `mode`: `'navigate'` (default; React Navigation semantics: goes back to the
+  route's entry when it is in the stack and updates its params, otherwise
+  pushes), `'push'` (always a new entry), `'replace'` (swaps the top entry) or
+  `'reset'` (clears the history). `RedirectMode` cases are accepted too.
+- `transition` (`NavigationTransition`) and `duration` (ms) override the
+  route's animation for this step.
+- `merge: true` fills the params not given from the route's entry already in
+  the stack, so required params need not be repeated.
+- In the helper, `mode`, `transition`, `merge` and `duration` are reserved
+  names: a route param called one of them goes in the `$params` array. The
+  route compiler skips them, and does not report missing params when `merge:`
+  is given.
+
+`back()` is the system Back: the open child navigator (tabs, a nested stack)
+goes back first, then this stack. A Back that the screen cancels (a
+`BeforeRemove` listener calling `preventDefault()`, "leave without
+saving?") is still consumed: `back()` returns `true` and the screen stays, so
+the Back never falls through to closing the app. It returns `false` only when
+there is nothing to go back to. The legacy `Navigator::pop()` differs: it
+ignores child navigators and returns `false` when the screen cancels.
 Params are validated against the screen before navigating: an unknown name, a
 missing required parameter or a value that cannot become the declared type
 throws. `Route::current()`, `Route::path('chat', ['id' => 5])`,
@@ -568,16 +595,18 @@ assert($app->current()->routeName() === 'chat' && $app->screen()->id === '1');
 $app->navigate('home')->back();
 
 Testing\reset();                      // teardown: unmount all, shut the runtime down
+Testing\routes()->open('/chat/2');    // routes and aliases survive reset()
 ```
 
 | API | What it does |
 | --- | --- |
-| `Testing\mount($class\|$instance, $props = [], ?array $params = null)` | Mounts the component: `boot()`, `setup()` (with `$params` as route params), `mount()`, the first render, `onMounted()`. With `$params` the component is a screen and also gets `onFocus()`, as from the router; without, it counts as focused while mounted. Returns a `Testing\Mounted` handle. Several roots can be mounted at once. |
+| `Testing\mount($class\|$instance, $props = [], ?array $params = null)` | Accepts an instance made with `new` (no registry needed for components with `render()`; a template-only `.pam.php` component missing from the registry triggers the `src/` convention discovery, as `App::run()`). Mounts the component: `boot()`, `setup()` (with `$params` as route params), `mount()`, the first render, `onMounted()`. With `$params` the component is a screen and also gets `onFocus()`, as from the router; without, it counts as focused while mounted. Returns a `Testing\Mounted` handle. Several roots can be mounted at once. |
 | `Mounted` | `instance`, `render()` (a render pass; returns the root's `Element`), `element()`, `text()` (every `Text` joined by a space), `focus()`, `blur()`, `unmount()`, `mounted()`. |
-| `Testing\routes($routesFile\|require result\|RouteCollection, ?array $middleware = null)` | Builds and activates the `RouteNavigator`, so `navigate()`, `back()` and `Route::current()` work, and mounts it. Given a path, the routes are registered from scratch. Middleware aliases: `$middleware`, then `config/middleware.php` next to the routes file (or in the project root). Returns a `Testing\RouteTester`. |
+| `Testing\routes($routesFile\|require result\|RouteCollection\|null, ?array $middleware = null)` | Builds and activates the `RouteNavigator`, so `navigate()`, `back()` and `Route::current()` work, and mounts it. Given a path, the routes are registered from scratch. Middleware aliases: `$middleware`, then `config/middleware.php` next to the routes file (or in the project root). Returns a `Testing\RouteTester`. |
 | `RouteTester` | `open($uri)` (path or deep link, middleware included), `navigate($route, $params)`, `back()`, `current()`, `path()`, `screen()` (the focused screen component), `text()` (of the focused screen), `render()`, `unmount()`, `navigator`. |
 | `Testing\environment(scheme, insets, keyboard, window, locale, timezone)` | Sends what the host would: `scheme` (`'light'`/`'dark'`) becomes the system scheme with the `System` preference; `insets` and `window` (`width`, `height`, `scale`, `fontScale`) a window-metrics event; `keyboard` the settled keyboard (a height; `0` or `false` hides it, `true` is 300 pt); `locale` and `timezone` the `DeviceInfo` that `useLocale()`/`useTimezone()` read. Omitted arguments keep their value. Mounted components re-render. |
-| `Testing\reset()` | Unmounts every root, calls `Runtime::shutdown()`, and clears routes, middleware aliases, composable sources and I18n overrides. |
+| `Testing\reset(bool $flushRoutes = false)` | Unmounts every root, calls `Runtime::shutdown()`, and clears composable sources and I18n overrides. Registered routes and middleware aliases are kept, so `Testing\routes()` (no argument) mounts them again; `flushRoutes: true` clears them too. |
+| `Testing\unmount($handle\|$routeTester\|$component)` | Unmounts; a component that was never mounted, or was already unmounted or reset, is a no-op (so is `->unmount()` twice). |
 
 `Testing\mount()` needs the runtime for itself: in a test that already called
 `App::run()`, call `Testing\reset()` first. Without a host, frames are encoded

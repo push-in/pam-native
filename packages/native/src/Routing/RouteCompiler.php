@@ -371,7 +371,12 @@ final class RouteCompiler
                 continue;
             }
             if (is_array($next) && $next[0] === T_STRING && ($tokens[$index + 2] ?? null) === ':') {
-                if ($next[1] === 'params' || $next[1] === 'mode') continue;
+                if (in_array($next[1], ['params', 'mode', 'transition', 'duration'], true)) continue;
+                if ($next[1] === 'merge') {
+                    // Missing params come from the existing entry.
+                    $complete = false;
+                    continue;
+                }
                 $params[$next[1]] = self::literalType($tokens, $index + 3);
                 continue;
             }

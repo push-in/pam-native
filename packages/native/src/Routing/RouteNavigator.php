@@ -186,18 +186,27 @@ final class RouteNavigator implements NavigationLinkHandler
         }
     }
 
-    /** @param array<string, string|int|float|bool|null> $params */
+    /**
+     * @param array<string, string|int|float|bool|null> $params
+     * @param RedirectMode|'navigate'|'push'|'replace'|'reset' $mode
+     * @param bool $merge fill the params not given from the route's entry already in the stack
+     */
     public function navigate(
         string|BackedEnum|TypedRoute $target,
         array $params = [],
-        RedirectMode $mode = RedirectMode::Navigate,
+        RedirectMode|string $mode = RedirectMode::Navigate,
         int $redirects = 0,
+        ?NavigationTransition $transition = null,
+        bool $merge = false,
+        ?int $durationMs = null,
     ): bool {
+        $mode = RedirectMode::parse($mode);
         if ($target instanceof TypedRoute) {
             $params = [...$target->params, ...$params];
             $target = $target->name;
         }
         $route = $this->routes->get($target);
+        if ($merge) $params = [...$this->entryParams($route), ...$params];
         $params = $this->validate($route, $params);
         $this->navigating++;
         try {
@@ -211,7 +220,7 @@ final class RouteNavigator implements NavigationLinkHandler
             }
             if ($outcome === false) return false;
 
-            return $this->perform($route, $params, $mode);
+            return $this->perform($route, $params, $mode, $transition, $durationMs, $merge);
         } finally {
             if (--$this->navigating === 0) {
                 $this->verdicts = [];
@@ -421,8 +430,14 @@ final class RouteNavigator implements NavigationLinkHandler
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    private function perform(Route $route, array $params, RedirectMode $mode): bool
-    {
+    private function perform(
+        Route $route,
+        array $params,
+        RedirectMode $mode,
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+        bool $merge = false,
+    ): bool {
         if ($route->kind === RouteKind::Tab) {
             $host = $this->routes->host($route);
             // The tab inherits its host's middleware and already passed it.
@@ -433,21 +448,42 @@ final class RouteNavigator implements NavigationLinkHandler
             return $tabs->select($route->routeName()) || $tabs->selectedTab() === $route->routeName();
         }
 
-        return $this->stackAction($route, $params, $mode);
+        return $this->stackAction($route, $params, $mode, $transition, $durationMs, $merge);
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    private function stackAction(Route $route, array $params, RedirectMode $mode): bool
-    {
+    private function stackAction(
+        Route $route,
+        array $params,
+        RedirectMode $mode,
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+        bool $merge = false,
+    ): bool {
         $name = $route->routeName();
         match ($mode) {
-            RedirectMode::Navigate => $this->stack->navigate($name, $params),
-            RedirectMode::Push => $this->stack->push($name, $params),
-            RedirectMode::Replace => $this->stack->replace($name, $params),
-            RedirectMode::Reset => $this->stack->reset($name, $params),
+            RedirectMode::Navigate => $this->stack->navigate($name, $params, $merge, $transition, $durationMs),
+            RedirectMode::Push => $this->stack->push($name, $params, $transition, $durationMs),
+            RedirectMode::Replace => $this->stack->replace($name, $params, $transition, $durationMs),
+            RedirectMode::Reset => $this->stack->reset($name, $params, $transition, $durationMs),
         };
 
         return true;
+    }
+
+    /**
+     * Params of the route's top-most stack entry (navigate(merge: true)).
+     *
+     * @return array<string, string|int|float|bool|null>
+     */
+    private function entryParams(Route $route): array
+    {
+        $name = $route->routeName();
+        foreach (array_reverse($this->stack->getState()['routes']) as $entry) {
+            if ($entry['name'] === $name) return $entry['params'];
+        }
+
+        return [];
     }
 
     /**

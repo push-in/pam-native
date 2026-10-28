@@ -541,7 +541,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function replace(string|BackedEnum $route, array $params = []): void
+    public function replace(
+        string|BackedEnum $route,
+        array $params = [],
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+    ): void
     {
         $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
@@ -553,6 +558,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Replace, $route, $params))) return;
+        $this->setActionTransition($transition, $durationMs);
         $this->outgoing = array_pop($this->stack);
         $this->park($this->outgoing);
         $this->stack[] = [
@@ -567,7 +573,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function reset(string|BackedEnum $route, array $params = []): void
+    public function reset(
+        string|BackedEnum $route,
+        array $params = [],
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+    ): void
     {
         $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
@@ -579,6 +590,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Reset, $route, $params))) return;
+        $this->setActionTransition($transition, $durationMs);
         $this->outgoing = null;
         $this->parked = [];
         $this->stack = [[

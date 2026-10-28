@@ -14,4 +14,18 @@ enum RedirectMode: int
     case Replace = 3;
     /** Clear the history and start from the route. */
     case Reset = 4;
+
+    /** Accepts the enum or its lower-case name: 'navigate', 'push', 'replace', 'reset'. */
+    public static function parse(self|string $mode): self
+    {
+        if ($mode instanceof self) return $mode;
+
+        return match (strtolower($mode)) {
+            'navigate' => self::Navigate,
+            'push' => self::Push,
+            'replace' => self::Replace,
+            'reset' => self::Reset,
+            default => throw new \InvalidArgumentException("Navigation mode must be 'navigate', 'push', 'replace' or 'reset', '{$mode}' given."),
+        };
+    }
 }

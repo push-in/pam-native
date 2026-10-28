@@ -26,6 +26,7 @@ use function Pam\Native\useSafeAreaInsets;
 final class ChatScreen extends Component
 {
     public string $id = '';
+    public int $unread = 0;
     public ?Signal $draft = null;
     public ?ColorScheme $scheme = null;
     public ?SafeAreaInsets $insets = null;
@@ -36,9 +37,10 @@ final class ChatScreen extends Component
     {
     }
 
-    public function setup(string $id = '0'): void
+    public function setup(string $id = '0', int $unread = 0): void
     {
         $this->id = $id;
+        $this->unread = $unread;
         $this->draft = signal('');
         $this->scheme = useColorScheme();
         $this->insets = useSafeAreaInsets();

@@ -188,11 +188,22 @@ final class Route
     public static function navigate(
         string|BackedEnum|TypedRoute $route,
         array $params = [],
-        RedirectMode $mode = RedirectMode::Navigate,
+        RedirectMode|string $mode = RedirectMode::Navigate,
+        ?NavigationTransition $transition = null,
+        bool $merge = false,
+        ?int $duration = null,
     ): bool {
-        return self::navigator()->navigate($route, $params, $mode);
+        return self::navigator()->navigate($route, $params, $mode, 0, $transition, $merge, $duration);
     }
 
+    /**
+     * Goes back one step, like the system Back: the open child navigator
+     * (tabs, nested stack) first, then this stack. A Back that a screen
+     * cancels (beforeRemove, "leave without saving?") is still consumed and
+     * returns true, so it never falls through to closing the app; false only
+     * when there is nothing to go back to. Navigator::pop() (legacy) returns
+     * false when the screen cancels and ignores child navigators.
+     */
     public static function back(): bool
     {
         return self::navigator()->back();
