@@ -115,6 +115,12 @@ final class Runtime
         }
     }
 
+    /** @internal The booted root (Testing checks whether it owns the runtime). */
+    public static function root(): Renderable|Closure|null
+    {
+        return self::$root;
+    }
+
     public static function windowMetrics(): WindowMetrics
     {
         return self::$windowMetrics ??= self::bootMetrics();

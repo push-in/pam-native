@@ -796,6 +796,12 @@ abstract class Component implements Renderable
         return $this;
     }
 
+    /** @internal The element of the last render (Testing reads screen content). */
+    final public function __pamRendered(): ?Element
+    {
+        return $this->pamLastElement;
+    }
+
     /** @internal True for screens shown by a router. */
     final public function __pamIsRoute(): bool
     {

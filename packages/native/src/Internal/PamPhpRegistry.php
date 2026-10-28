@@ -243,6 +243,12 @@ final class PamPhpRegistry
         }
     }
 
+    /** True when $className is a discovered .pam.php component. */
+    public static function has(string $className): bool
+    {
+        return isset(self::$components[$className]);
+    }
+
     /** @param array<string, mixed> $props */
     public static function make(string $className, array $props = []): Component
     {

@@ -540,6 +540,49 @@ Errors behave as in JavaScript:
   Cancelled promises and `TaskCancelledException` reasons are not reported,
   and unhandled rejections do not count toward the runtime's safe mode.
 
+## Testing
+
+`Pam\Native\Testing` mounts components and routes through the real runtime
+(lifecycle, composables, middleware, focus) without a device. Tests never call
+the internal `__pamSetup()`, `__pamMounted()` or `__pamDisposeResources()`.
+
+```php
+use Pam\Native\Testing;
+
+// A component: props by name, route params for setup().
+$chat = Testing\mount(ChatScreen::class, ['title' => 'Room'], params: ['id' => '1']);
+$chat->instance->draft->value = 'oi';
+$chat->render();                      // another render pass; returns its Element
+assert(str_contains($chat->text(), 'oi'));
+$chat->blur();                        // onBlur(), as when another screen covers it
+$chat->focus();                       // onFocus()
+$chat->unmount();                     // onUnmounted(); setup() scope, own() and timers released
+
+// The device: scheme, insets, window, keyboard, locale and time zone.
+Testing\environment(scheme: 'dark', insets: ['top' => 24, 'bottom' => 34], keyboard: 280,
+    window: ['width' => 390, 'height' => 844], locale: 'pt-BR', timezone: 'America/Sao_Paulo');
+
+// The app's routes, with the aliases from config/middleware.php.
+$app = Testing\routes(__DIR__.'/../routes.php')->open('/chat/1');
+assert($app->current()->routeName() === 'chat' && $app->screen()->id === '1');
+$app->navigate('home')->back();
+
+Testing\reset();                      // teardown: unmount all, shut the runtime down
+```
+
+| API | What it does |
+| --- | --- |
+| `Testing\mount($class\|$instance, $props = [], ?array $params = null)` | Mounts the component: `boot()`, `setup()` (with `$params` as route params), `mount()`, the first render, `onMounted()`. With `$params` the component is a screen and also gets `onFocus()`, as from the router; without, it counts as focused while mounted. Returns a `Testing\Mounted` handle. Several roots can be mounted at once. |
+| `Mounted` | `instance`, `render()` (a render pass; returns the root's `Element`), `element()`, `text()` (every `Text` joined by a space), `focus()`, `blur()`, `unmount()`, `mounted()`. |
+| `Testing\routes($routesFile\|require result\|RouteCollection, ?array $middleware = null)` | Builds and activates the `RouteNavigator`, so `navigate()`, `back()` and `Route::current()` work, and mounts it. Given a path, the routes are registered from scratch. Middleware aliases: `$middleware`, then `config/middleware.php` next to the routes file (or in the project root). Returns a `Testing\RouteTester`. |
+| `RouteTester` | `open($uri)` (path or deep link, middleware included), `navigate($route, $params)`, `back()`, `current()`, `path()`, `screen()` (the focused screen component), `text()` (of the focused screen), `render()`, `unmount()`, `navigator`. |
+| `Testing\environment(scheme, insets, keyboard, window, locale, timezone)` | Sends what the host would: `scheme` (`'light'`/`'dark'`) becomes the system scheme with the `System` preference; `insets` and `window` (`width`, `height`, `scale`, `fontScale`) a window-metrics event; `keyboard` the settled keyboard (a height; `0` or `false` hides it, `true` is 300 pt); `locale` and `timezone` the `DeviceInfo` that `useLocale()`/`useTimezone()` read. Omitted arguments keep their value. Mounted components re-render. |
+| `Testing\reset()` | Unmounts every root, calls `Runtime::shutdown()`, and clears routes, middleware aliases, composable sources and I18n overrides. |
+
+`Testing\mount()` needs the runtime for itself: in a test that already called
+`App::run()`, call `Testing\reset()` first. Without a host, frames are encoded
+and dropped.
+
 ## Migration
 
 | Before | Architecture v2 |
@@ -557,3 +600,5 @@ Errors behave as in JavaScript:
 | `routes.json`, `Routing\Route::stack()`, `Navigator->push()` | `routes.php`, `navigate()` (see [Routing](#migrating-from-routesjson-and-routestack)) |
 | `Http::get($url, $callback)` | `Http::create(...)->get($url)->then(...)` (the callback API still works) |
 | App-specific singletons reached through statics | `App::globals()` |
+| `__pamSetup()` / `__pamMounted()` / `__pamDisposeResources()` in tests | `Testing\mount()` and `->unmount()`; `Testing\routes()` for screens behind routes |
+| Replacing the `$scheme` global to fake light/dark in tests | `Testing\environment(scheme: 'dark')` |

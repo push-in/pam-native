@@ -108,8 +108,8 @@ foreach (Mbstring::FUNCTIONS as $function) {
 $composer = json_decode((string) file_get_contents(__DIR__.'/../composer.json'), true, flags: JSON_THROW_ON_ERROR);
 $rootComposer = json_decode((string) file_get_contents(__DIR__.'/../../../composer.json'), true, flags: JSON_THROW_ON_ERROR);
 $assert(
-    ($composer['autoload']['files'] ?? []) === ['src/Polyfill/mbstring_functions.php', 'src/Routing/functions.php', 'src/functions.php']
-        && ($rootComposer['autoload']['files'] ?? []) === ['packages/native/src/Polyfill/mbstring_functions.php', 'packages/native/src/Routing/functions.php', 'packages/native/src/functions.php'],
+    ($composer['autoload']['files'] ?? []) === ['src/Polyfill/mbstring_functions.php', 'src/Routing/functions.php', 'src/functions.php', 'src/Testing/functions.php']
+        && ($rootComposer['autoload']['files'] ?? []) === ['packages/native/src/Polyfill/mbstring_functions.php', 'packages/native/src/Routing/functions.php', 'packages/native/src/functions.php', 'packages/native/src/Testing/functions.php'],
     'Both composer.json files must autoload the mbstring polyfill before application code.',
 );
 

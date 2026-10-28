@@ -51,6 +51,8 @@ final class RouteNavigator implements NavigationLinkHandler
     /** @var array<string, Component> tab and status-bar-wrapped screens, by route name */
     private array $tracked = [];
     private ?Component $focused = null;
+    /** @var array<string, \WeakReference<Component>> the last screen component built for each route */
+    private array $screens = [];
     /**
      * Middleware verdicts of the navigation in progress, keyed by route and
      * params: the stack guard and the tab-press check reuse them, so the
@@ -291,6 +293,14 @@ final class RouteNavigator implements NavigationLinkHandler
         return $route->withParams($context->all());
     }
 
+    /** @internal The component of the focused route (tests), null for closures and plain Renderables. */
+    public function screen(): ?Component
+    {
+        $name = $this->current()?->routeName();
+
+        return $name === null ? null : ($this->screens[$name] ?? null)?->get();
+    }
+
     public function open(string $uri): bool
     {
         if ($uri === '' || strlen($uri) > 8_192) return false;
@@ -361,6 +371,7 @@ final class RouteNavigator implements NavigationLinkHandler
         if (!$result instanceof Renderable) {
             throw new InvalidArgumentException("Route {$name} screen must be Renderable, ".get_debug_type($result).' given.');
         }
+        if ($result instanceof Component) $this->screens[$name] = \WeakReference::create($result);
         $style = $route->statusBarStyle();
         if ($style === null && $route->kind !== RouteKind::Tab) return $result;
         if ($result instanceof Component) {
