@@ -7,6 +7,21 @@ final class PamVectorCanvas: UIView {
         CAShapeLayer.self
     }
 
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // A view that overrides draw(_:) is opaque by default, and UIKit
+        // fills the undrawn backing store with black: the canvas would cover
+        // everything behind it (Android's canvas View is transparent).
+        isOpaque = false
+        backgroundColor = .clear
+        contentMode = .redraw
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     func setCommands(_ value: String) {
         guard let data = value.data(using: .utf8), data.count <= 1_000_000,
               let decoded = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
