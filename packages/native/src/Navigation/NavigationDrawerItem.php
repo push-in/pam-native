@@ -4,39 +4,6 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
-use Closure;
-use InvalidArgumentException;
-use Pam\Native\Renderable;
+use Pam\Native\Plugin\MovedToPlugin;
 
-use function strlen;
-
-final readonly class NavigationDrawerItem
-{
-    public function __construct(
-        public string $name,
-        public string $label,
-        public Renderable|Closure $content,
-        public ?Renderable $icon = null,
-        public ?string $badge = null,
-        public ?string $group = null,
-    ) {
-        if (
-            preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/D', $name) !== 1
-            || trim($label) === ''
-            || strlen($label) > 64
-            || $badge !== null && strlen($badge) > 12
-            || $group !== null && (trim($group) === '' || strlen($group) > 48)
-        ) {
-            throw new InvalidArgumentException(
-                'Drawer routes require safe names and bounded labels.',
-            );
-        }
-    }
-
-    public function render(): Renderable
-    {
-        $content = $this->content;
-
-        return $content instanceof Closure ? $content() : $content;
-    }
-}
+MovedToPlugin::alias(NavigationDrawerItem::class, \Pam\Native\Drawer\NavigationDrawerItem::class, 'pushinbr/pam-native-drawer');

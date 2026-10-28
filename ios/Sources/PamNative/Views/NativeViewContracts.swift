@@ -56,3 +56,8 @@ public protocol NativePropertyView: AnyObject {
     var onProtocolEvent: ((Int, Data) -> Void)? { get set }
     func applyProtocolProperty(key: Int, value: WireValue?)
 }
+
+/// Optional native container owning the placement of declarative children.
+public protocol NativeChildHost: AnyObject {
+    func insert(_ view: UIView, index: Int)
+}

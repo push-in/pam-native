@@ -80,7 +80,6 @@ use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\Contract\ContractValidator;
 use Pam\Native\UI\CustomView;
-use Pam\Native\UI\DrawerLayoutAndroid;
 use Pam\Native\UI\DrawingCanvas;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Grid;
@@ -2196,10 +2195,6 @@ final class TemplateRenderer
             ),
             'StatusBar' => self::statusBar($values),
             'SafeAreaView' => SafeAreaView::make(...$children),
-            'DrawerLayoutAndroid' => DrawerLayoutAndroid::make(
-                self::childAt($children, 0, $tag),
-                self::childAt($children, 1, $tag),
-            ),
             'InputAccessoryView' => InputAccessoryView::make(...$children),
             'Native', 'CustomView' => CustomView::make(
                 self::stringValue($values['name'] ?? '', 'Native view name'),

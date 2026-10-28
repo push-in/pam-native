@@ -896,6 +896,7 @@ class PamRendererInstrumentedTest {
         val events = ArrayList<Pair<Long, Int>>()
         lateinit var renderer: PamRenderer
         try {
+            org.junit.Assume.assumeTrue("Optional drawer plugin host", dev.pam.nativeapp.views.GeneratedPamViews.create(activity).containsKey("drawer"))
             onMain(instrumentation) {
                 renderer = PamRenderer(activity, activity.host) { id, kind, _ ->
                     events += id to kind
@@ -930,10 +931,10 @@ class PamRendererInstrumentedTest {
             onMain(instrumentation) {
                 val target = requireNotNull(activity.host.findByTransitionName("drawer-destination"))
                 var ancestor = target.parent
-                while (ancestor != null && ancestor !is PamDrawerLayout) {
+                while (ancestor != null && ancestor !is dev.pam.nativeapp.views.NativePropertyView) {
                     ancestor = ancestor.parent
                 }
-                requireNotNull(ancestor as? PamDrawerLayout)
+                requireNotNull(ancestor as? dev.pam.nativeapp.views.NativePropertyView)
                 val targetLocation = IntArray(2)
                 val hostLocation = IntArray(2)
                 target.getLocationOnScreen(targetLocation)

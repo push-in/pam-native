@@ -1631,6 +1631,10 @@ public final class PamRenderer: @unchecked Sendable {
             return
         }
 
+        if let plugin = parent as? NativeChildHost {
+            plugin.insert(view, index: index)
+            return
+        }
         if let navigation = parent as? PamNavigationHost {
             navigation.insert(view, index: index)
             return
@@ -1788,7 +1792,9 @@ public final class PamRenderer: @unchecked Sendable {
             }
             return modal
         case .drawerLayout:
-            return PamDrawerLayout()
+            return nativeViews.create(name: "drawer") { [weak self] kind, payload in
+                self?.dispatchEvent(spec.id, kind, payload)
+            }
         case .statusBar:
             return PamStatusBarNodeView()
         case .navigationHost:
@@ -2166,17 +2172,6 @@ public final class PamRenderer: @unchecked Sendable {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.refresh.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachRefresh(refresh)
             eventBridges[nodeId]?[EventKind.refresh.rawValue] = bridge
-        }
-
-        if eventProperties.contains(PamConstants.onDrawerOpen) || eventProperties.contains(PamConstants.onDrawerClose),
-           let drawer = view as? PamDrawerLayout {
-            let bridge = EventBridge(nodeId: nodeId, kind: EventKind.drawerOpen.rawValue, dispatchEvent: dispatchEvent)
-            bridge.attachDrawerCallbacks(
-                drawer,
-                onOpen: eventProperties.contains(PamConstants.onDrawerOpen),
-                onClose: eventProperties.contains(PamConstants.onDrawerClose),
-            )
-            eventBridges[nodeId]?[EventKind.drawerOpen.rawValue] = bridge
         }
 
         if let modal = view as? PamModalHost {
@@ -3351,32 +3346,20 @@ public final class PamRenderer: @unchecked Sendable {
             } else if let list = view as? PamVirtualListView {
                 requestVirtualListScroll(list, nodeId: nodeId)
             }
-        case PamConstants.drawerOpen:
-            (view as? PamDrawerLayout)?.setOpen(value.boolOrNil() ?? false, animated: true)
-        case PamConstants.drawerType:
-            (view as? PamDrawerLayout)?.setDrawerType(Int(value.integerOrNil() ?? 1))
-        case PamConstants.drawerPosition:
-            (view as? PamDrawerLayout)?.setDrawerPosition(Int(value.integerOrNil() ?? 1))
-        case PamConstants.drawerWidth:
-            (view as? PamDrawerLayout)?.setDrawerWidth(CGFloat(value.decimalOrZero()))
-        case PamConstants.drawerOverlayColor:
-            if let color = value.integerOrNil() {
-                (view as? PamDrawerLayout)?.setOverlayColor(Int(color))
-            }
-        case PamConstants.drawerSwipeEnabled:
-            (view as? PamDrawerLayout)?.setSwipeEnabled(value.boolOrNil() ?? true)
-        case PamConstants.drawerSwipeEdgeWidth:
-            (view as? PamDrawerLayout)?.setSwipeEdgeWidth(CGFloat(value.decimalOrZero()))
-        case PamConstants.drawerSwipeMinDistance:
-            (view as? PamDrawerLayout)?.setSwipeMinDistance(CGFloat(value.decimalOrZero()))
-        case PamConstants.drawerKeyboardDismissMode:
-            (view as? PamDrawerLayout)?.setKeyboardDismissMode(Int(value.integerOrNil() ?? 1))
-        case PamConstants.drawerHideStatusBarOnOpen:
-            (view as? PamDrawerLayout)?.setHideStatusBarOnOpen(value.boolOrNil() ?? false)
-        case PamConstants.drawerStatusBarAnimation:
-            (view as? PamDrawerLayout)?.setStatusBarAnimation(Int(value.integerOrNil() ?? 1))
-        case PamConstants.drawerPermanentBreakpoint:
-            (view as? PamDrawerLayout)?.setPermanentBreakpoint(CGFloat(value.decimalOrZero()))
+        // Reserved properties are forwarded through NativePropertyView above.
+        case PamConstants.drawerOpen,
+             PamConstants.drawerType,
+             PamConstants.drawerPosition,
+             PamConstants.drawerWidth,
+             PamConstants.drawerOverlayColor,
+             PamConstants.drawerSwipeEnabled,
+             PamConstants.drawerSwipeEdgeWidth,
+             PamConstants.drawerSwipeMinDistance,
+             PamConstants.drawerKeyboardDismissMode,
+             PamConstants.drawerHideStatusBarOnOpen,
+             PamConstants.drawerStatusBarAnimation,
+             PamConstants.drawerPermanentBreakpoint:
+            break
         case PamConstants.layoutDirection:
             view.semanticContentAttribute = value.integerOrNil() == 2
                 ? .forceRightToLeft
@@ -3882,7 +3865,7 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.scrollRequest:
             break
         case PamConstants.drawerOpen:
-            (view as? PamDrawerLayout)?.setOpen(false, animated: true)
+            break
         case PamConstants.pointerEvents:
             applyPointerEvents(view, mode: PamPointerEvents.auto)
         case PamConstants.activityAnimating:
@@ -5838,7 +5821,6 @@ public final class PamRenderer: @unchecked Sendable {
         private weak var control: UIControl?
         private weak var scrollView: UIScrollView?
         private weak var refreshControl: PamRefreshContainer?
-        private weak var drawer: PamDrawerLayout?
         private var modal: PamModalHost?
         private weak var modalView: PamModalHost?
         private var pressInKind: Int?
@@ -6266,26 +6248,6 @@ public final class PamRenderer: @unchecked Sendable {
             refreshControl = refresh
         }
 
-        func attachDrawerCallbacks(_ drawer: PamDrawerLayout, onOpen: Bool, onClose: Bool) {
-            drawer.setCallbacks(
-                opened: onOpen ? { [weak self] in
-                    self?.dispatchEvent(
-                        self?.nodeId ?? 0,
-                        EventKind.drawerOpen.rawValue,
-                        Data(),
-                    )
-                } : nil,
-                closed: onClose ? { [weak self] in
-                    self?.dispatchEvent(
-                        self?.nodeId ?? 0,
-                        EventKind.drawerClose.rawValue,
-                        Data(),
-                    )
-                } : nil,
-            )
-            self.drawer = drawer
-        }
-
         func attachModalCallbacks(
             _ modal: PamModalHost,
             state: NodeState,
@@ -6432,9 +6394,6 @@ public final class PamRenderer: @unchecked Sendable {
             }
             if let refreshControl {
                 refreshControl.setOnRefresh(nil)
-            }
-            if let drawer {
-                drawer.setCallbacks(opened: nil, closed: nil)
             }
             if let modal {
                 modal.setCallbacks(

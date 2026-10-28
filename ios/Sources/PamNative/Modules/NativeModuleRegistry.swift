@@ -59,8 +59,9 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             storage.invoke(method: "get", payload: payload, completion: completion)
         case .storageSet:
             storage.invoke(method: "set", payload: payload, completion: completion)
+        case .toast:
+            invoke(module: "toast", method: "show", payload: payload, completion: completion)
         case .alert,
-             .toast,
              .share,
              .openUrl,
              .canOpenUrl,
