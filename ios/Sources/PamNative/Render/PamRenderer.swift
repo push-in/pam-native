@@ -33,7 +33,11 @@ public final class PamRenderer: @unchecked Sendable {
     var onSurfaceKeyboardInset: ((Int64, CGFloat, TimeInterval, UInt) -> Void)?
     private let fontLoader = PamFontLoader()
     private let host: UIView
-    private let dispatchEvent: (Int64, Int, Data) -> Void
+    /// The runtime sink; every bridge goes through `dispatchEvent` (`routeEvent`).
+    private let sinkEvent: (Int64, Int, Data) -> Void
+    private lazy var dispatchEvent: (Int64, Int, Data) -> Void = { [weak self] id, kind, payload in
+        self?.routeEvent(id, kind, payload)
+    }
     private let nativeViews: NativeViewRegistry
     private let imageSession: URLSession
     private let imageSessionDelegate: ImageLoadSessionDelegate
@@ -162,7 +166,7 @@ public final class PamRenderer: @unchecked Sendable {
         dispatchEvent: @escaping (Int64, Int, Data) -> Void
     ) {
         self.host = hostView
-        self.dispatchEvent = dispatchEvent
+        self.sinkEvent = dispatchEvent
         self.nativeViews = NativeViewRegistry(additionalFactories: nativeViews)
         let sessionDelegate = ImageLoadSessionDelegate()
         self.imageSessionDelegate = sessionDelegate
@@ -1802,6 +1806,24 @@ public final class PamRenderer: @unchecked Sendable {
             return PamRefreshContainer()
         case .customView:
             return UIView()
+        }
+    }
+
+    /// Android `flushFocusedNativeInputs()`: a native-synced input keeps its
+    /// keystrokes on the device until blur or submit, but a press (a "Done"
+    /// button next to the field, which never takes the keyboard focus) must
+    /// observe exactly the text the editor shows, so its pending value is
+    /// sent before the press.
+    func routeEvent(_ id: Int64, _ kind: Int, _ payload: Data) {
+        if kind == EventKind.press.rawValue {
+            flushPendingNativeInputs()
+        }
+        sinkEvent(id, kind, payload)
+    }
+
+    private func flushPendingNativeInputs() {
+        for (_, bridges) in eventBridges {
+            bridges[EventKind.change.rawValue]?.flushPendingNativeChange()
         }
     }
 
@@ -7337,6 +7359,12 @@ public final class PamRenderer: @unchecked Sendable {
             default:
                 pendingChangeValue = value
             }
+        }
+
+        /// A press elsewhere drains a native-synced value still on the device.
+        func flushPendingNativeChange() {
+            guard inputSyncMode == 1, pendingChangeValue != nil else { return }
+            onInputSyncFlush()
         }
 
         /// Sends the coalesced value (debounce window elapsed, blur or submit).

@@ -150,6 +150,35 @@ final class PamInputParityTests: XCTestCase {
         XCTAssertEqual(values, ["ab"])
     }
 
+    func testNativeSyncModeFlushesThePendingTextBeforeAPress() throws {
+        var events: [String] = []
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.onChange: .integer(1),
+            PamConstants.inputSyncMode: .integer(1),
+        ], kind: .input) { _, kind, payload in
+            if kind == EventKind.change.rawValue {
+                events.append("change:" + String(decoding: payload, as: UTF8.self))
+            } else if kind == EventKind.press.rawValue {
+                events.append("press")
+            }
+        }
+        defer { renderer.close() }
+        let field = try XCTUnwrap(view as? PamInputField)
+        field.text = "QA"
+        perform(.editingChanged, on: field)
+        field.text = "QA loop"
+        perform(.editingChanged, on: field)
+        XCTAssertEqual(events, [], "native sync keeps keystrokes on the device")
+
+        // A "Done" button that never takes the focus: the text it acts on
+        // reaches PHP first (Android flushFocusedNativeInputs).
+        renderer.routeEvent(999, EventKind.press.rawValue, Data())
+        XCTAssertEqual(events, ["change:QA loop", "press"])
+
+        renderer.routeEvent(999, EventKind.press.rawValue, Data())
+        XCTAssertEqual(events, ["change:QA loop", "press", "press"], "nothing pending, nothing resent")
+    }
+
     func testImmediateSyncModeSendsEveryChange() throws {
         var values: [String] = []
         let (_, renderer, view) = PamRenderTestSupport.render([
