@@ -1342,18 +1342,21 @@ fn layout_node(
                 .min((available_cross - cross_before - cross_after).max(0.0))
             }
         });
+        // A start-aligned child sits at its own cross margin, negative ones
+        // included (Yoga: `margin: 0 -16px` bleeds out of the parent padding);
+        // only offsets computed from the free space are kept inside the box.
         let cross_offset = match alignment {
             CrossAlignment::Start | CrossAlignment::Stretch => cross_before,
-            CrossAlignment::Center => (available_cross - cross + cross_before - cross_after) / 2.0,
-            CrossAlignment::End => available_cross - cross - cross_after,
-            CrossAlignment::Baseline if axis == Axis::Horizontal => {
-                baseline_target
-                    - baseline_from_top(context.children, child, cross, context.text_scale)
-                    + cross_before
+            CrossAlignment::Center => {
+                ((available_cross - cross + cross_before - cross_after) / 2.0).max(0.0)
             }
+            CrossAlignment::End => (available_cross - cross - cross_after).max(0.0),
+            CrossAlignment::Baseline if axis == Axis::Horizontal => (baseline_target
+                - baseline_from_top(context.children, child, cross, context.text_scale)
+                + cross_before)
+                .max(0.0),
             CrossAlignment::Baseline => cross_before,
-        }
-        .max(0.0);
+        };
         cursor += main_before;
         let child_frame = match axis {
             Axis::Vertical => Layout {
@@ -1805,16 +1808,16 @@ fn layout_wrapped_children(
             });
             let cross_offset = match alignment {
                 CrossAlignment::Start | CrossAlignment::Stretch => cross_before,
-                CrossAlignment::Center => (line_cross - cross + cross_before - cross_after) / 2.0,
-                CrossAlignment::End => line_cross - cross - cross_after,
-                CrossAlignment::Baseline if axis == Axis::Horizontal => {
-                    line_baseline
-                        - baseline_from_top(context.children, child, cross, context.text_scale)
-                        + cross_before
+                CrossAlignment::Center => {
+                    ((line_cross - cross + cross_before - cross_after) / 2.0).max(0.0)
                 }
+                CrossAlignment::End => (line_cross - cross - cross_after).max(0.0),
+                CrossAlignment::Baseline if axis == Axis::Horizontal => (line_baseline
+                    - baseline_from_top(context.children, child, cross, context.text_scale)
+                    + cross_before)
+                    .max(0.0),
                 CrossAlignment::Baseline => cross_before,
-            }
-            .max(0.0);
+            };
             main_cursor += main_before;
             let child_frame = match axis {
                 Axis::Vertical => Layout {
@@ -5033,6 +5036,57 @@ mod tests {
         // Padding does not move the containing block of an absolute child.
         assert_eq!(child.x, 30.0);
         assert_eq!(child.y, 80.0);
+    }
+
+    #[test]
+    fn negative_cross_margins_bleed_out_of_the_parent_padding() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Column,
+                        [
+                            (PropKey::PaddingLeft, PropValue::Float(16.0)),
+                            (PropKey::PaddingRight, PropValue::Float(16.0)),
+                            (PropKey::PaddingTop, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(360.0)),
+                            (PropKey::Height, PropValue::Float(100.0)),
+                            (PropKey::MarginLeft, PropValue::Float(-16.0)),
+                            (PropKey::MarginRight, PropValue::Float(-16.0)),
+                            (PropKey::MarginTop, PropValue::Float(12.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+        // A full-bleed media frame inside a padded post box (margin: 12px -16px 0).
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("negative cross margins");
+        assert_eq!(layouts[&3].x, 0.0, "{:?}", layouts[&3]);
+        assert_eq!(layouts[&3].width, 360.0);
     }
 
     #[test]
