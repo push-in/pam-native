@@ -134,6 +134,26 @@ $scope->dispose();
 $drain();
 $assert($ran === 0 && $late->disposed() && $late->data === null && Scheduler::pending() === 0, 'Disposing the owning scope must cancel the request.');
 
+$cancellable = new class {
+    public bool $cancelled = false;
+
+    public function then(Closure $fulfilled, ?Closure $rejected = null): self
+    {
+        return $this;
+    }
+
+    public function cancel(): void
+    {
+        $this->cancelled = true;
+    }
+};
+$asyncScope = effectScope(static function () use ($cancellable): void {
+    useResource(static fn (): object => $cancellable);
+});
+$drain();
+$asyncScope->dispose();
+$assert($cancellable->cancelled, 'Disposing must cancel a thenable request in flight.');
+
 // refreshOnFocus: the first focus is the mount, later focuses reload.
 $focusLoads = 0;
 $focusScope = new EffectScope();

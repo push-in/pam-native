@@ -734,9 +734,14 @@ abstract class Component implements Renderable
         $this->pamScope = $scope;
         $this->pamAttachFocusOwner($scope);
         $method = new ReflectionMethod($this, 'setup');
+        $params = $this->pamRouteParams;
+        if ($params === null && class_exists(\Pam\Native\Routing\RouteArguments::class)) {
+            // Screens created by the Route facade carry their params there.
+            $params = \Pam\Native\Routing\RouteArguments::params($this);
+        }
         $arguments = \Pam\Native\Internal\SetupArguments::resolve(
             $method,
-            $this->pamRouteParams ?? [],
+            $params ?? [],
             $this->pamRouteContext,
             static::class,
         );

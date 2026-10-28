@@ -47,7 +47,8 @@ use function property_exists;
  *   `items`, `next_cursor`, `nextCursor`, `meta.next_cursor`); `data` is the
  *   accumulated list and more() loads the next page.
  * - A loader may also return a thenable (`then(onFulfilled, onRejected)`),
- *   such as an asynchronous HTTP request.
+ *   such as an asynchronous HTTP request; a thenable with cancel() is
+ *   cancelled when the resource is disposed.
  *
  * @property-read mixed $data the result (the accumulated list when paginated)
  * @property-read bool $loading the first load or a reload without data is running
@@ -76,6 +77,8 @@ final class Resource extends ReactiveObject implements Disposable
     private bool $started = false;
     private bool $disposed = false;
     private int $focusCount = 0;
+    /** @var array<int, object> thenables in flight, cancelled on dispose */
+    private array $inFlight = [];
     /** @var array<string, true> keys of items marked failed */
     private array $failed = [];
 
@@ -259,6 +262,13 @@ final class Resource extends ReactiveObject implements Disposable
         $this->generation++;
         $this->first->cancel();
         $this->next->cancel();
+        $inFlight = $this->inFlight;
+        $this->inFlight = [];
+        foreach ($inFlight as $pending) {
+            if (method_exists($pending, 'cancel')) {
+                $pending->cancel();
+            }
+        }
         foreach ($this->unsubscribe as $unsubscribe) {
             $unsubscribe();
         }
@@ -296,11 +306,15 @@ final class Resource extends ReactiveObject implements Disposable
         if (is_object($result) && method_exists($result, 'then')) {
             $generation = $this->generation;
             $more = $cursor !== null;
+            $id = spl_object_id($result);
+            $this->inFlight[$id] = $result;
             $result->then(
-                function (mixed $value) use ($generation, $more): void {
+                function (mixed $value) use ($generation, $more, $id): void {
+                    unset($this->inFlight[$id]);
                     $this->settled(AsyncValue::content($value), $more, $generation, true);
                 },
-                function (mixed $error) use ($generation, $more): void {
+                function (mixed $error) use ($generation, $more, $id): void {
+                    unset($this->inFlight[$id]);
                     $message = $error instanceof Throwable ? $error->getMessage() : (is_string($error) ? $error : 'Request failed.');
                     $this->settled(AsyncValue::error($message), $more, $generation, true);
                 },
