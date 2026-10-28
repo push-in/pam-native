@@ -78,9 +78,7 @@ final class ComputedSignal implements ReactiveObserver, ReactiveSource, Readable
             return;
         }
         $this->dirty = true;
-        foreach ($this->observers as $observer => $_) {
-            $observer->dependencyChanged();
-        }
+        $this->notifyObservers();
     }
 
     public function dependOn(ReactiveSource $source): void
@@ -108,5 +106,24 @@ final class ComputedSignal implements ReactiveObserver, ReactiveSource, Readable
             $source->detach($this);
         }
         $this->dependencies = new WeakMap();
+    }
+
+    /**
+     * Notifies a snapshot of the observers. Each effect detaches and re-attaches
+     * itself while it re-runs, which moves it within the WeakMap; iterating the
+     * live map then skipped the next observer. An observer detached by an
+     * earlier one in the same pass (a disposed watcher) is not notified.
+     */
+    private function notifyObservers(): void
+    {
+        $observers = [];
+        foreach ($this->observers as $observer => $_) {
+            $observers[] = $observer;
+        }
+        foreach ($observers as $observer) {
+            if (isset($this->observers[$observer])) {
+                $observer->dependencyChanged();
+            }
+        }
     }
 }

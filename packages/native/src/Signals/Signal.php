@@ -78,9 +78,7 @@ final class Signal implements ReactiveSource, ReadableSignal
         $previous = $this->value;
         $this->value = $value;
         DependencyTracker::invalidate($this, 'value');
-        foreach ($this->observers as $observer => $_) {
-            $observer->dependencyChanged();
-        }
+        $this->notifyObservers();
         foreach ($this->listeners as $listener) {
             $listener($value, $previous);
         }
@@ -114,5 +112,24 @@ final class Signal implements ReactiveSource, ReadableSignal
     public function detach(ReactiveObserver $observer): void
     {
         unset($this->observers[$observer]);
+    }
+
+    /**
+     * Notifies a snapshot of the observers. Each effect detaches and re-attaches
+     * itself while it re-runs, which moves it within the WeakMap; iterating the
+     * live map then skipped the next observer. An observer detached by an
+     * earlier one in the same pass (a disposed watcher) is not notified.
+     */
+    private function notifyObservers(): void
+    {
+        $observers = [];
+        foreach ($this->observers as $observer => $_) {
+            $observers[] = $observer;
+        }
+        foreach ($observers as $observer) {
+            if (isset($this->observers[$observer])) {
+                $observer->dependencyChanged();
+            }
+        }
     }
 }
