@@ -3618,7 +3618,11 @@ fn ios_engine_matches(ios_root: &Path, native_home: &Path) -> Result<(), String>
         "the iOS Pam Native engine at {} was not built from these sources (expected SDK {} with protocol {protocol}, found {}); rebuild PamNativeEngine.xcframework from {} (cargo build --release -p pam-native-engine for aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios) and record it with: printf '{}' > {}",
         ios_root.join("PamNativeEngine.xcframework").display(),
         env!("CARGO_PKG_VERSION"),
-        if marker.trim().is_empty() { "no marker".to_owned() } else { marker.split_whitespace().collect::<Vec<_>>().join(" ") },
+        if marker.trim().is_empty() {
+            "no marker".to_owned()
+        } else {
+            marker.split_whitespace().collect::<Vec<_>>().join(" ")
+        },
         native_home.display(),
         engine_marker(env!("CARGO_PKG_VERSION"), &protocol).replace('\n', "\\n"),
         marker_path.display(),
@@ -8395,17 +8399,24 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
     if engine_ready_at(native_home, abi) && !is_source_checkout(native_home) {
         return Ok(());
     }
-    let mismatch = native_engine_path(native_home, abi).is_file() && !engine_ready_at(native_home, abi);
+    let mismatch =
+        native_engine_path(native_home, abi).is_file() && !engine_ready_at(native_home, abi);
     let installed = installed_rust_targets().map_err(|error| {
         if mismatch {
-            format!("{}; building it from source needs Rust: {error}", engine_mismatch_detail(native_home))
+            format!(
+                "{}; building it from source needs Rust: {error}",
+                engine_mismatch_detail(native_home)
+            )
         } else {
             error
         }
     })?;
     if !installed.contains(abi.rust_target()) {
         let reason = if mismatch {
-            format!("{}, so it must be built from source, but ", engine_mismatch_detail(native_home))
+            format!(
+                "{}, so it must be built from source, but ",
+                engine_mismatch_detail(native_home)
+            )
         } else {
             String::new()
         };
@@ -10784,14 +10795,21 @@ mod tests {
         assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
         assert!(engine_mismatch_detail(&root).contains(&current));
 
-        fs::write(&marker, engine_marker("0.0.0", &protocol_fingerprint(&root).expect("fp"))).expect("old version");
+        fs::write(
+            &marker,
+            engine_marker("0.0.0", &protocol_fingerprint(&root).expect("fp")),
+        )
+        .expect("old version");
         assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
 
         // iOS: the same rule for the engine xcframework, with a clear error.
         let ios_root = root.join("ios-runtime");
         fs::create_dir_all(ios_root.join("PamNativeEngine.xcframework")).expect("xcframework");
         let error = ios_engine_matches(&ios_root, &root).expect_err("no marker");
-        assert!(error.contains("was not built from these sources"), "{error}");
+        assert!(
+            error.contains("was not built from these sources"),
+            "{error}"
+        );
         fs::write(
             ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version"),
             engine_marker(version, &protocol_fingerprint(&root).expect("fp")),
