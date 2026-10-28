@@ -85,7 +85,7 @@ final class App
             RouteCollection::activate($navigator);
             $navigator->listen();
 
-            return $navigator->root();
+            return $navigator->view();
         }
         if (is_string($root) && is_a($root, Renderable::class, true)) {
             $screen = RouteArguments::instantiate($root, [], $root);

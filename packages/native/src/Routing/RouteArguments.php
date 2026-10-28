@@ -40,11 +40,14 @@ final class RouteArguments
     {
     }
 
-    /** @param array<string, string|int|float|bool|null> $params */
-    public static function attach(object $screen, array $params, string $route = ''): void
+    /**
+     * @param array<string, string|int|float|bool|null> $params
+     * @param list<object> $services injectable by type (Navigator, RouteContext, ...)
+     */
+    public static function attach(object $screen, array $params, string $route = '', array $services = []): void
     {
         self::$attached ??= new WeakMap();
-        self::$attached[$screen] = ['params' => $params, 'route' => $route];
+        self::$attached[$screen] = ['params' => $params, 'route' => $route, 'services' => $services];
     }
 
     /** @return array<string, string|int|float|bool|null> Params attached to a screen. */
@@ -61,9 +64,9 @@ final class RouteArguments
     public static function for(object $component, string $method = 'setup'): array
     {
         if (!method_exists($component, $method)) return [];
-        $entry = self::$attached[$component] ?? ['params' => [], 'route' => $component::class];
+        $entry = self::$attached[$component] ?? ['params' => [], 'route' => $component::class, 'services' => []];
 
-        return self::resolve(new ReflectionMethod($component, $method), $entry['params'], $entry['route'] ?: $component::class, strict: false);
+        return self::resolve(new ReflectionMethod($component, $method), $entry['params'], $entry['route'] ?: $component::class, strict: false, services: $entry['services']);
     }
 
     /**
@@ -72,8 +75,9 @@ final class RouteArguments
      *
      * @param class-string $class
      * @param array<string, string|int|float|bool|null> $params
+     * @param list<object> $services injected into class-typed parameters
      */
-    public static function instantiate(string $class, array $params, string $route): object
+    public static function instantiate(string $class, array $params, string $route, array $services = []): object
     {
         $reflection = new ReflectionClass($class);
         if (!$reflection->isInstantiable()) {
@@ -81,11 +85,11 @@ final class RouteArguments
         }
         $constructor = $reflection->getConstructor();
         if ($constructor !== null && $constructor->getNumberOfParameters() > 0) {
-            $screen = $reflection->newInstanceArgs(self::resolve($constructor, $params, $route, strict: false));
+            $screen = $reflection->newInstanceArgs(self::resolve($constructor, $params, $route, strict: false, services: $services));
         } else {
             $screen = $reflection->newInstance();
         }
-        self::attach($screen, $params, $route);
+        self::attach($screen, $params, $route, $services);
 
         return $screen;
     }
@@ -103,6 +107,7 @@ final class RouteArguments
         if ($function === null) return [];
         $signature = [];
         foreach ($function->getParameters() as $parameter) {
+            if (self::injectable($parameter)) continue;
             $type = $parameter->getType();
             $name = $type instanceof ReflectionNamedType ? $type->getName() : 'mixed';
             $enum = null;
@@ -138,17 +143,42 @@ final class RouteArguments
         return $constructor !== null && $constructor->getNumberOfParameters() > 0 ? $constructor : null;
     }
 
+    /** Class-typed (non-enum) parameters are services injected by type, not route params. */
+    public static function injectable(ReflectionParameter $parameter): bool
+    {
+        $type = $parameter->getType();
+
+        return $type instanceof ReflectionNamedType && !$type->isBuiltin()
+            && !is_a($type->getName(), BackedEnum::class, true);
+    }
+
     /**
      * @param array<string, string|int|float|bool|null> $params
+     * @param list<object> $services
      * @return array<string, mixed>
      */
-    public static function resolve(ReflectionFunctionAbstract $function, array $params, string $route, bool $strict): array
+    public static function resolve(ReflectionFunctionAbstract $function, array $params, string $route, bool $strict, array $services = []): array
     {
         $arguments = [];
         $known = [];
         foreach ($function->getParameters() as $parameter) {
             $name = $parameter->getName();
             $known[$name] = true;
+            if (self::injectable($parameter)) {
+                $type = $parameter->getType()->getName();
+                foreach ($services as $service) {
+                    if ($service instanceof $type) {
+                        $arguments[$name] = $service;
+                        continue 2;
+                    }
+                }
+                if ($parameter->isOptional()) continue;
+                if ($parameter->allowsNull()) {
+                    $arguments[$name] = null;
+                    continue;
+                }
+                throw new InvalidArgumentException("Route {$route} cannot inject {$type} \${$name}.");
+            }
             if (array_key_exists($name, $params)) {
                 $arguments[$name] = self::coerce($route, $parameter, $params[$name]);
                 continue;
@@ -192,6 +222,7 @@ final class RouteArguments
         $known = array_flip($extra);
         $coerced = [];
         foreach ($function->getParameters() as $parameter) {
+            if (self::injectable($parameter)) continue;
             $known[$parameter->getName()] = true;
             if (array_key_exists($parameter->getName(), $params)) {
                 $value = self::coerce($route, $parameter, $params[$parameter->getName()]);

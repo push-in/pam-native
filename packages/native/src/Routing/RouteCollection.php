@@ -30,8 +30,12 @@ final class RouteCollection
     private array $named = [];
     /** @var array<string, TabGroup> */
     private array $tabGroups = [];
-    /** @var list<array{middleware: list<string|Closure>, name: string, prefix: string}> */
+    /** @var list<array{middleware: list<string|Closure>, name: string, prefix: string, options: list<mixed>, errorBoundary: ?Closure}> */
     private array $groups = [];
+    /** @var class-string<\Pam\Native\Renderable>|Closure|null Route::layout() */
+    public string|Closure|null $layout = null;
+    /** Route::errorBoundary(): default boundary of every route without its own. */
+    public ?Closure $errorBoundary = null;
     private ?TabGroup $openTabs = null;
     public bool $linking = true;
     public bool $persist = false;
@@ -77,6 +81,7 @@ final class RouteCollection
             $this->openTabs?->host->routeName(),
         );
         $route->inheritMiddleware($this->activeMiddleware());
+        $this->inheritGroups($route);
         $this->routes[] = $route;
         $base = $this->namePrefix().self::nameFromPath($path);
         $name = $base;
@@ -137,10 +142,21 @@ final class RouteCollection
         $this->named[$name] = $route;
     }
 
-    /** @param list<string|Closure> $middleware @internal */
-    public function pushGroup(array $middleware, string $name, string $prefix): void
+    /** @param list<string|Closure> $middleware @param list<mixed> $options @internal */
+    public function pushGroup(array $middleware, string $name, string $prefix, array $options = [], ?Closure $errorBoundary = null): void
     {
-        $this->groups[] = ['middleware' => $middleware, 'name' => $name, 'prefix' => $prefix];
+        $this->groups[] = compact('middleware', 'name', 'prefix', 'options', 'errorBoundary');
+    }
+
+    private function inheritGroups(Route $route): void
+    {
+        $options = [];
+        $boundary = null;
+        foreach ($this->groups as $group) {
+            foreach ($group['options'] as $option) $options[] = $option;
+            $boundary = $group['errorBoundary'] ?? $boundary;
+        }
+        $route->inheritGroup($options, $boundary);
     }
 
     /** @internal */
@@ -232,7 +248,8 @@ final class RouteCollection
         return $middleware;
     }
 
-    private function prefixed(string $path): string
+    /** @internal */
+    public function prefixed(string $path): string
     {
         $prefix = '';
         foreach ($this->groups as $group) $prefix .= $group['prefix'];

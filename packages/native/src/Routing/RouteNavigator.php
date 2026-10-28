@@ -11,6 +11,7 @@ use LogicException;
 use Pam\Native\Component;
 use Pam\Native\Navigation\DeepLink;
 use Pam\Native\Navigation\NavigationLinkHandler;
+use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\Router;
@@ -49,9 +50,11 @@ final class RouteNavigator implements NavigationLinkHandler
     public function __construct(private readonly RouteCollection $routes)
     {
         $initial = $this->bootRoute();
+        // Same stack defaults as the pre-v2 Route::stack(): slide from right, 240 ms, fresh boot.
         $router = Router::stack($initial->routeName())
             ->persistence('routes')
-            ->restoreState($routes->persist);
+            ->restoreState($routes->persist)
+            ->transitions(NavigationTransition::SlideFromRight, 240);
         $fallback = null;
         foreach ($routes->all() as $route) {
             if ($route->kind === RouteKind::Tab) continue;
@@ -59,7 +62,9 @@ final class RouteNavigator implements NavigationLinkHandler
             $factory = $route->kind === RouteKind::Tabs
                 ? fn (): TabNavigator => $this->tabNavigator($route)
                 : fn (RouteContext $context): Renderable => $this->make($route, $context->all());
-            $router = $router->route($name, $factory, self::options($route));
+            $router = $router->route($name, $factory, self::options($route), $route->identity());
+            $boundary = $route->boundary() ?? $routes->errorBoundary;
+            if ($boundary !== null && $route->kind !== RouteKind::Tabs) $router = $router->errorBoundary($name, $boundary);
             if ($route->middleware() !== []) {
                 $router = $router->guard(
                     $name,
@@ -68,20 +73,43 @@ final class RouteNavigator implements NavigationLinkHandler
             } elseif ($fallback === null && $route->kind !== RouteKind::Tabs) {
                 $fallback = $name;
             }
-            if ($route->keepsAlive() || $route->kind === RouteKind::Tabs) $router = $router->keepAlive($name);
+            $keepAlive = $route->kind === RouteKind::Tabs ? true : $route->keepsAlive();
+            if ($keepAlive !== false) $router = $router->keepAlive($name, $keepAlive instanceof Closure ? $keepAlive : null);
         }
         if ($fallback !== null) $router = $router->guardFallback($fallback);
         $this->stack = $router->build();
         foreach ($routes->all() as $route) {
-            if ($route->linkable()) $this->links[] = [new DeepLink((string) $route->path, $route->routeName()), $route];
+            if (!$route->linkable()) continue;
+            foreach ([(string) $route->path, ...$route->aliases()] as $path) {
+                $this->links[] = [new DeepLink($path, $route->routeName()), $route];
+            }
         }
         \Pam\Native\Routing\Navigation::attach($this->stack);
     }
 
-    /** The native stack, for App::run() and pre-v2 APIs that take a Navigator. */
+    /** The native stack, for pre-v2 APIs that take a Navigator. */
     public function root(): Navigator
     {
         return $this->stack;
+    }
+
+    /** What App::run() mounts: the Route::layout() component around the stack, or the stack. */
+    public function view(): Renderable
+    {
+        $layout = $this->routes->layout;
+        if ($layout === null) return $this->stack;
+        $services = [$this->stack, $this];
+        if ($layout instanceof Closure) {
+            $view = $layout(...RouteArguments::resolve(new ReflectionFunction($layout), [], 'layout', strict: false, services: $services));
+        } else {
+            $view = RouteArguments::instantiate($layout, [], 'layout', $services);
+            if (!$view instanceof Component && method_exists($view, 'setup')) $view->setup(...RouteArguments::for($view));
+        }
+        if (!$view instanceof Renderable) {
+            throw new InvalidArgumentException('Route::layout() must produce a Renderable, '.get_debug_type($view).' given.');
+        }
+
+        return $view;
     }
 
     public function routes(): RouteCollection
@@ -208,15 +236,12 @@ final class RouteNavigator implements NavigationLinkHandler
     {
         $screen = $route->screen;
         $name = $route->routeName();
+        // Navigator, RouteContext and RouteNavigator are injected by type.
+        $services = [$this->stack, new RouteContext($name, $params), $this];
         if ($screen instanceof Closure) {
-            $reflection = new ReflectionFunction($screen);
-            $first = $reflection->getParameters()[0] ?? null;
-            $type = $first?->getType();
-            $result = $type instanceof \ReflectionNamedType && $type->getName() === RouteContext::class
-                ? $screen(new RouteContext($name, $params))
-                : $screen(...RouteArguments::resolve($reflection, $params, $name, strict: false));
+            $result = $screen(...RouteArguments::resolve(new ReflectionFunction($screen), $params, $name, strict: false, services: $services));
         } elseif (is_string($screen)) {
-            $result = RouteArguments::instantiate($screen, $params, $name);
+            $result = RouteArguments::instantiate($screen, $params, $name, $services);
             if (!$result instanceof Component && method_exists($result, 'setup')) {
                 $result->setup(...RouteArguments::for($result));
             }

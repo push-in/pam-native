@@ -78,6 +78,9 @@ pub struct RouteEntry {
     pub path: Option<String>,
     #[serde(default)]
     pub linkable: bool,
+    /// Extra paths from `->alias('/group/{id}')`.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// One derived link; maps onto `android.deepLinks` entries.
@@ -116,7 +119,8 @@ pub fn derive_links(options: &LinkOptions, manifest: &RouteManifest) -> Vec<Deri
         .routes
         .iter()
         .filter(|route| route.linkable)
-        .filter_map(|route| route.path.as_deref().and_then(path_prefix))
+        .flat_map(|route| route.path.iter().chain(route.aliases.iter()))
+        .filter_map(|path| path_prefix(path))
         .collect();
     for host in &options.hosts {
         for prefix in &prefixes {
@@ -220,7 +224,7 @@ mod tests {
                 {"name":"login","path":"/login","linkable":true,"kind":1},
                 {"name":"tabs","path":null,"linkable":false,"kind":4},
                 {"name":"chats","path":"/chats","linkable":true},
-                {"name":"chat","path":"/chat/{id}","linkable":true},
+                {"name":"chat","path":"/chat/{id}","linkable":true,"aliases":["/group/{id}"]},
                 {"name":"chat-topic","path":"/chat/{id}/topic/{topic}","linkable":true},
                 {"name":"home","path":"/","linkable":true},
                 {"name":"secret","path":"/secret","linkable":false}
@@ -254,7 +258,7 @@ mod tests {
             .filter(|link| link.scheme == "https")
             .map(|link| link.path_prefix.clone().unwrap())
             .collect();
-        assert_eq!(prefixes, vec!["/chat/", "/chats", "/login"]);
+        assert_eq!(prefixes, vec!["/chat/", "/chats", "/group/", "/login"]);
         assert!(links
             .iter()
             .filter(|link| link.scheme == "https")

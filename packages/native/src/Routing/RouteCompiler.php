@@ -108,6 +108,7 @@ final class RouteCompiler
                 'middleware' => array_values(array_filter($route->middleware(), is_string(...))),
                 'params' => $params,
                 'pathParams' => $route->pathParameters(),
+                'aliases' => $route->aliases(),
             ];
         }
         if ($errors !== []) throw new RuntimeException(implode("\n", $errors));
@@ -489,9 +490,9 @@ final class RouteCompiler
     {
         $signature = [];
         foreach ((new ReflectionFunction($closure))->getParameters() as $parameter) {
+            if (RouteArguments::injectable($parameter)) continue;
             $type = $parameter->getType();
             $name = $type instanceof ReflectionNamedType ? $type->getName() : 'mixed';
-            if ($name === \Pam\Native\Navigation\RouteContext::class) continue;
             $signature[] = [
                 'name' => $parameter->getName(),
                 'type' => $name,

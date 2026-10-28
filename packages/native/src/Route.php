@@ -13,7 +13,9 @@ use Pam\Native\Navigation\NavigationGestureDirection;
 use Pam\Native\Navigation\NavigationOrientation;
 use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
+use Pam\Native\Routing\RoutePreset;
 use Pam\Native\Routing\PendingRouteGroup;
 use Pam\Native\Routing\RedirectMode;
 use Pam\Native\Routing\RouteCollection;
@@ -24,6 +26,7 @@ use Pam\Native\Routing\TypedRoute;
 
 use function count;
 use function is_array;
+use function in_array;
 use function is_string;
 
 /**
@@ -57,14 +60,18 @@ final class Route
 {
     /** @var list<string|Closure> */
     private array $middleware = [];
-    /** @var list<ScreenOptionsPatch> */
+    /** @var list<ScreenOptionsPatch|ScreenOptions|Closure> */
     private array $options = [];
+    /** @var list<string> */
+    private array $aliases = [];
+    private ?Closure $identity = null;
+    private ?Closure $errorBoundary = null;
     private ?string $name = null;
     private ?string $icon = null;
     private ?string $label = null;
     private ?StatusBarAppearance $statusBar = null;
     private bool $statusBarHidden = false;
-    private bool $keepAlive = false;
+    private bool|Closure $keepAlive = false;
     private bool $initial = false;
     private bool $deepLink = true;
     /** @var array<string, string|int|float|bool|null> */
@@ -110,19 +117,39 @@ final class Route
     }
 
     /**
-     * @param array{middleware?: string|list<string>, name?: string, prefix?: string}|Closure $attributes
+     * Attributes: middleware, name, prefix, transition (NavigationTransition or
+     * [NavigationTransition, ms]), gestures (bool), presentation, orientation,
+     * options (ScreenOptionsPatch|Closure), errorBoundary (Closure). A
+     * RoutePreset or ScreenOptionsPatch is accepted as the options shorthand.
+     *
+     * @param array<string, mixed>|RoutePreset|ScreenOptionsPatch|Closure $attributes
      */
-    public static function group(array|Closure $attributes, ?Closure $routes = null): void
+    public static function group(array|RoutePreset|ScreenOptionsPatch|Closure $attributes, ?Closure $routes = null): void
     {
         if ($attributes instanceof Closure) {
             (new PendingRouteGroup())->group($attributes);
             return;
         }
-        $group = new PendingRouteGroup();
-        if (isset($attributes['middleware'])) $group = $group->middleware($attributes['middleware']);
-        if (isset($attributes['name'])) $group = $group->name($attributes['name']);
-        if (isset($attributes['prefix'])) $group = $group->prefix($attributes['prefix']);
-        $group->group($routes ?? throw new InvalidArgumentException('Route::group() needs a closure.'));
+        $routes ??= throw new InvalidArgumentException('Route::group() needs a closure.');
+        if (!is_array($attributes)) {
+            (new PendingRouteGroup())->options($attributes)->group($routes);
+            return;
+        }
+        PendingRouteGroup::fromAttributes($attributes)->group($routes);
+    }
+
+    /**
+     * Root layout (like a Laravel/Expo layout): the component wraps the whole
+     * stack. Its constructor/setup() receives the Navigator (or the
+     * RouteNavigator) by type, so it can draw gates, banners and hosts
+     * around or over the screens.
+     *
+     * @param class-string<Renderable>|Closure $layout
+     */
+    public static function layout(string|Closure $layout, ?Closure $routes = null): void
+    {
+        RouteCollection::current()->layout = $layout;
+        $routes?->__invoke();
     }
 
     /** Opt out of system deep links (`zechat://...`) for the whole router. */
@@ -144,6 +171,7 @@ final class Route
             'middleware' => (new PendingRouteGroup())->middleware(...$arguments),
             'name' => (new PendingRouteGroup())->name(...$arguments),
             'prefix' => (new PendingRouteGroup())->prefix(...$arguments),
+            'errorBoundary' => RouteCollection::current()->errorBoundary = $arguments[0] ?? null,
             default => throw new BadMethodCallException("Route::{$method}() does not exist."),
         };
     }
@@ -225,6 +253,7 @@ final class Route
         return match ($method) {
             'name' => $arguments === [] ? $this->routeName() : $this->named(...$arguments),
             'middleware' => $arguments === [] ? $this->middleware : $this->withMiddleware(...$arguments),
+            'errorBoundary' => $this->withErrorBoundary(...$arguments),
             default => throw new BadMethodCallException("Route->{$method}() does not exist."),
         };
     }
@@ -337,10 +366,37 @@ final class Route
         return $this->option('secure', $enabled);
     }
 
-    /** Keep the screen mounted (state, scroll) when it leaves the stack. */
-    public function keepAlive(bool $enabled = true): self
+    /**
+     * Keep the screen mounted (state, scroll) when it leaves the stack; a
+     * closure limits it to some entries: `fn (RouteContext $r) => !$r->has('id')`.
+     */
+    public function keepAlive(bool|Closure $when = true): self
     {
-        $this->keepAlive = $enabled;
+        $this->keepAlive = $when;
+
+        return $this;
+    }
+
+    /** Another path (and deep link) for this route, e.g. ->alias('/group/{chatId}'). Repeatable. */
+    public function alias(string $path): self
+    {
+        $path = RouteCollection::current()->prefixed($path);
+        new \Pam\Native\Navigation\DeepLink($path, 'probe');
+        if (!in_array($path, $this->aliases, true) && $path !== $this->path) $this->aliases[] = $path;
+
+        return $this;
+    }
+
+    /**
+     * Route identity: navigate() to an entry with the same identity goes
+     * back to it instead of pushing another, e.g.
+     * `->unique(fn (RouteContext $r) => 'chat:'.$r->chatId)`.
+     *
+     * @param Closure(\Pam\Native\Navigation\RouteContext): (string|int|null) $identity
+     */
+    public function unique(Closure $identity): self
+    {
+        $this->identity = $identity;
 
         return $this;
     }
@@ -361,9 +417,9 @@ final class Route
         return $this;
     }
 
-    public function options(ScreenOptionsPatch $patch): self
+    public function options(ScreenOptionsPatch|ScreenOptions|RoutePreset|Closure $options): self
     {
-        $this->options[] = $patch;
+        $this->options[] = $options instanceof RoutePreset ? $options->options : $options;
 
         return $this;
     }
@@ -428,16 +484,52 @@ final class Route
         return $this->statusBarHidden;
     }
 
-    /** @internal @return list<ScreenOptionsPatch> */
+    /** @internal @return list<ScreenOptionsPatch|ScreenOptions|Closure> */
     public function screenOptions(): array
     {
         return $this->options;
     }
 
     /** @internal */
-    public function keepsAlive(): bool
+    public function keepsAlive(): bool|Closure
     {
         return $this->keepAlive;
+    }
+
+    /** @internal @return list<string> */
+    public function aliases(): array
+    {
+        return $this->aliases;
+    }
+
+    /** @internal */
+    public function identity(): ?Closure
+    {
+        return $this->identity;
+    }
+
+    /** @internal */
+    public function boundary(): ?Closure
+    {
+        return $this->errorBoundary;
+    }
+
+    /**
+     * @internal Group attributes, applied under the route's own.
+     * @param list<ScreenOptionsPatch|ScreenOptions|Closure> $options
+     */
+    public function inheritGroup(array $options, ?Closure $errorBoundary): void
+    {
+        $this->options = [...$options, ...$this->options];
+        $this->errorBoundary ??= $errorBoundary;
+    }
+
+    /** @param Closure(\Throwable, \Pam\Native\Navigation\RouteContext, Closure(): void): Renderable $boundary */
+    private function withErrorBoundary(Closure $boundary): self
+    {
+        $this->errorBoundary = $boundary;
+
+        return $this;
     }
 
     /** @internal */
@@ -452,13 +544,13 @@ final class Route
         return $this->deepLink && $this->path !== null && $this->kind !== RouteKind::Tabs;
     }
 
-    /** @internal Path placeholders, e.g. ['id'] for /chat/{id}. @return list<string> */
+    /** @internal Placeholders of the path and aliases, e.g. ['id'] for /chat/{id}. @return list<string> */
     public function pathParameters(): array
     {
         if ($this->path === null) return [];
-        preg_match_all('/\{([A-Za-z][A-Za-z0-9_]{0,63})\??\}/', $this->path, $matches);
+        preg_match_all('/\{([A-Za-z][A-Za-z0-9_]{0,63})[?*]?\}/', implode('/', [$this->path, ...$this->aliases]), $matches);
 
-        return $matches[1];
+        return array_values(array_unique($matches[1]));
     }
 
     /** @internal */
