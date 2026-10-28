@@ -84,6 +84,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.PamAppearance
 import dev.pam.nativeapp.R
+import dev.pam.nativeapp.views.NativePropertyView
 import dev.pam.nativeapp.views.NativeViewRegistry
 import dev.pam.nativeapp.views.NativeChildVisibilityHost
 import org.json.JSONArray
@@ -873,7 +874,7 @@ class PamRenderer(
         for (index in 0 until views.size()) {
             when (val view = views.valueAt(index)) {
                 is PamMediaView -> view.onHostPause()
-                is PamWebView -> view.onHostPause()
+                is NativePropertyView -> view.pauseHost()
             }
         }
     }
@@ -890,7 +891,7 @@ class PamRenderer(
         for (index in 0 until views.size()) {
             when (val view = views.valueAt(index)) {
                 is PamMediaView -> view.onHostResume()
-                is PamWebView -> view.onHostResume()
+                is NativePropertyView -> view.resumeHost()
             }
         }
     }
@@ -1827,7 +1828,13 @@ class PamRenderer(
                 it.onActiveRouteChanged = ::applyMergedStatusBar
                 it.onRouteVisibilityChanged = ::scheduleRouteListenerSync
             }
-            NodeKind.WEB_VIEW -> PamWebView(context)
+            NodeKind.WEB_VIEW -> nativeViews.create("webview") { kind, payload ->
+                state?.let { dispatchBytes(it.id, kind, payload) }
+            }.also { view ->
+                (view as? NativePropertyView)?.onProtocolEvent = { kind, payload ->
+                    state?.let { dispatchBytes(it.id, kind, payload) }
+                }
+            }
             NodeKind.MEDIA -> PamMediaView(context, mediaCache, imageLoader).also {
                 it.boundViews = mediaBoundViews
             }
@@ -1887,7 +1894,6 @@ class PamRenderer(
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
         pamImageView(view)?.let(imageLoader::cancel)
-        (view as? PamWebView)?.destroy()
         view?.let(nativeViews::release)
         view?.let(::clearHitSlop)
         state.directiveLayoutListener?.let { listener ->
@@ -2586,7 +2592,6 @@ class PamRenderer(
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         pamImageView(view)?.let(imageLoader::cancel)
-        (view as? PamWebView)?.destroy()
         view.let(nativeViews::release)
         clearHitSlop(view)
         val navigationParent = views[state.parent] as? PamNavigationHost
@@ -3329,6 +3334,7 @@ class PamRenderer(
         key: PropKey,
         value: PropValue,
     ) {
+        (view as? NativePropertyView)?.applyProtocolProperty(key.value, value.protocolScalar())
         when (key) {
             PropKey.TEXT -> (view as? TextView)?.let { text ->
                 val semanticText = value.semanticValue().toString()
@@ -3679,19 +3685,13 @@ class PamRenderer(
                 (view as? PamModalHost)?.setBottomSheetCornerRadius(
                     value.decimal().toFloat(),
                 )
-            PropKey.WEB_VIEW_SOURCE -> (view as? PamWebView)?.setSource(value.text(key))
-            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED ->
-                (view as? PamWebView)?.setJavaScriptEnabled(value.flag())
-            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED ->
-                (view as? PamWebView)?.setDomStorageEnabled(value.flag())
-            PropKey.WEB_VIEW_USER_AGENT ->
-                (view as? PamWebView)?.setUserAgent(value.text(key))
-            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT ->
-                (view as? PamWebView)?.setInjectedJavaScript(value.text(key))
-            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA ->
-                (view as? PamWebView)?.setAllowsInlineMedia(value.flag())
-            PropKey.WEB_VIEW_ALLOWED_HOSTS ->
-                (view as? PamWebView)?.setAllowedHosts(value.text(key))
+            PropKey.WEB_VIEW_SOURCE -> Unit
+            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED -> Unit
+            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED -> Unit
+            PropKey.WEB_VIEW_USER_AGENT -> Unit
+            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT -> Unit
+            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA -> Unit
+            PropKey.WEB_VIEW_ALLOWED_HOSTS -> Unit
             PropKey.MEDIA_SOURCE -> (view as? PamMediaView)?.let {
                 configureMediaCache(it, state)
                 // An idle view never starts preparing its source (key order applies the source first).
@@ -3838,7 +3838,6 @@ class PamRenderer(
             PropKey.SCROLL_ENABLED -> when (view) {
                 is PamScrollContainer -> view.setScrollEnabled(value.flag())
                 is PamRecyclerList -> view.setScrollEnabled(value.flag())
-                is PamWebView -> view.setScrollEnabled(value.flag())
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
                 is PamScrollContainer -> view.setShowsScrollIndicator(value.flag())
@@ -3895,7 +3894,6 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setFillViewport(value.flag())
             PropKey.SCROLL_OVER_SCROLL_MODE -> when (view) {
                 is PamScrollContainer -> view.setOverScrollModeValue(value.integer().toInt())
-                is PamWebView -> view.setOverScrollModeValue(value.integer().toInt())
             }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(value.flag())
@@ -4295,6 +4293,7 @@ class PamRenderer(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
+        (view as? NativePropertyView)?.applyProtocolProperty(key.value, null)
         when (key) {
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
             PropKey.TEXT -> (view as? TextView)?.let { text ->
@@ -4535,7 +4534,6 @@ class PamRenderer(
             PropKey.SCROLL_ENABLED -> when (view) {
                 is PamScrollContainer -> view.setScrollEnabled(true)
                 is PamRecyclerList -> view.setScrollEnabled(true)
-                is PamWebView -> view.setScrollEnabled(true)
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
                 is PamScrollContainer -> view.setShowsScrollIndicator(false)
@@ -4580,7 +4578,6 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setFillViewport(true)
             PropKey.SCROLL_OVER_SCROLL_MODE -> when (view) {
                 is PamScrollContainer -> view.setOverScrollModeValue(1)
-                is PamWebView -> view.setOverScrollModeValue(1)
             }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(true)
@@ -4674,18 +4671,13 @@ class PamRenderer(
                 (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(1)
             PropKey.BOTTOM_SHEET_CORNER_RADIUS ->
                 (view as? PamModalHost)?.setBottomSheetCornerRadius(20f)
-            PropKey.WEB_VIEW_SOURCE -> (view as? PamWebView)?.setSource("")
-            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED ->
-                (view as? PamWebView)?.setJavaScriptEnabled(true)
-            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED ->
-                (view as? PamWebView)?.setDomStorageEnabled(true)
-            PropKey.WEB_VIEW_USER_AGENT -> (view as? PamWebView)?.setUserAgent("")
-            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT ->
-                (view as? PamWebView)?.setInjectedJavaScript("")
-            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA ->
-                (view as? PamWebView)?.setAllowsInlineMedia(true)
-            PropKey.WEB_VIEW_ALLOWED_HOSTS ->
-                (view as? PamWebView)?.setAllowedHosts("")
+            PropKey.WEB_VIEW_SOURCE -> Unit
+            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED -> Unit
+            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED -> Unit
+            PropKey.WEB_VIEW_USER_AGENT -> Unit
+            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT -> Unit
+            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA -> Unit
+            PropKey.WEB_VIEW_ALLOWED_HOSTS -> Unit
             PropKey.MEDIA_SOURCE -> (view as? PamMediaView)?.setSource("")
             PropKey.MEDIA_TYPE -> Unit
             PropKey.MEDIA_AUTO_PLAY -> (view as? PamMediaView)?.setAutoPlay(false)
@@ -5133,34 +5125,6 @@ class PamRenderer(
                     dispatch(state.id, EVENT_BOTTOM_SHEET_DISMISS)
                 },
             )
-        }
-        if (view is PamWebView) {
-            view.onLoad = state.callback(PropKey.ON_WEB_VIEW_LOAD) {
-                dispatch(state.id, EventKind.WEB_VIEW_LOAD.value)
-            }
-            view.onError = if (state.properties[PropKey.ON_WEB_VIEW_ERROR] != null) {
-                { message ->
-                    dispatchBytes(
-                        state.id,
-                        EventKind.WEB_VIEW_ERROR.value,
-                        WireMap.encode(mapOf("message" to WireValue.Text(message))),
-                    )
-                }
-            } else null
-            view.onMessage = if (state.properties[PropKey.ON_WEB_VIEW_MESSAGE] != null) {
-                { message, pageUrl ->
-                    dispatchBytes(
-                        state.id,
-                        EventKind.WEB_VIEW_MESSAGE.value,
-                        WireMap.encode(
-                            mapOf(
-                                "message" to WireValue.Text(message),
-                                "url" to WireValue.Text(pageUrl),
-                            ),
-                        ),
-                    )
-                }
-            } else null
         }
         if (view is PamMediaView) {
             view.onReady = null
@@ -11009,4 +10973,12 @@ private class PamTextTransformMethod(
     private companion object {
         val WORD_BOUNDARY = Regex("(?<=\\s)|(?=\\s)")
     }
+}
+
+private fun PropValue.protocolScalar(): WireValue? = when (this) {
+    is PropValue.Text -> WireValue.Text(value)
+    is PropValue.Integer -> WireValue.Integer(value)
+    is PropValue.Decimal -> WireValue.Decimal(value)
+    is PropValue.Flag -> WireValue.Flag(value)
+    else -> null
 }

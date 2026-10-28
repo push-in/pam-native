@@ -148,30 +148,21 @@ class RetainedEventModulesInstrumentedTest {
                 })
             }
             listen(old, "linking", "nextUrl")
-            listen(old, "incoming-share", "next")
-            listen(old, "notifications", "nextPushEvent")
-            listen(old, "notifications", "nextAction")
             val replacement = NativeModuleRegistry(activity, old)
             try {
                 old.retire()
                 assertTrue("Activity replacement must not fail retained PHP listeners: $results", results.isEmpty())
                 PamDeepLinks.reportOpened("https://example.test/retained")
-                PamIncomingShares.reportOpened(activity, Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "retained event")
-                })
-                PamPushNotifications.reportReceived("retained-test", dataJson = "{}")
-                assertEquals(listOf("linking", "incoming-share", "notifications"), results.map { it.first })
+                assertEquals(listOf("linking"), results.map { it.first })
                 assertTrue(results.all { it.second == ModuleResultStatus.SUCCESS })
                 // Delivery must permit the normal PHP re-arm through the new registry.
                 listen(replacement, "linking", "nextUrl")
                 PamDeepLinks.reportOpened("https://example.test/rearmed")
-                assertEquals(4, results.size)
+                assertEquals(2, results.size)
                 assertEquals(ModuleResultStatus.SUCCESS, results.last().second)
-                // The old notification-action waiter still belongs to the live runtime.
+                // Closing the runtime does not manufacture an extra link event.
                 replacement.close()
-                assertEquals("notifications" to ModuleResultStatus.FAILURE, results.last())
-                assertEquals(5, results.size)
+                assertEquals(2, results.size)
             } finally {
                 replacement.prepareReload()
                 replacement.close()

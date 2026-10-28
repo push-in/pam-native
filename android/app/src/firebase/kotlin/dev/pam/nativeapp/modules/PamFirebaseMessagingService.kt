@@ -11,7 +11,6 @@ import org.json.JSONObject
  */
 public class PamFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        PamPushNotifications.attach(applicationContext)
         val data = JSONObject()
         message.data.forEach { (key, value) -> data.put(key, value) }
         val notification = message.notification
@@ -26,19 +25,6 @@ public class PamFirebaseMessagingService : FirebaseMessagingService() {
         val title = notification?.title ?: message.data["title"].orEmpty()
         val body = notification?.body ?: message.data["body"].orEmpty()
         val dataJson = data.toString()
-        val rendered = notification == null &&
-            PamPushRendering.render(applicationContext, id, title, body, dataJson)
-        if (rendered) {
-            PamPushNotifications.reportRendered(id, title, body, dataJson, deepLink)
-        } else {
-            PamPushNotifications.reportReceived(
-                id = id,
-                title = title,
-                body = body,
-                dataJson = dataJson,
-                deepLink = deepLink,
-            )
-        }
         sendBroadcast(
             BackgroundPush.receivedIntent(
                 context = applicationContext,

@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### 1.46.0 (prepared, unpublished)
+
+- Wave two: notifications, incoming shares, biometrics, media library/system
+  capture/view capture, and WebView move to optional plugins. Deprecated
+  `MovedToPlugin` PHP aliases remain until 1.47; `suggest` lists their packages.
+- Generic plugin hooks: activity intents/foreground/reload, permission and
+  native-ref hosts, PHP runtime reset/route focus, reserved-node property/event
+  delegation. The WebView NodeKind stays reserved and delegates to its plugin.
+- iOS keeps push-provider/delegate hooks and photo-URI helpers used by basic
+  Image/MediaPlayer/Files; optional notification presentation leaves the core.
+
+- Core slimming (the core keeps only runtime, protocol, renderer/layout,
+  primitives, navigation, state, basic HTTP, gestures/a11y, storage and the
+  generic hooks plugins need). Moved to plugins, each with its native
+  module, permissions and dependencies:
+  - `System\Location` and `LocationError`/`LocationPosition`/
+    `LocationServicesResult` → `pushinbr/pam-native-location`
+    (`Pam\Native\Location\*`). Play Services Location and the location
+    permissions leave the core Android build.
+  - `System\Contacts`, `Contact` and `System\Sms` →
+    `pushinbr/pam-native-contacts` (`Pam\Native\Contacts\*`); the
+    contacts permission leaves the core manifest.
+  - `System\Sensors`, `SensorReading`, `SensorType` →
+    `pushinbr/pam-native-sensors` (`Pam\Native\Sensors\*`); the core
+    `NativeOperation::SensorRead` (19) stays reserved and answers a failure
+    that names the plugin.
+  - `System\AudioRecorder`, `AudioRecording`, `AudioRecordingProgress` →
+    `pushinbr/pam-native-audio` (`Pam\Native\Audio\*`).
+  - `System\ImageEditor`, `ImageCropRatio`, `ImageFilterType`,
+    `ImageTextLayerStyle` → the media editor plugin
+    (`Pam\Native\MediaEditor\*`).
+  Migration: every old class name is a deprecated shim for 1.46 only. With
+  the plugin installed it is an alias of the plugin class (same class, so
+  `instanceof`, enum cases and type hints keep working); without it the
+  autoload throws `PluginException` with the exact `composer require`. The
+  plugins are listed under `suggest`. The shims are removed in 1.47.
+- Plugin API (generic hooks the moved modules need): `WatchChannel`
+  (bounded watch/next/stop channel) moves to the Android plugin API and is
+  public on iOS; Android `ActivityResultHost` (implemented by the PAM
+  activity) lets a plugin module start a system screen and get its result.
+
+
 ## 1.45.1 - 2026-10-28
 
 Fixes on top of 1.45.0, no protocol change (core and extension identifiers as in 1.45.0).

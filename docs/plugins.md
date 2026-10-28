@@ -13,6 +13,37 @@ Pam Native plugins are ordinary Composer packages. One package can publish:
 Discovery and autolinking happen at build time. Production apps do not scan
 classpaths, load DEX files, or parse plugin JSON during a frame.
 
+## Core and plugins
+
+The core keeps only the base every app needs: runtime and protocol,
+renderer and layout, primitives, navigation, state and reactivity, basic
+HTTP, gestures, keyboard, accessibility and storage, plus the generic hooks
+plugins build on. A feature that not every app uses ships as a
+`pam-native-*` plugin.
+
+Generic hooks for plugin modules (Android `:plugin-api`, iOS `PamNative`):
+
+- `WatchChannel`: bounded single-reader channel for `watch`/`next`/`stop`
+  observations (location fixes, sensor readings, recorder levels).
+- Android `ActivityResultHost`: the PAM activity implements it; a module
+  created with that activity as its context starts a system screen
+  (`launchForResult`, `launchIntentSenderForResult`) and receives the result.
+
+Moved out of the core in 1.46 (the old class names are deprecated aliases
+for 1.46 only and throw `PluginException` naming the package when it is not
+installed):
+
+| Old core class | Plugin | New class |
+| --- | --- | --- |
+| `System\Location`, `LocationError`, `LocationPosition`, `LocationServicesResult` | `pushinbr/pam-native-location` | `Pam\Native\Location\*` |
+| `System\Contacts`, `Contact`, `System\Sms` | `pushinbr/pam-native-contacts` | `Pam\Native\Contacts\*` |
+| `System\Sensors`, `SensorReading`, `SensorType` | `pushinbr/pam-native-sensors` | `Pam\Native\Sensors\*` |
+| `System\AudioRecorder`, `AudioRecording`, `AudioRecordingProgress` | `pushinbr/pam-native-audio` | `Pam\Native\Audio\*` |
+| `System\ImageEditor`, `ImageCropRatio`, `ImageFilterType`, `ImageTextLayerStyle` | media editor plugin | `Pam\Native\MediaEditor\*` |
+
+The native module names (`location`, `contacts`, `sms`, `sensors`,
+`audio-recorder`, `image-editor`) and their wire payloads did not change.
+
 ## Install and inspect
 
 ```bash
@@ -428,3 +459,20 @@ PAM deliberately does not execute arbitrary package-provided Gradle scripts.
 The declared integration surface covers source, View/Compose AARs, Maven
 dependencies, resources, assets, manifests, JNI, and R8 while keeping builds
 auditable.
+
+
+### Core extraction, wave two (1.46)
+
+| Capability | Package | Canonical PHP namespace |
+| --- | --- | --- |
+| Notifications | pushinbr/pam-native-notifications | Pam\Native\Notifications (domain builders under Contracts) |
+| Media library/capture/view capture | pushinbr/pam-native-media | Pam\Native\Media |
+| Incoming shares | pushinbr/pam-native-share-extension | Pam\Native\ShareExtension |
+| Biometrics compatibility | pushinbr/pam-native-auth | Pam\Native\Auth\LegacyBiometrics |
+| WebView | pushinbr/pam-native-webview | Pam\Native\WebView |
+
+The core ships aliases for one minor version. Removing a plugin makes its old
+PHP facade fail with the exact Composer package to install. Existing numeric
+protocol keys and native module names remain reserved. WebView's reserved node
+uses the registered `webview` factory and the generic `NativePropertyView`
+bridge; core layout still handles its ordinary Element properties.

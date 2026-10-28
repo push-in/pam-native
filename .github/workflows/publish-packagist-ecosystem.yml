@@ -11,6 +11,10 @@ on:
           - pam-native-sync
           - pam-native-laravel-sync
           - pam-native-nitro
+          - pam-native-location
+          - pam-native-contacts
+          - pam-native-sensors
+          - pam-native-audio
       release_tag:
         description: Existing immutable v* GitHub release tag
         required: true
@@ -51,6 +55,10 @@ jobs:
               repository=push-in/pam-native-nitro
               composer=pushinbr/pam-native-nitro
               ;;
+            pam-native-location|pam-native-contacts|pam-native-sensors|pam-native-audio)
+              repository="push-in/${PACKAGE}"
+              composer="pushinbr/${PACKAGE}"
+              ;;
             *)
               printf 'Package is not allowlisted.\n' >&2
               exit 2
@@ -83,6 +91,7 @@ jobs:
 
       - name: Refresh Packagist metadata
         env:
+          COMPOSER_PACKAGE: ${{ steps.package.outputs.composer }}
           PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
           PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
           REPOSITORY: ${{ steps.package.outputs.repository }}
@@ -97,6 +106,22 @@ jobs:
           ')
           encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
           encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
+          # A plugin moved out of the core is new on Packagist: register it once.
+          if ! curl --proto '=https' --tlsv1.2 --fail --silent --output /dev/null \
+            "https://repo.packagist.org/p2/${COMPOSER_PACKAGE}.json"; then
+            create=$(php -r '
+              echo json_encode(
+                ["repository" => "https://github.com/".getenv("REPOSITORY")],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+              );
+            ')
+            curl --proto '=https' --tlsv1.2 \
+              --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --data "${create}" \
+              "https://packagist.org/api/create-package?username=${encoded_username}&apiToken=${encoded_token}"
+          fi
           curl --proto '=https' --tlsv1.2 \
             --fail --silent --show-error \
             --request POST \
@@ -110,14 +135,14 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           for attempt in $(seq 1 24); do
-            latest=$(curl --proto '=https' --tlsv1.2 \
+            latest=$( (curl --proto '=https' --tlsv1.2 \
               --fail --silent --show-error \
-              "https://repo.packagist.org/p2/${COMPOSER_PACKAGE}.json" |
+              "https://repo.packagist.org/p2/${COMPOSER_PACKAGE}.json" || printf '{}') |
               php -r '
                 $metadata = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
                 $versions = array_values($metadata["packages"])[0] ?? [];
                 echo $versions[0]["version"] ?? "";
-              ')
+              ') || latest=''
             if [[ "${latest}" == "${RELEASE_TAG}" ]]; then
               printf '%s is public at %s\n' "${COMPOSER_PACKAGE}" "${RELEASE_TAG}"
               exit 0

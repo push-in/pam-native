@@ -6,28 +6,17 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let system = SystemModule()
     private let sqlite = SQLiteModule()
     private let files = FilesModule()
-    private let notifications = NotificationsModule()
     private let linking = LinkingModule()
     private let cache = CacheModule()
     private let background = BackgroundModule()
     private let device = DeviceModule()
     private let permissions = PermissionsModule()
-    private let sensors = SensorsModule()
-    private let contacts = ContactsModule()
-    private let sms = SmsModule()
-    private let location = LocationModule()
-    private let audioRecorder = AudioRecorderModule()
-    private let imageEditor = ImageEditorModule()
-    private let incomingShare = IncomingShareModule()
-    private let mediaLibrary = MediaLibraryModule()
     private let timers = TimersModule()
     private let appearance = AppearanceModule()
     private let window = WindowModule()
     private let accessibility = AccessibilityModule()
-    private let biometrics = BiometricsModule()
     private let secureStorage = SecureStorageModule()
     private let image = ImagePrefetchModule()
-    private let viewCapture = ViewCaptureModule()
     private let viewRef = ViewRefModule()
     private let modules: [String: NativeModule]
 
@@ -37,28 +26,17 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "storage": storage,
             "sqlite": sqlite,
             "files": files,
-            "notifications": notifications,
             "linking": linking,
             "cache": cache,
             "background": background,
             "device": device,
             "permissions": permissions,
-            "sensors": sensors,
-            "contacts": contacts,
-            "sms": sms,
-            "location": location,
-            "audio-recorder": audioRecorder,
-            "image-editor": imageEditor,
-            "incoming-share": incomingShare,
-            "media-library": mediaLibrary,
             "timers": timers,
             "appearance": appearance,
             "window": window,
             "accessibility": accessibility,
-            "biometrics": biometrics,
             "secure-storage": secureStorage,
             "image": image,
-            "view-capture": viewCapture,
             "view-ref": viewRef,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }

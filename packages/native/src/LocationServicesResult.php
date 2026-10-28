@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-/** Outcome of Location::requestServices() (the system location switch, not the permission). */
-enum LocationServicesResult: int
-{
-    /** Location services are on (already, or the user accepted the system dialog). */
-    case Enabled = 1;
-    /** The user dismissed the system "turn on location" dialog. Do not ask again right away. */
-    case Denied = 2;
-    /** No dialog is possible (no Play Services, no activity, iOS): offer Location::openSettings(). */
-    case Unavailable = 3;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+/*
+ * Deprecated since 1.46.0: LocationServicesResult moved to the pushinbr/pam-native-location plugin as
+ * \Pam\Native\Location\LocationServicesResult. This shim aliases the old name while the plugin is
+ * installed and is removed in 1.47.0.
+ */
+MovedToPlugin::alias('Pam\\Native\\LocationServicesResult', 'Pam\\Native\\Location\\LocationServicesResult', 'pushinbr/pam-native-location');

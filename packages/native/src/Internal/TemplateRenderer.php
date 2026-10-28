@@ -5193,7 +5193,7 @@ final class TemplateRenderer
     }
 
     /**
-     * Skeleton shimmer matching the Zé Chat native shimmer: `baseColor`
+     * Skeleton shimmer matching the common native shimmer: `baseColor`
      * fills the box, a `gradientColor` highlight sweeps left to right every
      * `duration` ms; children render on top. Clips to its radius.
      *

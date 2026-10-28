@@ -4,14 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-final readonly class IncomingShare
-{
-    /** @param list<FileReference> $files */
-    public function __construct(
-        public string $text,
-        public string $subject,
-        public string $mimeType,
-        public array $files,
-    ) {
-    }
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\IncomingShare', 'Pam\\Native\\ShareExtension\\IncomingShare', 'pushinbr/pam-native-share-extension');

@@ -1790,7 +1790,9 @@ public final class PamRenderer: @unchecked Sendable {
         case .navigationHost:
             return PamNavigationHost()
         case .webView:
-            return PamWebView()
+            return nativeViews.create(name: "webview") { [weak self] kind, payload in
+                self?.dispatchEvent(spec.id, kind, payload)
+            }
         case .media:
             let media = PamMediaView()
             // Local poster sources (asset://, pam-file://, data:) decode like images.
@@ -2188,21 +2190,6 @@ public final class PamRenderer: @unchecked Sendable {
                 handleBottomSheetDismiss: eventProperties.contains(PamConstants.onBottomSheetDismiss),
             )
             eventBridges[nodeId]?[EventKind.modalRequestClose.rawValue] = bridge
-        }
-        if let webView = view as? PamWebView {
-            webView.onLoad = eventProperties.contains(PamConstants.onWebViewLoad) ? {
-                [weak self] in self?.dispatchEvent(nodeId, EventKind.webViewLoad.rawValue, Data())
-            } : nil
-            webView.onError = eventProperties.contains(PamConstants.onWebViewError) ? {
-                [weak self] message in
-                let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
-                self?.dispatchEvent(nodeId, EventKind.webViewError.rawValue, payload)
-            } : nil
-            webView.onMessage = eventProperties.contains(PamConstants.onWebViewMessage) ? {
-                [weak self] message, pageUrl in
-                let payload = (try? WireMap.encode(["message": .text(message), "url": .text(pageUrl)])) ?? Data()
-                self?.dispatchEvent(nodeId, EventKind.webViewMessage.rawValue, payload)
-            } : nil
         }
         if let drawing = view as? PamDrawingCanvas {
             drawing.onDrawingChange = eventProperties.contains(PamConstants.onChange) ? {
@@ -2707,6 +2694,10 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
+        if let plugin = view as? NativePropertyView {
+            plugin.onProtocolEvent = { [weak self] kind, payload in self?.dispatchEvent(nodeId, kind, payload) }
+            plugin.applyProtocolProperty(key: key, value: value.protocolScalar)
+        }
         switch key {
         case PamConstants.text:
             if let textValue = value.textOrNil() {
@@ -3146,20 +3137,13 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamModalHost)?.setBottomSheetCornerRadius(
                 CGFloat(value.decimalOrZero())
             )
-        case PamConstants.webViewSource:
-            (view as? PamWebView)?.setSource(value.textOrNil() ?? "")
-        case PamConstants.webViewJavaScriptEnabled:
-            (view as? PamWebView)?.setJavaScriptEnabled(value.boolOrNil() ?? true)
-        case PamConstants.webViewDomStorageEnabled:
-            (view as? PamWebView)?.setDomStorageEnabled(value.boolOrNil() ?? true)
-        case PamConstants.webViewUserAgent:
-            (view as? PamWebView)?.setUserAgent(value.textOrNil() ?? "")
-        case PamConstants.webViewInjectedJavaScript:
-            (view as? PamWebView)?.setInjectedJavaScript(value.textOrNil() ?? "")
-        case PamConstants.webViewAllowsInlineMedia:
-            (view as? PamWebView)?.setAllowsInlineMedia(value.boolOrNil() ?? true)
-        case PamConstants.webViewAllowedHosts:
-            (view as? PamWebView)?.setAllowedHosts(value.textOrNil() ?? "")
+        case PamConstants.webViewSource: break
+        case PamConstants.webViewJavaScriptEnabled: break
+        case PamConstants.webViewDomStorageEnabled: break
+        case PamConstants.webViewUserAgent: break
+        case PamConstants.webViewInjectedJavaScript: break
+        case PamConstants.webViewAllowsInlineMedia: break
+        case PamConstants.webViewAllowedHosts: break
         case PamConstants.mediaSource:
             if let media = view as? PamMediaView, let state = nodes[nodeId] {
                 configureMediaCache(media, state: state)
@@ -3280,8 +3264,6 @@ public final class PamRenderer: @unchecked Sendable {
                 let enabled = value.boolOrNil() ?? true
                 scroll.isScrollEnabled = enabled
                 if !enabled { scroll.pamStopDeceleration() }
-            } else if let webView = view as? PamWebView {
-                webView.setScrollEnabled(value.boolOrNil() ?? true)
             }
         case PamConstants.showsScrollIndicator:
             if let scroll = view as? UIScrollView {
@@ -3458,6 +3440,7 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func resetProperty(view: UIView, nodeId: Int64, key: Int, state: NodeState) {
+        (view as? NativePropertyView)?.applyProtocolProperty(key: key, value: nil)
         switch key {
         // A removed value (a class toggled off) goes back to its default
         // through the declared transition, like any other change; re-adding
@@ -3720,20 +3703,13 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(1)
         case PamConstants.bottomSheetCornerRadius:
             (view as? PamModalHost)?.setBottomSheetCornerRadius(20)
-        case PamConstants.webViewSource:
-            (view as? PamWebView)?.setSource("")
-        case PamConstants.webViewJavaScriptEnabled:
-            (view as? PamWebView)?.setJavaScriptEnabled(true)
-        case PamConstants.webViewDomStorageEnabled:
-            (view as? PamWebView)?.setDomStorageEnabled(true)
-        case PamConstants.webViewUserAgent:
-            (view as? PamWebView)?.setUserAgent("")
-        case PamConstants.webViewInjectedJavaScript:
-            (view as? PamWebView)?.setInjectedJavaScript("")
-        case PamConstants.webViewAllowsInlineMedia:
-            (view as? PamWebView)?.setAllowsInlineMedia(true)
-        case PamConstants.webViewAllowedHosts:
-            (view as? PamWebView)?.setAllowedHosts("")
+        case PamConstants.webViewSource: break
+        case PamConstants.webViewJavaScriptEnabled: break
+        case PamConstants.webViewDomStorageEnabled: break
+        case PamConstants.webViewUserAgent: break
+        case PamConstants.webViewInjectedJavaScript: break
+        case PamConstants.webViewAllowsInlineMedia: break
+        case PamConstants.webViewAllowedHosts: break
         case PamConstants.mediaSource:
             (view as? PamMediaView)?.setSource("")
         case PamConstants.mediaType:
@@ -3837,7 +3813,6 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamVirtualListView)?.pamRemoveClippedSubviews = true
         case PamConstants.scrollEnabled:
             (view as? UIScrollView)?.isScrollEnabled = true
-            (view as? PamWebView)?.setScrollEnabled(true)
         case PamConstants.showsScrollIndicator:
             if let scroll = view as? UIScrollView {
                 (scroll as? PamAnchoredScrollView)?.pamShowsScrollIndicator = true
@@ -7705,5 +7680,17 @@ extension UIColor {
         let b = CGFloat(value & 0xFF) / 255.0
         let a = CGFloat((value >> 24) & 0xFF) / 255.0
         self.init(red: r, green: g, blue: b, alpha: a)
+    }
+}
+
+private extension PropValue {
+    var protocolScalar: WireValue? {
+        switch self {
+        case let .text(value): return .text(value)
+        case let .integer(value): return .integer(value)
+        case let .decimal(value): return .decimal(value)
+        case let .flag(value): return .flag(value)
+        default: return nil
+        }
     }
 }

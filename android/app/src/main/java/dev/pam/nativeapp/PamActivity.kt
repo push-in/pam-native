@@ -43,11 +43,9 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import dev.pam.nativeapp.render.PamRootHost
-import dev.pam.nativeapp.modules.PamPushNotifications
-import dev.pam.nativeapp.modules.PamIncomingShares
 import dev.pam.nativeapp.modules.PamDeepLinks
 
-class PamActivity : FragmentActivity() {
+class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, NativeRefHost {
     internal lateinit var rootHost: PamRootHost
     /** The renderer of this surface: ViewCapture finds `nativeRef` views through it. */
     private var activeRenderer: PamRenderer? = null
@@ -84,7 +82,7 @@ class PamActivity : FragmentActivity() {
     private var fullyDrawnReported = false
 
     /** ViewCapture: the mounted view tagged with `nativeRef` [ref], if any. */
-    internal fun viewForNativeRef(ref: String): View? = activeRenderer?.viewForNativeRef(ref)
+    override fun viewForNativeRef(ref: String): View? = activeRenderer?.viewForNativeRef(ref)
 
     /** ViewRef module: the renderer that owns `nativeRef` views of this surface. */
     internal fun nativeRefRenderer(): dev.pam.nativeapp.render.PamRenderer? = activeRenderer
@@ -214,8 +212,7 @@ class PamActivity : FragmentActivity() {
             )
             // PHP reads its launch intent while booting.
             PamDeepLinks.captureInitial(intent?.dataString)
-            PamIncomingShares.captureInitial(this, intent)
-            reportNotificationOpen(intent)
+            HostEvents.initialIntent(this, intent)
             // API 30+ reports the window bounds and system-bar/cutout insets
             // before the first layout: PHP boots now, while the rest of the
             // native surface is built and the window runs its first
@@ -282,8 +279,7 @@ class PamActivity : FragmentActivity() {
         if (retained != null) {
             // PHP already consumed its launch intent; this one is a new open.
             intent?.dataString?.let(PamDeepLinks::reportOpened)
-            intent?.let { PamIncomingShares.reportOpened(this, it) }
-            reportNotificationOpen(intent)
+            HostEvents.openedIntent(this, intent)
             runtimeEntryPath = PamRuntimeHost.entryPath
             runtimeStarted = true
             bindRuntimeSurface()
@@ -439,7 +435,7 @@ class PamActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        dev.pam.nativeapp.modules.PamActiveRoute.setForeground(true)
+        HostEvents.foreground(true)
         if (runtimeStarted) {
             runtime.onHostResume()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_ACTIVE.toString().toByteArray())
@@ -450,12 +446,11 @@ class PamActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         PamDeepLinks.reportOpened(intent.dataString)
-        PamIncomingShares.reportOpened(this, intent)
-        reportNotificationOpen(intent)
+        HostEvents.openedIntent(this, intent)
     }
 
     override fun onPause() {
-        dev.pam.nativeapp.modules.PamActiveRoute.setForeground(false)
+        HostEvents.foreground(false)
         if (runtimeStarted) {
             runtime.onHostPause()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_INACTIVE.toString().toByteArray())
@@ -530,8 +525,11 @@ class PamActivity : FragmentActivity() {
         runtime.dispatchBack()
     }
 
+    override val isActivityResultHostActive: Boolean
+        get() = !isFinishing && !isDestroyed
+
     @Suppress("DEPRECATION")
-    internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
+    override fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
         try {
@@ -544,7 +542,7 @@ class PamActivity : FragmentActivity() {
 
     /** Like launchForResult for a PendingIntent's sender (Play Services resolution dialogs). */
     @Suppress("DEPRECATION")
-    internal fun launchIntentSenderForResult(sender: IntentSender, callback: (Int, Intent?) -> Unit) {
+    override fun launchIntentSenderForResult(sender: IntentSender, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
         try {
@@ -706,7 +704,7 @@ class PamActivity : FragmentActivity() {
         }
     }
 
-    fun requestPamPermission(permission: String, callback: (Boolean) -> Unit) {
+    override fun requestPamPermission(permission: String, callback: (Boolean) -> Unit) {
         if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
             callback(true)
             return
@@ -717,7 +715,7 @@ class PamActivity : FragmentActivity() {
         requestPermissions(arrayOf(permission), request)
     }
 
-    fun requestPamPermissions(permissions: Array<String>, callback: (Boolean) -> Unit) {
+    override fun requestPamPermissions(permissions: Array<String>, callback: (Boolean) -> Unit) {
         if (permissions.any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
             callback(true)
             return
@@ -732,7 +730,7 @@ class PamActivity : FragmentActivity() {
      * Requests [permissions] even when one is already granted: on Android 14+
      * with partial media access this shows the photo/video selection again.
      */
-    fun requestPamPermissionsAgain(permissions: Array<String>, callback: (Boolean) -> Unit) {
+    override fun requestPamPermissionsAgain(permissions: Array<String>, callback: (Boolean) -> Unit) {
         val request = nextPermissionRequest++
         if (nextPermissionRequest > 60_000) nextPermissionRequest = 40_000
         permissionCallbacks[request] = callback
@@ -824,17 +822,6 @@ class PamActivity : FragmentActivity() {
         return true
     }
 
-    private fun reportNotificationOpen(intent: Intent?) {
-        if (intent?.getBooleanExtra("pam.notification.opened", false) != true) return
-        PamPushNotifications.reportOpened(
-            id = intent.getStringExtra("pam.notification.id").orEmpty(),
-            title = intent.getStringExtra("pam.notification.title").orEmpty(),
-            body = intent.getStringExtra("pam.notification.body").orEmpty(),
-            dataJson = intent.getStringExtra("pam.notification.data").orEmpty().ifEmpty { "{}" },
-            deepLink = intent.getStringExtra("pam.notification.deepLink").orEmpty(),
-        )
-        intent.removeExtra("pam.notification.opened")
-    }
 
     private fun isDarkAppearance(): Boolean = PamAppearance.isDark(this)
 

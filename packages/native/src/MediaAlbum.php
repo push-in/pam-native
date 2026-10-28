@@ -4,13 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-final readonly class MediaAlbum
-{
-    public function __construct(
-        public string $id,
-        public string $title,
-        public int $count,
-        public string $coverUri,
-    ) {
-    }
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\MediaAlbum', 'Pam\\Native\\Media\\MediaAlbum', 'pushinbr/pam-native-media');

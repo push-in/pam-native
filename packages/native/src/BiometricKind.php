@@ -4,12 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-/** Biometric hardware the device can authenticate with (System\Biometrics::status). */
-enum BiometricKind: int
-{
-    case None = 1;
-    case Fingerprint = 2;
-    case Face = 3;
-    case Iris = 4;
-    case Other = 5;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\BiometricKind', 'Pam\\Native\\Auth\\BiometricKind', 'pushinbr/pam-native-auth');

@@ -18,6 +18,17 @@
     "require": {
         "php": "^8.5"
     },
+    "suggest": {
+        "pushinbr/pam-native-audio": "Voice recorder (moved out of the core in 1.46: Pam\\Native\\Audio\\AudioRecorder) and the headless audio player.",
+        "pushinbr/pam-native-contacts": "Device contacts and the SMS composer (moved out of the core in 1.46: Pam\\Native\\Contacts\\Contacts, Sms).",
+        "pushinbr/pam-native-location": "Device location (moved out of the core in 1.46: Pam\\Native\\Location\\Location).",
+        "pushinbr/pam-native-sensors": "Motion sensors (moved out of the core in 1.46: Pam\\Native\\Sensors\\Sensors).",
+        "pushinbr/pam-native-media": "Media library, system capture and view capture.",
+        "pushinbr/pam-native-auth": "Biometric authentication.",
+        "pushinbr/pam-native-notifications": "Native notifications and push rendering.",
+        "pushinbr/pam-native-share-extension": "Incoming shared content.",
+        "pushinbr/pam-native-webview": "Hardened native embedded web pages."
+    },
     "autoload": {
         "files": [
             "packages/native/src/Polyfill/mbstring_functions.php",
@@ -261,7 +272,9 @@
                 },
                 "make:feature": {
                     "bin": "packages/native/bin/pam-native",
-                    "arguments": ["make:feature"],
+                    "arguments": [
+                        "make:feature"
+                    ],
                     "description": "Generate a modular PAM Native feature"
                 },
                 "package": {
