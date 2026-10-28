@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-enum NotificationImportance: int
-{
-    case Low = 1;
-    case Default = 2;
-    case High = 3;
-    case Urgent = 4;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\NotificationImportance', 'Pam\\Native\\Notifications\\NotificationImportance', 'pushinbr/pam-native-notifications');

@@ -26,9 +26,7 @@ use Pam\Native\Diagnostics\RuntimeError;
 use Pam\Native\Diagnostics\RuntimeErrorPhase;
 use Pam\Native\Scheduling\Scheduler;
 use Pam\Native\Scheduling\TaskPriority;
-use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Linking;
-use Pam\Native\System\PushNotifications;
 use Pam\Native\TemplateException;
 use Pam\Native\Theme;
 use Pam\Native\Style\StyleVariables;
@@ -1002,8 +1000,7 @@ final class Runtime
         Linking::resetRuntime();
         \Pam\Native\Routing\Route::resetRuntime();
         \Pam\Native\Events\EventBus::resetRuntime();
-        IncomingShares::resetRuntime();
-        PushNotifications::resetRuntime();
+        \Pam\Native\Plugin\RuntimeHooks::reset();
         State::resetCache();
         TemplateRenderer::releaseFrame();
         if (self::$cycleCollection) {

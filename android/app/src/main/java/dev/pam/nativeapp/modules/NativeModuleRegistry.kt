@@ -15,31 +15,23 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
     private val system = SystemModule(context)
     private val sqlite: SQLiteModule = previous?.sqlite ?: SQLiteModule(context.applicationContext)
     private val files = (context as? dev.pam.nativeapp.PamActivity)?.let(::FilesModule)
-    private val notifications =
-        (context as? dev.pam.nativeapp.PamActivity)?.let(::NotificationsModule)
+
     private val linking = LinkingModule()
-    private val incomingShare = IncomingShareModule()
     private val cache: CacheModule = previous?.cache ?: CacheModule(context.applicationContext)
     private val background = BackgroundModule(context)
     private val device = DeviceModule(context)
     private val permissions =
         (context as? dev.pam.nativeapp.PamActivity)?.let(::PermissionsModule)
-    private val mediaLibrary = MediaLibraryModule(context)
+
     private var runtimeResourcesTransferred = false
     private val timers: TimersModule = previous?.timers?.also { previous.runtimeResourcesTransferred = true } ?: TimersModule()
     private val appearance = AppearanceModule(context)
     private val window = (context as? android.app.Activity)?.let(::WindowModule)
     private val accessibility = AccessibilityModule(context)
-    private val biometrics = (context as? android.app.Activity)?.let(::BiometricsModule)
+
     private val secureStorage = SecureStorageModule(context)
     private val image = ImagePrefetchModule(context)
-    private val viewCapture = (context as? dev.pam.nativeapp.PamActivity)?.let { activity ->
-        ViewCaptureModule(
-            activity.filesDir,
-            density = { activity.resources.displayMetrics.density },
-            findView = activity::viewForNativeRef,
-        )
-    }
+
     private val viewRef = (context as? dev.pam.nativeapp.PamActivity)?.let { activity ->
         ViewRefModule { activity.nativeRefRenderer() }
     }
@@ -48,22 +40,17 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
         put("storage", storage)
         put("sqlite", sqlite)
         files?.let { put("files", it) }
-        notifications?.let { put("notifications", it) }
         put("linking", linking)
-        put("incoming-share", incomingShare)
         put("cache", cache)
         put("background", background)
         put("device", device)
         permissions?.let { put("permissions", it) }
-        put("media-library", mediaLibrary)
         put("timers", timers)
         put("appearance", appearance)
         window?.let { put("window", it) }
         put("accessibility", accessibility)
-        biometrics?.let { put("biometrics", it) }
         put("secure-storage", secureStorage)
         put("image", image)
-        viewCapture?.let { put("view-capture", it) }
         viewRef?.let { put("view-ref", it) }
         putAll(GeneratedPamModules.create(context))
     }
@@ -132,9 +119,7 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
     fun prepareReload() {
         generation.incrementAndGet()
         PamDeepLinks.prepareReload()
-        PamIncomingShares.prepareReload()
-        PamPushNotifications.prepareReload()
-        PamNotificationActions.prepareReload()
+        dev.pam.nativeapp.HostEvents.prepareReload()
     }
 
     /**

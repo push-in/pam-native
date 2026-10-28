@@ -4,16 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-/** Encoding of a ViewCapture image. */
-enum ImageCaptureFormat: int
-{
-    /** Lossless, keeps transparency (stickers, cards). */
-    case Png = 1;
-    /** Smaller, opaque (photos, backgrounds). */
-    case Jpeg = 2;
+use Pam\Native\Plugin\MovedToPlugin;
 
-    public function mimeType(): string
-    {
-        return $this === self::Png ? 'image/png' : 'image/jpeg';
-    }
-}
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\ImageCaptureFormat', 'Pam\\Native\\Media\\ImageCaptureFormat', 'pushinbr/pam-native-media');

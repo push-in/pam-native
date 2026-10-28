@@ -8,7 +8,7 @@ import UIKit
 final class ViewRefModule: NativeModule {
     private let findView: (String) -> UIView?
 
-    init(findView: @escaping (String) -> UIView? = ViewCaptureModule.mountedView(_:)) {
+    init(findView: @escaping (String) -> UIView? = MountedViews.mountedView(_:)) {
         self.findView = findView
     }
 

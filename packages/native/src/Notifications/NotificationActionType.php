@@ -1,13 +1,5 @@
 <?php
-
 declare(strict_types=1);
-
 namespace Pam\Native\Notifications;
-
-enum NotificationActionType: int
-{
-    case Reply = 1;
-    case MarkRead = 2;
-    /** A background button declared with PushRenderingRule::action(). */
-    case Button = 3;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+MovedToPlugin::alias(__NAMESPACE__.'\\NotificationActionType', \Pam\Native\Notifications\Contracts\NotificationActionType::class, 'pushinbr/pam-native-notifications');

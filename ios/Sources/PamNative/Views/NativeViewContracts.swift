@@ -50,3 +50,9 @@ public extension NativeViewFactory {
     func release(view: UIView) {}
     func close() {}
 }
+
+/// Compatibility bridge for reserved protocol nodes supplied by optional plugins.
+public protocol NativePropertyView: AnyObject {
+    var onProtocolEvent: ((Int, Data) -> Void)? { get set }
+    func applyProtocolProperty(key: Int, value: WireValue?)
+}

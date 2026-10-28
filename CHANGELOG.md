@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 1.46.0 (prepared, unpublished)
+
+- Wave two: notifications, incoming shares, biometrics, media library/system
+  capture/view capture, and WebView move to optional plugins. Deprecated
+  `MovedToPlugin` PHP aliases remain until 1.47; `suggest` lists their packages.
+- Generic plugin hooks: activity intents/foreground/reload, permission and
+  native-ref hosts, PHP runtime reset/route focus, reserved-node property/event
+  delegation. The WebView NodeKind stays reserved and delegates to its plugin.
+- iOS keeps push-provider/delegate hooks and photo-URI helpers used by basic
+  Image/MediaPlayer/Files; optional notification presentation leaves the core.
+
 ### 1.45.1
 
 - Signals: every watcher, computed value and effect of a signal sees every

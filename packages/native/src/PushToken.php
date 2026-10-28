@@ -4,11 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
-final readonly class PushToken
-{
-    public function __construct(
-        public string $value,
-        public PushProvider $provider,
-    ) {
-    }
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+// Deprecated in 1.46; removed in 1.47.
+MovedToPlugin::alias('Pam\\Native\\PushToken', 'Pam\\Native\\Notifications\\PushToken', 'pushinbr/pam-native-notifications');

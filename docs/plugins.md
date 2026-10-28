@@ -459,3 +459,20 @@ PAM deliberately does not execute arbitrary package-provided Gradle scripts.
 The declared integration surface covers source, View/Compose AARs, Maven
 dependencies, resources, assets, manifests, JNI, and R8 while keeping builds
 auditable.
+
+
+### Core extraction, wave two (1.46)
+
+| Capability | Package | Canonical PHP namespace |
+| --- | --- | --- |
+| Notifications | pushinbr/pam-native-notifications | Pam\Native\Notifications (domain builders under Contracts) |
+| Media library/capture/view capture | pushinbr/pam-native-media | Pam\Native\Media |
+| Incoming shares | pushinbr/pam-native-share-extension | Pam\Native\ShareExtension |
+| Biometrics compatibility | pushinbr/pam-native-auth | Pam\Native\Auth\LegacyBiometrics |
+| WebView | pushinbr/pam-native-webview | Pam\Native\WebView |
+
+The core ships aliases for one minor version. Removing a plugin makes its old
+PHP facade fail with the exact Composer package to install. Existing numeric
+protocol keys and native module names remain reserved. WebView's reserved node
+uses the registered `webview` factory and the generic `NativePropertyView`
+bridge; core layout still handles its ordinary Element properties.

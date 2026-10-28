@@ -210,6 +210,18 @@ use Pam\Native\Worklets\Worklet;
 use Pam\Native\Worklets\WorkletTarget;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
+$testPluginRoots = array_filter(explode(PATH_SEPARATOR, getenv('PAM_TEST_PLUGIN_ROOTS') ?: ''));
+foreach ($testPluginRoots as $testPluginRoot) {
+    $metadata = json_decode(file_get_contents($testPluginRoot.'/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+    foreach ($metadata['autoload']['psr-4'] ?? [] as $prefix => $directory) {
+        spl_autoload_register(static function (string $class) use ($prefix, $directory, $testPluginRoot): void {
+            if (!str_starts_with($class, $prefix)) return;
+            $path = $testPluginRoot.'/'.$directory.str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+            if (is_file($path)) require $path;
+        }, prepend: true);
+    }
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'Pam\\Native\\';
 
@@ -3383,111 +3395,6 @@ $assert(
     'Public native module facade did not decode its result.',
 );
 
-$captureError = null;
-$captureSucceeded = false;
-$captureRequestId = MediaCapture::capture(
-    CaptureType::Photo,
-    static function (FileReference $_) use (&$captureSucceeded): void {
-        $captureSucceeded = true;
-    },
-    static function (string $message) use (&$captureError): void {
-        $captureError = $message;
-    },
-);
-Runtime::dispatchModuleResult(
-    $captureRequestId,
-    ModuleResultStatus::Failure->value,
-    'Camera is unavailable.',
-);
-$assert(
-    !$captureSucceeded && $captureError === 'Camera is unavailable.',
-    'Media capture failures must reach the optional failure callback.',
-);
-
-
-foreach ([true, false] as $notificationGranted) {
-    $notificationDecision = null;
-    $permissionRequest = \Pam\Native\System\Notifications::requestPermission(
-        static function (bool $granted) use (&$notificationDecision): void { $notificationDecision = $granted; },
-        failure: static function (string $message): void { throw new RuntimeException('A permission decision is not a failure.'); },
-    );
-    Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Success->value, Wire::map(['granted' => $notificationGranted]));
-    $assert($notificationDecision === $notificationGranted, 'Notification permission must preserve granted and denied decisions.');
-}
-$notificationFailure = null;
-$permissionRequest = \Pam\Native\System\Notifications::requestPermission(
-    static function (bool $granted): void { throw new RuntimeException('Native failure must not invoke permission success.'); },
-    failure: static function (string $message) use (&$notificationFailure): void { $notificationFailure = $message; },
-);
-Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Failure->value, 'No foreground activity.');
-$assert($notificationFailure === 'No foreground activity.', 'Notification permission failure must reach the optional callback.');
-$permissionRequest = \Pam\Native\System\Notifications::requestPermission(static function (bool $granted): void {});
-$permissionErrorsBefore = count(TestDiagnostics::$messages);
-Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Failure->value, 'Permission module failed.');
-$assert(count(TestDiagnostics::$messages) === $permissionErrorsBefore + 1
-    && str_contains(TestDiagnostics::$messages[array_key_last(TestDiagnostics::$messages)], 'Permission module failed.'),
-    'Omitting the permission failure callback must preserve legacy error reporting.');
-array_pop(TestDiagnostics::$messages);
-
-$pushRegistrationFailure = null;
-$pushRegistrationRequest = PushNotifications::register(
-    static function (): void {
-        throw new RuntimeException('Failed push registration must not invoke success.');
-    },
-    static function (string $message) use (&$pushRegistrationFailure): void {
-        $pushRegistrationFailure = $message;
-    },
-);
-$pushRegistrationCall = TestDiagnostics::$moduleCall;
-$assert(
-    $pushRegistrationCall !== null
-        && $pushRegistrationCall['requestId'] === $pushRegistrationRequest
-        && $pushRegistrationCall['module'] === 'notifications'
-        && $pushRegistrationCall['method'] === 'registerPush',
-    'Push registration must emit its typed native module call.',
-);
-Runtime::dispatchModuleResult(
-    $pushRegistrationRequest,
-    ModuleResultStatus::Failure->value,
-    'Firebase rejected push token registration.',
-);
-$assert(
-    $pushRegistrationFailure === 'Firebase rejected push token registration.',
-    'Push registration failures must reach the optional failure callback.',
-);
-
-$pushUnregistered = false;
-$pushUnregisterRequest = PushNotifications::unregister(
-    static function () use (&$pushUnregistered): void { $pushUnregistered = true; },
-    static function (string $message): void { throw new RuntimeException($message); },
-);
-$pushUnregisterCall = TestDiagnostics::$moduleCall;
-$assert(
-    $pushUnregisterCall !== null
-        && $pushUnregisterCall['requestId'] === $pushUnregisterRequest
-        && $pushUnregisterCall['module'] === 'notifications'
-        && $pushUnregisterCall['method'] === 'unregisterPush',
-    'Push unregistration must emit its typed native module call.',
-);
-Runtime::dispatchModuleResult($pushUnregisterRequest, ModuleResultStatus::Success->value, '');
-$assert($pushUnregistered, 'Push unregistration must invoke its success callback.');
-
-$pushUnregisterFailure = null;
-$failedPushUnregisterRequest = PushNotifications::unregister(
-    static function (): void { throw new RuntimeException('Failed push unregistration must not invoke success.'); },
-    static function (string $message) use (&$pushUnregisterFailure): void { $pushUnregisterFailure = $message; },
-);
-Runtime::dispatchModuleResult(
-    $failedPushUnregisterRequest,
-    ModuleResultStatus::Failure->value,
-    'Firebase rejected push token unregistration.',
-);
-$assert(
-    $pushUnregisterFailure === 'Firebase rejected push token unregistration.',
-    'Push unregistration failures must reach the optional failure callback.',
-);
-
-
 $linkOpenFailure = null;
 $linkOpenRequest = \Pam\Native\System\Linking::open(
     'invalid://destination',
@@ -3666,23 +3573,6 @@ Runtime::dispatchModuleResult(
 $assert(
     $cancelledMany === [],
     'Files pickMany must resolve user cancellation with an empty list.',
-);
-
-$cancelledCapture = new FileReference('unexpected', 'unexpected', 'text/plain', 1);
-$cancelledCaptureRequest = \Pam\Native\System\MediaCapture::capture(
-    \Pam\Native\CaptureType::Photo,
-    static function (?FileReference $file) use (&$cancelledCapture): void {
-        $cancelledCapture = $file;
-    },
-);
-Runtime::dispatchModuleResult(
-    $cancelledCaptureRequest,
-    ModuleResultStatus::Success->value,
-    '',
-);
-$assert(
-    $cancelledCapture === null,
-    'Media capture must resolve user cancellation with null instead of throwing.',
 );
 
 $fileDigest = null;
@@ -4112,144 +4002,6 @@ Runtime::dispatchModuleResult(
     '',
 );
 
-
-$mediaPage = null;
-$mediaRequestId = MediaLibrary::assets(
-    MediaPickerType::Media,
-    static function (MediaAssetPage $page) use (&$mediaPage): void {
-        $mediaPage = $page;
-    },
-    limit: 80,
-    offset: 160,
-    albumId: 'camera',
-);
-$mediaCall = TestDiagnostics::$moduleCall;
-$assert(
-    $mediaCall !== null
-        && $mediaCall['requestId'] === $mediaRequestId
-        && $mediaCall['module'] === 'media-library'
-        && $mediaCall['method'] === 'assets'
-        && Wire::decodeMap($mediaCall['payload']) == [
-            'albumId' => 'camera',
-            'limit' => 80,
-            'offset' => 160,
-            'type' => MediaPickerType::Media->value,
-        ],
-    'MediaLibrary assets must emit a bounded paginated native query.',
-);
-Runtime::dispatchModuleResult(
-    $mediaRequestId,
-    ModuleResultStatus::Success->value,
-    Wire::map([
-        'items' => json_encode([[
-            'id' => '42',
-            'uri' => 'content://media/external/images/media/42',
-            'name' => 'photo-42.jpg',
-            'mimeType' => 'image/jpeg',
-            'width' => 1_080,
-            'height' => 1_350,
-            'durationMs' => 0,
-            'size' => 4_096,
-            'createdAt' => 1_785_000_000_000,
-            'modifiedAt' => 1_785_000_100_000,
-            'albumId' => 'camera',
-            'albumTitle' => 'Câmera',
-            'favorite' => true,
-        ]], JSON_THROW_ON_ERROR),
-        'hasMore' => true,
-    ]),
-);
-$assert(
-    $mediaPage instanceof MediaAssetPage
-        && $mediaPage->hasMore
-        && $mediaPage->nextOffset === 161
-        && count($mediaPage->items) === 1
-        && $mediaPage->items[0] instanceof MediaAsset
-        && $mediaPage->items[0]->id === '42'
-        && $mediaPage->items[0]->width === 1_080
-        && $mediaPage->items[0]->favorite
-        && !$mediaPage->items[0]->video(),
-    'MediaLibrary assets must decode typed media metadata and pagination.',
-);
-
-$mediaAlbums = null;
-$albumRequestId = MediaLibrary::albums(
-    MediaPickerType::Image,
-    static function (array $items) use (&$mediaAlbums): void {
-        $mediaAlbums = $items;
-    },
-);
-$albumCall = TestDiagnostics::$moduleCall;
-$assert(
-    $albumCall !== null
-        && $albumCall['requestId'] === $albumRequestId
-        && $albumCall['module'] === 'media-library'
-        && $albumCall['method'] === 'albums'
-        && Wire::decodeMap($albumCall['payload']) == [
-            'type' => MediaPickerType::Image->value,
-        ],
-    'MediaLibrary albums must emit its typed media filter.',
-);
-Runtime::dispatchModuleResult(
-    $albumRequestId,
-    ModuleResultStatus::Success->value,
-    Wire::map([
-        'items' => json_encode([[
-            'id' => 'camera',
-            'title' => 'Câmera',
-            'count' => 42,
-            'coverUri' => 'content://media/external/images/media/42',
-        ]], JSON_THROW_ON_ERROR),
-    ]),
-);
-$assert(
-    is_array($mediaAlbums)
-        && count($mediaAlbums) === 1
-        && $mediaAlbums[0] instanceof MediaAlbum
-        && $mediaAlbums[0]->id === 'camera'
-        && $mediaAlbums[0]->count === 42,
-    'MediaLibrary albums must decode typed album metadata.',
-);
-
-
-$incomingShare = null;
-$incomingShareRequestId = IncomingShares::initial(
-    static function (?IncomingShare $share) use (&$incomingShare): void {
-        $incomingShare = $share;
-    },
-);
-$incomingShareCall = TestDiagnostics::$moduleCall;
-$assert(
-    $incomingShareCall !== null
-        && $incomingShareCall['requestId'] === $incomingShareRequestId
-        && $incomingShareCall['module'] === 'incoming-share'
-        && $incomingShareCall['method'] === 'initial',
-    'IncomingShares facade did not request the cold-start payload.',
-);
-Runtime::dispatchModuleResult(
-    $incomingShareRequestId,
-    \Pam\Native\ModuleResultStatus::Success->value,
-    Wire::map([
-        'available' => true,
-        'text' => 'Shared caption',
-        'subject' => 'Shared subject',
-        'mimeType' => 'image/jpeg',
-        'files' => json_encode([[
-            'path' => '/data/user/0/app/cache/pam-incoming-shares/incoming-photo.jpg',
-            'name' => 'photo.jpg',
-            'mimeType' => 'image/jpeg',
-            'size' => 1234,
-        ]], JSON_THROW_ON_ERROR),
-    ]),
-);
-$assert(
-    $incomingShare instanceof IncomingShare
-        && $incomingShare->text === 'Shared caption'
-        && count($incomingShare->files) === 1
-        && $incomingShare->files[0]->name === 'photo.jpg'
-        && $incomingShare->files[0]->size === 1234,
-    'IncomingShares facade did not decode the sandboxed file payload.',
-);
 
 $cacheUsage = null;
 $cacheRequestId = Caches::usage(
@@ -7262,19 +7014,16 @@ $assert(
     'InteractionRegion must encode drag, drop and native menu behavior.',
 );
 
-$webView = WebView::make('https://example.com')->javaScriptEnabled(false);
 $media = MediaPlayer::make('https://example.com/video.mp4', MediaType::Video)
     ->autoPlay()
     ->loop()
     ->fit(ImageFit::Cover)
     ->volume(0.5);
 $assert(
-    $webView->kind() === NodeKind::WebView
-        && $webView->properties()[PropKey::WebViewJavaScriptEnabled->value] === false
-        && $media->kind() === NodeKind::Media
+    $media->kind() === NodeKind::Media
         && $media->properties()[PropKey::MediaLoop->value] === true
         && $media->properties()[PropKey::ImageFit->value] === ImageFit::Cover->value,
-    'WebView and MediaPlayer must compile into dedicated native node kinds.',
+    'MediaPlayer must compile into its dedicated native node kind.',
 );
 
 $cachedImage = Image::make('https://example.com/hero.webp')
@@ -7366,57 +7115,6 @@ $assert(
     'PAM templates must expose typed shared-element tags and motion styles.',
 );
 
-$hardenedWebView = WebView::make('https://example.com/app')
-    ->allowedHosts(['example.com', 'cdn.example.com']);
-$assert(
-    $hardenedWebView->properties()[PropKey::WebViewAllowedHosts->value]
-        === "example.com\ncdn.example.com"
-        && PropKey::WebViewAllowedHosts->value === 366,
-    'WebView host allowlists must use the append-only native protocol.',
-);
-
-// A fixed full-screen page (a game): no scroll, bounce or over-scroll, on the
-// existing scroll keys (no new protocol numbers).
-$fixedWebView = WebView::make('https://example.com/app')
-    ->scrollEnabled(false)
-    ->overScrollMode(ScrollOverScrollMode::Never);
-$assert(
-    $fixedWebView->properties()[PropKey::ScrollEnabled->value] === false
-        && $fixedWebView->properties()[PropKey::ScrollOverScrollMode->value] === ScrollOverScrollMode::Never->value,
-    'WebView must accept scrollEnabled and overScrollMode on the shared scroll keys.',
-);
-$fixedTemplate = TemplateRenderer::render(TemplateCompiler::compile(
-    '<WebView source="https://example.com/app" scrollEnabled="false" overScrollMode="never" />',
-), null, []);
-$assert(
-    $fixedTemplate->kind() === NodeKind::WebView
-        && ($fixedTemplate->properties()[PropKey::ScrollEnabled->value] ?? null) === false
-        && ($fixedTemplate->properties()[PropKey::ScrollOverScrollMode->value] ?? null) === ScrollOverScrollMode::Never->value,
-    'WebView templates must forward scrollEnabled and overScrollMode.',
-);
-$webMessages = [];
-$messageWebView = WebView::make('https://example.com/app')->onMessage(
-    static function (string $message, string $url) use (&$webMessages): void {
-        $webMessages[] = [$message, $url];
-    },
-);
-$messageWebView->events()[EventKind::WebViewMessage->value](Wire::map([
-    'message' => '{"type":1}',
-    'url' => 'https://example.com/app',
-]));
-$messageWebView->events()[EventKind::WebViewMessage->value](Wire::map(['message' => 'legacy']));
-$legacyMessages = [];
-WebView::make('https://example.com/app')->onMessage(
-    static function (string $message) use (&$legacyMessages): void {
-        $legacyMessages[] = $message;
-    },
-)->events()[EventKind::WebViewMessage->value](Wire::map(['message' => 'one', 'url' => 'https://example.com/']));
-$assert(
-    $webMessages === [['{"type":1}', 'https://example.com/app'], ['legacy', '']]
-        && $legacyMessages === ['one'],
-    'WebView messages must carry the posting page URL and keep one-argument handlers working.',
-);
-
 $permission = new PermissionDecision(
     PermissionKind::Photos,
     PermissionStatus::Limited,
@@ -7427,8 +7125,7 @@ $assert(
         && PermissionKind::LocationWhenInUse->value === 5
         && PermissionKind::Contacts->value === 6
         && PermissionStatus::Limited->value === 4
-        && PushEventType::Opened->value === 2
-        && PushProvider::Apns->value === 2,
+,
     'Production capability variants must remain sequential integer enums.',
 );
 
@@ -7904,6 +7601,20 @@ require __DIR__.'/memoization.php';
 require __DIR__.'/hot_reload_state.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/keyboard_visibility.php';
+
+foreach ($testPluginRoots as $testPluginRoot) {
+    $compatibilityTests = $testPluginRoot.'/tests/core-compat.php';
+    if (is_file($compatibilityTests)) {
+        $manifest = json_decode(file_get_contents($testPluginRoot.'/pam-native.plugin.json'), true, flags: JSON_THROW_ON_ERROR);
+        $providerClass = $manifest['php']['provider'];
+        $provider = new $providerClass();
+        $provider->register();
+        $provider->boot();
+        require $compatibilityTests;
+        \Pam\Native\Plugin\RuntimeHooks::forget($providerClass);
+    }
+}
+
 require __DIR__.'/native_capabilities.php';
 require __DIR__.'/moved_to_plugin.php';
 require __DIR__.'/i18n.php';
@@ -7922,7 +7633,7 @@ require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
-require __DIR__.'/view_capture.php';
+
 require __DIR__.'/view_ref.php';
 require __DIR__.'/portal.php';
 require __DIR__.'/image_events.php';

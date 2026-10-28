@@ -31,6 +31,19 @@ foreach ([
     );
 }
 
+foreach ([
+    'Pam\\Native\\System\\Notifications' => 'pushinbr/pam-native-notifications',
+    'Pam\\Native\\System\\MediaLibrary' => 'pushinbr/pam-native-media',
+    'Pam\\Native\\System\\IncomingShares' => 'pushinbr/pam-native-share-extension',
+    'Pam\\Native\\System\\Biometrics' => 'pushinbr/pam-native-auth',
+    'Pam\\Native\\UI\\WebView' => 'pushinbr/pam-native-webview',
+] as $legacy => $package) {
+    if ($testPluginRoots !== []) continue;
+    $message = '';
+    try { class_exists($legacy); } catch (PluginException $error) { $message = $error->getMessage(); }
+    $assert(str_contains($message, 'composer require '.$package), $legacy.' must name its plugin.');
+}
+
 // With the plugin installed the old name is the plugin class itself.
 eval('namespace Pam\\Native\\MovedFixture; enum Ratio: int { case Square = 1; }');
 MovedToPlugin::alias('Pam\\Native\\LegacyRatio', 'Pam\\Native\\MovedFixture\\Ratio', 'pushinbr/pam-native-fixture');
