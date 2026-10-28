@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- iOS `<Switch checked>`: the switch follows `checked` (sent by the template
+  Switch and `Toggle::make`), like the Android Switch. It only reached the
+  accessibility state, so every template switch stayed visually off (a
+  real-world app's "send in original quality" row said on next to an off
+  switch).
+
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion

@@ -2810,6 +2810,11 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.selected,
              PamConstants.checked,
              PamConstants.loading:
+            // `<Switch checked>` (Toggle) drives the switch itself, like the
+            // Android Switch; it only fed the accessibility state before.
+            if key == PamConstants.checked, let switchView = view as? PamVuetifySwitch {
+                switchView.isOn = value.boolOrNil() ?? false
+            }
             applyAccessibility(view: view, state: nodes[nodeId])
         case PamConstants.testId:
             view.accessibilityIdentifier = value.textOrNil()
@@ -3501,6 +3506,9 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.selected,
              PamConstants.checked,
              PamConstants.loading:
+            if key == PamConstants.checked, let switchView = view as? PamVuetifySwitch {
+                switchView.isOn = false
+            }
             applyAccessibility(view: view, state: state)
         case PamConstants.layoutDirection:
             view.semanticContentAttribute = .unspecified
