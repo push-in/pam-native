@@ -13,6 +13,10 @@ use Pam\Native\Internal\Runtime;
 use Pam\Native\Dom\Document;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Navigation\TabNavigator;
+use Pam\Native\Routing\MiddlewareRegistry;
+use Pam\Native\Routing\RouteArguments;
+use Pam\Native\Routing\RouteCollection;
+use Pam\Native\Routing\RouteNavigator;
 use Throwable;
 
 final class App
@@ -32,9 +36,17 @@ final class App
     {
     }
 
-    public static function run(Renderable|Closure $root): void
+    /**
+     * Boots the app. Accepts a root Renderable/closure, a screen class, or
+     * the routes registered by routes.php: `App::run(require 'routes.php')`
+     * (require returns 1, or the RouteCollection when the file returns one).
+     *
+     * @param Renderable|Closure|RouteCollection|class-string<Renderable>|int $root
+     */
+    public static function run(Renderable|Closure|RouteCollection|string|int $root): void
     {
         try {
+            $root = self::resolveRoot($root);
             PluginManager::boot();
             if ($root instanceof TabNavigator) {
                 Runtime::onDimensions($root->dimensions(...));
@@ -45,6 +57,44 @@ final class App
 
             throw $error;
         }
+    }
+
+    /**
+     * Route middleware aliases: `App::middleware(['auth' => Authenticate::class])`,
+     * then `Route::middleware('auth')` or `->middleware('auth')` in routes.php.
+     *
+     * @param array<string, class-string<Middleware>|Middleware|Closure> $aliases
+     */
+    public static function middleware(array $aliases): void
+    {
+        MiddlewareRegistry::alias($aliases);
+    }
+
+    /** @param Renderable|Closure|RouteCollection|class-string<Renderable>|int $root */
+    private static function resolveRoot(Renderable|Closure|RouteCollection|string|int $root): Renderable|Closure
+    {
+        if ($root instanceof Renderable || $root instanceof Closure) return $root;
+        if ($root instanceof RouteCollection || $root === 1 || ($root !== '' && is_string($root) && is_file($root))) {
+            if (is_string($root)) {
+                RouteCollection::reset();
+                $loaded = require $root;
+                if ($loaded instanceof RouteCollection) $root = $loaded;
+            }
+            $routes = $root instanceof RouteCollection ? $root : RouteCollection::current();
+            $navigator = new RouteNavigator($routes);
+            RouteCollection::activate($navigator);
+            $navigator->listen();
+
+            return $navigator->root();
+        }
+        if (is_string($root) && is_a($root, Renderable::class, true)) {
+            $screen = RouteArguments::instantiate($root, [], $root);
+            if (!$screen instanceof Component && method_exists($screen, 'setup')) $screen->setup();
+            /** @var Renderable $screen */
+            return $screen;
+        }
+
+        throw new \InvalidArgumentException('App::run() needs a Renderable, a screen class or the routes from routes.php.');
     }
 
     /**
