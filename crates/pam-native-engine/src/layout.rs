@@ -10831,7 +10831,11 @@ mod auto_safe_area_tests {
             assert_eq!(layouts[&3].y, 0.0, "pager starts at the window top");
             assert_eq!(layouts[&3].height, 800.0, "a page is the window height");
             assert_eq!(layouts[&4].y, 0.0);
-            assert_eq!(bottom(layouts[&4]), 800.0, "stretched overlay keeps its frame");
+            assert_eq!(
+                bottom(layouts[&4]),
+                800.0,
+                "stretched overlay keeps its frame"
+            );
             // A plain (non-paging) list still ends above the bars.
             let layouts = layout_with(&pager_screen(false), insets);
             assert_eq!(layouts[&3].y, insets[1]);

@@ -158,9 +158,9 @@ struct HttpMultipartBody {
     }
 }
 
-enum PamPrivateFilePath {
+public enum PamPrivateFilePath {
     /// Resolves a relative path strictly inside the private PAM files directory.
-    static func resolve(root: URL, path: String) throws -> URL {
+    public static func resolve(root: URL, path: String) throws -> URL {
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\"), !path.contains("\0"),
               !path.split(separator: "/", omittingEmptySubsequences: false)
                 .contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {

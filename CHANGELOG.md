@@ -6,7 +6,45 @@
   extra program plays on the anchor's next child alongside the first (Android,
   iOS; the protocol string carries one `pam-motion` program per layer).
 
-### 1.46.0 (prepared, unpublished)
+## 1.46.0 - 2026-10-28
+
+Core slimming: optional native capabilities move to plugins, the core keeps
+the runtime, protocol, renderer/layout, primitives, navigation, state, basic
+HTTP, gestures/accessibility, storage and the generic hooks plugins need.
+Includes everything since 1.45.1.
+
+### Upgrade notes
+
+The core no longer ships these APIs. Each old class name still works in
+1.46 as a deprecated alias of the plugin class, but only when the plugin is
+installed; without it, the first use throws `PluginException` naming the
+package. Add the plugin and switch to the new namespace before 1.47, which
+removes the aliases. Plugin versions below are the first ones built for
+`pushinbr/pam-native ^1.46`.
+
+| Old core API (`Pam\Native\…`) | New class | Install |
+| --- | --- | --- |
+| `System\Location`, `LocationError`, `LocationPosition`, `LocationServicesResult` | `Pam\Native\Location\*` | `composer require pushinbr/pam-native-location:^0.1` |
+| `System\Contacts`, `Contact`, `System\Sms` | `Pam\Native\Contacts\*` | `composer require pushinbr/pam-native-contacts:^0.1` |
+| `System\Sensors`, `SensorReading`, `SensorType` | `Pam\Native\Sensors\*` | `composer require pushinbr/pam-native-sensors:^0.1` |
+| `System\AudioRecorder`, `AudioRecording`, `AudioRecordingProgress` | `Pam\Native\Audio\*` | `composer require pushinbr/pam-native-audio:^0.3` |
+| `System\ImageEditor`, `ImageCropRatio`, `ImageFilterType`, `ImageTextLayerStyle` | `Pam\Native\MediaEditor\*` | `composer require pushinbr/pam-native-media-editor:^0.5.1` |
+| `System\MediaLibrary`, `System\MediaCapture`, `System\ViewCapture`, `MediaAsset`, `MediaAssetPage`, `MediaAlbum`, `CapturedImage`, `CaptureType`, `ImageCaptureFormat` | `Pam\Native\Media\*` | `composer require pushinbr/pam-native-media:^0.7` |
+| `System\Biometrics`, `BiometricKind`, `BiometricError` | `Pam\Native\Auth\*` (`System\Biometrics` → `Auth\LegacyBiometrics`) | `composer require pushinbr/pam-native-auth:^0.4.1` |
+| `System\Notifications`, `System\PushNotifications`, `PushMessage`, `PushToken`, `PushProvider`, `PushEventType`, `NotificationImportance`, `Notifications\*` (`ConversationNotification`, `NotificationAction`, `NotificationActionType`, `NotificationCredentials`, `Person`, `PushRendering`, `PushRenderingRule`, `ActionEndpoint`, `ReplyFailures`) | `Pam\Native\Notifications\*` (the `Notifications\*` value types → `Notifications\Contracts\*`) | `composer require pushinbr/pam-native-notifications:^0.1.2` |
+| `System\IncomingShares`, `IncomingShare` | `Pam\Native\ShareExtension\*` | `composer require pushinbr/pam-native-share-extension:^0.4.1` |
+| `UI\WebView` | `Pam\Native\WebView\WebView` | `composer require pushinbr/pam-native-webview:^0.1.1` |
+
+- The native side moves with the PHP classes: permissions, manifest entries,
+  Gradle/Swift dependencies (Play Services Location, CameraX/Media3,
+  biometric, WebKit, Contacts, CoreMotion…) now come only from the
+  installed plugins, so an app that does not use them builds smaller.
+- `NativeOperation::SensorRead` (19) and the WebView `NodeKind` stay
+  reserved in the protocol and answer a failure that names the plugin.
+- No protocol change: core PropKeys, events and extension identifiers are
+  as in 1.45.1 (`protocol=` marker unchanged).
+
+### Moved to plugins
 
 - Wave two: notifications, incoming shares, biometrics, media library/system
   capture/view capture, and WebView move to optional plugins. Deprecated
@@ -46,7 +84,33 @@
   (bounded watch/next/stop channel) moves to the Android plugin API and is
   public on iOS; Android `ActivityResultHost` (implemented by the PAM
   activity) lets a plugin module start a system screen and get its result.
+- iOS plugin API: `PamMediaDiskCache.shared.data(source:stableKey:maxAgeMs:completion:)`
+  and `PamPrivateFilePath.resolve(root:path:)` are public, so the
+  notifications plugin (a separate Swift module) reads conversation avatars
+  from the image cache and the private files directory. Before, the moved
+  plugin did not compile on iOS.
 
+### Fixes
+
+- Android Back: a predictive back (Android 15+ also starts one for the
+  Back key) that the app consumes through `Navigator::interceptSystemBack()`
+  no longer leaves the screen. The released gesture waits for the next
+  committed frame: a pop completes it, and without one it settles back
+  (1 s safety timeout). Before, the stack host slid the route away while
+  PHP kept it, so closing a panel with Back looked like leaving the screen.
+- Android text: font size, line height and letter spacing convert like
+  React Native's `PixelUtil.toPixelFromSP`, through Android 14's non-linear
+  font scale (`TypedValue.applyDimension(SP)`); an app text scale applies
+  to the style first, as RN's StyleSheet patch does. At an OS scale of 1.3
+  a 20 dp line height is 23.6 dp instead of 26 dp, so multiline text is no
+  longer taller than in RN. iOS already scales `lineHeight` linearly like
+  RN (`RCTTextAttributes`). A text with no colour is opaque (RN draws
+  black): the light theme's 87 % primary colour faded colour emoji.
+- Automatic safe area: a vertical pager (a `pagingEnabled` list or scroll)
+  is full-bleed like React Native and Android. The screen container is no
+  longer padded 62/34 pt around it, which shrank the pager below the window
+  while each page stayed one window tall and clipped the bottom chrome of
+  every page.
 
 ## 1.45.1 - 2026-10-28
 
@@ -66,21 +130,6 @@ Fixes on top of 1.45.0, no protocol change (core and extension identifiers as in
   drawn scale (Android multiplied it by the density as well), and an image
   with a translucent border blurs into transparency instead of clamping, so
   a glyph used as its own shadow no longer becomes a translucent square.
-
-- Android Back: a predictive back (Android 15+ also starts one for the
-  Back key) that the app consumes through `Navigator::interceptSystemBack()`
-  no longer leaves the screen. The released gesture waits for the next
-  committed frame: a pop completes it, and without one it settles back
-  (1 s safety timeout). Before, the stack host slid the route away while
-  PHP kept it, so closing a panel with Back looked like leaving the screen.
-- Android text: font size, line height and letter spacing convert like
-  React Native's `PixelUtil.toPixelFromSP`, through Android 14's non-linear
-  font scale (`TypedValue.applyDimension(SP)`); an app text scale applies
-  to the style first, as RN's StyleSheet patch does. At an OS scale of 1.3
-  a 20 dp line height is 23.6 dp instead of 26 dp, so multiline text is no
-  longer taller than in RN. iOS already scales `lineHeight` linearly like
-  RN (`RCTTextAttributes`). A text with no colour is opaque (RN draws
-  black): the light theme's 87 % primary colour faded colour emoji.
 
 - Signals: every watcher, computed value and effect of a signal sees every
   change. `Signal::set()` and `ComputedSignal` iterated their live observer
@@ -133,7 +182,6 @@ working; the core protocol identifiers do not change. Upgrade notes:
   (`target/pam-native-engine-version`: version, `protocol=` and `engine=`).
   `pam-native` installs a release engine only when its engine sources match
   the local ones and records `engine=` in the installed marker.
-
 
 - iOS `<Switch checked>`: the switch follows `checked` (sent by the template
   Switch and `Toggle::make`), like the Android Switch. It only reached the
@@ -1170,7 +1218,6 @@ artifacts are unchanged from 1.39.4 (only the version moves).
 - Add PHP subscription/invalidation contracts, native reducer tests and real
   Android IME assertions across fitted/translucent modals and interactive sheets.
   The iOS checklist records the equivalent Xcode/device journey.
-
 
 ## 1.37.1 - 2026-10-10
 
@@ -3587,7 +3634,6 @@ instead of a full ~180 ms re-render.
 - Add exact project-relative `.pamignore` exclusions for mobile bundles.
 - Restore PHP language tooling and embedded template/CSS highlighting for PAM components in VS Code.
 - Publish editor package 0.1.1 with PHP definition/hover regression coverage.
-
 
 ## 1.0.16 - 2026-08-26
 

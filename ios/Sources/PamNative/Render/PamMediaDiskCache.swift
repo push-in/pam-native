@@ -6,12 +6,14 @@ struct PamCacheUsage: Sendable {
     let totalBytes: Int64
 }
 
-final class PamMediaDiskCache: @unchecked Sendable {
+/// Encoded-media disk cache shared by images, players and plugins (for
+/// example notification avatars), keyed like the image pipeline.
+public final class PamMediaDiskCache: @unchecked Sendable {
     struct Resolution: Sendable {
         let url: URL
         let hit: Bool
     }
-    static let shared = PamMediaDiskCache()
+    public static let shared = PamMediaDiskCache()
 
     private let root: URL
     private let queue = DispatchQueue(label: "dev.pam.media-cache", qos: .utility)
@@ -46,7 +48,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
         return hashed
     }
 
-    func data(
+    public func data(
         source: String,
         stableKey: String?,
         maxAgeMs: Int64,
