@@ -314,6 +314,8 @@ internal class NativeImageLoader(
         ConcurrentHashMap.newKeySet<HttpURLConnection>()
     private val diskDirectory = File(context.cacheDir, DISK_DIRECTORY)
     private val diskLock = DISK_LOCK
+    private var diskBytesSinceTrim = 0L
+    private var diskWritesSinceTrim = 0
 
     fun load(
         request: NativeImageRequest,
@@ -1409,16 +1411,33 @@ internal class NativeImageLoader(
 
     private fun writeDisk(file: File, bytes: ByteArray, limit: Long = DISK_CACHE_BYTES) {
         if (closed.get()) return
+        // The bytes go to a per-thread temporary outside the lock; only the
+        // rename and the (occasional) trim are serialized. Trimming lists and
+        // sorts the whole cache directory, so doing it on every write made
+        // image threads queue behind each other after a fast fling and the
+        // rows that came to rest waited seconds for their pictures.
+        val temporary = File(diskDirectory, "${file.name}.${Thread.currentThread().id}.tmp")
+        val written = runCatching {
+            diskDirectory.mkdirs()
+            temporary.outputStream().use { output -> output.write(bytes) }
+        }.isSuccess
+        if (!written) {
+            temporary.delete()
+            return
+        }
         synchronized(diskLock) {
             runCatching {
-                diskDirectory.mkdirs()
-                val temporary = File(diskDirectory, "${file.name}.tmp")
-                temporary.outputStream().use { output -> output.write(bytes) }
                 if (!temporary.renameTo(file)) {
                     file.outputStream().use { output -> output.write(bytes) }
                     temporary.delete()
                 }
-                trimDisk(limit.coerceIn(8L * 1024 * 1024, MAX_DISK_CACHE_BYTES))
+                diskBytesSinceTrim += bytes.size
+                diskWritesSinceTrim++
+                if (diskTrimDue(diskBytesSinceTrim, diskWritesSinceTrim)) {
+                    diskBytesSinceTrim = 0L
+                    diskWritesSinceTrim = 0
+                    trimDisk(limit.coerceIn(8L * 1024 * 1024, MAX_DISK_CACHE_BYTES))
+                }
             }
         }
     }
@@ -1682,3 +1701,7 @@ internal fun ByteArray.toHexString(): String {
     }
     return String(output)
 }
+
+/** Trim the disk cache once a few megabytes or dozens of files were written since the last trim. */
+internal fun diskTrimDue(bytesSinceTrim: Long, writesSinceTrim: Int): Boolean =
+    bytesSinceTrim >= 4L * 1024 * 1024 || writesSinceTrim >= 48
