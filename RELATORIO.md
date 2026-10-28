@@ -51,3 +51,27 @@ TMPDIR exclusivo: `/tmp/codex-inbox-resource-validation/framework-v3-tmp`.
 Resultados: `/tmp/codex-inbox-resource-validation/framework-v3-results.json`.
 Sem alterações de dependências, plugins ou código nativo nesta correção.
 A integração desta correção não atesta QA nativo do aplicativo consumidor.
+
+
+## Rodada x5 — Drawer e Toast, 28/10/2026
+
+Extração do WIP concluída: Drawer e Toast passam a plugins opcionais públicos;
+as 13 classes/enums históricos usam MovedToPlugin. IDs de protocolo permanecem
+reservados; o núcleo encaminha as operações pelos registros genéricos.
+Nenhum arquivo reservado de chat, listas, shared elements ou perfil foi alterado.
+
+Publicados em push-in/pam-native-drawer e push-in/pam-native-toast: tags e releases
+0.1.0; registro no Packagist solicitado pelo utilitário packagist-publish.
+Sem tag do núcleo. Rebase sobre origin/integrate/port3-20261027 concluído; conflitos
+apenas de relatório, preservando o texto anterior da integração.
+
+Validações: suíte PHP SDK sem plugins 1/1; suíte PHP com os dois plugins e
+compatibilidade 1/1; protocolo 1/1; manifests Composer dos plugins 2/2; compilação
+Kotlin dos plugins 2/2; testes JVM Drawer 5/5 (Toast sem testes JVM).
+Gradle com lock exclusivo, -Xmx3g, quatro workers, --stop e liberação ao terminar.
+Compilação aprovada com fallback sem daemon Kotlin pela restrição de escrita.
+Logs em /tmp/codex-x5-validation/. Builds próprios removidos após a etapa.
+
+QA visual/instrumentado e medições no dispositivo não realizados nesta rodada.
+Integração autorizada pelo pedido x5 com validadores verdes sem QA visual.
+Somente Android; não houve execução de Swift, Mac, dispositivos físicos ou emulador.
