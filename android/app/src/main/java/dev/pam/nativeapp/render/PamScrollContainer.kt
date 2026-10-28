@@ -655,7 +655,13 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val newMax = primaryMaxOffset()
         primaryMaxOffsetBeforeLastLayout = previousMax
         previousPrimaryMaxOffset = newMax
-        if (offsetAwaitsLayout) scheduleRequestedOffset()
+        if (offsetAwaitsLayout) {
+            // The first layout applies the requested offset in the same frame:
+            // a pager opened on page N draws page N first (a navigation
+            // transition, or a shared element, measures it before any draw).
+            applyRequestedOffset(laidOut = true)
+            scheduleRequestedOffset()
+        }
         when {
             anchorToEnd && !initialEndAnchorApplied -> {
                 initialEndAnchorApplied = true
@@ -727,8 +733,8 @@ internal class PamScrollContainer @JvmOverloads constructor(
         if (enabled) activeScroll.setFadingEdgeLength(fadingEdgeLengthPx)
     }
 
-    private fun applyRequestedOffset() {
-        if (!isLaidOut || activeScroll.childCount == 0) {
+    private fun applyRequestedOffset(laidOut: Boolean = isLaidOut) {
+        if (!laidOut || activeScroll.childCount == 0) {
             // Retried from the next layout. Re-posting itself here spun the
             // UI thread for as long as the container stayed unlaid (a GONE or
             // never-measured scroll view): ~60% CPU on the S10.

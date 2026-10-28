@@ -479,6 +479,20 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         clearSharedElements()
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
+            PamSharedElements.touched(event.rawX, event.rawY)
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    /** [pressed] (a Pressable) was clicked inside this host's active route. */
+    private fun launchFromPress(pressed: View): Boolean {
+        val route = activeRoute ?: return false
+        if (running != null || gesturePrepared || predictiveBackActive || animationsDisabled()) return false
+        return sharedElements.launchFromPress(route, pressed)
+    }
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             gestureTracking = false
@@ -955,7 +969,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 // element flies home.
                 outgoing?.alpha = 1f - sharedElements.eased(time).coerceIn(0f, 1f)
             } else {
-                incoming.alpha = sharedElements.eased(time).coerceIn(0f, 1f)
+                // A launch backdrop already darkened the screen: continue from it.
+                val floor = sharedElements.fadeFloor
+                incoming.alpha = floor + (1f - floor) * sharedElements.eased(time).coerceIn(0f, 1f)
             }
             TRANSITION_FADE_FROM_BOTTOM -> {
                 incoming.alpha = progress
@@ -1216,12 +1232,24 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun keepsPreviousRouteVisible(): Boolean = operation != OPERATION_POP &&
         screenPresentation in PRESENTATION_CONTAINED_MODAL..PRESENTATION_FORM_SHEET
 
-    private companion object {
+    internal companion object Launcher {
+        /** Starts a launch flight in the innermost host around [pressed]. */
+        fun pressed(pressed: View) {
+            var current = pressed.parent
+            while (current != null) {
+                if (current is PamNavigationHost) {
+                    if (current.launchFromPress(pressed)) return
+                }
+                current = current.parent
+            }
+        }
+
         const val OPERATION_IDLE = 1
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
         const val OPERATION_REPLACE = 4
         const val PREDICTIVE_BACK_VERDICT_TIMEOUT_MS = 1_000L
+
 
         const val TRANSITION_PLATFORM_DEFAULT = 1
         const val TRANSITION_SLIDE_FROM_RIGHT = 2

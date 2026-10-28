@@ -65,8 +65,8 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
             NativeOperation.HTTP_GET -> http.invoke("get", payload, reloadSafeCompletion)
             NativeOperation.STORAGE_GET -> storage.invoke("get", payload, reloadSafeCompletion)
             NativeOperation.STORAGE_SET -> storage.invoke("set", payload, reloadSafeCompletion)
+            NativeOperation.TOAST -> invoke("toast", "show", payload, reloadSafeCompletion)
             NativeOperation.ALERT,
-            NativeOperation.TOAST,
             NativeOperation.SHARE,
             NativeOperation.OPEN_URL,
             NativeOperation.CAN_OPEN_URL,

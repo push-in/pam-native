@@ -668,3 +668,23 @@ and dropped.
 | App-specific singletons reached through statics | `App::globals()` |
 | `__pamSetup()` / `__pamMounted()` / `__pamDisposeResources()` in tests | `Testing\mount()` and `->unmount()`; `Testing\routes()` for screens behind routes |
 | Replacing the `$scheme` global to fake light/dark in tests | `Testing\environment(scheme: 'dark')` |
+
+## Navegadores opcionais e apresentação de feedback
+
+Drawer e Toast pertencem aos plugins `pushinbr/pam-native-drawer` e
+`pushinbr/pam-native-toast` (0.1.0). Os IDs históricos de nó, propriedades,
+eventos e operação permanecem reservados para compatibilidade do protocolo.
+A operação Toast encaminha para o módulo gerado `toast.show`; o núcleo não
+conhece variantes, cores nem dimensões de apresentação.
+
+Plugins de navegação podem usar `Routing\Route::customNavigator($build)`:
+o escopo impede que navegadores filhos assumam a navegação global, restaura
+profundidade em `finally` e anexa apenas a raiz. `Route::screenContent()`
+normaliza instância, closure ou classe de tela sem executar conteúdo antes
+do foco. As fachadas históricas `Route::drawer()`/`drawerScreen()` só delegam.
+
+Android mantém `NativePropertyView` para views opcionais com IDs reservados.
+iOS oferece também `NativeChildHost::insert(view:index:)`, permitindo que
+qualquer plugin de container controle o destino dos filhos declarativos.
+O provider do Drawer registra seu tag por `TemplateRegistry::component()`.
+Swipeable não é afetado.

@@ -17,6 +17,43 @@
   show each commit's own kind and sizes (`frame=`, `frameIn=`, `frameOut=`)
   next to the engine totals (`totalFull=`, `totalPatch=`, `totalInBytes=`),
   which used to read like per-frame values.
+- Shared elements between a screen and a `<Modal>` (the component, not a
+  route), with the same `shared` tag and no app code: opening the Modal flies
+  every tag on screen below into it, and closing it (`visible` false or
+  unmounted) flies its tags home to the instance they came from. Media reuse
+  the decoded picture and morph frame, crop and radius; a `launchOnTap()`
+  flight is handed to the Modal the tap opened; a view released by
+  `Drag::holdAt(...)` flies home from where it was let go. The Modal fades in
+  step with the flights, an unmounted Modal keeps its window (untouchable)
+  until they land, and a Modal over a Modal pairs with the one below
+  (Android; iOS keeps the Modal animation for now).
+- A shared element flies home to the instance it left from while that
+  instance is still on screen, even when the last touch was elsewhere (a close
+  button), and the touch that picks among repeated tags is tracked on screen
+  coordinates across windows.
+
+## 1.46.5 - 2026-10-28
+
+Shared element fixes and instant launch on top of 1.46.4, no protocol change.
+
+- Shared elements: a destination whose media is not drawn yet (a video before
+  its poster or first frame, an image still decoding) keeps the picture that
+  flew in as its placeholder until its own media draws, with no time limit,
+  instead of the flight disappearing after 0.7 s over a black frame
+  (Android, iOS).
+- Shared elements: `SharedTransitionStyle::launchOnTap()` on a tapped
+  element (a thumbnail) starts its flight on the tap itself, natively, in the
+  next frame: toward the media contain-fit on the whole screen over a fading
+  backdrop, before the app has handled the press. The pushed route takes the
+  flight over (it continues from where it is to the real frame, and the route
+  fade continues from the backdrop); with no route it flies back home
+  (Android, iOS).
+- Android: a scroll view applies its requested initial offset in its first
+  layout, so a pager opened on page N draws (and is measured on) page N before
+  the first frame, instead of page 0 for one frame.
+- Shared elements: when one tag is on screen more than once (an author's
+  avatar on several posts), the instance under the finger that opened the
+  route flies, and the flight home lands on it (Android, iOS).
 
 ## 1.46.4 - 2026-10-28
 

@@ -400,6 +400,8 @@
         "pushinbr/pam-native-auth": "Biometric authentication.",
         "pushinbr/pam-native-notifications": "Native notifications and push rendering.",
         "pushinbr/pam-native-share-extension": "Incoming shared content.",
-        "pushinbr/pam-native-webview": "Hardened native embedded web pages."
+        "pushinbr/pam-native-webview": "Hardened native embedded web pages.",
+        "pushinbr/pam-native-drawer": "Optional drawer navigation and native drawer host.",
+        "pushinbr/pam-native-toast": "Styled in-app toasts and variants."
     }
 }

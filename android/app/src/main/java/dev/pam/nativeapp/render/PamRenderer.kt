@@ -993,6 +993,7 @@ class PamRenderer(
             val parent = nodes[id]?.parent ?: return
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
+        if (localModalIds.isNotEmpty()) prepareModalSharedRemovals(batches)
         deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
             try {
@@ -1306,6 +1307,36 @@ class PamRenderer(
         }
         collect(root)
         return labels
+    }
+
+    /**
+     * A presented Modal unmounted by this commit (itself or an ancestor)
+     * starts its shared elements home while its views are still laid out,
+     * before the removals below take them away.
+     */
+    private fun prepareModalSharedRemovals(batches: List<List<Mutation>>) {
+        var removed: HashSet<Long>? = null
+        for (batch in batches) {
+            for (mutation in batch) {
+                if (mutation is Mutation.Remove) {
+                    (removed ?: HashSet<Long>().also { removed = it }) += mutation.id
+                }
+            }
+        }
+        val ids = removed ?: return
+        for (id in localModalIds) {
+            val modal = views[id] as? PamModalHost ?: continue
+            if (!modal.isPresented()) continue
+            var current = id
+            var depth = 0
+            while (current != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
+                if (current in ids) {
+                    modal.prepareSharedRemoval()
+                    break
+                }
+                current = nodes[current]?.parent ?: 0L
+            }
+        }
     }
 
     private fun closeLocalModalAncestor(startId: Long) {
@@ -1824,7 +1855,11 @@ class PamRenderer(
             NodeKind.SAFE_AREA_VIEW -> PamContainer(context).also {
                 installSafeArea(it, requireNotNull(state))
             }
-            NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
+            NodeKind.DRAWER_LAYOUT -> nativeViews.create("drawer") { kind, payload ->
+                state?.let { dispatchBytes(it.id, kind, payload) }
+            }.also { view ->
+                (view as? NativePropertyView)?.onProtocolEvent = { kind, payload -> state?.let { dispatchBytes(it.id, kind, payload) } }
+            }
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context).also {
                 it.onActiveRouteChanged = ::applyMergedStatusBar
                 it.onRouteVisibilityChanged = ::scheduleRouteListenerSync
@@ -2618,7 +2653,6 @@ class PamRenderer(
             }
             is PamContainer -> parent.insert(view, index)
             is PamRefreshContainer -> parent.insert(view, index)
-            is PamDrawerLayout -> parent.insert(view, index)
             is PamNavigationHost -> parent.insert(view, index)
             is PamTabHost -> parent.insertScene(view, index)
             is PamModalHost -> parent.insert(view, index)
@@ -4007,18 +4041,18 @@ class PamRenderer(
             PropKey.SCALE_Y,
             PropKey.ROTATION,
             -> animateOrSet(view, state, key, value.decimal().toFloat())
-            PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(value.flag())
-            PropKey.DRAWER_TYPE -> (view as? PamDrawerLayout)?.setDrawerType(value.integer().toInt())
-            PropKey.DRAWER_POSITION -> (view as? PamDrawerLayout)?.setDrawerPosition(value.integer().toInt())
-            PropKey.DRAWER_WIDTH -> (view as? PamDrawerLayout)?.setDrawerWidth(value.decimal().toFloat())
-            PropKey.DRAWER_OVERLAY_COLOR -> (view as? PamDrawerLayout)?.setOverlayColor(value.integer().toInt())
-            PropKey.DRAWER_SWIPE_ENABLED -> (view as? PamDrawerLayout)?.setSwipeEnabled(value.flag())
-            PropKey.DRAWER_SWIPE_EDGE_WIDTH -> (view as? PamDrawerLayout)?.setSwipeEdgeWidth(value.decimal().toFloat())
-            PropKey.DRAWER_SWIPE_MIN_DISTANCE -> (view as? PamDrawerLayout)?.setSwipeMinDistance(value.decimal().toFloat())
-            PropKey.DRAWER_KEYBOARD_DISMISS_MODE -> (view as? PamDrawerLayout)?.setKeyboardDismissMode(value.integer().toInt())
-            PropKey.DRAWER_HIDE_STATUS_BAR_ON_OPEN -> (view as? PamDrawerLayout)?.setHideStatusBarOnOpen(value.flag())
-            PropKey.DRAWER_STATUS_BAR_ANIMATION -> (view as? PamDrawerLayout)?.setStatusBarAnimation(value.integer().toInt())
-            PropKey.DRAWER_PERMANENT_BREAKPOINT -> (view as? PamDrawerLayout)?.setPermanentBreakpoint(value.decimal().toFloat())
+            PropKey.DRAWER_OPEN -> Unit
+            PropKey.DRAWER_TYPE -> Unit
+            PropKey.DRAWER_POSITION -> Unit
+            PropKey.DRAWER_WIDTH -> Unit
+            PropKey.DRAWER_OVERLAY_COLOR -> Unit
+            PropKey.DRAWER_SWIPE_ENABLED -> Unit
+            PropKey.DRAWER_SWIPE_EDGE_WIDTH -> Unit
+            PropKey.DRAWER_SWIPE_MIN_DISTANCE -> Unit
+            PropKey.DRAWER_KEYBOARD_DISMISS_MODE -> Unit
+            PropKey.DRAWER_HIDE_STATUS_BAR_ON_OPEN -> Unit
+            PropKey.DRAWER_STATUS_BAR_ANIMATION -> Unit
+            PropKey.DRAWER_PERMANENT_BREAKPOINT -> Unit
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection =
                 if (value.integer().toInt() == 2) {
                     View.LAYOUT_DIRECTION_RTL
@@ -4805,7 +4839,7 @@ class PamRenderer(
                 (view as? PamRefreshContainer)?.setProgressViewOffset(0f)
             PropKey.REFRESH_INDICATOR_SIZE ->
                 (view as? PamRefreshContainer)?.setIndicatorSize(REFRESH_SIZE_DEFAULT)
-            PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(false)
+            PropKey.DRAWER_OPEN -> Unit
             PropKey.TEXT_DECORATION -> (view as? TextView)?.let { text ->
                 text.paintFlags = text.paintFlags and
                     (Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG).inv()
@@ -5041,20 +5075,6 @@ class PamRenderer(
             view.setOnRefresh(
                 if (state.properties[PropKey.ON_REFRESH] != null) {
                     { dispatch(state.id, EVENT_REFRESH) }
-                } else {
-                    null
-                },
-            )
-        }
-        if (view is PamDrawerLayout) {
-            view.setCallbacks(
-                if (state.properties[PropKey.ON_DRAWER_OPEN] != null) {
-                    { dispatch(state.id, EVENT_DRAWER_OPEN) }
-                } else {
-                    null
-                },
-                if (state.properties[PropKey.ON_DRAWER_CLOSE] != null) {
-                    { dispatch(state.id, EVENT_DRAWER_CLOSE) }
                 } else {
                     null
                 },

@@ -163,6 +163,13 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
 
     override fun sharedContent(): PamSharedContent? = sharedDrawableCopy(this, drawable)
 
+    /** Until the decoded image arrives (the loader replaces the drawable). */
+    override fun adoptSharedPlaceholder(content: PamSharedContent): Boolean {
+        if (hasSharedContent) return false
+        setImageDrawable(content.drawable)
+        return true
+    }
+
     /** Largest corner radius of the image's own clip, px. */
     fun cornerRadius(): Float = cornerRadii.maxOrNull() ?: 0f
 

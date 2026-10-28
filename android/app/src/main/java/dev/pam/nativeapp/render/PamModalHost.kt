@@ -276,6 +276,10 @@ internal class PamModalHost @JvmOverloads constructor(
     private var lastOrientation: Int? = null
     private var dialogGeneration = 0L
     private var slideFadeAnimator: ValueAnimator? = null
+    private val shared = PamModalSharedTransition(content)
+
+    /** The window an unmounted Modal keeps on screen while its tags fly home. */
+    private var sharedRemoval: Dialog? = null
     private var updateScheduled = false
     private var bottomSheetSnapPoints = listOf(0.5f, 0.9f)
     private var dynamicSheetSizing = false
@@ -758,6 +762,11 @@ internal class PamModalHost @JvmOverloads constructor(
         }
         val active = dialog
         if (active?.isPresentedWindow == true) {
+            if (shared.running) {
+                // Shown again while its tags flew home: it stays.
+                shared.cancel()
+                setHiddenWindowInput(active, hidden = false)
+            }
             content.animate().cancel()
             content.alpha = 1f
             content.translationY = 0f
@@ -777,6 +786,7 @@ internal class PamModalHost @JvmOverloads constructor(
             applyWindowConfiguration(active)
             applyWindowLayout(active)
             animateEntrance()
+            armSharedEntrance(active)
             dispatchOrientation(force = true)
             onShow?.invoke()
             focusModalContent(active)
@@ -827,6 +837,7 @@ internal class PamModalHost @JvmOverloads constructor(
             applyWindowConfiguration(modal)
             applyWindowLayout(modal)
             animateEntrance()
+            armSharedEntrance(modal)
             dispatchOrientation(force = true)
             onShow?.invoke()
             focusModalContent(modal)
@@ -1406,6 +1417,8 @@ internal class PamModalHost @JvmOverloads constructor(
      * sheet (and its handle) slide by their own height, independently.
      */
     private fun animateSheet(entering: Boolean, endAction: (() -> Unit)? = null) {
+        // Shared elements set the entrance (a fade in step with the flights).
+        if (entering && shared.running) return
         val distance = (lastSheetHeight.takeIf { it > 0 } ?: sheetChild()?.height ?: 0).toFloat() + dp(24f)
         val movers = sheetChildren() + handle
         backdropAnimator?.cancel()
@@ -1460,6 +1473,7 @@ internal class PamModalHost @JvmOverloads constructor(
      * frame-synchronised animator drives both on the UI thread.
      */
     private fun animateSlideFade(entering: Boolean, end: (() -> Unit)? = null) {
+        if (entering && shared.running) return
         slideFadeAnimator?.cancel()
         content.alpha = 1f
         content.translationY = 0f
@@ -1542,11 +1556,119 @@ internal class PamModalHost @JvmOverloads constructor(
             .start()
     }
 
+    /**
+     * On the Modal's first frame (laid out, nothing drawn yet), tags on
+     * screen below fly into it ([PamModalSharedTransition]); the Modal then
+     * fades in with them instead of its own entrance.
+     */
+    private fun armSharedEntrance(modal: Dialog) {
+        if (PamMotionPolicy.isReduced(context)) return
+        val generation = dialogGeneration
+        val observer = content.viewTreeObserver
+        observer.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                content.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
+                if (observer.isAlive && observer !== content.viewTreeObserver) observer.removeOnPreDrawListener(this)
+                if (dialog === modal && generation == dialogGeneration && modal.isPresentedWindow && desiredVisible) {
+                    startSharedEntrance(modal)
+                }
+                return true
+            }
+        })
+    }
+
+    private fun startSharedEntrance(modal: Dialog) {
+        val window = modal.window?.decorView as? ViewGroup ?: return
+        val below = sharedBelow() ?: return
+        if (!PamModalSharedTransition.hasTag(content)) return
+        // Destinations are measured at rest: the entrance offsets wait.
+        val rest = sheetRestTranslation()
+        val movers = content.children() + content
+        val offsets = movers.map { it.translationY }
+        movers.forEach { it.translationY = if (it === content) 0f else rest }
+        if (!shared.enter(window, below, MODAL_ENTER_DURATION_MS)) {
+            movers.forEachIndexed { index, view -> view.translationY = offsets[index] }
+            return
+        }
+        content.animate().cancel()
+        slideFadeAnimator?.cancel()
+        slideFadeAnimator = null
+        backdropAnimator?.cancel()
+        backdropDrawable.alpha = 255
+        movers.forEach { it.animate().cancel() }
+    }
+
+    private fun sheetRestTranslation(): Float =
+        if (presentation == PRESENTATION_SHEET) sheetKeyboardTranslation else 0f
+
+    private fun ViewGroup.children(): List<View> = List(childCount, ::getChildAt)
+
+    /** The window under this Modal: where its anchor lives (the screen, or the Modal below). */
+    private fun sharedBelow(): View? = rootView.takeIf { isAttachedToWindow && it !== this }
+
+    /**
+     * The Modal's tags fly home to the window below while it fades. [shade]
+     * keeps a cover of the Modal's background for an unmounted Modal, whose
+     * views go away at once. The window stops taking touches meanwhile.
+     */
+    private fun startSharedExit(modal: Dialog, shade: Boolean, onEnd: (Boolean) -> Unit): Boolean {
+        if (PamMotionPolicy.isReduced(context)) return false
+        val window = modal.window?.decorView as? ViewGroup ?: return false
+        val below = sharedBelow() ?: return false
+        val cover = if (shade) PamModalSharedTransition.coverColor(content, handle) else null
+        val flying = shared.exit(window, below, MODAL_EXIT_DURATION_MS, cover, onEnd)
+        if (flying) {
+            content.animate().cancel()
+            slideFadeAnimator?.cancel()
+            slideFadeAnimator = null
+            backdropAnimator?.cancel()
+            setHiddenWindowInput(modal, hidden = true)
+        }
+        return flying
+    }
+
+    /**
+     * The Modal (or an ancestor) is about to be unmounted in this commit:
+     * while its views are still laid out, its tags start flying home and the
+     * window stays until they land (see [destroyDialog]).
+     */
+    internal fun prepareSharedRemoval() {
+        val modal = dialog?.takeIf { it.isPresentedWindow } ?: return
+        if (sharedRemoval != null) return
+        if (shared.running) shared.cancel()
+        val started = startSharedExit(modal, shade = true) { completed ->
+            if (sharedRemoval === modal) sharedRemoval = null
+            when {
+                // Unmounted: the kept window goes now.
+                dialog !== modal -> runCatching { modal.dismiss() }
+                // Still mounted after all (the commit did not remove it): close it the regular way.
+                completed -> dismissNow(modal, notify = true)
+            }
+        }
+        if (started) sharedRemoval = modal
+    }
+
+    internal fun activeSharedElementCount(): Int = shared.activeCount()
+
+    internal fun activeSharedElementFrames(): List<FloatArray> = shared.activeFrames()
+
     private fun dismiss(notify: Boolean, animated: Boolean) {
         val modal = dialog ?: return
         if (!modal.isPresentedWindow) {
             dismissNow(modal, notify)
             return
+        }
+        if (animated && sharedRemoval == null && !shared.running) {
+            val generation = dialogGeneration + 1
+            val flying = startSharedExit(modal, shade = false) { completed ->
+                if (completed && dialogGeneration == generation && dialog === modal && !desiredVisible) {
+                    dismissNow(modal, notify)
+                }
+            }
+            if (flying) {
+                ++dialogGeneration
+                return
+            }
         }
         if (
             animated &&
@@ -1599,6 +1721,7 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun dismissNow(modal: Dialog, notify: Boolean) {
         if (dialog !== modal) return
         ++dialogGeneration
+        shared.cancel()
         removeCallbacks(clearAutoFocusKeyboard)
         autoFocusKeyboardPending = false
         backdropAnimator?.cancel()
@@ -1652,6 +1775,9 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun destroyDialog(notify: Boolean) {
         val modal = dialog ?: return
         ++dialogGeneration
+        // An unmounted Modal whose tags fly home keeps its window until they land.
+        val keepWindow = sharedRemoval === modal && shared.running && pamActivity()?.isFinishing != true
+        if (!keepWindow) shared.cancel()
         content.animate().cancel()
         resetSlideFade()
         content.alpha = 1f
@@ -1665,7 +1791,7 @@ internal class PamModalHost @JvmOverloads constructor(
         }
         keyboardWindowFocusListener = null
         modal.window?.let(PamSafeAreaInspector::detach)
-        modal.dismiss()
+        if (!keepWindow) modal.dismiss()
         dialog = null
         lastOrientation = null
         onKeyboardVisibility?.invoke(false)

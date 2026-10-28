@@ -934,4 +934,13 @@ extension PamMediaView: PamSharedContentView {
         }
         return posterView.isHidden ? nil : posterView.sharedContent()
     }
+
+    /// The poster slot shows what flew in until the real poster decodes or
+    /// the first frame covers it: no black frame while a video loads.
+    func adoptSharedPlaceholder(_ image: UIImage) -> Bool {
+        guard !hasSharedContent else { return false }
+        posterView.image = image
+        posterView.isHidden = false
+        return true
+    }
 }

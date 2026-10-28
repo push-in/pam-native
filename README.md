@@ -505,3 +505,13 @@ PAM Native is open source under Apache-2.0. You may build and sell
 proprietary or open applications with it without a revenue limit or runtime
 royalty. See [LICENSING.md](LICENSING.md) for the plain-language grant and the
 full [LICENSE](LICENSE) for controlling terms.
+
+### Drawer e Toast opcionais (1.46)
+
+Instale `pushinbr/pam-native-drawer:0.1.0` para Drawer e
+`pushinbr/pam-native-toast:0.1.0` para Toast. Migre os imports para
+`Pam\Native\Drawer` e `Pam\Native\Toast`. Os nomes antigos usam `MovedToPlugin`:
+com o pacote instalado são aliases; sem ele, informam o comando Composer.
+O núcleo conserva os IDs reservados e os ganchos genéricos de módulos/views;
+não inclui o renderizador de Drawer nem a aparência ou variantes de Toast.
+O real-world app depende somente do plugin Toast.

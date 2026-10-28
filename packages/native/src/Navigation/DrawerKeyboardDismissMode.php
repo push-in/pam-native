@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
-enum DrawerKeyboardDismissMode: int
-{
-    case OnDrag = 1;
-    case None = 2;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+MovedToPlugin::alias(DrawerKeyboardDismissMode::class, \Pam\Native\Drawer\DrawerKeyboardDismissMode::class, 'pushinbr/pam-native-drawer');
