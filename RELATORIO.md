@@ -10,6 +10,7 @@ Branch remota: `feat/port4-core-slim-20261027`. Base inicial: `origin/integrate/
 - O núcleo conserva `MovedToPlugin` por uma versão e sugestões Composer em ambos os manifests. Ausência do plugin produz a instrução exata de instalação.
 - Ganchos genéricos: intents/foreground/reload, permissões, lookup de nativeRef, reset/foco de rota em PHP e delegação de propriedades/eventos de nós reservados.
 - O NodeKind da WebView permanece reservado; sua implementação vem da factory do plugin. O Swift de web foi separado de mídia. Helpers de URI de fotos continuam na base porque Image/MediaPlayer/Files os utilizam.
+- MediaCapture conserva o wire básico `files.capture`; os helpers de mídia de Files permanecem na base, conforme a exceção explícita do plano. O facade PHP agora pertence ao media.
 - O núcleo iOS mantém apenas os ganchos de provider/delegate de push; apresentação, ações e categorias pertencem ao plugin.
 - A API antiga de biometria é adaptada para auth.biometrics, preservando o módulo biometrics durante a migração. AppCompat alinhado em 1.7.1 no plugin auth para resolver o classpath de testes do host.
 - Testes PHP, JVM e instrumentados foram transferidos para seus plugins. O núcleo conserva testes de falha dos shims sem plugin.
