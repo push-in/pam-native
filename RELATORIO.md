@@ -33,3 +33,36 @@ Cargo e Gradle usam o lock compartilhado /tmp/pam-gradle.lock.d. Gradle: heap m�
 PR #180 reconhecido como MERGED pelo GitHub; merge 0168f10d e relatório 5bd1c220 enviados à integrate. O media-editor privado 0.5.0 não continha as APIs extraídas; integração privada 4b6d3c9 e correção f878c22 entregues como tag/release privada v0.5.1, sem publicação em serviço público. O real-world app conserva ^0.5.0 e instala 0.5.1.
 
 Nenhum gate solicitado pendente. Swift e QA/perfilamento em dispositivo continuam fora desta execução; não há números de CPU/PSS/FPS. Nenhuma tag/release do núcleo foi criada. O commit deste relatório registra os resultados finais.
+
+
+# Relatório u3 — extração de i18n (codex-i18n-plugin)
+
+## O que foi feito
+
+- Catálogos, tradução, preferências e formatação transferidos para o plugin público `push-in/pam-native-i18n`, publicado como 0.1.0.
+- `Pam\Native\useLocale()` e `useTimezone()` leem somente metadados do sistema. Compartilham uma fonte lazy de DeviceInfo e liberam a assinatura ao desmontar.
+- Quatro shims `MovedToPlugin`: I18n, Format, DateStyle e RelativeTimeStyle. Ausência do plugin informa o comando Composer que restaura a API.
+- Templates recebem helpers pelo registro genérico de funções; `t()` é registrado pelo plugin, com precedência dos métodos do componente.
+- Removida a dependência de i18n do Harness de testes. Documentadas as novas APIs e a migração.
+- Nenhuma alteração de renderer nativo, protocolo ou layout.
+
+## Commits
+
+- `865bc443`: extração e shims.
+- `c186b312`: testes e documentação da migração.
+- Plugin: `d8e115c` e `d1044f6` (tag v0.1.0).
+
+## Validadores — 4/4
+
+- Suíte completa `packages/native/tests/run.php`: aprovada com TMPDIR exclusivo desta tarefa.
+- `packages/native/tests/i18n_without_plugin.php`: aprovado; quatro diagnósticos de pacote ausente, helpers e locale do sistema.
+- `packages/native/tests/arch_v2_testing.php`: aprovado, incluindo montagem, ambiente e reset sem plugin i18n.
+- `composer validate --no-check-publish`: aprovado.
+- Suíte do plugin: 70 asserções aprovadas. Quatro validadores de i18n do real-world app aprovados contra os worktrees locais.
+
+## Concorrência e pendências
+
+- A primeira tentativa da suíte completa encontrou classes duplicadas num temporário compartilhado. O rerun com TMPDIR exclusivo passou.
+- Disco inicialmente abaixo de 20 GB; nenhum validador foi executado até a liberação para 29 GB. Novas rodadas precedidas de df.
+- QA RN/PAM no mesmo emulador ainda não executada: lock `/tmp/pam-emulator.lock.d` reservado por `parity-feed`; há emuladores ativos de outros trabalhos. Nenhum emulador iniciado ou aparelho físico utilizado.
+- Integração em `integrate/port3-20261027` pendente da QA visual exigida. O trabalho fica na branch própria para não declarar tudo verde sem essa evidência.
