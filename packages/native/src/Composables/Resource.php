@@ -118,15 +118,24 @@ final class Resource extends ReactiveObject implements Disposable
     private ?array $identityFields = null;
     private ?Closure $identityMatch = null;
     private int $loaderArity;
+    /** @var (Closure(string, mixed...): mixed)|null app cache adapter: ($id) reads, ($id, $entry) writes */
+    private ?Closure $cacheAdapter = null;
+    /** @var array<int, Closure(mixed, ?string): void> */
+    private array $settledListeners = [];
+    /** @var array<int, Closure(mixed, string): void> */
+    private array $pageListeners = [];
+    private int $nextListener = 1;
 
     /**
      * @param Closure(mixed...): mixed $loader
-     * @param string|array{key: string, scope?: string|int|null, persist?: bool, limit?: int}|null $cache
+     * @param string|array{key: string, scope?: string|int|null, persist?: bool, limit?: int, store?: callable}|null $cache
      * @param string|(Closure(): mixed) $key a Closure: reactive dependencies (a change cancels, swaps the cache and reloads); a string: the identity field (legacy, use $identity)
      * @param (Closure(mixed): ?string)|null $nextCursor reads the older-page cursor from a page
      * @param (Closure(mixed): list<mixed>)|null $items reads the items from a page
      * @param string|list<string>|(Closure(mixed, mixed): bool)|null $identity how items are matched (optimistic helpers, page merges)
      * @param (Closure(mixed): ?string)|null $previousCursor reads the newer-page cursor from a page
+     * @param mixed $initial data (or first page when paginated) shown at once, e.g. from an app cache
+     * @param bool $manual never loads by itself (construction, reads, key changes): only load()/reload()
      */
     public function __construct(
         private readonly Closure $loader,
@@ -140,6 +149,8 @@ final class Resource extends ReactiveObject implements Disposable
         string|array|Closure|null $identity = null,
         private readonly ?Closure $previousCursor = null,
         private mixed $around = null,
+        mixed $initial = null,
+        private readonly bool $manual = false,
     ) {
         $this->loaderArity = self::arity($loader);
         $identity ??= is_string($key) ? $key : 'id';
@@ -158,6 +169,9 @@ final class Resource extends ReactiveObject implements Disposable
 
         $this->state = new Signal(self::emptyState($paginate));
         $this->showCached();
+        if ($initial !== null && !$this->hasData()) {
+            $this->seed($initial);
+        }
 
         $scope = EffectScope::current();
         $scope?->own($this);
@@ -169,9 +183,49 @@ final class Resource extends ReactiveObject implements Disposable
                 }
             });
         }
-        if (!$lazy) {
+        if (!$lazy && !$manual) {
             $this->start();
         }
+    }
+
+    /** Starts a lazy or manual resource; a no-op once started (reload() fetches again). */
+    public function load(): void
+    {
+        $this->start();
+    }
+
+    /**
+     * Calls $listener($data, $error) each time the first page (or a reload)
+     * settles: $error is null on success, the message on failure.
+     *
+     * @param Closure(mixed, ?string): void $listener
+     * @return Closure(): void unsubscribes
+     */
+    public function onSettled(Closure $listener): Closure
+    {
+        $id = $this->nextListener++;
+        $this->settledListeners[$id] = $listener;
+
+        return function () use ($id): void {
+            unset($this->settledListeners[$id]);
+        };
+    }
+
+    /**
+     * Calls $listener($page, $direction) with each page the loader returned
+     * ('initial', 'older' or 'newer'), before it is merged into data.
+     *
+     * @param Closure(mixed, string): void $listener
+     * @return Closure(): void unsubscribes
+     */
+    public function onPage(Closure $listener): Closure
+    {
+        $id = $this->nextListener++;
+        $this->pageListeners[$id] = $listener;
+
+        return function () use ($id): void {
+            unset($this->pageListeners[$id]);
+        };
     }
 
     protected function properties(): array
@@ -181,7 +235,7 @@ final class Resource extends ReactiveObject implements Disposable
 
     protected function read(string $name): mixed
     {
-        if ($this->lazy && !$this->started) {
+        if ($this->lazy && !$this->manual && !$this->started) {
             // Lazy resources start when something first renders them.
             $this->start();
         }
@@ -341,6 +395,8 @@ final class Resource extends ReactiveObject implements Disposable
         }
         $this->dependencies?->dispose();
         $this->dependencies = null;
+        $this->settledListeners = [];
+        $this->pageListeners = [];
     }
 
     public function disposed(): bool
@@ -477,7 +533,37 @@ final class Resource extends ReactiveObject implements Disposable
     {
         if (!$this->current($kind, $ticket)) return;
         unset($this->requests[$kind]);
-        $this->patch([...self::idle($kind), 'error' => $message === '' ? 'Request failed.' : $message, 'status' => AsyncStatus::Error]);
+        $message = $message === '' ? 'Request failed.' : $message;
+        $this->patch([...self::idle($kind), 'error' => $message, 'status' => AsyncStatus::Error]);
+        if ($kind === self::FIRST) $this->emitSettled($message);
+    }
+
+    private function emitSettled(?string $error): void
+    {
+        $data = $this->state->peek()['data'];
+        foreach ($this->settledListeners as $listener) $listener($data, $error);
+    }
+
+    private function hasData(): bool
+    {
+        $data = $this->state->peek()['data'];
+
+        return $data !== null && $data !== [];
+    }
+
+    /** Shows $initial as stale data until the first load settles. */
+    private function seed(mixed $initial): void
+    {
+        if (!$this->paginate) {
+            $this->patch(['data' => $initial, 'stale' => true, 'status' => AsyncStatus::Stale]);
+
+            return;
+        }
+        $data = $this->merged([], $this->itemsOf($initial));
+        $next = $this->cursorOf($initial, false);
+        $previous = $this->cursorOf($initial, true);
+        $this->patch(['data' => $data, 'next' => $next, 'previous' => $previous, 'hasMore' => $next !== null,
+            'hasNewer' => $previous !== null, 'stale' => true, 'status' => $data === [] ? AsyncStatus::Empty : AsyncStatus::Stale]);
     }
 
     private function settled(string $kind, int $ticket, mixed $value): void
@@ -485,12 +571,15 @@ final class Resource extends ReactiveObject implements Disposable
         if (!$this->current($kind, $ticket)) return;
         unset($this->requests[$kind]);
         $this->settledOnce = true;
+        foreach ($this->pageListeners as $listener) $listener($value, $kind === self::FIRST ? ResourcePage::INITIAL : $kind);
+        if (!$this->current($kind, $ticket) && isset($this->requests[$kind])) return;
         $flags = self::idle($kind);
         if (!$this->paginate) {
             $empty = $value === null || $value === [];
             $this->patch([...$flags, 'data' => $empty ? null : $value, 'error' => null, 'stale' => false,
                 'status' => $empty ? AsyncStatus::Empty : AsyncStatus::Content]);
             $this->remember();
+            $this->emitSettled(null);
 
             return;
         }
@@ -515,6 +604,7 @@ final class Resource extends ReactiveObject implements Disposable
             'status' => $data === [] ? AsyncStatus::Empty : AsyncStatus::Content,
         ]);
         $this->remember();
+        if ($kind === self::FIRST) $this->emitSettled(null);
     }
 
     /** @return array<string, false> */
@@ -569,7 +659,7 @@ final class Resource extends ReactiveObject implements Disposable
         $this->showCached();
         if ($this->started) {
             $this->started = false;
-            $this->start();
+            if (!$this->manual) $this->start();
         }
     }
 
@@ -594,6 +684,11 @@ final class Resource extends ReactiveObject implements Disposable
             throw new InvalidArgumentException("useResource() cache needs a 'key' string.");
         }
         $this->cacheBase = $key;
+        $adapter = $cache['store'] ?? null;
+        if ($adapter !== null) {
+            if (!is_callable($adapter)) throw new InvalidArgumentException("useResource() cache 'store' must be callable: (\$id) reads, (\$id, \$entry) writes.");
+            $this->cacheAdapter = Closure::fromCallable($adapter);
+        }
         $scope = $cache['scope'] ?? null;
         $this->cacheScope = $scope === null ? null : self::scopeName((string) $scope);
         $this->persist = (bool) ($cache['persist'] ?? false);
@@ -631,7 +726,7 @@ final class Resource extends ReactiveObject implements Disposable
     private function showCached(): void
     {
         if ($this->cacheId() === null) return;
-        if ($this->persist) {
+        if ($this->persist && $this->cacheAdapter === null) {
             $scope = $this->cacheScope ?? '';
             self::persistentStore($scope);
             if ((self::$hydration[$scope] ?? null) !== true) {
@@ -651,7 +746,7 @@ final class Resource extends ReactiveObject implements Disposable
     private function applyCached(): void
     {
         $id = $this->cacheId();
-        $cached = $id === null ? null : $this->cacheStore()->get($id);
+        $cached = $id === null ? null : ($this->cacheAdapter !== null ? ($this->cacheAdapter)($id) : $this->cacheStore()->get($id));
         if (!is_array($cached) || !array_key_exists('data', $cached)) return;
         $next = is_string($cached['next'] ?? null) ? $cached['next'] : null;
         $previous = is_string($cached['previous'] ?? null) ? $cached['previous'] : null;
@@ -684,7 +779,13 @@ final class Resource extends ReactiveObject implements Disposable
             $data = array_slice(array_values($data), 0, $this->persistLimit);
             $next = null;
         }
-        $this->cacheStore()->put($id, ['data' => $data, 'next' => $next, 'previous' => $state['previous']]);
+        $entry = ['data' => $data, 'next' => $next, 'previous' => $state['previous']];
+        if ($this->cacheAdapter !== null) {
+            ($this->cacheAdapter)($id, $entry);
+
+            return;
+        }
+        $this->cacheStore()->put($id, $entry);
     }
 
     private static function scopeName(string $scope): string

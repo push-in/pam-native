@@ -8287,6 +8287,7 @@ require __DIR__.'/arch_v2_globals.php';
 require __DIR__.'/arch_v2_composables.php';
 require __DIR__.'/arch_v2_resource.php';
 require __DIR__.'/arch_v2_resource_production.php';
+require __DIR__.'/arch_v2_resource_options.php';
 require __DIR__.'/arch_v2_component_discovery.php';
 require __DIR__.'/arch_v2_routing.php';
 require __DIR__.'/arch_v2_route_compiler.php';

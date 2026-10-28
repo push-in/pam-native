@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### 1.45.1
+
+- Signals: every watcher, computed value and effect of a signal sees every
+  change. `Signal::set()` and `ComputedSignal` iterated their live observer
+  `WeakMap` while each effect detached and re-attached itself on re-run,
+  which moved it in the map and skipped the next observer: with two or more
+  watchers each one missed about half of the changes (`useResource` readers
+  and `key:` on a shared signal, `computed` chains, globals, composables).
+  Observers are now notified from a snapshot; one disposed earlier in the
+  same change is skipped. `batch()` still coalesces the render request, and
+  an effect still never re-enters itself.
+- `useResource()`: `initial:` shows synchronous data at once (stale, refreshed
+  behind it); `cache: ['store' => $adapter]` reads and writes an app's own
+  cache instead of a second copy; `onSettled()` and `onPage()` events;
+  `manual: true` never loads by itself, only on `load()` / `reload()`.
+
 - Android navigation: a transition or back gesture never leaves a route
   faded, moved or scaled. Every exit path restores the routes it touched:
   finished, released early, cancelled, interrupted by another navigation

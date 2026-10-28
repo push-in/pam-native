@@ -260,7 +260,9 @@ if (!\function_exists('Pam\Native\useResource')) {
         string|array|Closure|null $identity = null,
         ?Closure $previousCursor = null,
         mixed $around = null,
+        mixed $initial = null,
+        bool $manual = false,
     ): Resource {
-        return new Resource($loader, $paginate, $refreshOnFocus, $lazy, $cache, $key, $nextCursor, $items, $identity, $previousCursor, $around);
+        return new Resource($loader, $paginate, $refreshOnFocus, $lazy, $cache, $key, $nextCursor, $items, $identity, $previousCursor, $around, $initial, $manual);
     }
 }

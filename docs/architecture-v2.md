@@ -162,6 +162,12 @@ final class ChatScreen extends Component
 | `watch($source, Closure $callback, bool $immediate = false)` | `Signals\Watcher` | `$source` is a signal, a computed value or a closure that reads signals. The callback receives `($next, $previous)` on every change and runs untracked. The watcher stops with the scope that created it, or with `dispose()`. |
 | `effectScope(Closure)` | `Signals\EffectScope` | Runs code in its own scope (services, tests). `dispose()` releases everything created inside it. |
 
+Every watcher, computed value and effect of a signal is notified on every
+change, however many there are: a change notifies a snapshot of the observers
+taken before the first one runs, and an observer disposed by an earlier one in
+the same change is skipped. An effect never re-enters itself: a `set()` of a
+signal it reads, made from inside it, does not re-run it (no loops).
+
 These functions wrap the existing `Signals` classes. `Signals::signal()`,
 `Signals::computed()` and `Signals::effect()` remain available.
 
@@ -233,6 +239,9 @@ $feed = useResource(fn (?string $cursor) => Api::client()->get('/feed', ['cursor
 | `around: $id` | Opens the first page around an item: the loader reads `$page->around` and returns both cursors. `reload(around: $id)` jumps elsewhere. |
 | `refreshOnFocus` | Reloads each time the screen is focused again. The first focus is covered by the initial load. |
 | `lazy` | Waits until something first reads the resource, instead of loading immediately. |
+| `manual` | Never loads by itself: not on construction, not on a read, not after a `key:` change (which only resets the data). Only `load()` (first time) and `reload()` fetch. |
+| `initial: $data` | Synchronous data shown at once (`stale`, the first load runs as a refresh behind it), for example from an app cache. Ignored when a `cache:` entry was already shown. With `paginate`, it is a page (`data`/`next`/`prev`) like the loader returns. |
+| `cache: ['key' => 'feed', 'store' => $adapter]` | Reuses the app's own cache instead of a second copy in the framework's: `$adapter($id)` returns the entry (`['data' => ..., 'next' => ?string, 'previous' => ?string]`) or `null`; `$adapter($id, $entry)` writes it. `$id` is the key plus scope and `key:` hash, as for the built-in cache. Neither the in-memory LRU nor disk is used. |
 | `cache: 'key'` | Shows the last result for this key immediately (`stale`) and refreshes behind it. In-memory LRU of 64 entries and 4 MiB. `Resource::forgetCache()` clears everything, `forgetCache('feed')` one key, `forgetCache(scope: $userId)` one account (memory and disk), for example on logout. |
 
 Methods:
@@ -249,6 +258,12 @@ Methods:
   when paginated, `(CancellationToken $token, ResourcePage $page)` otherwise;
   declare only what you use. `ResourcePage` has `direction` (`'initial'`,
   `'older'`, `'newer'`), `cursor`, `around` and `key`.
+- `load()` starts a `lazy` or `manual` resource (a no-op once started).
+- Events: `onSettled(fn ($data, ?string $error) => ...)` fires each time the
+  first page or a reload settles (`$error` is `null` on success);
+  `onPage(fn ($page, string $direction) => ...)` fires with each raw page the
+  loader returned (`'initial'`, `'older'`, `'newer'`) before it is merged. Both
+  return an unsubscribe closure and are cleared on dispose.
 - Optimistic UI: `prepend($item)`, `append($item)`, `replace($tmp, $real)`,
   `markFailed($tmp)` (an array item gets `_failed: true`; `isFailed($item)`),
   `remove($itemOrKey)`, and `update(fn ($data) => ...)` for any other shape.
