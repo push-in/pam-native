@@ -73,11 +73,30 @@ final class PluginManager
         }
 
         foreach ($providers as $provider) {
+            if ($provider instanceof ProvidesGlobals) {
+                self::registerGlobals($provider);
+            }
+        }
+
+        foreach ($providers as $provider) {
             $provider->boot();
         }
 
         self::$providers = $providers;
         self::$booted = true;
+    }
+
+    /** @internal Registers a provider's globals, leaving names the application owns untouched. */
+    public static function registerGlobals(ProvidesGlobals $provider): void
+    {
+        $owner = 'plugin '.$provider::class;
+        foreach ($provider->globals() as $name => $value) {
+            $name = (string) $name;
+            if (\Pam\Native\Globals::owner($name) === \Pam\Native\Globals::OWNER_APP) {
+                continue;
+            }
+            \Pam\Native\Globals::set($name, $value, false, $owner);
+        }
     }
 
     /** @return list<class-string<PluginProvider>> */
@@ -256,6 +275,12 @@ final class PluginManager
     {
         self::$providers = [];
         self::$booted = false;
+    }
+
+    /** @internal The application root: the nearest directory with vendor/composer/installed.json. */
+    public static function projectRoot(): ?string
+    {
+        return self::findProjectRoot();
     }
 
     private static function findProjectRoot(): ?string

@@ -254,10 +254,81 @@ final class TemplateExpression
         return self::compileTree($expression);
     }
 
+    /**
+     * @internal `{ id: x, title: $t }` (JavaScript-style object literal, as in
+     * `<Link :params="{ id: x }">`) becomes `['id' => $x, 'title' => $t]`.
+     * Bare identifiers as values (and `{ id }` shorthand) read template data.
+     * Any other expression is returned unchanged.
+     */
+    public static function normalizeObjectLiteral(string $expression): string
+    {
+        $trimmed = trim($expression);
+        if (strlen($trimmed) < 2 || $trimmed[0] !== '{' || $trimmed[strlen($trimmed) - 1] !== '}') return $expression;
+        $body = trim(substr($trimmed, 1, -1));
+        if ($body === '') return '[]';
+        $entries = [];
+        foreach (self::splitTopLevel($body) as $entry) {
+            $entry = trim($entry);
+            if ($entry === '') continue;
+            if (preg_match('/^\$?([A-Za-z_][A-Za-z0-9_]*)$/D', $entry, $shorthand) === 1) {
+                $entries[] = "'{$shorthand[1]}' => \${$shorthand[1]}";
+                continue;
+            }
+            if (preg_match('/^(?:([A-Za-z_][A-Za-z0-9_]*)|\'([^\']*)\'|"([^"]*)")\s*:(?!:)\s*(.+)$/Ds', $entry, $match) !== 1) {
+                throw new RuntimeException("Invalid object literal entry \"{$entry}\" in template expression.");
+            }
+            $key = $match[1] !== '' ? $match[1] : ($match[2] !== '' ? $match[2] : $match[3]);
+            $value = trim($match[4]);
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $value) === 1
+                && !in_array(strtolower($value), ['true', 'false', 'null'], true)) {
+                $value = '$'.$value;
+            } elseif ($value !== '' && $value[0] === '{') {
+                $value = self::normalizeObjectLiteral($value);
+            }
+            $entries[] = var_export($key, true).' => '.$value;
+        }
+
+        return '['.implode(', ', $entries).']';
+    }
+
+    /** @return list<string> */
+    private static function splitTopLevel(string $body): array
+    {
+        $parts = [];
+        $depth = 0;
+        $quote = null;
+        $start = 0;
+        $length = strlen($body);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $body[$index];
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    $index++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '\'' || $character === '"') {
+                $quote = $character;
+            } elseif (str_contains('([{', $character)) {
+                $depth++;
+            } elseif (str_contains(')]}', $character)) {
+                $depth--;
+            } elseif ($character === ',' && $depth === 0) {
+                $parts[] = substr($body, $start, $index - $start);
+                $start = $index + 1;
+            }
+        }
+        $parts[] = substr($body, $start);
+
+        return $parts;
+    }
+
     /** @return Closure(array<string, mixed>, ?object): mixed */
     private static function compileTree(string $expression): Closure
     {
-        $parser = new self($expression);
+        $parser = new self(self::normalizeObjectLiteral($expression));
         $compiled = $parser->ternary();
 
         if ($parser->peek() !== null) {
@@ -342,11 +413,16 @@ final class TemplateExpression
 
             return $property->getValue($scope);
         }
+        if (\Pam\Native\Globals::has($name)) {
+            return \Pam\Native\Globals::get($name);
+        }
         if ($lenient) {
             return self::missing();
         }
 
-        throw new RuntimeException("Template expression \${$name} is undefined.");
+        throw new RuntimeException(
+            "Template expression \${$name} is undefined (not a loop variable, component property or App::global()).",
+        );
     }
 
     /** @internal Property step that is not a plain array key. */
@@ -357,8 +433,10 @@ final class TemplateExpression
         return match (true) {
             $value === $missing => $missing,
             is_array($value) && array_key_exists($step, $value) => $value[$step],
+            $value instanceof \Pam\Native\Signals\ReadableSignal && $step === 'value' => $value->get(),
             is_object($value) && property_exists($value, $step) =>
                 self::property($value, $step)->getValue($value),
+            is_object($value) && method_exists($value, '__get') && isset($value->{$step}) => $value->{$step},
             $lenient => $missing,
             default => throw new RuntimeException(
                 "Cannot resolve template property {$step}.",
@@ -841,16 +919,8 @@ final class TemplateExpression
         return static function (array $data, ?object $scope) use ($name, $lenient, $missing, $postfix): mixed {
             if (array_key_exists($name, $data)) {
                 $value = $data[$name];
-            } elseif ($scope !== null && property_exists($scope, $name)) {
-                $property = self::property($scope, $name);
-                if (!$property->isInitialized($scope)) {
-                    throw new RuntimeException("Template property \${$name} is not initialized.");
-                }
-                $value = $property->getValue($scope);
-            } elseif ($lenient) {
-                $value = $missing;
             } else {
-                throw new RuntimeException("Template expression \${$name} is undefined.");
+                $value = self::__pamVariable($scope, $name, $lenient);
             }
 
             return $postfix === null ? $value : $postfix($value, $data, $scope);
@@ -890,16 +960,9 @@ final class TemplateExpression
         return static function (mixed $value, array $data, ?object $scope) use ($steps, $lenient, $missing): mixed {
             foreach ($steps as [$isProperty, $step]) {
                 if ($isProperty) {
-                    $value = match (true) {
-                        $value === $missing => $missing,
-                        is_array($value) && array_key_exists($step, $value) => $value[$step],
-                        is_object($value) && property_exists($value, $step) =>
-                            self::property($value, $step)->getValue($value),
-                        $lenient => $missing,
-                        default => throw new RuntimeException(
-                            "Cannot resolve template property {$step}.",
-                        ),
-                    };
+                    $value = is_array($value) && array_key_exists($step, $value)
+                        ? $value[$step]
+                        : self::__pamPropertyStep($value, $step, $lenient);
                     continue;
                 }
                 $index = $step($data, $scope);

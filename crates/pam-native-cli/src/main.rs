@@ -7,6 +7,7 @@ mod bundle_paths;
 mod dev_event;
 mod mobile;
 mod safe_area_lint;
+mod routes;
 
 fn main() -> ExitCode {
     match mobile::run(std::env::args_os().skip(1).collect::<Vec<OsString>>()) {

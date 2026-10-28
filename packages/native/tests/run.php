@@ -233,6 +233,7 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
+require __DIR__.'/../src/functions.php';
 require __DIR__.'/Fixtures/ExamplePluginProvider.php';
 require __DIR__.'/Fixtures/TemplateEnumScope.php';
 
@@ -8269,5 +8270,14 @@ require __DIR__.'/handler_purity.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
 require __DIR__.'/media_idle_surface.php';
+require __DIR__.'/arch_v2_signals.php';
+require __DIR__.'/arch_v2_setup_lifecycle.php';
+require __DIR__.'/arch_v2_globals.php';
+require __DIR__.'/arch_v2_composables.php';
+require __DIR__.'/arch_v2_resource.php';
+require __DIR__.'/arch_v2_component_discovery.php';
+require __DIR__.'/arch_v2_routing.php';
+require __DIR__.'/arch_v2_route_compiler.php';
+require __DIR__.'/arch_v2_http.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

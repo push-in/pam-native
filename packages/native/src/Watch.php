@@ -12,7 +12,12 @@ final class Watch
     {
     }
 
-    /** @param Closure(): mixed $value @param Closure(mixed, mixed): void $changed */
+    /**
+     * @deprecated Since architecture v2. Use `Pam\Native\watch($source, $callback)` inside setup().
+     *
+     * @param Closure(): mixed $value
+     * @param Closure(mixed, mixed): void $changed
+     */
     public static function value(Closure $value, Closure $changed): Effect
     {
         $initialized = false;

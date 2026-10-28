@@ -3,28 +3,59 @@
 
 declare(strict_types=1);
 
-$autoloadCandidates = [dirname(__DIR__, 3).'/autoload.php', dirname(__DIR__).'/vendor/autoload.php'];
-foreach ($autoloadCandidates as $autoload) {
-    if (is_file($autoload)) { require $autoload; break; }
-}
-if (!class_exists(\Pam\Native\Routing\RouteCodeGenerator::class)) {
-    require dirname(__DIR__).'/src/Routing/RouteCodeGenerator.php';
-}
+/*
+ * pam-native-routes <routes.php> <output-directory> [--namespace=App\Navigation\Generated]
+ *     [--manifest=.pam-native/routes.manifest.json] [--src=src] [--check-only]
+ *   Compiles Laravel-style routes: typed RouteName/Routes, the deep-link
+ *   manifest for the CLI, and literal navigate()/redirect()/<Link> checks.
+ *
+ * pam-native-routes <routes.json> <output-directory>   (deprecated manifest format)
+ */
 
-if ($argc !== 3) {
-    fwrite(STDERR, "Usage: pam-native-routes <routes.json> <output-directory>\n");
+$arguments = array_slice($argv, 1);
+$options = [];
+$positional = [];
+foreach ($arguments as $argument) {
+    if (str_starts_with($argument, '--')) {
+        [$key, $value] = explode('=', substr($argument, 2), 2) + [1 => 'true'];
+        $options[$key] = $value;
+    } else {
+        $positional[] = $argument;
+    }
+}
+if (count($positional) !== 2) {
+    fwrite(STDERR, "Usage: pam-native-routes <routes.php|routes.json> <output-directory> [--namespace=...] [--manifest=...] [--src=...] [--check-only]\n");
     exit(2);
 }
+[$input, $output] = $positional;
+$project = dirname((string) realpath($input) ?: getcwd());
 
-try {
-    $json = file_get_contents($argv[1]);
-    if ($json === false) throw new RuntimeException("Cannot read route manifest: {$argv[1]}");
-    $files = \Pam\Native\Routing\RouteCodeGenerator::fromJson($json);
-    if (!is_dir($argv[2]) && !mkdir($argv[2], 0775, true) && !is_dir($argv[2])) {
-        throw new RuntimeException("Cannot create output directory: {$argv[2]}");
+$autoloadCandidates = [
+    $_composer_autoload_path ?? null,
+    $project.'/vendor/autoload.php',
+    getcwd().'/vendor/autoload.php',
+    dirname(__DIR__, 3).'/autoload.php',
+    dirname(__DIR__).'/vendor/autoload.php',
+];
+foreach ($autoloadCandidates as $autoload) {
+    if (is_string($autoload) && is_file($autoload)) { require_once $autoload; break; }
+}
+if (!class_exists(\Pam\Native\Routing\RouteCodeGenerator::class)) {
+    spl_autoload_register(static function (string $class): void {
+        if (!str_starts_with($class, 'Pam\\Native\\')) return;
+        $path = dirname(__DIR__).'/src/'.str_replace('\\', '/', substr($class, strlen('Pam\\Native\\'))).'.php';
+        if (is_file($path)) require $path;
+    });
+    require_once dirname(__DIR__).'/src/Routing/functions.php';
+}
+
+$write = static function (string $directory, array $files): void {
+    if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+        throw new RuntimeException("Cannot create output directory: {$directory}");
     }
     foreach ($files as $filename => $source) {
-        $target = rtrim($argv[2], DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$filename;
+        $target = rtrim($directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$filename;
+        if (is_file($target) && file_get_contents($target) === $source) continue;
         $temporary = $target.'.tmp.'.getmypid();
         if (file_put_contents($temporary, $source, LOCK_EX) === false || !rename($temporary, $target)) {
             @unlink($temporary);
@@ -32,6 +63,35 @@ try {
         }
         fwrite(STDOUT, "Generated {$target}\n");
     }
+};
+
+try {
+    if (str_ends_with($input, '.json')) {
+        $json = file_get_contents($input);
+        if ($json === false) throw new RuntimeException("Cannot read route manifest: {$input}");
+        $write($output, \Pam\Native\Routing\RouteCodeGenerator::fromJson($json));
+        exit(0);
+    }
+
+    $source = $options['src'] ?? $project.'/src';
+    $routes = \Pam\Native\Routing\RouteCompiler::load($input);
+    $manifest = \Pam\Native\Routing\RouteCompiler::manifest(
+        $routes,
+        \Pam\Native\Routing\RouteCompiler::componentDiscovery($source, $options['components-cache'] ?? $project.'/.pam-native/components'),
+    );
+    $outputReal = realpath($output) ?: $output;
+    $errors = \Pam\Native\Routing\RouteCompiler::check($manifest, $source, [rtrim($outputReal, '/').'/']);
+    if ($errors !== []) {
+        fwrite(STDERR, "Route errors:\n  ".implode("\n  ", $errors)."\n");
+        exit(1);
+    }
+    if (($options['check-only'] ?? 'false') === 'true') {
+        fwrite(STDOUT, sprintf("ROUTES_OK routes=%d\n", count($manifest['routes'])));
+        exit(0);
+    }
+    $write($output, \Pam\Native\Routing\RouteCompiler::generate($manifest, $options['namespace'] ?? 'App\\Navigation\\Generated'));
+    $manifestPath = $options['manifest'] ?? $project.'/.pam-native/routes.manifest.json';
+    $write(dirname($manifestPath), [basename($manifestPath) => json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n"]);
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage()."\n");
     exit(1);

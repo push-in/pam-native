@@ -146,6 +146,13 @@ struct NativeManifest {
     /// plugin declares (for example `plugins.shareExtension`).
     #[serde(default)]
     plugins: BTreeMap<String, serde_json::Value>,
+    /// Where route paths are reachable from (custom schemes, https hosts);
+    /// Android/iOS deep links are derived from `routes.php` paths.
+    #[serde(default)]
+    links: Option<crate::routes::LinkOptions>,
+    /// Route compiler options (routes file, generated namespace/output).
+    #[serde(default)]
+    routes: Option<crate::routes::RoutesOptions>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1465,7 +1472,8 @@ fn default_abis() -> Vec<AndroidAbi> {
 }
 
 fn load_project(path: &Path) -> Result<Project, String> {
-    let (root, manifest) = load_project_manifest(path)?;
+    let (root, mut manifest) = load_project_manifest(path)?;
+    apply_route_links(&root, &mut manifest)?;
     validate_manifest(&root, &manifest)?;
     let plugins = discover_plugins(&root, &manifest)?;
     Ok(Project {
@@ -1473,6 +1481,43 @@ fn load_project(path: &Path) -> Result<Project, String> {
         manifest,
         plugins,
     })
+}
+
+/// Compiles routes.php (typed navigation + literal checks) and merges the
+/// deep links derived from its paths into the Android and iOS options.
+fn apply_route_links(root: &Path, manifest: &mut NativeManifest) -> Result<(), String> {
+    let options = manifest.routes.clone().unwrap_or_default();
+    let Some(routes) = crate::routes::compile(root, &options)? else {
+        return Ok(());
+    };
+    merge_route_links(manifest, &routes);
+    Ok(())
+}
+
+fn merge_route_links(manifest: &mut NativeManifest, routes: &crate::routes::RouteManifest) {
+    let Some(links) = manifest.links.clone() else {
+        return;
+    };
+    for link in crate::routes::derive_links(&links, &routes) {
+        let exists = manifest.android.deep_links.iter().any(|current| {
+            current.scheme.eq_ignore_ascii_case(&link.scheme)
+                && current.host == link.host
+                && current.path_prefix == link.path_prefix
+        });
+        if !exists {
+            manifest.android.deep_links.push(AndroidDeepLink {
+                scheme: link.scheme,
+                host: link.host,
+                path_prefix: link.path_prefix,
+                auto_verify: link.auto_verify,
+            });
+        }
+    }
+    crate::routes::merge_unique(&mut manifest.ios.url_schemes, links.schemes.clone());
+    crate::routes::merge_unique(
+        &mut manifest.ios.associated_domains,
+        crate::routes::associated_domains(&links),
+    );
 }
 
 fn load_project_manifest(path: &Path) -> Result<(PathBuf, NativeManifest), String> {
@@ -10908,6 +10953,63 @@ mod tests {
             }))
             .expect("plugin manifest"),
         }
+    }
+
+    #[test]
+    fn route_paths_become_android_and_ios_links() {
+        let mut manifest: NativeManifest = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "applicationId": "app.pam.routes",
+            "name": "Routes",
+            "entry": "index.php",
+            "android": {"deepLinks": [{"scheme": "routes"}]},
+            "ios": {"urlSchemes": ["ROUTES"]},
+            "links": {"schemes": ["routes"], "hosts": ["app.example.com"]}
+        }))
+        .expect("app manifest");
+        let routes: crate::routes::RouteManifest = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "routes": [
+                {"name": "chat", "path": "/chat/{id}", "linkable": true},
+                {"name": "settings", "path": "/settings", "linkable": true},
+                {"name": "tabs", "path": null, "linkable": false}
+            ]
+        }))
+        .expect("route manifest");
+        merge_route_links(&mut manifest, &routes);
+        let links: Vec<_> = manifest
+            .android
+            .deep_links
+            .iter()
+            .map(|link| {
+                (
+                    link.scheme.as_str(),
+                    link.host.as_deref(),
+                    link.path_prefix.as_deref(),
+                    link.auto_verify,
+                )
+            })
+            .collect();
+        assert_eq!(
+            links,
+            vec![
+                ("routes", None, None, false),
+                ("https", Some("app.example.com"), Some("/chat/"), true),
+                ("https", Some("app.example.com"), Some("/settings"), true),
+            ]
+        );
+        assert_eq!(manifest.ios.url_schemes, vec!["ROUTES"]);
+        assert_eq!(
+            manifest.ios.associated_domains,
+            vec!["applinks:app.example.com"]
+        );
+        validate_ios_links(&manifest.ios).expect("valid iOS links");
+        merge_route_links(&mut manifest, &routes);
+        assert_eq!(
+            manifest.android.deep_links.len(),
+            3,
+            "merging twice adds nothing"
+        );
     }
 
     fn share_app(plugins: serde_json::Value) -> NativeManifest {

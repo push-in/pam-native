@@ -25,6 +25,31 @@ final class Http
     {
     }
 
+    /**
+     * Axios-style client with a base URL, default headers, timeout, retry and
+     * chained onRequest/onResponse/onError interceptors. Its requests return
+     * a PendingResponse (Thenable of Response) instead of taking a callback.
+     *
+     * @param array<string, string> $headers
+     * @param int $retry Extra attempts for idempotent requests after a
+     *     transport failure, 408, 429 or 5xx (0-5).
+     */
+    public static function create(
+        string $baseUrl = '',
+        array $headers = [],
+        int $timeout = 30_000,
+        int $retry = 0,
+        int $retryDelay = 300,
+    ): HttpClient {
+        return new HttpClient(
+            $baseUrl,
+            ['Accept' => 'application/json', ...$headers],
+            $timeout,
+            $retry,
+            $retryDelay,
+        );
+    }
+
     /** @param Closure(HttpResponse): void $callback */
     public static function get(
         string $url,

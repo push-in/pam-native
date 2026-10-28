@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\Routing;
 
 use InvalidArgumentException;
+use Pam\Native\Component;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Renderable;
 use ReflectionClass;
@@ -36,18 +37,9 @@ final class ScreenFactory
 
         $constructor = $reflection->getConstructor();
         $params = $route->all();
-        if ($constructor === null) {
-            if ($params !== []) {
-                throw new InvalidArgumentException("Route {$route->name} does not accept parameters.");
-            }
-
-            /** @var Renderable */
-            return $reflection->newInstance();
-        }
-
+        $known = self::setupParameters($reflection);
         $arguments = [];
-        $known = [];
-        foreach ($constructor->getParameters() as $parameter) {
+        foreach ($constructor?->getParameters() ?? [] as $parameter) {
             $known[$parameter->getName()] = true;
             if (array_key_exists($parameter->getName(), $params)) {
                 $value = $params[$parameter->getName()];
@@ -64,13 +56,38 @@ final class ScreenFactory
 
         $unknown = array_diff_key($params, $known);
         if ($unknown !== []) {
-            throw new InvalidArgumentException(
-                "Route {$route->name} received unknown parameter ".array_key_first($unknown).'.',
-            );
+            throw new InvalidArgumentException($known === []
+                ? "Route {$route->name} does not accept parameters."
+                : "Route {$route->name} received unknown parameter ".array_key_first($unknown).'.');
+        }
+
+        $screen = $constructor === null ? $reflection->newInstance() : $reflection->newInstanceArgs($arguments);
+        if ($screen instanceof Component) {
+            // setup(...) receives the route parameters by name (architecture v2).
+            $screen->__pamRouteParams($params, $route);
         }
 
         /** @var Renderable */
-        return $reflection->newInstanceArgs($arguments);
+        return $screen;
+    }
+
+    /**
+     * Names accepted by the screen's `setup(...)`, every name when it is variadic.
+     *
+     * @param ReflectionClass<object> $reflection
+     * @return array<string, true>
+     */
+    private static function setupParameters(ReflectionClass $reflection): array
+    {
+        if (!$reflection->isSubclassOf(Component::class) || !$reflection->hasMethod('setup')) {
+            return [];
+        }
+        $names = [];
+        foreach ($reflection->getMethod('setup')->getParameters() as $parameter) {
+            $names[$parameter->getName()] = true;
+        }
+
+        return $names;
     }
 
     private static function assertType(

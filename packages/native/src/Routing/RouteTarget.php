@@ -6,6 +6,9 @@ namespace Pam\Native\Routing;
 
 use BackedEnum;
 
+/**
+ * @deprecated Generated routes now return Pam\Native\Routing\TypedRoute (navigate(), push(), replace(), reset(), path()).
+ */
 final readonly class RouteTarget
 {
     /** @var array<string, string|int|float|bool|null> */

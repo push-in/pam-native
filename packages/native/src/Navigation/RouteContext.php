@@ -29,6 +29,17 @@ final readonly class RouteContext
         return $this->params;
     }
 
+    /** `$route->chatId`: a param by name (null when absent). */
+    public function __get(string $name): string|int|float|bool|null
+    {
+        return $this->params[$name] ?? null;
+    }
+
+    public function __isset(string $name): bool
+    {
+        return isset($this->params[$name]);
+    }
+
     public function has(string $key): bool
     {
         return array_key_exists($key, $this->params);

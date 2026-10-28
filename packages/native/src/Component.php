@@ -62,6 +62,21 @@ abstract class Component implements Renderable
     /** @var array<int, Disposable> resources released on unmount, by object id */
     private array $pamOwned = [];
     private ?\Pam\Native\System\ComponentTimers $pamTimers = null;
+    /** Scope of the last setup(): watchers, composables and lifecycle hooks. */
+    private ?\Pam\Native\Signals\EffectScope $pamScope = null;
+    /** @var array<string, mixed>|null parameters of the route that created this screen */
+    private ?array $pamRouteParams = null;
+    private ?\Pam\Native\Navigation\RouteContext $pamRouteContext = null;
+    /** True for components a router shows as a screen (they own onFocus/onBlur). */
+    private bool $pamIsRoute = false;
+    /** Last navigation focus delivered to this screen (null before the first). */
+    private ?bool $pamFocused = null;
+    /** @var array<int, \Pam\Native\Signals\EffectScope> setup scopes following this screen's focus */
+    private array $pamFocusScopes = [];
+    /** True when setup() must run again on remount (its scope was disposed). */
+    private bool $pamSetupStale = false;
+    /** Nearest ancestor screen whose focus drives this component's onFocus()/onBlur(). */
+    private ?Component $pamFocusOwner = null;
 
     /** @var array<class-string, bool> */
     private static array $pamAlwaysRender = [];
@@ -103,6 +118,14 @@ abstract class Component implements Renderable
         'pamHandlers',
         'pamOwned',
         'pamTimers',
+        'pamScope',
+        'pamRouteParams',
+        'pamRouteContext',
+        'pamIsRoute',
+        'pamFocused',
+        'pamFocusScopes',
+        'pamSetupStale',
+        'pamFocusOwner',
     ];
 
     public function render(): Renderable
@@ -114,10 +137,21 @@ abstract class Component implements Renderable
     {
     }
 
-    public function setup(): void
-    {
-    }
+    /*
+     * setup(...$params) is not declared here so each component can declare
+     * its own typed parameters, e.g. `public function setup(string $id): void`.
+     * It runs once per mount, receives the route parameters by name, and may
+     * call signal(), computed(), watch(), onMounted(), onUnmounted(),
+     * onFocus(), onBlur() and any use*() composable; everything it creates is
+     * released when the component unmounts.
+     */
 
+    /**
+     * @deprecated Since architecture v2. Declare `public function setup(...)`
+     * and register `onMounted(fn () => ...)` inside it; subscriptions made
+     * through composables (`useKeyboard()`, `useResource()`...) are released
+     * automatically. mount() keeps working and runs after setup().
+     */
     public function mount(): void
     {
     }
@@ -187,19 +221,33 @@ abstract class Component implements Renderable
     {
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * @deprecated Since architecture v2. Keep local state in signals created
+     * in setup(): `$this->count = signal(0)`, read as `$count.value`.
+     *
+     * @return array<string, mixed>
+     */
     protected function initialState(): array
     {
         return [];
     }
 
-    /** @return list<Effect> */
+    /**
+     * @deprecated Since architecture v2. Call `watch($source, fn ($next, $previous) => ...)`
+     * inside setup(); it stops on unmount.
+     *
+     * @return list<Effect>
+     */
     protected function effects(): array
     {
         return [];
     }
 
-    /** @return list<Effect> */
+    /**
+     * @deprecated Since architecture v2. Call `watch()` inside setup().
+     *
+     * @return list<Effect>
+     */
     protected function watchers(): array
     {
         return [];
@@ -275,7 +323,13 @@ abstract class Component implements Renderable
             }
         }
 
-        throw new LogicException("Unknown component property {$name}.");
+        if (Globals::has($name)) {
+            return Globals::get($name);
+        }
+
+        throw new LogicException(
+            "Unknown component property {$name}. Declare it, or register it with App::global('{$name}', ...).",
+        );
     }
 
     final protected function memo(string $key, array $dependencies, Closure $compute): mixed
@@ -705,7 +759,113 @@ abstract class Component implements Renderable
     final public function __pamSetup(): void
     {
         $this->pamLocalState();
-        $this->setup();
+        $this->pamSetupStale = false;
+        if (!method_exists($this, 'setup')) {
+            return;
+        }
+        $scope = new \Pam\Native\Signals\EffectScope();
+        $this->pamScope = $scope;
+        $this->pamAttachFocusOwner($scope);
+        $method = new ReflectionMethod($this, 'setup');
+        $params = $this->pamRouteParams;
+        if ($params === null && class_exists(\Pam\Native\Routing\RouteArguments::class)) {
+            // Screens created by the Route facade carry their params there.
+            $params = \Pam\Native\Routing\RouteArguments::params($this);
+        }
+        $arguments = \Pam\Native\Internal\SetupArguments::resolve(
+            $method,
+            $params ?? [],
+            $this->pamRouteContext,
+            static::class,
+        );
+        $scope->run(fn () => $method->invokeArgs($this, $arguments));
+    }
+
+    /**
+     * @internal Route parameters for setup(), given by the router (or by
+     * App::make()) before the first render. Marks the component as a screen.
+     *
+     * @param array<string, mixed> $params
+     */
+    final public function __pamRouteParams(array $params, ?\Pam\Native\Navigation\RouteContext $route = null): static
+    {
+        $this->pamRouteParams = $params;
+        $this->pamRouteContext = $route;
+        $this->pamIsRoute = true;
+
+        return $this;
+    }
+
+    /** @internal True for screens shown by a router. */
+    final public function __pamIsRoute(): bool
+    {
+        return $this->pamIsRoute;
+    }
+
+    /** @internal The scope of the current setup(), when setup() is declared. */
+    final public function __pamScope(): ?\Pam\Native\Signals\EffectScope
+    {
+        return $this->pamScope;
+    }
+
+    /** @internal Navigation focused or blurred this screen. */
+    final public function __pamNavigationFocus(bool $focused): void
+    {
+        $this->pamIsRoute = true;
+        if ($this->pamFocused === $focused) {
+            return;
+        }
+        $this->pamFocused = $focused;
+        foreach ($this->pamFocusScopes as $scope) {
+            if ($focused && !$scope->isMounted()) {
+                continue;
+            }
+            $scope->focusChanged($focused);
+        }
+    }
+
+    /** @internal The component was attached in this mount cycle: run onMounted() hooks and initial focus. */
+    final public function __pamMounted(): void
+    {
+        $scope = $this->pamScope;
+        if ($scope === null || $scope->disposed()) {
+            return;
+        }
+        $scope->mount();
+        $owner = $this->pamFocusOwner;
+        if ($owner === null || $owner->pamFocused === true) {
+            $scope->focusChanged(true);
+        }
+    }
+
+    /** @internal setup() must run again because its scope was released at unmount. */
+    final public function __pamSetupStale(): bool
+    {
+        return $this->pamSetupStale;
+    }
+
+    private function pamAttachFocusOwner(\Pam\Native\Signals\EffectScope $scope): void
+    {
+        $owner = null;
+        foreach (array_reverse(ComponentLifecycle::ancestors()) as $ancestor) {
+            if ($ancestor->pamIsRoute) {
+                $owner = $ancestor;
+                break;
+            }
+        }
+        $this->pamFocusOwner = $owner;
+        if ($owner === null) {
+            return;
+        }
+        $id = spl_object_id($scope);
+        $owner->pamFocusScopes[$id] = $scope;
+        $reference = \WeakReference::create($owner);
+        $scope->onDispose(static function () use ($reference, $id): void {
+            $owner = $reference->get();
+            if ($owner !== null) {
+                unset($owner->pamFocusScopes[$id]);
+            }
+        });
     }
 
     final public function __pamRunEffects(): void
@@ -815,6 +975,17 @@ abstract class Component implements Renderable
         $owned = $this->pamOwned;
         $this->pamOwned = [];
         $failure = null;
+        $scope = $this->pamScope;
+        if ($scope !== null && !$scope->disposed()) {
+            // setup() runs again on every remount; own() resources and timers are released below.
+            $this->pamSetupStale = true;
+            try {
+                $scope->dispose();
+            } catch (Throwable $error) {
+                $failure = $error;
+            }
+        }
+        $this->pamFocusOwner = null;
         foreach ($owned as $resource) {
             try {
                 $resource->dispose();
@@ -836,6 +1007,8 @@ abstract class Component implements Renderable
         $this->pamEventListeners = [];
         $this->pamSlots = [];
         $this->pamParent = null;
+        $this->pamFocusOwner = null;
+        $this->pamFocusScopes = [];
     }
 
     final public function __pamCleanup(): void

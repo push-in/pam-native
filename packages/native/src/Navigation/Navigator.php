@@ -24,6 +24,9 @@ use function is_scalar;
 use function is_string;
 use function strlen;
 
+/**
+ * @deprecated Declare routes in routes.php with Pam\Native\Route and navigate with navigate()/back()/<Link>; screens that still take a Navigator get it injected by type. Navigator remains the stack engine behind Route (see docs/architecture-v2.md#routing).
+ */
 final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var array<string, Closure(): Renderable> */
@@ -1389,6 +1392,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             if ($previousInstance instanceof NavigationLifecycleAware) {
                 $previousInstance->navigationBlurred($this->contextFor($previous));
             }
+            if ($previousInstance instanceof \Pam\Native\Component) {
+                $previousInstance->__pamNavigationFocus(false);
+            }
             $this->focusedEntryKey = null;
             $this->emitNavigation(NavigationEventType::Blur, ['route' => $this->contextFor($previous)], false, $this->entryKey($previous));
             $this->emitNavigation(NavigationEventType::Focus, ['route' => $this->contextFor($current)], false, $this->entryKey($current));
@@ -1558,6 +1564,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         \Pam\Native\Notifications\PushRendering::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
         if ($instance instanceof NavigationLifecycleAware) {
             $instance->navigationFocused($this->contextFor($entry));
+        }
+        if ($instance instanceof \Pam\Native\Component) {
+            $instance->__pamNavigationFocus(true);
         }
     }
 

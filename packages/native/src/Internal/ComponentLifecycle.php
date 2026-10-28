@@ -248,6 +248,17 @@ final class ComponentLifecycle
         }
     }
 
+    /**
+     * Components currently rendering, outermost first (the one being set up
+     * is last).
+     *
+     * @return list<Component>
+     */
+    public static function ancestors(): array
+    {
+        return self::$renderStack;
+    }
+
     public static function leave(): void
     {
         array_pop(self::$renderStack);
@@ -492,6 +503,10 @@ final class ComponentLifecycle
             } finally {
                 $component->__pamDisposeResources();
             }
+            if ($component->__pamSetupStale()) {
+                // setup() created subscriptions that unmount released: run it again on remount.
+                $state->setup = false;
+            }
             $state->mounted = false;
             $state->attached = false;
             $state->resumed = false;
@@ -537,6 +552,7 @@ final class ComponentLifecycle
                 if (!$state->attached) {
                     $component->attached();
                     $state->attached = true;
+                    $component->__pamMounted();
                 }
                 if (self::$appState !== AppState::Background && !$state->resumed) {
                     $component->__pamResumeResources();
