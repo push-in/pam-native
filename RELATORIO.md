@@ -52,6 +52,9 @@ Todos com release GitHub e atualização do Packagist aceita. Os plugins existen
 | Testes JVM, núcleo + cinco plugins | 360/360, zero falhas |
 | PHP dos plugins | media 20/20; auth 4/4; share 8/8; notifications 35/35 asserções; webview 4/4 asserções |
 | Compile Kotlin dos testes instrumentados, núcleo + plugins | aprovado (compilação; não executados em dispositivo) |
+| Validadores registrados no Composer do real-world app | 59/59 |
+| Todos os scripts de validação do real-world app | 474/475; build-integrity depende de bundle/release |
+| Safe-area do real-world app | 158 superfícies, dois insets, explícito + automático: aprovado |
 | Swift | pendente, sem Mac |
 
 Gradle/cargo foram executados com o lock compartilhado; Gradle com Xmx3g, quatro workers, compilador Kotlin no processo e --stop no fim. O teste JVM do media usa org.json:json:20250517 no harness, após consulta ao POM. Os manifests/lockfiles e metadados Composer foram verificados antes da instalação.
@@ -86,4 +89,4 @@ d885779e ci: the Packagist ecosystem publisher retries until the release is visi
 818cb049 refactor(core): move location, contacts/SMS, sensors, the audio recorder and the image editor out of the core into plugins (pam-native-location, pam-native-contacts, pam-native-sensors, pam-native-audio, the media editor plugin); deprecated alias shims for 1.46 that name the composer package when the plugin is missing; generic plugin hooks WatchChannel (plugin API, public on iOS) and Android ActivityResultHost; Play Services Location and the location/contacts permissions leave the core build [skip ci]
 ```
 
-O commit deste relatório é posterior aos hashes acima. Os logs de execução desta sessão estão em `/tmp/codex-slim-*`; são evidência local, não artefatos publicados.
+Commit adicional de código: `511ea7e4`, remoção do import Swift de biometria restante e esclarecimento dos helpers de Files. O commit deste relatório é posterior aos hashes acima. Os logs de execução desta sessão estão em `/tmp/codex-slim-*`; são evidência local, não artefatos publicados.
