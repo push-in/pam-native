@@ -77,6 +77,8 @@ abstract class Component implements Renderable
     private bool $pamSetupStale = false;
     /** Nearest ancestor screen whose focus drives this component's onFocus()/onBlur(). */
     private ?Component $pamFocusOwner = null;
+    /** @var list<Closure> navigation focus waiting for the first mount (setup() not run yet) */
+    private array $pamPendingFocus = [];
 
     /** @var array<class-string, bool> */
     private static array $pamAlwaysRender = [];
@@ -838,10 +840,30 @@ abstract class Component implements Renderable
             return;
         }
         $scope->mount();
+        $pending = $this->pamPendingFocus;
+        $this->pamPendingFocus = [];
+        foreach ($pending as $deliver) {
+            $deliver();
+        }
         $owner = $this->pamFocusOwner;
         if ($owner === null || $owner->pamFocused === true) {
             $scope->focusChanged(true);
         }
+    }
+
+    /**
+     * @internal Runs a navigation focus now, or after the first mount when
+     * setup() has not run yet: focus always follows setup() and onMounted().
+     */
+    final public function __pamWhenMounted(Closure $deliver): void
+    {
+        $scope = $this->pamScope;
+        if (!method_exists($this, 'setup') || ($scope !== null && !$this->pamSetupStale && $scope->isMounted())) {
+            $deliver();
+
+            return;
+        }
+        $this->pamPendingFocus[] = $deliver;
     }
 
     /** @internal setup() must run again because its scope was released at unmount. */
