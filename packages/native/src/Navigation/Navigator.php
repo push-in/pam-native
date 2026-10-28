@@ -528,7 +528,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     {
         $child = $this->activeChildBackHandler();
         if ($child?->canGoBack() === true) return $child->goBack();
-        return $this->pop();
+        if (count($this->stack) <= 1) return false;
+        // React Navigation: a Back that a beforeRemove listener prevented (a
+        // screen asking "leave?") is still consumed, so the system Back never
+        // falls through to closing or backgrounding the app.
+        $this->pop();
+
+        return true;
     }
 
     /** @param array<string, string|int|float|bool|null> $params */

@@ -6781,6 +6781,11 @@ $blocked = $advancedNavigator->addListener(
     },
 );
 $assert(!$advancedNavigator->pop(), 'beforeRemove must cancel every stack removal path.');
+$routeBeforeBlockedBack = $advancedNavigator->currentRoute();
+$assert(
+    $advancedNavigator->goBack() && $advancedNavigator->currentRoute() === $routeBeforeBlockedBack,
+    'A Back prevented by beforeRemove is consumed (never closes the app) and keeps the focused screen.',
+);
 $blocked->unsubscribe();
 $assert($advancedNavigator->pop(), 'Removing a beforeRemove listener must release navigation.');
 $containerStateChanges = 0;
