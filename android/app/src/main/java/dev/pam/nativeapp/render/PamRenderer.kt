@@ -993,6 +993,7 @@ class PamRenderer(
             val parent = nodes[id]?.parent ?: return
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
+        if (localModalIds.isNotEmpty()) prepareModalSharedRemovals(batches)
         deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
             try {
@@ -1306,6 +1307,36 @@ class PamRenderer(
         }
         collect(root)
         return labels
+    }
+
+    /**
+     * A presented Modal unmounted by this commit (itself or an ancestor)
+     * starts its shared elements home while its views are still laid out,
+     * before the removals below take them away.
+     */
+    private fun prepareModalSharedRemovals(batches: List<List<Mutation>>) {
+        var removed: HashSet<Long>? = null
+        for (batch in batches) {
+            for (mutation in batch) {
+                if (mutation is Mutation.Remove) {
+                    (removed ?: HashSet<Long>().also { removed = it }) += mutation.id
+                }
+            }
+        }
+        val ids = removed ?: return
+        for (id in localModalIds) {
+            val modal = views[id] as? PamModalHost ?: continue
+            if (!modal.isPresented()) continue
+            var current = id
+            var depth = 0
+            while (current != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
+                if (current in ids) {
+                    modal.prepareSharedRemoval()
+                    break
+                }
+                current = nodes[current]?.parent ?: 0L
+            }
+        }
     }
 
     private fun closeLocalModalAncestor(startId: Long) {

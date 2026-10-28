@@ -7144,6 +7144,27 @@ $assert(
         && !array_key_exists('returnDurationMs', json_decode(SharedTransitionStyle::timing()->toJson(), true)),
     'Any template element takes a `shared` tag (null leaves it untagged) and a style with a return curve.',
 );
+$modalShared = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<View><Image source="a.jpg" :shared="$tag" />'
+        .'<Modal p-if="$open" visible="true" presentation="fullScreen" animationType="fade">'
+        .'<View :shared="$tag" :sharedStyle="$style"><Image source="a-full.jpg" resizeMode="contain" /></View>'
+        .'</Modal></View>',
+    ),
+    null,
+    ['tag' => 'avatar:7', 'style' => $returnStyle, 'open' => true],
+);
+$modalSharedThumb = $modalShared->children()[0];
+$modalSharedModal = $modalShared->children()[1] ?? null;
+$modalSharedPhoto = $modalSharedModal?->children()[0] ?? null;
+$assert(
+    $modalSharedThumb->properties()[PropKey::SharedTransitionTag->value] === 'avatar:7'
+        && $modalSharedModal?->kind() === NodeKind::Modal
+        && $modalSharedPhoto?->properties()[PropKey::SharedTransitionTag->value] === 'avatar:7'
+        && $modalSharedPhoto->properties()[PropKey::SharedTransitionConfig->value] === $returnStyle->toJson(),
+    'A `shared` tag inside a Modal reaches the retained tree like any other element (the host pairs it with the screen below).',
+);
+
 $launchConfig = json_decode(SharedTransitionStyle::spring(360)->returning(200)->launchOnTap()->toJson(), true);
 $assert(
     $launchConfig['launch'] === true && $launchConfig['launchBackdrop'] === '#000000' && $launchConfig['returnDurationMs'] === 200

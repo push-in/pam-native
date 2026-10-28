@@ -481,7 +481,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
-            sharedElements.touched(event.x, event.y)
+            PamSharedElements.touched(event.rawX, event.rawY)
         }
         return super.dispatchTouchEvent(event)
     }

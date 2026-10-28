@@ -425,6 +425,30 @@ What flies, with no app measuring or animation code:
   and the pop that follows flies it home from there.
 - **Late destination.** A destination image still decoding keeps its flight
   on top (up to 0.7 s) instead of showing an empty frame.
+- **Modals.** A `<Modal>` (the component, not a route) pairs with the screen
+  under it the same way: when it opens, every tag on screen below that the
+  Modal also shows flies into it, and when it closes (`visible` false, or the
+  Modal unmounted by `p-if`) its tags fly home to the instance they came from
+  (or the one now on screen for that tag). Media keep the decoded picture and
+  morph frame, crop and radius; `launchOnTap()` hands its flight to the Modal
+  the tap opened; a view released with `Drag::holdAt(...)` flies home from
+  where the finger left it. While anything flies, the Modal fades in step
+  with the flights instead of its own `animationType`, and the screen below
+  takes touches again as soon as the Modal starts closing. A Modal opened
+  over another Modal pairs with that one. No app code: tag both sides.
+
+  ```php
+  <Pressable on:press="openPhoto">
+      <Avatar :source="$avatar" :shared="'avatar:'.$userId" />
+  </Pressable>
+  <Modal p-if="$photoOpen" presentation="fullScreen" animationType="fade" on:requestClose="closePhoto">
+      <View class="photo" :shared="'avatar:'.$userId" :sharedStyle="$style">
+          <Image :source="$avatarFull" resizeMode="contain" class="fill" />
+      </View>
+  </Modal>
+  ```
+
+  Android only for now; iOS keeps the Modal's own animation.
 - **Platforms.** Android draws flights in the navigation host overlay from the
   transition animator; iOS animates them with a `UIViewPropertyAnimator`
   (`UISpringTimingParameters` for springs) above the routes, and presents a

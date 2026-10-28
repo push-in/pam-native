@@ -105,6 +105,10 @@ internal object PamSharedGeometry {
 
     fun lerp(from: Float, to: Float, progress: Float): Float = from + (to - from) * progress
 
+    /** What moves a point at [from] (x, y on screen) to the same place relative to [to]. */
+    fun delta(from: IntArray, to: IntArray): Pair<Float, Float> =
+        (from[0] - to[0]).toFloat() to (from[1] - to[1]).toFloat()
+
     /**
      * Eased value at [progress] (linear time, 0..1) of a [durationMs] flight.
      * 3 is a damped spring (damping ratio, stiffness, mass) whose overshoot is
@@ -166,9 +170,16 @@ internal class PamSharedElements(private val host: ViewGroup) {
         )
     }
 
-    private class Side(val clip: RectF, val content: RectF, val radius: Float)
+    private class Side(val clip: RectF, val content: RectF, val radius: Float) {
+        fun shifted(dx: Float, dy: Float): Side = Side(
+            RectF(clip).apply { offset(dx, dy) },
+            RectF(content).apply { offset(dx, dy) },
+            radius,
+        )
+    }
 
     private class Flight(
+        val tag: String,
         val source: View,
         val destination: View,
         val sourceAlpha: Float,
@@ -196,38 +207,36 @@ internal class PamSharedElements(private val host: ViewGroup) {
     }
 
     /**
-     * Pairs every tag on screen on both routes. The style comes from the
-     * element on the top route (the destination of a push, the source of a
-     * pop, which then uses its return curve).
+     * The view each tag flew from on the last opening flight (a push, a modal
+     * opening). The flight home prefers it while it is still on screen, so a
+     * tag shown more than once returns to the instance it came from even when
+     * the last touch was elsewhere (a close button).
      */
-    private var touchX = Float.NaN
-    private var touchY = Float.NaN
+    private val homes = HashMap<String, java.lang.ref.WeakReference<View>>()
 
-    /**
-     * The last touch in host coordinates. When one tag is on screen more than
-     * once (the same author's avatar on several posts), the instance under
-     * the finger that opened the route flies, and the flight home lands there.
-     */
-    fun touched(x: Float, y: Float) {
-        touchX = x
-        touchY = y
-    }
-
-    private fun pick(candidates: List<View>?, route: View, minimumShare: Float): View? {
+    private fun pick(candidates: List<View>?, route: View, minimumShare: Float, home: View? = null): View? {
         val visible = candidates?.filter { onScreen(it, route, minimumShare) }.orEmpty()
-        if (visible.size <= 1 || touchX.isNaN()) return visible.firstOrNull()
-        return visible.filter { hits(it, touchX, touchY) }.minByOrNull(::visibleArea) ?: visible.first()
+        if (home != null && home in visible) return home
+        val x = touchX
+        val y = touchY
+        if (visible.size <= 1 || x.isNaN()) return visible.firstOrNull()
+        return visible.filter { hits(it, x, y) }.minByOrNull(::visibleArea) ?: visible.first()
     }
 
-    /** The point (host coordinates) is on the visible, clipped part of [view]. */
+    private fun remember(tag: String, source: View) {
+        if (homes.size >= MAX_HOMES) homes.entries.removeAll { it.value.get()?.isAttachedToWindow != true }
+        if (homes.size >= MAX_HOMES) homes.clear()
+        homes[tag] = java.lang.ref.WeakReference(source)
+    }
+
+    /** The point (screen coordinates) is on the visible, clipped part of [view]. */
     private fun hits(view: View, x: Float, y: Float): Boolean {
         val visible = Rect()
         if (!view.getGlobalVisibleRect(visible)) return false
         val origin = IntArray(2)
-        host.getLocationInWindow(origin)
-        val rootOrigin = IntArray(2)
-        host.rootView.getLocationInWindow(rootOrigin)
-        return visible.contains((x + origin[0] - rootOrigin[0]).toInt(), (y + origin[1] - rootOrigin[1]).toInt())
+        view.rootView.getLocationOnScreen(origin)
+        visible.offset(origin[0], origin[1])
+        return visible.contains(x.toInt(), y.toInt())
     }
 
     private fun visibleArea(view: View): Long {
@@ -248,7 +257,9 @@ internal class PamSharedElements(private val host: ViewGroup) {
             if (flights.size >= 16) break
             if (tag == launched?.tag) continue
             val source = pick(candidates, outgoing, minimumShare = 0.5f) ?: continue
-            val destination = pick(destinations[tag], incoming, minimumShare = 0f) ?: continue
+            val home = if (popping) homes[tag]?.get() else null
+            val destination = pick(destinations[tag], incoming, minimumShare = 0f, home) ?: continue
+            if (!popping) remember(tag, source)
             val top = if (popping) source else destination
             val below = if (popping) destination else source
             val styled = config(top) ?: config(below)
@@ -257,7 +268,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
                 popping -> styled.returning()
                 else -> styled
             }
-            createFlight(source, destination, config)?.let(flights::add)
+            createFlight(tag, source, destination, config)?.let(flights::add)
         }
         flights.forEach {
             it.source.alpha = 0f
@@ -337,6 +348,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
         flightView.set(start, predicted, 0f)
         view.alpha = 0f
         launch = started
+        launchOwner = java.lang.ref.WeakReference(this)
         started.animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
             duration = config.durationMs.coerceIn(1L, 2_000L)
             interpolator = android.view.animation.LinearInterpolator()
@@ -355,6 +367,34 @@ internal class PamSharedElements(private val host: ViewGroup) {
         return true
     }
 
+    /**
+     * Takes over a flight launched on a tap in another host (the screen under
+     * a Modal that the tap opened): it moves into this host's overlay, in this
+     * host's coordinates, and [prepare] hands it to the destination or flies
+     * it home. True when a launch is now pending here.
+     */
+    fun adoptLaunch(): Boolean {
+        if (launch != null) return true
+        val owner = launchOwner?.get()?.takeIf { it !== this } ?: return false
+        val moved = owner.launch ?: return false
+        owner.launch = null
+        owner.host.removeCallbacks(owner.launchTimeout)
+        launchOwner = java.lang.ref.WeakReference(this)
+        moved.animator?.cancel()
+        val (dx, dy) = screenDelta(owner.host, host)
+        owner.host.overlay.remove(moved.view)
+        owner.host.overlay.remove(moved.backdrop)
+        moved.view.attach(host, dx, dy)
+        moved.backdrop.layout(0, 0, host.width, host.height)
+        host.overlay.add(moved.backdrop)
+        host.overlay.add(moved.view)
+        launch = Launch(
+            moved.tag, moved.source, moved.sourceAlpha, moved.start.shifted(dx, dy), moved.predicted.shifted(dx, dy),
+            moved.view, moved.backdrop, moved.content, moved.owned, moved.config, moved.startedAt,
+        )
+        return true
+    }
+
     /** The pushed route holds the launched tag: continue from where it is to the real frame. */
     private fun handOff(launched: Launch, destinations: Map<String, List<View>>, incoming: View) {
         host.removeCallbacks(launchTimeout)
@@ -364,6 +404,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
             returnLaunch(launched)
             return
         }
+        remember(launched.tag, launched.source)
         val media = contentView(destination)
         val fit = media?.sharedFit
         val end = if (media != null && fit != null) side(destination, media as View, fit, launched.content) else null
@@ -375,7 +416,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
         fadeFloor = launched.backdrop.alpha
         host.overlay.remove(launched.backdrop)
         val flight = Flight(
-            launched.source, destination, launched.sourceAlpha, destination.alpha, now, target, launched.view,
+            launched.tag, launched.source, destination, launched.sourceAlpha, destination.alpha, now, target, launched.view,
             launched.owned, media, Config(durationMs = remaining, easing = 5), launched.content,
         )
         destination.alpha = 0f
@@ -502,7 +543,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
         flight.owned.forEach { if (!it.isRecycled) it.recycle() }
     }
 
-    private fun createFlight(source: View, destination: View, config: Config): Flight? {
+    private fun createFlight(tag: String, source: View, destination: View, config: Config): Flight? {
         val sourceMedia = contentView(source)
         val destinationMedia = contentView(destination)
         val owned = ArrayList<Bitmap>(2)
@@ -523,16 +564,16 @@ internal class PamSharedElements(private val host: ViewGroup) {
             val end = side(destination, destinationMedia as View, destinationMedia.sharedFit!!, content) ?: return null
             val view = FlightView(host, content.drawable, content.width, content.height, null)
             return Flight(
-                source, destination, source.alpha, destination.alpha, start, end, view, owned,
+                tag, source, destination, source.alpha, destination.alpha, start, end, view, owned,
                 destinationMedia, config, content,
             )
         }
         owned.forEach { if (!it.isRecycled) it.recycle() }
-        return snapshotFlight(source, destination, config)
+        return snapshotFlight(tag, source, destination, config)
     }
 
     /** Any view: its pixels scale from one frame to the other (resizeMode). */
-    private fun snapshotFlight(source: View, destination: View, config: Config): Flight? {
+    private fun snapshotFlight(tag: String, source: View, destination: View, config: Config): Flight? {
         val bitmap = snapshot(source) ?: return null
         val target = if (config.crossFade) snapshot(destination) else null
         val start = rectInHost(source, RectF(0f, 0f, source.width.toFloat(), source.height.toFloat()))
@@ -564,7 +605,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
             target?.let { BitmapDrawable(host.resources, it) },
         )
         return Flight(
-            source, destination, source.alpha, destination.alpha, startSide, endSide, view,
+            tag, source, destination, source.alpha, destination.alpha, startSide, endSide, view,
             mutableListOf<Bitmap>().apply { add(bitmap); target?.let(::add) }, null, config,
         )
     }
@@ -597,7 +638,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
         var current = view.parent as? View
         repeat(3) {
             val ancestor = current ?: return 0f
-            if (ancestor === host) return 0f
+            if (ancestor === host || ancestor.parent !is View) return 0f
             val frame = rectInHost(ancestor, RectF(0f, 0f, ancestor.width.toFloat(), ancestor.height.toFloat()))
             if (kotlin.math.abs(frame.left - box.left) > 2f || kotlin.math.abs(frame.top - box.top) > 2f ||
                 kotlin.math.abs(frame.right - box.right) > 2f || kotlin.math.abs(frame.bottom - box.bottom) > 2f
@@ -675,13 +716,23 @@ internal class PamSharedElements(private val host: ViewGroup) {
         return area > 0f && visible.width().toFloat() * visible.height() >= area * minimumShare * 0.98f
     }
 
-    /** Maps a rect of [view] into host coordinates through every transform (drag, scale, zoom). */
+    /**
+     * Maps a rect of [view] into host coordinates through every transform
+     * (drag, scale, zoom). A view in another window (the screen under a
+     * Modal, the Modal over it) is mapped to its window's root and then
+     * moved by the distance between the two windows on screen.
+     */
     private fun rectInHost(view: View, local: RectF): RectF {
         val matrix = Matrix()
         var current: View = view
         while (current !== host) {
             matrix.postConcat(current.matrix)
-            val parent = current.parent as? View ?: break
+            val parent = current.parent as? View
+            if (parent == null) {
+                val (dx, dy) = screenDelta(current, host)
+                matrix.postTranslate(current.left + dx, current.top + dy)
+                break
+            }
             matrix.postTranslate(current.left.toFloat() - parent.scrollX, current.top.toFloat() - parent.scrollY)
             current = parent
         }
@@ -750,6 +801,14 @@ internal class PamSharedElements(private val host: ViewGroup) {
             layout(0, 0, host.width, host.height)
         }
 
+        /** Moves into another host [dx], [dy] away on screen (a launch adopted by a Modal). */
+        fun attach(host: ViewGroup, dx: Float, dy: Float) {
+            layout(0, 0, host.width, host.height)
+            clip.offset(dx, dy)
+            content.offset(dx, dy)
+            invalidate()
+        }
+
         fun set(start: Side, end: Side, value: Float) {
             fun RectF.lerp(from: RectF, to: RectF) = set(
                 PamSharedGeometry.lerp(from.left, to.left, value),
@@ -803,9 +862,41 @@ internal class PamSharedElements(private val host: ViewGroup) {
         }
     }
 
-    private companion object {
-        const val HOLD_SAFETY_MS = 15_000L
+    companion object {
+        private const val HOLD_SAFETY_MS = 15_000L
+        private const val MAX_HOMES = 32
+        private var touchX = Float.NaN
+        private var touchY = Float.NaN
+
+        /** The host whose launch flight is still waiting for its destination. */
+        private var launchOwner: java.lang.ref.WeakReference<PamSharedElements>? = null
+
+        /**
+         * The last touch on screen (raw coordinates). When one tag is on
+         * screen more than once (the same author's avatar on several posts),
+         * the instance under the finger that opened the route or Modal flies.
+         */
+        fun touched(rawX: Float, rawY: Float) {
+            touchX = rawX
+            touchY = rawY
+        }
+
+        /** How far [to] is from [from] on screen: what moves a point of one window into the other. */
+        internal fun screenDelta(from: View, to: View): Pair<Float, Float> {
+            if (from.rootView === to.rootView) {
+                val a = IntArray(2)
+                val b = IntArray(2)
+                from.getLocationInWindow(a)
+                to.getLocationInWindow(b)
+                return PamSharedGeometry.delta(a, b)
+            }
+            val a = IntArray(2)
+            val b = IntArray(2)
+            from.getLocationOnScreen(a)
+            to.getLocationOnScreen(b)
+            return PamSharedGeometry.delta(a, b)
+        }
         /** How long a launched flight waits for its route beyond its own duration. */
-        const val LAUNCH_WAIT_MS = 900L
+        private const val LAUNCH_WAIT_MS = 900L
     }
 }

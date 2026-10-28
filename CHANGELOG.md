@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Shared elements between a screen and a `<Modal>` (the component, not a
+  route), with the same `shared` tag and no app code: opening the Modal flies
+  every tag on screen below into it, and closing it (`visible` false or
+  unmounted) flies its tags home to the instance they came from. Media reuse
+  the decoded picture and morph frame, crop and radius; a `launchOnTap()`
+  flight is handed to the Modal the tap opened; a view released by
+  `Drag::holdAt(...)` flies home from where it was let go. The Modal fades in
+  step with the flights, an unmounted Modal keeps its window (untouchable)
+  until they land, and a Modal over a Modal pairs with the one below
+  (Android; iOS keeps the Modal animation for now).
+- A shared element flies home to the instance it left from while that
+  instance is still on screen, even when the last touch was elsewhere (a close
+  button), and the touch that picks among repeated tags is tracked on screen
+  coordinates across windows.
+
 ## 1.46.5 - 2026-10-28
 
 Shared element fixes and instant launch on top of 1.46.4, no protocol change.
