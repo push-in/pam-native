@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Android navigation: a transition or back gesture never leaves a route
+  faded, moved or scaled. Every exit path restores the routes it touched:
+  finished, released early, cancelled, interrupted by another navigation
+  (also while the gesture settles), the window hidden (app sent to the
+  background) and the host detached. A navigation that arrived during a back
+  drag left the route below at the gesture's 0.82–1 alpha, so the whole
+  screen stayed ~8% darker until a relaunch. A touch only starts the gesture
+  once it moves past the touch slop along the gesture axis: a tap or a
+  vertical scroll on a full-screen-gesture route no longer makes the route
+  below visible and active, nor fires `onGestureStart`.
+- Navigator: the back gesture is enabled only when the stack has a route to
+  go back to. On a stack's root, an edge swipe uncovered the screen mounted
+  below it by `prewarm()` (or kept alive) and left it on screen with nothing
+  popped.
+- Android `ViewRef::blur()` moves focus off the input: the window's decor
+  view gives focus to its descendants first, so parking focus on it handed
+  it straight back to the first input.
+
 - iOS `<Switch checked>`: the switch follows `checked` (sent by the template
   Switch and `Toggle::make`), like the Android Switch. It only reached the
   accessibility state, so every template switch stayed visually off (a

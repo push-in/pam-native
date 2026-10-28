@@ -17,6 +17,7 @@ import android.view.ViewOutlineProvider
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
+import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -74,7 +75,21 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var onGestureStart: (() -> Unit)? = null
     private var onGestureEnd: (() -> Unit)? = null
     private var onGestureCancel: (() -> Unit)? = null
+    /** A touch that may become a back gesture (it went down where one can start). */
     private var gestureTracking = false
+    /** The back gesture began: its two routes below are captured and moving. */
+    private var gesturePrepared = false
+    private var gestureIncoming: View? = null
+    private var gestureOutgoing: View? = null
+    private var gestureSettle: ValueAnimator? = null
+    /**
+     * Routes whose alpha/translation/scale/rotation this host changed for a
+     * transition or a gesture. Every exit path (end, cancel, interruption,
+     * detach, background) restores them, so no route keeps a dimmed or moved
+     * frame after its animation stopped.
+     */
+    private val transformedRoutes: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var gestureStartX = 0f
     private var gestureStartY = 0f
     private var gestureDirection = 1
@@ -220,6 +235,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         super.onViewRemoved(child)
         if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
+        // A route leaves at rest: mounted again later (kept alive, parked) it
+        // must not come back faded or moved.
+        if (transformedRoutes.remove(child)) reset(child)
         if (child === activeRoute) {
             activeRoute = null
             if (childCount > 0) {
@@ -231,6 +249,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                     applyRoutePresentation(replacement)
                 }
             }
+            restoreIdleRoutes()
         }
         val fragment = routeControllers.remove(child) ?: return
         fragmentManager()?.takeUnless(FragmentManager::isStateSaved)?.let { manager ->
@@ -370,7 +389,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     fun startPredictiveBack(): Boolean {
-        if (!gestureEnabled || childCount < 2 || running != null) return false
+        endGestureSettle()
+        if (!gestureEnabled || childCount < 2 || running != null || gesturePrepared) return false
         predictiveBackActive = true
         predictiveBackCommitted = false
         predictiveBackProgress = 0f
@@ -409,29 +429,65 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-        if (!gestureEnabled || childCount < 2 || running != null) return false
-        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            gestureTracking = false
+            if (!gestureEnabled || childCount < 2 || running != null || gestureSettle != null ||
+                predictiveBackActive || gesturePrepared
+            ) {
+                return false
+            }
+            val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+            val edge = dp(gestureEdgeWidth)
+            val withinEdge = fullScreenGestureEnabled || gestureDirection == 2 ||
+                if (rtl) event.x >= width - edge else event.x <= edge
+            if (!withinEdge) return false
+            // Only remember where the touch went down: nothing changes on
+            // screen (or in the route lifecycles) until it moves like a back
+            // gesture. A tap, a scroll or a cancelled touch leaves no trace.
+            gestureStartX = event.x
+            gestureStartY = event.y
+            gestureTracking = true
+            velocityTracker?.recycle()
+            velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+            return false
+        }
+        if (!gestureTracking) return false
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                val edge = dp(gestureEdgeWidth)
-                val withinEdge = fullScreenGestureEnabled || gestureDirection == 2 ||
-                    if (rtl) event.x >= width - edge else event.x <= edge
-                if (!withinEdge) return false
-                gestureStartX = event.x
-                gestureStartY = event.y
-                gestureTracking = true
-                velocityTracker?.recycle()
-                velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
-                prepareGesture()
-            }
             MotionEvent.ACTION_MOVE -> {
-                if (!gestureTracking) return false
-                val distance = if (gestureDirection == 2) event.y - gestureStartY
-                    else if (rtl) gestureStartX - event.x else event.x - gestureStartX
-                if (distance > dp(6f)) return true
+                velocityTracker?.addMovement(event)
+                if (gestureBegins(event)) {
+                    prepareGesture()
+                    return true
+                }
             }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopTracking()
         }
         return false
+    }
+
+    /**
+     * True once the touch travelled past the touch slop along the gesture
+     * axis, more than across it; a touch that first moves across it (a list
+     * scroll) stops being a candidate.
+     */
+    private fun gestureBegins(event: MotionEvent): Boolean {
+        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val dx = event.x - gestureStartX
+        val dy = event.y - gestureStartY
+        val along = if (gestureDirection == 2) dy else if (rtl) -dx else dx
+        val across = kotlin.math.abs(if (gestureDirection == 2) dx else dy)
+        val slop = maxOf(touchSlop.toFloat(), dp(6f))
+        if (across > slop && across > along) {
+            stopTracking()
+            return false
+        }
+        return along > slop && along > across
+    }
+
+    private fun stopTracking() {
+        gestureTracking = false
+        velocityTracker?.recycle()
+        velocityTracker = null
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -444,19 +500,27 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val extent = if (gestureDirection == 2) height else width
         val progress = (distance / extent.coerceAtLeast(1)).coerceIn(0f, 1f)
         when (event.actionMasked) {
-            MotionEvent.ACTION_MOVE -> applyGestureProgress(progress, rtl)
+            MotionEvent.ACTION_MOVE -> {
+                // No child took the touch: the gesture begins here instead
+                // of in onInterceptTouchEvent.
+                if (!gesturePrepared) {
+                    if (!gestureBegins(event)) return gestureTracking
+                    prepareGesture()
+                }
+                applyGestureProgress(progress, rtl)
+            }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 velocityTracker?.computeCurrentVelocity(1_000)
                 val rawVelocity = if (gestureDirection == 2) velocityTracker?.yVelocity ?: 0f
                     else velocityTracker?.xVelocity ?: 0f
                 val velocity = if (gestureDirection == 2 || !rtl) rawVelocity else -rawVelocity
-                val complete = event.actionMasked == MotionEvent.ACTION_UP &&
-                    (progress >= gestureThreshold || velocity >= dp(700f))
-                settleGesture(progress, complete, rtl)
-                gestureTracking = false
-                velocityTracker?.recycle()
-                velocityTracker = null
-                if (event.actionMasked == MotionEvent.ACTION_UP && progress == 0f) {
+                val prepared = gesturePrepared
+                stopTracking()
+                if (prepared) {
+                    val complete = event.actionMasked == MotionEvent.ACTION_UP &&
+                        (progress >= gestureThreshold || velocity >= dp(700f))
+                    settleGesture(progress, complete, rtl)
+                } else if (event.actionMasked == MotionEvent.ACTION_UP) {
                     performClick()
                 }
             }
@@ -472,6 +536,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun prepareGesture() {
         val incoming = getChildAt(childCount - 2)
         val outgoing = getChildAt(childCount - 1)
+        gesturePrepared = true
+        gestureIncoming = incoming
+        gestureOutgoing = outgoing
+        transformedRoutes += incoming
+        transformedRoutes += outgoing
         setActiveRoute(incoming)
         applyRoutePresentation(incoming)
         setRouteVisibility(incoming, View.VISIBLE)
@@ -481,8 +550,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyGestureProgress(progress: Float, rtl: Boolean) {
-        val incoming = getChildAt(childCount - 2)
-        val outgoing = getChildAt(childCount - 1)
+        val incoming = gestureIncoming ?: return
+        val outgoing = gestureOutgoing ?: return
         val sign = if (rtl) -1f else 1f
         if (gestureDirection == 2) {
             outgoing.translationY = height * progress
@@ -496,7 +565,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun settleGesture(start: Float, complete: Boolean, rtl: Boolean) {
-        ValueAnimator.ofFloat(start, if (complete) 1f else 0f).apply {
+        val incoming = gestureIncoming
+        val outgoing = gestureOutgoing
+        if (incoming == null || outgoing == null) {
+            abortGesture()
+            return
+        }
+        gestureSettle?.cancel()
+        gestureSettle = ValueAnimator.ofFloat(start, if (complete) 1f else 0f).apply {
             duration = ((if (complete) 1f - start else start) * 220)
                 .toLong()
                 .coerceAtLeast(80)
@@ -504,42 +580,117 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             addUpdateListener { applyGestureProgress(it.animatedValue as Float, rtl) }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (childCount < 2) return
-                    val incoming = getChildAt(childCount - 2)
-                    val outgoing = getChildAt(childCount - 1)
-                    reset(incoming)
-                    reset(outgoing)
-                    clearSharedElements()
-                    if (complete) {
-                        predictiveBackCommitted = true
-                        setRouteVisibility(outgoing, View.INVISIBLE)
-                        setRouteVisibility(incoming, View.VISIBLE)
-                        setActiveRoute(incoming)
-                        onGestureEnd?.invoke()
-                        onGesturePop?.invoke()
-                    } else {
-                        setRouteVisibility(incoming, View.INVISIBLE)
-                        setRouteVisibility(outgoing, View.VISIBLE)
-                        setActiveRoute(outgoing)
-                        onGestureCancel?.invoke()
-                    }
+                    if (gestureSettle === animation) gestureSettle = null
+                    endGesture(incoming, outgoing, complete)
                 }
             })
             start()
         }
     }
 
+    /**
+     * Ends a settled back gesture on the routes it moved, whatever happened
+     * to the stack meanwhile (a route removed or inserted while it settled).
+     */
+    private fun endGesture(incoming: View, outgoing: View, complete: Boolean) {
+        gesturePrepared = false
+        gestureIncoming = null
+        gestureOutgoing = null
+        reset(incoming)
+        reset(outgoing)
+        clearSharedElements()
+        val incomingMounted = incoming.parent === this
+        val outgoingMounted = outgoing.parent === this
+        if (complete) {
+            predictiveBackCommitted = true
+            if (outgoingMounted) setRouteVisibility(outgoing, View.INVISIBLE)
+            if (incomingMounted) {
+                setRouteVisibility(incoming, View.VISIBLE)
+                setActiveRoute(incoming)
+            }
+            onGestureEnd?.invoke()
+            onGesturePop?.invoke()
+        } else {
+            if (incomingMounted && outgoingMounted) setRouteVisibility(incoming, View.INVISIBLE)
+            if (outgoingMounted) {
+                setRouteVisibility(outgoing, View.VISIBLE)
+                setActiveRoute(outgoing)
+            } else {
+                showOnlyTop()
+            }
+            onGestureCancel?.invoke()
+        }
+        restoreIdleRoutes()
+    }
+
+    /** Jumps a settling back gesture to its end (its routes restored). */
+    private fun endGestureSettle() {
+        gestureSettle?.end()
+    }
+
+    /**
+     * Drops a back gesture that a navigation, a detach or the app going to
+     * the background interrupted before it settled: its routes go back to
+     * rest and the routes the interrupting change shows decide what is
+     * visible.
+     */
+    private fun abortGesture() {
+        stopTracking()
+        endGestureSettle()
+        val wasPrepared = gesturePrepared || predictiveBackActive
+        val incoming = gestureIncoming
+        val outgoing = gestureOutgoing
+        gesturePrepared = false
+        gestureIncoming = null
+        gestureOutgoing = null
+        predictiveBackActive = false
+        if (!wasPrepared) return
+        incoming?.let(::reset)
+        outgoing?.let(::reset)
+        clearSharedElements()
+        // A committed predictive back is completed by the pop that follows.
+        if (predictiveBackCommitted) return
+        if (outgoing != null && outgoing.parent === this) setActiveRoute(outgoing)
+        onGestureCancel?.invoke()
+    }
+
+    /**
+     * Restores every route this host moved or faded once nothing animates
+     * any more (no transition, no gesture), and hides the routes a finished
+     * gesture left visible under the top one.
+     */
+    private fun restoreIdleRoutes() {
+        if (running != null || gestureSettle != null || gesturePrepared || predictiveBackActive) return
+        if (transformedRoutes.isEmpty()) return
+        val routes = transformedRoutes.toList()
+        transformedRoutes.clear()
+        routes.forEach(::reset)
+    }
+
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     override fun onDetachedFromWindow() {
         overlay.remove(nativeToolbar)
+        abortGesture()
         clearSharedElements()
         clearPendingTransition()
         running?.cancel()
         running = null
-        velocityTracker?.recycle()
-        velocityTracker = null
+        restoreIdleRoutes()
         super.onDetachedFromWindow()
+    }
+
+    /**
+     * The app went to the background (or the window was hidden) during a
+     * transition or a back gesture: finish it now instead of leaving a route
+     * faded or moved if its frames stop while the window is not drawn.
+     */
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) return
+        abortGesture()
+        running?.end()
+        restoreIdleRoutes()
     }
 
     private fun scheduleTransition() {
@@ -575,8 +726,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun runTransition() {
+        // A navigation interrupts whatever still moves the routes: the
+        // previous transition ends on its destination and a back gesture in
+        // progress (or settling) is dropped, so no route keeps its frame.
         running?.cancel()
-        if (childCount == 0) return
+        abortGesture()
+        if (childCount == 0) {
+            restoreIdleRoutes()
+            return
+        }
         val top = getChildAt(childCount - 1)
         if (operation != OPERATION_POP && top in awaitingFirstLayout) {
             // Mounted in this frame: lay it out on the next one, then show it
@@ -601,6 +759,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
             else -> {
                 showOnlyTop()
+                restoreIdleRoutes()
                 return
             }
         }
@@ -640,6 +799,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         } else {
             maxOf(durationMs, sharedDuration).coerceAtMost(2_000L)
         }
+        transformedRoutes += incoming
+        outgoing?.let { transformedRoutes += it }
         prepare(incoming, outgoing, actualTransition)
         if (actualDuration == 0L || actualTransition == TRANSITION_NONE) {
             finish(incoming, outgoing)
@@ -658,7 +819,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             interpolator = DecelerateInterpolator(1.75f)
             addUpdateListener { applyProgress(incoming, outgoing, actualTransition, it.animatedValue as Float) }
             addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) = finish(incoming, outgoing)
+                override fun onAnimationEnd(animation: Animator) {
+                    if (running === animation) running = null
+                    finish(incoming, outgoing)
+                }
             })
             start()
         }
@@ -899,6 +1063,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         incoming.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         outgoing?.importantForAccessibility =
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        restoreIdleRoutes()
         onTransitionEnd?.invoke()
     }
 

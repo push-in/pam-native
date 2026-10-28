@@ -6949,7 +6949,17 @@ $assert(
         && $prewarmScreen->focused === 0 && !Navigator::isPrewarming(),
     'A prewarmed screen must render hidden under the current one, mounted while isPrewarming(), without focus.',
 );
+$prewarmGesture = static fn (Navigator $navigator): mixed => $navigator->render()->toElement()
+    ->properties()[PropKey::NavigationGestureEnabled->value] ?? null;
+$assert(
+    $prewarmGesture($prewarmNavigator) === false,
+    'The root of a stack must not enable the back gesture, even with a prewarmed screen mounted below it (the gesture uncovered it with nothing to pop).',
+);
 $prewarmNavigator->push('detail', ['id' => 7]);
+$assert(
+    $prewarmGesture($prewarmNavigator) === true,
+    'A stack with a route to go back to must enable the back gesture.',
+);
 $pushedKeys = $prewarmKeys($prewarmNavigator);
 $assert(
     $prewarmBuilds === 1 && end($pushedKeys) === $warmKeys[0] && $prewarmScreen->focused === 1

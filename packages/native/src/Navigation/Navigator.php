@@ -497,7 +497,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $this->revision,
             ...$screens,
         )->gestureNavigation(
-            $activeOptions->gestureEnabled,
+            // Only a stack with a route to go back to: on its root, a back
+            // gesture would uncover a prewarmed or kept-alive screen mounted
+            // below it and leave it on screen with nothing popped.
+            $activeOptions->gestureEnabled && count($this->stack) > 1,
             direction: $activeOptions->gestureDirection,
             fullScreen: $activeOptions->fullScreenGestureEnabled,
         )
