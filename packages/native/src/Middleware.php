@@ -18,9 +18,9 @@ use Closure;
  *         }
  *     }
  *
- * Middleware also guards the stack (initial route, deep links, history
- * refresh), so it may run more than once per navigation: keep it a pure check
- * and do side effects in the screen or composable.
+ * It runs once per navigation (the stack guard and the tab bar reuse the
+ * verdict) and also guards tab-bar taps, links, the boot route and history
+ * refresh: keep it a check and do side effects in the screen or composable.
  */
 interface Middleware
 {

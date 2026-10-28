@@ -285,7 +285,7 @@ Route::middleware('auth')->group(function () {
 | `Route::middleware('auth')->group(fn)`, `Route::name('settings.')`, `Route::prefix('/settings')` | Fluent groups. |
 | `Route::layout(AppShell::class, fn)` | Root layout (Laravel/Expo layouts). The component receives the `Navigator` (or the `RouteNavigator`) by type and draws the stack inside, with gates, banners and hosts around or over it. `App::run()` mounts it. |
 | `Route::errorBoundary(fn (Throwable $e, RouteContext $r, Closure $retry) => ...)` | Default boundary for every route without its own. |
-| `Route::linking(false)`, `Route::persist()` | Opt out of system links; restore the persisted stack on cold start (off by default). |
+| `Route::linking(false)`, `Route::persist()` | Opt out of system links; restore the persisted stack on cold start (off by default). The router listens to incoming links itself when routes have paths; an app that keeps its own `Linking::listen()` gets a development warning and should call `Route::open($uri)` from it, or declare `Route::linking(false)`. |
 
 Chained on a route: `->name()`, `->middleware()`, `->icon()`, `->label()`,
 `->title()`, `->gestures(bool)`, `->presentation('card'|'modal'|'fullScreen'|'transparent'|'sheet'|'contained')`,
@@ -324,8 +324,11 @@ App::middleware(['auth' => Authenticate::class]);   // in index.php
 (`->reset()`, `->replace()`, `->push()`, `->with([...])`) to go elsewhere, or
 `false` to stay. Aliases take arguments (`'role:admin,editor'` calls
 `handle($to, $next, 'admin', 'editor')`), and closures work as middleware.
-Middleware also guards the stack (boot, links, `Route::refresh()` after login
-or logout), so it can run more than once per navigation: keep it a pure check.
+Middleware runs once per navigation: the stack guard and the tab bar reuse
+that navigation's verdict. It also guards taps on the tab bar (a denied tab
+stays unselected; a redirect navigates), links, the boot route and
+`Route::refresh()` after login or logout, where it is evaluated again. Keep it
+a check and do side effects in screens or composables.
 
 ### Navigating
 

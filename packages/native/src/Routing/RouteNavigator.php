@@ -9,6 +9,7 @@ use Closure;
 use InvalidArgumentException;
 use LogicException;
 use Pam\Native\Component;
+use Pam\Native\Internal\DevWarnings;
 use Pam\Native\Navigation\DeepLink;
 use Pam\Native\Navigation\NavigationLinkHandler;
 use Pam\Native\Navigation\NavigationEventType;
@@ -50,9 +51,23 @@ final class RouteNavigator implements NavigationLinkHandler
     /** @var array<string, Component> tab and status-bar-wrapped screens, by route name */
     private array $tracked = [];
     private ?Component $focused = null;
+    /**
+     * Middleware verdicts of the navigation in progress, keyed by route and
+     * params: the stack guard and the tab-press check reuse them, so the
+     * middleware runs once per navigation.
+     *
+     * @var array<string, bool|Redirect>
+     */
+    private array $verdicts = [];
+    private int $navigating = 0;
+    /** @var list<\Pam\Native\Navigation\NavigationSubscription> kept alive: a dropped subscription unsubscribes */
+    private array $subscriptions = [];
+    /** @var list<array{0: string|BackedEnum, 1: array<string, mixed>, 2: RedirectMode}> */
+    private array $pendingRedirects = [];
 
     public function __construct(private readonly RouteCollection $routes)
     {
+        $this->navigating++;
         $initial = $this->bootRoute();
         // Same stack defaults as the pre-v2 Route::stack(): slide from right, 240 ms, fresh boot.
         $router = Router::stack($initial->routeName())
@@ -72,7 +87,7 @@ final class RouteNavigator implements NavigationLinkHandler
             if ($route->middleware() !== []) {
                 $router = $router->guard(
                     $name,
-                    static fn (RouteContext $context): bool => MiddlewareRegistry::run($route->withParams($context->all())) === true,
+                    fn (RouteContext $context): bool => $this->verdict($route, $context->all()) === true,
                 );
             } elseif ($fallback === null && $route->kind !== RouteKind::Tabs) {
                 $fallback = $name;
@@ -81,7 +96,12 @@ final class RouteNavigator implements NavigationLinkHandler
             if ($keepAlive !== false) $router = $router->keepAlive($name, $keepAlive instanceof Closure ? $keepAlive : null);
         }
         if ($fallback !== null) $router = $router->guardFallback($fallback);
-        $this->stack = $router->build();
+        try {
+            $this->stack = $router->build();
+        } finally {
+            $this->navigating--;
+            $this->verdicts = [];
+        }
         foreach ($routes->all() as $route) {
             if (!$route->linkable()) continue;
             foreach ([(string) $route->path, ...$route->aliases()] as $path) {
@@ -90,7 +110,7 @@ final class RouteNavigator implements NavigationLinkHandler
         }
         \Pam\Native\Routing\Navigation::attach($this->stack);
         foreach ([NavigationEventType::Focus, NavigationEventType::State] as $type) {
-            $this->stack->addListener($type, fn () => $this->syncFocus());
+            $this->subscriptions[] = $this->stack->addListener($type, fn () => $this->syncFocus());
         }
     }
 
@@ -155,7 +175,12 @@ final class RouteNavigator implements NavigationLinkHandler
                 $this->open($url);
             });
         } catch (LogicException) {
-            // The app owns the single Linking listener; it can call Route::open($uri).
+            // The app already owns the single native Linking listener.
+            DevWarnings::warn(
+                'routes.php has linkable routes but the app already listens to Linking, so incoming links are not routed automatically. '
+                .'Call Route::open($uri) from your listener, or declare Route::linking(false) in routes.php to silence this',
+                'Pam\\Native\\Routing\\RouteNavigator::listen',
+            );
         }
     }
 
@@ -172,17 +197,74 @@ final class RouteNavigator implements NavigationLinkHandler
         }
         $route = $this->routes->get($target);
         $params = $this->validate($route, $params);
-        $outcome = MiddlewareRegistry::run($route->withParams($params));
-        if ($outcome instanceof Redirect) {
-            if ($redirects >= self::MAX_REDIRECTS) {
-                throw new LogicException("Route {$route->routeName()} redirects in a loop.");
+        $this->navigating++;
+        try {
+            $outcome = $this->verdict($route, $params);
+            if ($outcome instanceof Redirect) {
+                if ($redirects >= self::MAX_REDIRECTS) {
+                    throw new LogicException("Route {$route->routeName()} redirects in a loop.");
+                }
+
+                return $this->navigate($outcome->route, $outcome->params, $outcome->mode, $redirects + 1);
             }
+            if ($outcome === false) return false;
 
-            return $this->navigate($outcome->route, $outcome->params, $outcome->mode, $redirects + 1);
+            return $this->perform($route, $params, $mode);
+        } finally {
+            if (--$this->navigating === 0) {
+                $this->verdicts = [];
+                $this->flushRedirects();
+            }
         }
-        if ($outcome === false) return false;
+    }
 
-        return $this->perform($route, $params, $mode);
+    /**
+     * Runs a route's middleware once per navigation: while a navigation is in
+     * progress the verdict is cached for the same route and params; outside
+     * one (history refresh, restore) it is computed fresh.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function verdict(Route $route, array $params): bool|Redirect
+    {
+        if ($route->middleware() === []) return true;
+        ksort($params);
+        $key = $route->routeName().'|'.serialize($params);
+        if ($this->navigating > 0 && array_key_exists($key, $this->verdicts)) return $this->verdicts[$key];
+        $outcome = MiddlewareRegistry::run($route->withParams($params));
+        if ($this->navigating > 0) $this->verdicts[$key] = $outcome;
+
+        return $outcome;
+    }
+
+    /**
+     * A tap on a tab bar item goes through the tab's middleware like
+     * navigate(): a denied tab stays unselected, a redirect navigates.
+     */
+    private function guardTabPress(\Pam\Native\Navigation\NavigationEvent $event): void
+    {
+        $route = $this->routes->find((string) ($event->data['route'] ?? $event->target));
+        if ($route === null || $route->kind !== RouteKind::Tab) return;
+        $this->navigating++;
+        try {
+            $outcome = $this->verdict($route, []);
+        } finally {
+            if (--$this->navigating === 0) $this->verdicts = [];
+        }
+        if ($outcome === true) return;
+        $event->preventDefault();
+        if ($outcome instanceof Redirect) {
+            // Navigate after the tab bar finished handling this press.
+            $this->pendingRedirects[] = [$outcome->route, $outcome->params, $outcome->mode];
+            if ($this->navigating === 0) $this->flushRedirects();
+        }
+    }
+
+    private function flushRedirects(): void
+    {
+        while (($next = array_shift($this->pendingRedirects)) !== null) {
+            $this->navigate($next[0], $next[1], $next[2]);
+        }
     }
 
     public function back(): bool
@@ -310,7 +392,8 @@ final class RouteNavigator implements NavigationLinkHandler
         if ($group->backBehavior !== null) $router = $router->behavior($group->backBehavior);
 
         $navigator = $this->tabNavigators[$name] = $router->build();
-        $navigator->addListener(NavigationEventType::State, fn () => $this->syncFocus());
+        $this->subscriptions[] = $navigator->addListener(NavigationEventType::State, fn () => $this->syncFocus());
+        $this->subscriptions[] = $navigator->addListener(NavigationEventType::TabPress, fn (\Pam\Native\Navigation\NavigationEvent $event) => $this->guardTabPress($event));
 
         return $navigator;
     }
@@ -331,6 +414,8 @@ final class RouteNavigator implements NavigationLinkHandler
     {
         if ($route->kind === RouteKind::Tab) {
             $host = $this->routes->host($route);
+            // The tab inherits its host's middleware and already passed it.
+            $this->verdicts[$host->routeName().'|'.serialize([])] = true;
             $this->stackAction($host, [], $mode);
             $tabs = $this->tabNavigator($host);
 
@@ -385,7 +470,7 @@ final class RouteNavigator implements NavigationLinkHandler
         $route = $this->routes->initial();
         $params = [];
         for ($redirects = 0; $redirects <= self::MAX_REDIRECTS; $redirects++) {
-            $outcome = MiddlewareRegistry::run($route->withParams($params));
+            $outcome = $this->verdict($route, $params);
             if (!$outcome instanceof Redirect) return $route;
             $route = $this->routes->get($outcome->route);
             if ($route->kind === RouteKind::Tab) $route = $this->routes->host($route);

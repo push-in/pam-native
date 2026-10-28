@@ -190,6 +190,60 @@ $assert($pressable instanceof Pressable, '<Link> renders a Pressable.');
 $pressable->events()[EventKind::Press->value]('');
 $assert($router->root()->current()->all() === ['chatId' => '42'], '<Link route :params> navigates with its params.');
 
+// --- middleware runs once per navigation; tab presses go through it
+Route::flush();
+MiddlewareRegistry::reset();
+$runs = [];
+$allowed = true;
+MiddlewareRegistry::alias([
+    'count' => static function (Route $to, Closure $next) use (&$runs, &$allowed): mixed {
+        $runs[] = $to->name();
+        return $allowed ? $next($to) : redirect('home');
+    },
+]);
+Route::screen('/', ArchV2Home::class)->name('home');
+Route::middleware('count')->group(static function (): void {
+    Route::tabs(static function (): void {
+        Route::screen('/inbox', ArchV2Home::class)->name('inbox');
+        Route::screen('/vault', ArchV2Home::class)->name('vault');
+    });
+    Route::screen('/chat/{chatId}', ArchV2LegacyChat::class)->name('chat');
+});
+$router = new RouteNavigator(RouteCollection::current());
+RouteCollection::activate($router);
+$runs = [];
+navigate('chat', chatId: 'a');
+$assert($runs === ['chat'], 'Middleware must run once per navigation (the stack guard reuses the verdict): '.json_encode($runs));
+$runs = [];
+navigate('inbox');
+$assert($runs === ['inbox'] && Route::current()?->name() === 'inbox', 'A tab navigation runs the tab middleware once (host and tab press reuse it): '.json_encode($runs));
+$tabs = (new ReflectionProperty(RouteNavigator::class, 'tabNavigators'))->getValue($router)['tabs'];
+$runs = [];
+$allowed = false;
+$pressed = $tabs->select('vault');
+$assert($pressed === false && $tabs->selectedTab() === 'inbox', 'A tab-bar press on a protected tab must be denied by its middleware.');
+$assert($runs[0] === 'vault' && $router->root()->currentRoute() === 'home', 'A tab-bar press the middleware redirects must navigate to the redirect.');
+$allowed = true;
+$runs = [];
+navigate('inbox');
+$assert($tabs->select('vault') === true && $tabs->selectedTab() === 'vault' && in_array('vault', $runs, true), 'An allowed tab-bar press selects the tab.');
+
+// --- an app with its own Linking listener gets a development warning
+\Pam\Native\Internal\DevWarnings::reset();
+$own = \Pam\Native\System\Linking::listen(static function (string $url): void {});
+Route::flush();
+Route::screen('/chat/{chatId}', ArchV2LegacyChat::class)->name('chat');
+(new RouteNavigator(RouteCollection::current()))->listen();
+$development = \Pam\Native\BuildConfiguration::mode() === \Pam\Native\BuildMode::Development;
+$assert(!$development || str_contains(implode("\n", \Pam\Native\Internal\DevWarnings::messages()), 'Route::linking(false)'), 'A second Linking listener must warn in development.');
+Route::flush();
+Route::linking(false);
+Route::screen('/chat/{chatId}', ArchV2LegacyChat::class)->name('chat');
+\Pam\Native\Internal\DevWarnings::reset();
+(new RouteNavigator(RouteCollection::current()))->listen();
+$assert(\Pam\Native\Internal\DevWarnings::messages() === [], 'Route::linking(false) opts out silently.');
+\Pam\Native\System\Linking::unsubscribe($own);
+
 // --- App::run(require 'routes.php') returning 1 or a RouteCollection
 Route::flush();
 $required = (static fn () => require __DIR__.'/Fixtures/RoutesApp/routes.php')();
