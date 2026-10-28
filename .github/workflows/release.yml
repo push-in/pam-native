@@ -442,7 +442,8 @@ jobs:
             "pam-native-android-renderer-${version}/target/aarch64-linux-android/release/libpam_native_engine.a" \
             "pam-native-android-renderer-${version}/target/x86_64-linux-android/release/libpam_native_engine.a"
           protocol=$(sha256sum "${candidate_package}/crates/pam-native-protocol/src/lib.rs" | cut -c1-16)
-          printf '%s\nprotocol=%s\n' "${version}" "${protocol}" >"${candidate_package}/target/pam-native-engine-version"
+          engine=$(cd "${candidate_package}" && find crates/pam-native-engine/Cargo.toml crates/pam-native-engine/src crates/pam-native-protocol/Cargo.toml crates/pam-native-protocol/src -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+          printf '%s\nprotocol=%s\nengine=%s\n' "${version}" "${protocol}" "${engine}" >"${candidate_package}/target/pam-native-engine-version"
           printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
           printf 'PAM_HOME=%s\n' "${pam_home}" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"

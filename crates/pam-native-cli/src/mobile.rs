@@ -3610,21 +3610,22 @@ fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
 fn ios_engine_matches(ios_root: &Path, native_home: &Path) -> Result<(), String> {
     let marker_path = ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version");
     let marker = fs::read_to_string(&marker_path).unwrap_or_default();
-    if engine_marker_matches(&marker, native_home) && !marker.trim().is_empty() {
+    if engine_marker_matches(&marker, native_home, true) && !marker.trim().is_empty() {
         return Ok(());
     }
     let protocol = protocol_fingerprint(native_home).unwrap_or_else(|| "unknown".to_owned());
     Err(format!(
-        "the iOS Pam Native engine at {} was not built from these sources (expected SDK {} with protocol {protocol}, found {}); rebuild PamNativeEngine.xcframework from {} (cargo build --release -p pam-native-engine for aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios) and record it with: printf '{}' > {}",
+        "the iOS Pam Native engine at {} was not built from these sources (expected SDK {} with protocol {protocol} and engine sources {}, found {}); rebuild PamNativeEngine.xcframework from {} (cargo build --release -p pam-native-engine for aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios) and record it with: printf '{}' > {}",
         ios_root.join("PamNativeEngine.xcframework").display(),
         env!("CARGO_PKG_VERSION"),
+        engine_source_fingerprint(native_home).unwrap_or_else(|| "unknown".to_owned()),
         if marker.trim().is_empty() {
             "no marker".to_owned()
         } else {
             marker.split_whitespace().collect::<Vec<_>>().join(" ")
         },
         native_home.display(),
-        engine_marker(env!("CARGO_PKG_VERSION"), &protocol).replace('\n', "\\n"),
+        engine_marker_for(native_home, env!("CARGO_PKG_VERSION"), &protocol).replace('\n', "\\n"),
         marker_path.display(),
     ))
 }
@@ -8461,7 +8462,7 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
         if let Some(protocol) = protocol_fingerprint(native_home) {
             write_atomic(
                 &native_home.join(ENGINE_MARKER),
-                engine_marker(env!("CARGO_PKG_VERSION"), &protocol).as_bytes(),
+                engine_marker_for(native_home, env!("CARGO_PKG_VERSION"), &protocol).as_bytes(),
             )?;
         }
         Ok(())
@@ -8492,7 +8493,7 @@ fn engine_ready_at(native_home: &Path, abi: AndroidAbi) -> bool {
     }
     is_source_checkout(native_home)
         || fs::read_to_string(native_home.join(ENGINE_MARKER))
-            .is_ok_and(|marker| engine_marker_matches(&marker, native_home))
+            .is_ok_and(|marker| engine_marker_matches(&marker, native_home, false))
 }
 
 /// Marker next to a prebuilt engine: the SDK version and the wire protocol
@@ -8517,18 +8518,88 @@ fn engine_marker(version: &str, protocol: &str) -> String {
     format!("{version}\nprotocol={protocol}\n")
 }
 
+/// Every source the engine archive is compiled from. The protocol fingerprint
+/// alone lets an engine fix without a protocol change slip through (a stale
+/// layout or text engine reused under the same marker).
+const ENGINE_SOURCES: [&str; 4] = [
+    "crates/pam-native-engine/Cargo.toml",
+    "crates/pam-native-engine/src",
+    "crates/pam-native-protocol/Cargo.toml",
+    "crates/pam-native-protocol/src",
+];
+
+/// Fingerprint of the engine sources at `native_home`, the same value as
+/// `find <ENGINE_SOURCES> -type f | LC_ALL=C sort | xargs sha256sum |
+/// sha256sum | cut -c1-16` run from that directory. `None` when the engine
+/// sources are not shipped (prebuilt-only packages).
+fn engine_source_fingerprint(native_home: &Path) -> Option<String> {
+    if !native_home.join("crates/pam-native-engine/src").is_dir() {
+        return None;
+    }
+    let mut files = Vec::new();
+    for source in ENGINE_SOURCES {
+        let path = native_home.join(source);
+        if path.is_dir() {
+            files.extend(files_in(&path).ok()?);
+        } else if path.is_file() {
+            files.push(path);
+        }
+    }
+    let mut relative = files
+        .into_iter()
+        .map(|file| {
+            let name = file
+                .strip_prefix(native_home)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some((name, file))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    relative.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    let mut listing = Sha256::new();
+    for (name, file) in relative {
+        let digest = Sha256::digest(fs::read(&file).ok()?);
+        listing.update(format!("{digest:x}  {name}\n").as_bytes());
+    }
+    Some(format!("{:x}", listing.finalize())[..16].to_owned())
+}
+
+/// The marker recorded next to an engine compiled from `native_home`:
+/// SDK version, protocol and, when the sources are there, their fingerprint.
+fn engine_marker_for(native_home: &Path, version: &str, protocol: &str) -> String {
+    let mut marker = engine_marker(version, protocol);
+    if let Some(engine) = engine_source_fingerprint(native_home) {
+        marker.push_str(&format!("engine={engine}\n"));
+    }
+    marker
+}
+
 /// A prebuilt engine is reusable only for this exact SDK version and, when the
 /// sources are present, for exactly their protocol. A version-only marker
 /// (older archives) or another protocol never matches: the engine is then
 /// compiled from these sources or the build stops with a clear error.
-fn engine_marker_matches(marker: &str, native_home: &Path) -> bool {
-    let mut lines = marker.lines().map(str::trim);
-    if lines.next() != Some(env!("CARGO_PKG_VERSION")) {
+///
+/// An `engine=` line must match the engine sources when they are present.
+/// `require_source` (the iOS xcframework, recorded by hand) also rejects a
+/// marker without that line, so an engine built before an engine-only fix is
+/// never reused.
+fn engine_marker_matches(marker: &str, native_home: &Path, require_source: bool) -> bool {
+    let lines = marker.lines().map(str::trim).collect::<Vec<_>>();
+    if lines.first().copied() != Some(env!("CARGO_PKG_VERSION")) {
         return false;
     }
-    match protocol_fingerprint(native_home) {
-        Some(expected) => lines.any(|line| line == format!("protocol={expected}")),
-        None => true,
+    if let Some(expected) = protocol_fingerprint(native_home) {
+        if !lines.iter().any(|line| *line == format!("protocol={expected}")) {
+            return false;
+        }
+    }
+    let Some(expected) = engine_source_fingerprint(native_home) else {
+        return true;
+    };
+    match lines.iter().find_map(|line| line.strip_prefix("engine=")) {
+        Some(recorded) => recorded == expected,
+        None => !require_source,
     }
 }
 
@@ -10816,6 +10887,80 @@ mod tests {
         )
         .expect("ios marker");
         assert!(ios_engine_matches(&ios_root, &root).is_ok());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn an_engine_fix_without_a_protocol_change_invalidates_the_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-engine-source-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let protocol = root.join(PROTOCOL_SOURCE);
+        fs::create_dir_all(protocol.parent().expect("protocol parent")).expect("protocol dir");
+        fs::write(&protocol, b"ListWindowed = 542,").expect("protocol");
+        let layout = root.join("crates/pam-native-engine/src/layout.rs");
+        fs::create_dir_all(layout.parent().expect("engine src")).expect("engine dir");
+        fs::write(&layout, b"fn cross_margin() -> f32 { 0.0 }").expect("engine source");
+        fs::write(root.join("crates/pam-native-engine/Cargo.toml"), b"[package]").expect("manifest");
+        let version = env!("CARGO_PKG_VERSION");
+        let fp = protocol_fingerprint(&root).expect("fp");
+
+        let ios_root = root.join("ios-runtime");
+        let marker = ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version");
+        fs::create_dir_all(marker.parent().expect("xcframework")).expect("xcframework");
+
+        // A protocol-only marker is no proof on iOS once the sources ship.
+        fs::write(&marker, engine_marker(version, &fp)).expect("protocol marker");
+        assert!(ios_engine_matches(&ios_root, &root).is_err());
+
+        let recorded = engine_marker_for(&root, version, &fp);
+        assert!(recorded.contains("\nengine="), "{recorded}");
+        fs::write(&marker, &recorded).expect("source marker");
+        assert!(ios_engine_matches(&ios_root, &root).is_ok());
+
+        // Engine-only fix: same protocol, different layout source.
+        fs::write(&layout, b"fn cross_margin() -> f32 { -16.0 }").expect("engine fix");
+        let error = ios_engine_matches(&ios_root, &root).expect_err("stale engine");
+        assert!(error.contains(&engine_source_fingerprint(&root).expect("engine fp")), "{error}");
+
+        // Android prebuilt archives: a recorded engine line must match too;
+        // an archive marker without one keeps the protocol rule.
+        assert!(!engine_marker_matches(&recorded, &root, false));
+        assert!(engine_marker_matches(&engine_marker(version, &fp), &root, false));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn engine_source_fingerprint_matches_the_shell_recipe() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-engine-shell-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let files = [
+            ("crates/pam-native-engine/Cargo.toml", "a"),
+            ("crates/pam-native-engine/src/lib.rs", "b"),
+            ("crates/pam-native-protocol/src/lib.rs", "c"),
+        ];
+        for (path, text) in files {
+            let file = root.join(path);
+            fs::create_dir_all(file.parent().expect("parent")).expect("dir");
+            fs::write(file, text).expect("file");
+        }
+        let mut listing = String::new();
+        for (path, text) in files {
+            listing.push_str(&format!("{:x}  {path}\n", Sha256::digest(text.as_bytes())));
+        }
+        let expected = format!("{:x}", Sha256::digest(listing.as_bytes()))[..16].to_owned();
+        assert_eq!(engine_source_fingerprint(&root), Some(expected));
         fs::remove_dir_all(root).expect("cleanup");
     }
 
