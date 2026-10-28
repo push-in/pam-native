@@ -142,6 +142,17 @@ void log_debug(const char* message) {
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "%s", message);
 }
 
+// Per-frame tracing: verbose in debug builds, compiled out of release
+// (CMake Release/RelWithDebInfo define NDEBUG), so a scroll that commits
+// frames never writes one logcat line each.
+#ifdef NDEBUG
+inline void log_frame_trace(const char*) {}
+#else
+inline void log_frame_trace(const char* message) {
+    __android_log_print(ANDROID_LOG_VERBOSE, kLogTag, "%s", message);
+}
+#endif
+
 // PHP error_log()/log_errors output. The embed SAPI writes it to stderr,
 // which Android discards; route it to logcat for the whole process lifetime
 // (the runtime outlives Activities since it is re-attached to new hosts).
@@ -463,7 +474,7 @@ PHP_FUNCTION(pam_native_commit) {
     if (state == nullptr) {
         RETURN_FALSE;
     }
-    log_debug("Received a PHP render frame.");
+    log_frame_trace("Received a PHP render frame.");
 
     PamNativeBuffer batch{nullptr, 0, 0};
     PamStatus status;

@@ -95,6 +95,9 @@ class PamRuntime(
      * waiting for the next vsync, so the window's next traversal draws it.
      */
     private var surfaceAwaitingFirstFrame = true
+
+    /** Engine totals at the previous debug frame log (per-frame deltas). */
+    private var lastLoggedStats: RuntimeStats? = null
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
         flushEvents()
@@ -1088,12 +1091,27 @@ class PamRuntime(
         )
         if (BuildConfig.DEBUG) {
             val runtimeStats = metrics.stats
+            // full/patch/inBytes/outBytes are totals since the engine started;
+            // frame/frameIn/frameOut are this commit's own kind and sizes.
+            // A restarted engine resets its totals.
+            val previous = lastLoggedStats?.takeIf { it.inputBytes <= runtimeStats.inputBytes }
+            lastLoggedStats = runtimeStats
+            val frameKind = when {
+                previous == null -> "first"
+                runtimeStats.fullCommits > previous.fullCommits -> "full"
+                else -> "patch"
+            }
             Log.d(
                 PERFORMANCE_LOG_TAG,
                 "batches=${metrics.batches} decodeNs=${metrics.decodeNanos} " +
-                    "mountNs=${metrics.mountNanos} " +
-                    "full=${runtimeStats.fullCommits} patch=${runtimeStats.patchCommits} " +
-                    "inBytes=${runtimeStats.inputBytes} outBytes=${runtimeStats.outputBytes} " +
+                    "mountNs=${metrics.mountNanos} frame=$frameKind " +
+                    "frameIn=${runtimeStats.inputBytes - (previous?.inputBytes ?: 0)} " +
+                    "frameOut=${runtimeStats.outputBytes - (previous?.outputBytes ?: 0)} " +
+                    "frameNodes=+${runtimeStats.created - (previous?.created ?: 0)}" +
+                    "/-${runtimeStats.removed - (previous?.removed ?: 0)}" +
+                    "/~${runtimeStats.updated - (previous?.updated ?: 0)} " +
+                    "totalFull=${runtimeStats.fullCommits} totalPatch=${runtimeStats.patchCommits} " +
+                    "totalInBytes=${runtimeStats.inputBytes} totalOutBytes=${runtimeStats.outputBytes} " +
                     "buffers=${ownedBatchHandles.size}",
             )
         } else if (BuildConfig.BUILD_TYPE == "benchmark") {
