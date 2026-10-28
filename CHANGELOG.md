@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Navigation focus follows the first mount: a screen opened through
+  `Route::navigate()` (or any router entry) now gets
+  `NavigationLifecycleAware::navigationFocused()` after `setup()` and
+  `onMounted()`, then its `onFocus()` hooks, as in Vue/React Navigation.
+  Previously `navigationFocused()` ran before the first render, so a focus
+  handler using something `setup()` created saw it unset. Blur, back,
+  kept-alive, modal and tab ordering are unchanged; a screen left before its
+  first mount gets neither focus nor blur.
+
 - Windowed virtual lists opened with `initialScrollIndex` past the last row
   (a conversation opening at its newest message) materialize their last rows
   instead of the first 48 (PHP and the Android/iOS native encoder).

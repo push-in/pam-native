@@ -60,6 +60,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private array $boundaryScreens = [];
     private int $nextListenerId = 1;
     private ?string $focusedEntryKey = null;
+    /** @var array<string, true> focused screens whose navigationFocused() waits for their first mount */
+    private array $awaitingMount = [];
     /** @var array<string, NavigationSubscription> */
     private array $childSubscriptions = [];
     /** @var array<string, array<string, mixed>> */
@@ -1410,7 +1412,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $current = $this->currentEntry();
         if ($this->entryKey($previous) !== $this->entryKey($current)) {
             $previousInstance = $this->routeInstances[$this->entryKey($previous)] ?? null;
-            if ($previousInstance instanceof NavigationLifecycleAware) {
+            // A screen blurred before its first mount never saw its focus: no blur either.
+            $neverFocused = isset($this->awaitingMount[$this->entryKey($previous)]);
+            unset($this->awaitingMount[$this->entryKey($previous)]);
+            if ($previousInstance instanceof NavigationLifecycleAware && !$neverFocused) {
                 $previousInstance->navigationBlurred($this->contextFor($previous));
             }
             if ($previousInstance instanceof \Pam\Native\Component) {
@@ -1526,6 +1531,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                     $this->pendingChildState[$key],
                     $this->dynamicOptions[$key],
                     $this->frozenScreens[$key],
+                    $this->awaitingMount[$key],
                 );
                 if ($instance instanceof NavigationLifecycleAware && $context !== null) {
                     $instance->navigationRemoved($context);
@@ -1583,12 +1589,22 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($key !== $this->entryKey($this->currentEntry()) || $this->focusedEntryKey === $key) return;
         $this->focusedEntryKey = $key;
         \Pam\Native\Plugin\RuntimeHooks::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
+        if (!$instance instanceof \Pam\Native\Component) {
+            if ($instance instanceof NavigationLifecycleAware) $instance->navigationFocused($this->contextFor($entry));
+
+            return;
+        }
         if ($instance instanceof NavigationLifecycleAware) {
-            $instance->navigationFocused($this->contextFor($entry));
+            // Like React Navigation, focus follows the first mount: setup() and
+            // onMounted() have run before navigationFocused() sees the screen.
+            $this->awaitingMount[$key] = true;
+            $instance->__pamWhenMounted(function () use ($instance, $entry, $key): void {
+                if (!isset($this->awaitingMount[$key])) return;
+                unset($this->awaitingMount[$key]);
+                if ($this->focusedEntryKey === $key) $instance->navigationFocused($this->contextFor($entry));
+            });
         }
-        if ($instance instanceof \Pam\Native\Component) {
-            $instance->__pamNavigationFocus(true);
-        }
+        $instance->__pamNavigationFocus(true);
     }
 
     private function finalizeOutgoingRoute(): void

@@ -152,6 +152,17 @@ final class ChatScreen extends Component
   mounted.
 - Routers report focus with `Component::__pamNavigationFocus(bool)`. The
   `Navigator` already does.
+- **Focus order.** As in Vue and React Navigation (focus fires after mount), a
+  screen opened by `Route::navigate()`, `navigate()`, a deep link or a modal
+  is focused only after its first mount: `setup()` → `mount()` → first
+  render → commit → `onMounted()` → `navigationFocused()`
+  (`NavigationLifecycleAware`) → `onFocus()`. Focus handlers can use anything
+  `setup()` created. Later focus changes (back, a kept-alive screen shown
+  again, a tab switch) run `navigationBlurred()`/`onBlur()` on the outgoing
+  screen, then `navigationFocused()`/`onFocus()` on the incoming one, without
+  running `setup()` again. A screen left before its first mount gets neither
+  its focus nor its blur. Tab screens follow the same order for
+  `onMounted()` → `onFocus()`.
 
 ## Reactivity
 
