@@ -3151,6 +3151,8 @@ public final class PamRenderer: @unchecked Sendable {
                 scroll.pamPageTransformer.setKind(Int(value.integerOrNil() ?? 0), on: scroll)
                 scroll.setNeedsLayout()
             }
+        case PamConstants.scrollOffsetAnimationMs:
+            (view as? PamAnchoredScrollView)?.pamOffsetAnimationMs = Int(min(max(value.integerOrNil() ?? 0, 0), 2_000))
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = value.boolOrNil() ?? false
             (view as? PamVirtualListView)?.pamPagingEnabled = value.boolOrNil() ?? false
@@ -3694,6 +3696,8 @@ public final class PamRenderer: @unchecked Sendable {
             if let scroll = view as? PamAnchoredScrollView {
                 scroll.pamPageTransformer.setKind(PamPageTransformKind.none.rawValue, on: scroll)
             }
+        case PamConstants.scrollOffsetAnimationMs:
+            (view as? PamAnchoredScrollView)?.pamOffsetAnimationMs = 0
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
             (view as? PamVirtualListView)?.pamPagingEnabled = false

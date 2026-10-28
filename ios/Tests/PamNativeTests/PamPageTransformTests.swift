@@ -62,6 +62,32 @@ final class PamPageTransformTests: XCTestCase {
         XCTAssertTrue(pages.allSatisfy { ($0.layer.sublayers ?? []).isEmpty })
     }
 
+    func testOffsetGlideUsesTheReactNativeTimingCurve() {
+        XCTAssertEqual(pamEaseInOutQuad(0), 0)
+        XCTAssertEqual(pamEaseInOutQuad(0.25), 0.125, accuracy: 1e-9)
+        XCTAssertEqual(pamEaseInOutQuad(0.5), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(pamEaseInOutQuad(1.5), 1)
+    }
+
+    func testRequestedOffsetGlidesAfterTheFirstApplication() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 200))
+        let scroll = PamAnchoredScrollView(frame: window.bounds)
+        scroll.horizontal = true
+        scroll.contentSize = CGSize(width: 300, height: 200)
+        window.addSubview(scroll)
+        scroll.pamOffsetAnimationMs = 280
+        scroll.pamRequestedContentOffsetX = 100
+        scroll.layoutIfNeeded()
+        XCTAssertEqual(scroll.contentOffset.x, 100, "the first offset jumps (mount)")
+        scroll.pamRequestedContentOffsetX = 200
+        scroll.layoutIfNeeded()
+        XCTAssertLessThan(scroll.contentOffset.x, 200, "a later offset glides")
+        let expectation = expectation(description: "glide ends")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { expectation.fulfill() }
+        wait(for: [expectation], timeout: 2)
+        XCTAssertEqual(scroll.contentOffset.x, 200, accuracy: 0.5)
+    }
+
     func testBufferedAheadReadsTheRangeAroundThePlayhead() {
         let ranges = [
             CMTimeRange(start: CMTime(seconds: 0, preferredTimescale: 600), duration: CMTime(seconds: 0.3, preferredTimescale: 600)),

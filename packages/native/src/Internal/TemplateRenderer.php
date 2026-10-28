@@ -435,6 +435,7 @@ final class TemplateRenderer
         'pagingEnabled' => PropKey::ScrollPagingEnabled,
         'snapToInterval' => PropKey::ScrollSnapInterval,
         'pageTransform' => PropKey::ScrollPageTransform,
+        'contentOffsetAnimationMs' => PropKey::ScrollOffsetAnimationMs,
         'decelerationRate' => PropKey::ScrollDecelerationRate,
         'keyboardDismissMode' => PropKey::ScrollKeyboardDismissMode,
         'keyboardShouldPersistTaps' => PropKey::ScrollKeyboardPersistTaps,
@@ -4209,6 +4210,7 @@ final class TemplateRenderer
             PropKey::ScrollDecelerationRate,
             PropKey::ScrollKeyboardDismissMode,
             PropKey::ScrollPageTransform,
+            PropKey::ScrollOffsetAnimationMs,
             => $kind === NodeKind::Scroll,
             PropKey::ScrollPagingEnabled,
             PropKey::ScrollTargetTestId,
@@ -4751,6 +4753,7 @@ final class TemplateRenderer
                     ? null
                     : self::named($value, ['cube' => ScrollPageTransform::Cube->value])),
             PropKey::MediaStartBufferMs => max(0, min(30_000, self::intValue($value, 'startBufferMs'))),
+            PropKey::ScrollOffsetAnimationMs => max(0, min(2_000, self::intValue($value, 'contentOffsetAnimationMs'))),
             PropKey::ScrollOverScrollMode => self::named($value, [
                 'auto' => ScrollOverScrollMode::Auto->value,
                 'always' => ScrollOverScrollMode::Always->value,

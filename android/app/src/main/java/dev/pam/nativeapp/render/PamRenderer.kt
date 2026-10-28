@@ -3650,6 +3650,10 @@ class PamRenderer(
             PropKey.LIST_FOLLOW_END_ON_RESIZE -> Unit
             PropKey.SCROLL_PAGE_TRANSFORM ->
                 (view as? PamScrollContainer)?.setPageTransform(value.integer().toInt())
+            PropKey.SCROLL_OFFSET_ANIMATION_MS ->
+                (view as? PamScrollContainer)?.setOffsetAnimationMs(value.integer())
+            // Implemented by the idle-surface change (reels); reserved here so the when stays exhaustive.
+            PropKey.MEDIA_IDLE_SURFACE -> Unit
             PropKey.SCROLL_DECELERATION_RATE ->
                 (view as? PamScrollContainer)?.setDecelerationRate(
                     value.decimal().toFloat(),
@@ -4324,6 +4328,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setDecelerationRate(0.985f)
             PropKey.SCROLL_PAGE_TRANSFORM ->
                 (view as? PamScrollContainer)?.setPageTransform(PamPageTransformKind.NONE)
+            PropKey.SCROLL_OFFSET_ANIMATION_MS ->
+                (view as? PamScrollContainer)?.setOffsetAnimationMs(0L)
             PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
                 (view as? PamScrollContainer)?.setKeyboardDismissMode(1)
             PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)

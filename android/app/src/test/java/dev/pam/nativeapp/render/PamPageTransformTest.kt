@@ -34,6 +34,14 @@ class PamPageTransformTest {
     }
 
     @Test
+    fun offsetGlideInterpolatesWholePixelsAndClampsTheFraction() {
+        assertEquals(0, pamLerpOffset(0, 1080, 0f))
+        assertEquals(540, pamLerpOffset(0, 1080, 0.5f))
+        assertEquals(1080, pamLerpOffset(0, 1080, 1.4f))
+        assertEquals(1080, pamLerpOffset(2160, 1080, 1f))
+    }
+
+    @Test
     fun perspectiveMatchesReactNativeCameraDistance() {
         // RN BaseViewManager: density^2 * perspective * sqrt(5).
         assertEquals(2.75f * 2.75f * 864f * 2.2360680f, pamCameraDistance(864f, 2.75f), 0.5f)

@@ -311,6 +311,14 @@ final class PamAnchoredScrollView: UIScrollView {
     let pamSticky = PamStickyRegistry()
     /// `pageTransform` of a horizontal pager (stories cube).
     let pamPageTransformer = PamPageTransformer()
+    /// `contentOffsetAnimationMs`: a changed requested offset glides there
+    /// (one contentOffset per display frame, so layoutSubviews and the page
+    /// transform run during it) instead of jumping; 0 jumps.
+    var pamOffsetAnimationMs = 0 {
+        didSet { if pamOffsetAnimationMs <= 0 { pamOffsetGlide?.finish(jump: true) } }
+    }
+    private var pamOffsetAppliedOnce = false
+    private var pamOffsetGlide: PamOffsetGlide?
 
     /// RN `keyboardShouldPersistTaps`; nil when absent or `always`.
     var pamKeyboardTaps: PamKeyboardTapController?
@@ -406,9 +414,30 @@ final class PamAnchoredScrollView: UIScrollView {
             pamRequestedContentOffsetY = nil
             changed = true
         }
-        guard changed, target != contentOffset else { return }
+        guard changed else { return }
+        let glides = pamOffsetAnimationMs > 0 && pamOffsetAppliedOnce && window != nil
+            && !UIAccessibility.isReduceMotionEnabled
+        pamOffsetAppliedOnce = true
+        guard target != contentOffset else { return }
         pamStopDeceleration()
-        setContentOffset(target, animated: false)
+        pamOffsetGlide?.finish(jump: false)
+        guard glides else {
+            setContentOffset(target, animated: false)
+            return
+        }
+        pamOffsetGlide = PamOffsetGlide(
+            scroll: self,
+            from: contentOffset,
+            to: target,
+            duration: TimeInterval(pamOffsetAnimationMs) / 1_000
+        ) { [weak self] glide in
+            if self?.pamOffsetGlide === glide { self?.pamOffsetGlide = nil }
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { pamOffsetGlide?.finish(jump: true) }
     }
 
     private var primaryOffset: CGFloat {
@@ -3604,5 +3633,64 @@ extension UIScrollView {
         // running setContentOffset animation.
         guard !isTracking else { return }
         setContentOffset(contentOffset, animated: false)
+    }
+}
+
+/// RN `withTiming` default curve (`Easing.inOut(Easing.quad)`).
+func pamEaseInOutQuad(_ t: Double) -> Double {
+    let x = min(max(t, 0), 1)
+    return x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2
+}
+
+/// A programmatic contentOffset glide driven by a CADisplayLink: it runs
+/// only for its duration and ends at the target at once when a finger lands
+/// or the scroll view leaves the window.
+final class PamOffsetGlide {
+    private weak var scroll: UIScrollView?
+    private let from: CGPoint
+    private let to: CGPoint
+    private let duration: CFTimeInterval
+    private var start: CFTimeInterval = 0
+    private var link: CADisplayLink?
+    private let completion: (PamOffsetGlide) -> Void
+
+    init(scroll: UIScrollView, from: CGPoint, to: CGPoint, duration: TimeInterval, completion: @escaping (PamOffsetGlide) -> Void) {
+        self.scroll = scroll
+        self.from = from
+        self.to = to
+        self.duration = max(duration, 0.016)
+        self.completion = completion
+        let link = CADisplayLink(target: PamOffsetGlideProxy(self), selector: #selector(PamOffsetGlideProxy.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        start = CACurrentMediaTime()
+    }
+
+    fileprivate func tick(_ now: CFTimeInterval) {
+        guard let scroll else { return finish(jump: false) }
+        // A finger down completes the glide at once (a pager never rests between pages).
+        if scroll.isTracking { return finish(jump: true) }
+        let progress = min(1, (now - start) / duration)
+        let eased = CGFloat(pamEaseInOutQuad(progress))
+        scroll.contentOffset = CGPoint(x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased)
+        if progress >= 1 { finish(jump: false) }
+    }
+
+    func finish(jump: Bool) {
+        guard let link else { return }
+        link.invalidate()
+        self.link = nil
+        if jump { scroll?.contentOffset = to }
+        completion(self)
+    }
+}
+
+/// Breaks the CADisplayLink → target retain cycle.
+private final class PamOffsetGlideProxy: NSObject {
+    weak var glide: PamOffsetGlide?
+    init(_ glide: PamOffsetGlide) { self.glide = glide }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let glide else { link.invalidate(); return }
+        glide.tick(link.targetTimestamp)
     }
 }

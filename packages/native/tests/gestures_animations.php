@@ -155,8 +155,10 @@ $assert(
 // --- Scroll page transform and media start buffer ------------------------------
 $cubePager = \Pam\Native\UI\ScrollView::make(Text::make('page'))->horizontal()->pageTransform(\Pam\Native\ScrollPageTransform::Cube);
 $assert(
-    $cubePager->properties()[PropKey::ScrollPageTransform->value] === 1,
-    'pageTransform(Cube) sends 1 on the extension key.',
+    $cubePager->properties()[PropKey::ScrollPageTransform->value] === 1
+        && $cubePager->contentOffsetAnimation(280)->properties()[PropKey::ScrollOffsetAnimationMs->value] === 280
+        && $cubePager->contentOffsetAnimation(9_000)->properties()[PropKey::ScrollOffsetAnimationMs->value] === 2_000,
+    'pageTransform(Cube) sends 1 on the extension key; contentOffsetAnimation is clamped to 0..2000 ms.',
 );
 $player = \Pam\Native\UI\MediaPlayer::make('https://example.com/a.mp4');
 $assert(

@@ -14,7 +14,7 @@ public let PAM_EXTENSION_BASE = 1001
 /// Highest IDs this renderer implements, exported in the renderer contract.
 /// `scripts/protocol-parity.py` pins them to the PHP tables.
 public let PAM_PROPERTY_CEILING = 540
-public let PAM_EXTENSION_PROPERTY_CEILING = 1003
+public let PAM_EXTENSION_PROPERTY_CEILING = 1005
 public let PAM_EVENT_CEILING = 79
 public let PAM_EXTENSION_EVENT_CEILING = 1000
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
@@ -595,6 +595,8 @@ public enum PamConstants {
     public static let listFollowEndOnResize = 1001
     public static let scrollPageTransform = 1002
     public static let mediaStartBufferMs = 1003
+    public static let mediaIdleSurface = 1004
+    public static let scrollOffsetAnimationMs = 1005
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

@@ -707,7 +707,9 @@ enum class PropKey(val value: Int) {
     // Extension table (PAM_EXTENSION_BASE and up).
     LIST_FOLLOW_END_ON_RESIZE(1001),
     SCROLL_PAGE_TRANSFORM(1002),
-    MEDIA_START_BUFFER_MS(1003);
+    MEDIA_START_BUFFER_MS(1003),
+    MEDIA_IDLE_SURFACE(1004),
+    SCROLL_OFFSET_ANIMATION_MS(1005);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

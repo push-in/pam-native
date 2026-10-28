@@ -10,6 +10,15 @@
   Android (`rotationY`/`cameraDistance`/foreground shade) and iOS
   (`CATransform3D` with `m34`, shade sublayer) apply it from the scroll offset
   on the UI thread, only while the offset changes; pages off-screen are reset.
+- ScrollView `contentOffsetAnimationMs` (`Scroll::contentOffsetAnimation()`,
+  extension property `1005`): a changed `contentOffset` glides there in that
+  time (ease-in-out, like RN `withTiming`) instead of jumping, one offset per
+  frame (Android `ValueAnimator`, iOS `CADisplayLink`), so scroll listeners
+  and `pageTransform` run during it and the requested offset stays the
+  source of truth. The first offset after mount still jumps; a finger down
+  completes the glide at once (a pager never rests between pages). Property `1004` (`MediaIdleSurface`) is declared on every
+  layer to keep the extension table contiguous; its behaviour comes with its
+  own change.
 - MediaPlayer `startBufferMs` (template `startBufferMs="350"`, extension
   property `1003`): playback starts once that much media is buffered, like
   ExoPlayer `bufferForPlaybackMs` (and resumes after a stall at twice that,

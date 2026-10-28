@@ -106,6 +106,16 @@ final class Scroll extends Element
         return $this->withProperty(PropKey::ScrollPageTransform, $transform->value);
     }
 
+    /**
+     * A changed `contentOffset` glides there in [milliseconds] (ease-in-out,
+     * one offset per frame, so scroll listeners and `pageTransform` run during
+     * it) instead of jumping; a finger down completes it. 0 jumps (the default).
+     */
+    public function contentOffsetAnimation(int $milliseconds): self
+    {
+        return $this->withProperty(PropKey::ScrollOffsetAnimationMs, max(0, min(2_000, $milliseconds)));
+    }
+
     public function overScrollMode(ScrollOverScrollMode $mode): self
     {
         return $this->withProperty(PropKey::ScrollOverScrollMode, $mode->value);
