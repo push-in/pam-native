@@ -283,6 +283,15 @@ $assert(
 $scrollPayload = Wire::map(['x' => 720.0, 'y' => 0.0, 'velocityX' => 1800.0, 'velocityY' => 0.0, 'page' => 2]);
 $momentum = ScrollPhaseEvent::fromPayload($scrollPayload);
 $assert($momentum->page === 2 && $momentum->velocityX === 1800.0, 'Scroll phase events must decode the page index.');
+$assert($momentum->contentHeight === 0.0 && $momentum->distanceFromEnd() === null, 'A host without sizes reports no end distance.');
+$sized = ScrollPhaseEvent::fromPayload(Wire::map([
+    'x' => 0.0, 'y' => 1200.0, 'velocityX' => 0.0, 'velocityY' => 0.0, 'page' => 0,
+    'contentWidth' => 390.0, 'contentHeight' => 5000.0, 'layoutWidth' => 390.0, 'layoutHeight' => 700.0,
+]));
+$assert(
+    $sized->contentHeight === 5000.0 && $sized->layoutHeight === 700.0 && $sized->distanceFromEnd() === 3100.0,
+    'Scroll phase events must decode RN contentSize/layoutMeasurement and the distance to the end.',
+);
 $pageChanges = [];
 $carousel = Scroll::make(Text::make('Slide'))
     ->onPageChange(static function (PageChangeEvent $event) use (&$pageChanges): void {

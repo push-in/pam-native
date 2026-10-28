@@ -7034,14 +7034,22 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         /// `ScrollPhaseEvent`: offset, release velocity (points/s, positive
-        /// towards larger offsets) and page index.
+        /// towards larger offsets), page index and RN `contentSize` /
+        /// `layoutMeasurement` (the content's end distance for handlers).
         private func dispatchScrollPhase(_ scrollView: UIScrollView, kind: Int, velocity: CGPoint) {
+            let insets = scrollView.adjustedContentInset
             let payload = (try? WireMap.encode([
                 "x": .decimal(scrollView.contentOffset.x),
                 "y": .decimal(scrollView.contentOffset.y),
                 "velocityX": .decimal(velocity.x),
                 "velocityY": .decimal(velocity.y),
                 "page": .integer(Int64(Self.pageIndex(scrollView))),
+                "contentWidth": .decimal(scrollView.contentSize.width),
+                "contentHeight": .decimal(scrollView.contentSize.height),
+                // Minus the trailing insets: contentSize - layout - offset is
+                // then the distance to the end, as on Android.
+                "layoutWidth": .decimal(scrollView.bounds.width - insets.right),
+                "layoutHeight": .decimal(scrollView.bounds.height - insets.bottom),
             ])) ?? Data()
             dispatchEvent(nodeId, kind, payload)
         }

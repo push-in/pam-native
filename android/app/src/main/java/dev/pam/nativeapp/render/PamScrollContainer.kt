@@ -798,6 +798,12 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
     }
 
+    /** Scrolled content size in px (RN `contentSize`), paddings included. */
+    fun contentSizePx(): IntArray = intArrayOf(
+        content.width + activeScroll.paddingLeft + activeScroll.paddingRight,
+        content.height + activeScroll.paddingTop + activeScroll.paddingBottom,
+    )
+
     /** Page index along the primary axis using the paging/snap extent. */
     fun pageIndex(): Int {
         val extent = when {
