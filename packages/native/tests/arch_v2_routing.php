@@ -274,6 +274,26 @@ Route::flush();
 $required = (static fn () => require __DIR__.'/Fixtures/RoutesApp/routes.php')();
 $assert($required === 1 && RouteCollection::current()->count() === 6, 'routes.php returns nothing; require yields 1 and the registry holds the routes.');
 
+// --- config/middleware.php: one place for aliases, shared by index.php (App::run) and tests
+MiddlewareRegistry::reset();
+$configDir = sys_get_temp_dir().'/pam-arch-v2-middleware-'.getmypid();
+@mkdir($configDir.'/config', 0o777, true);
+file_put_contents($configDir.'/config/middleware.php', "<?php return ['auth' => \\RoutesApp\\Middleware\\Authenticate::class, 'admin' => static fn (\$to, \$next) => \$next(\$to)];");
+$own = static fn ($to, Closure $next) => false;
+App::middleware(['admin' => $own]);
+$assert(MiddlewareRegistry::loadConfig($configDir.'/config/middleware.php'), 'An existing config/middleware.php must load.');
+$aliases = App::middleware();
+$assert(
+    array_keys($aliases) === ['admin', 'auth'] && $aliases['auth'] === Authenticate::class && $aliases['admin'] === $own,
+    'App::middleware() must read the aliases; config fills only aliases not registered explicitly.',
+);
+file_put_contents($configDir.'/config/middleware.php', '<?php return "auth";');
+$expectError(static fn () => MiddlewareRegistry::loadConfig($configDir.'/config/middleware.php'), 'must return an array');
+$assert(!MiddlewareRegistry::loadConfig($configDir.'/missing.php'), 'A missing config file is not an error.');
+unlink($configDir.'/config/middleware.php');
+rmdir($configDir.'/config');
+rmdir($configDir);
+
 Route::flush();
 MiddlewareRegistry::reset();
 echo "Architecture v2 routing tests passed.\n";

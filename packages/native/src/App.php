@@ -50,6 +50,8 @@ final class App
     {
         try {
             self::discoverConventionalComponents();
+            $projectRoot = self::projectRoot();
+            if ($projectRoot !== null) MiddlewareRegistry::loadConfig($projectRoot.'/config/middleware.php');
             $root = self::resolveRoot($root);
             PluginManager::boot();
             if ($root instanceof TabNavigator) {
@@ -66,12 +68,18 @@ final class App
     /**
      * Route middleware aliases: `App::middleware(['auth' => Authenticate::class])`,
      * then `Route::middleware('auth')` or `->middleware('auth')` in routes.php.
+     * Without arguments it only reads them. Aliases kept in
+     * `config/middleware.php` (`return ['auth' => Authenticate::class];`) are
+     * loaded by App::run() and by Testing\routes(), so tests share them.
      *
-     * @param array<string, class-string<Middleware>|Middleware|Closure> $aliases
+     * @param array<string, class-string<Middleware>|Middleware|Closure>|null $aliases
+     * @return array<string, class-string<Middleware>|Middleware|Closure> every registered alias
      */
-    public static function middleware(array $aliases): void
+    public static function middleware(?array $aliases = null): array
     {
-        MiddlewareRegistry::alias($aliases);
+        if ($aliases !== null) MiddlewareRegistry::alias($aliases);
+
+        return MiddlewareRegistry::aliases();
     }
 
     /** @param Renderable|Closure|RouteCollection|class-string<Renderable>|int $root */
@@ -178,17 +186,28 @@ final class App
         if (self::$componentsConfigured) {
             return false;
         }
-        $root = $projectRoot ?? PluginManager::projectRoot();
-        if ($root === null) {
-            $script = $_SERVER['SCRIPT_FILENAME'] ?? null;
-            $root = is_string($script) && $script !== '' ? dirname($script) : null;
-        }
+        $root = $projectRoot ?? self::projectRoot();
         if ($root === null || !is_dir($root.'/src')) {
             return false;
         }
         self::components($root.'/src', $root.'/.pam-native/components');
 
         return true;
+    }
+
+    /**
+     * The app's root: the nearest directory with vendor/composer/installed.json,
+     * else the directory of the entry script.
+     */
+    private static function projectRoot(): ?string
+    {
+        $root = PluginManager::projectRoot();
+        if ($root === null) {
+            $script = $_SERVER['SCRIPT_FILENAME'] ?? null;
+            $root = is_string($script) && $script !== '' ? dirname($script) : null;
+        }
+
+        return $root;
     }
 
     /** @internal Test hook: forget whether components were configured. */

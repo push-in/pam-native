@@ -42,6 +42,23 @@ final class MiddlewareRegistry
         }
     }
 
+    /**
+     * Loads `config/middleware.php` (a file returning alias => middleware).
+     * Aliases already registered with App::middleware() keep their value.
+     * Returns false when the file does not exist.
+     */
+    public static function loadConfig(string $file): bool
+    {
+        if (!is_file($file)) return false;
+        $aliases = (static fn (string $path): mixed => require $path)($file);
+        if (!is_array($aliases)) {
+            throw new InvalidArgumentException("{$file} must return an array of middleware aliases.");
+        }
+        self::alias(array_diff_key($aliases, self::$aliases));
+
+        return true;
+    }
+
     public static function has(string $alias): bool
     {
         return isset(self::$aliases[explode(':', $alias, 2)[0]]);

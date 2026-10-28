@@ -18,6 +18,7 @@ use function Pam\Native\{signal, computed, watch, onMounted, onFocus, useResourc
 ```
 index.php          entry point and boot (globals, middleware, run)
 routes.php         optional, Laravel-style routes
+config/middleware.php  optional, middleware aliases shared with tests
 src/
   Api/ Middleware/ Composables/ Screens/ Components/
 ```
@@ -332,6 +333,19 @@ final class Authenticate implements Middleware
 
 App::middleware(['auth' => Authenticate::class]);   // in index.php
 ```
+
+To share the aliases with tests, keep them in `config/middleware.php` at the
+project root (next to `routes.php`):
+
+```php
+// config/middleware.php
+return ['auth' => Authenticate::class, 'role' => EnsureRole::class];
+```
+
+`App::run()` loads that file, and so does `Testing\routes()`. Aliases already
+registered with `App::middleware([...])` keep their value; the file only fills
+the missing ones. `App::middleware()` without arguments returns every
+registered alias.
 
 `$to` is the target route with its params (`$to->name()`, `$to->param('id')`,
 `$to->is('settings.*')`). Return `$next($to)` to continue, `redirect('login')`
