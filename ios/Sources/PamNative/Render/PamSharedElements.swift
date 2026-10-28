@@ -114,6 +114,8 @@ final class PamSharedElementFlights {
         var mass = 1.0
         var returnDurationMs: Int?
         var returnEasing: Int?
+        var launch: Bool?
+        var launchBackdrop: String?
 
         /// The curve of a flight back home (the element's route is popped).
         func returning() -> Config {
@@ -138,6 +140,11 @@ final class PamSharedElementFlights {
                 return UICubicTimingParameters(
                     controlPoint1: CGPoint(x: 0.32, y: 0), controlPoint2: CGPoint(x: 0.67, y: 0)
                 )
+            case 5:
+                // Ease-out cubic: a handed-off launch continues at speed.
+                return UICubicTimingParameters(
+                    controlPoint1: CGPoint(x: 0.215, y: 0.61), controlPoint2: CGPoint(x: 0.355, y: 1)
+                )
             default: return UICubicTimingParameters(animationCurve: .easeInOut)
             }
         }
@@ -154,7 +161,7 @@ final class PamSharedElementFlights {
         var destination: UIView?
         let sourceAlpha: CGFloat
         var destinationAlpha: CGFloat = 1
-        let start: Side
+        var start: Side
         var end: Side?
         let container = UIView()
         var content: UIView
@@ -227,11 +234,19 @@ final class PamSharedElementFlights {
     /// Phase 1: measures and copies the on-screen sources while the outgoing
     /// route is still in the window (a video frame needs it), then hides them.
     func capture(outgoing: UIView, defaultDuration: TimeInterval, popping: Bool = false) {
+        let kept = launched.flatMap { !popping && $0.flight.source.isDescendant(of: outgoing) ? $0 : nil }
+        if let current = launched, current.flight !== kept?.flight { returnLaunch(current) }
+        launched = nil
         clear()
+        handing = kept
+        if let kept {
+            kept.animator?.stopAnimation(true)
+            kept.timeout?.cancel()
+        }
         self.popping = popping
         defaultConfig = Config(durationMs: Int(defaultDuration * 1000))
         for (tag, candidates) in taggedViews(in: outgoing) {
-            guard captured.count < 16,
+            guard captured.count < 16, tag != handing?.tag,
                   let source = pick(candidates, route: outgoing, minimumShare: 0.5) else { continue }
             let config = Self.config(for: source) ?? defaultConfig
             if let flight = makeFlight(source: source, config: config) {
@@ -245,6 +260,8 @@ final class PamSharedElementFlights {
     /// laid-out incoming route; unmatched sources come back at once.
     func attach(incoming: UIView) {
         let destinations = taggedViews(in: incoming)
+        if let handing { handOff(handing, destinations: destinations, incoming: incoming) }
+        handing = nil
         for (tag, flight) in captured {
             guard let destination = pick(destinations[tag] ?? [], route: incoming, minimumShare: 0),
                   let end = endSide(flight, destination: destination) else {
@@ -267,24 +284,32 @@ final class PamSharedElementFlights {
                 flight.target = destination.snapshotView(afterScreenUpdates: true)
             }
             destination.alpha = 0
-            flight.container.clipsToBounds = true
-            flight.container.isUserInteractionEnabled = false
-            flight.content.bounds = CGRect(origin: .zero, size: flight.contentSize)
-            flight.container.addSubview(flight.content)
-            if let target = flight.target {
-                target.bounds = CGRect(origin: .zero, size: flight.contentSize)
-                target.alpha = 0
-                flight.container.addSubview(target)
-            }
-            overlayView().addSubview(flight.container)
+            mount(flight)
             flights.append(flight)
         }
         captured.removeAll()
     }
 
+    private func mount(_ flight: Flight) {
+        flight.container.clipsToBounds = true
+        flight.container.isUserInteractionEnabled = false
+        flight.content.bounds = CGRect(origin: .zero, size: flight.contentSize)
+        flight.container.addSubview(flight.content)
+        if let target = flight.target {
+            target.bounds = CGRect(origin: .zero, size: flight.contentSize)
+            target.alpha = 0
+            flight.container.addSubview(target)
+        }
+        overlayView().addSubview(flight.container)
+    }
+
     func apply(_ progress: CGFloat) {
-        for flight in flights {
-            guard let end = flight.end else { continue }
+        flights.forEach { apply($0, progress) }
+    }
+
+    private func apply(_ flight: Flight, _ progress: CGFloat) {
+        do {
+            guard let end = flight.end else { return }
             let clip = PamSharedGeometry.lerp(flight.start.clip, end.clip, progress)
             let content = PamSharedGeometry.lerp(flight.start.content, end.content, progress)
             flight.container.frame = clip
@@ -348,6 +373,7 @@ final class PamSharedElementFlights {
     /// Ends the flights. A destination whose media is not drawn yet keeps its
     /// flight on top, at the end frame, until it draws or 0.7 s pass.
     func finish() {
+        fadeFloor = 0
         let ended = flights
         flights.removeAll()
         captured.values.forEach { $0.source.alpha = $0.sourceAlpha }
@@ -375,7 +401,143 @@ final class PamSharedElementFlights {
         dropOverlayIfIdle()
     }
 
+    // MARK: Launch on tap
+
+    private final class Launch {
+        let tag: String
+        let flight: Flight
+        let backdrop: UIView
+        let startedAt = CACurrentMediaTime()
+        var animator: UIViewPropertyAnimator?
+        var timeout: DispatchWorkItem?
+
+        init(tag: String, flight: Flight, backdrop: UIView) {
+            self.tag = tag
+            self.flight = flight
+            self.backdrop = backdrop
+        }
+    }
+
+    private var launched: Launch?
+    private var handing: Launch?
+    /// Alpha the incoming route already shows through a launch backdrop.
+    private(set) var fadeFloor: CGFloat = 0
+
+    /// A tap on an element whose style says `launch` starts its flight now,
+    /// toward the media contain-fit on the whole screen over a fading
+    /// backdrop, before the app handles the tap (Android parity). The pushed
+    /// route takes it over ([attach]); without one it flies back home.
+    @discardableResult
+    func launchFromTap(route: UIView, point: CGPoint) -> Bool {
+        guard launched == nil, handing == nil, flights.isEmpty else { return false }
+        var found: (String, UIView)?
+        for (tag, views) in taggedViews(in: route) {
+            for view in views where Self.config(for: view)?.launch == true
+                && onScreen(view, route: route, minimumShare: 0.5)
+                && view.convert(view.bounds, to: host).contains(point) {
+                found = (tag, view)
+            }
+        }
+        guard let (tag, source) = found, let config = Self.config(for: source),
+              let flight = makeFlight(source: source, config: config),
+              flight.sourceMedia != nil, flight.contentSize != .zero else { return false }
+        let fitted = PamSharedGeometry.fit(host.bounds.size, content: flight.contentSize, fit: PamSharedFit.contain)
+        flight.end = Side(clip: fitted, content: fitted, radius: 0)
+        let backdrop = UIView(frame: host.bounds)
+        backdrop.isUserInteractionEnabled = false
+        backdrop.backgroundColor = Self.color(config.launchBackdrop) ?? .black
+        backdrop.alpha = 0
+        overlayView().addSubview(backdrop)
+        mount(flight)
+        source.alpha = 0
+        let launch = Launch(tag: tag, flight: flight, backdrop: backdrop)
+        launched = launch
+        apply(flight, 0)
+        let animator = UIViewPropertyAnimator(duration: max(Double(config.durationMs) / 1000, 0.01), timingParameters: config.timing)
+        animator.addAnimations { [weak self] in
+            self?.apply(flight, 1)
+            backdrop.alpha = 1
+        }
+        animator.startAnimation()
+        launch.animator = animator
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, let current = self.launched, current === launch else { return }
+            self.launched = nil
+            self.returnLaunch(current)
+        }
+        launch.timeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(config.durationMs) / 1000 + 0.9, execute: timeout)
+        return true
+    }
+
+    private func handOff(_ launch: Launch, destinations: [String: [UIView]], incoming: UIView) {
+        launch.timeout?.cancel()
+        let flight = launch.flight
+        guard let destination = pick(destinations[launch.tag] ?? [], route: incoming, minimumShare: 0) else {
+            returnLaunch(launch)
+            return
+        }
+        // The picture already flying stays: the end frame uses its aspect.
+        let media = contentView(of: destination)
+        flight.destinationMedia = media
+        let frame = destination.convert(destination.bounds, to: host)
+        let end = media.flatMap { item in
+            item.sharedFit.flatMap { side(tagged: destination, media: item, fit: $0, contentSize: flight.contentSize) }
+        } ?? Side(clip: frame, content: frame, radius: radius(of: destination))
+        // Stopped where it is: the model values are the frame on screen now.
+        flight.start = currentSide(flight)
+        flight.end = end
+        flight.destination = destination
+        flight.destinationAlpha = destination.alpha
+        destination.alpha = 0
+        let elapsed = Int((CACurrentMediaTime() - launch.startedAt) * 1000)
+        flight.config = Config(durationMs: min(max(flight.config.durationMs - elapsed, 120), 2_000), easing: 5)
+        fadeFloor = launch.backdrop.alpha
+        launch.backdrop.removeFromSuperview()
+        flights.append(flight)
+        // Above a modal presentation added since the launch.
+        _ = overlayView()
+    }
+
+    private func returnLaunch(_ launch: Launch) {
+        launch.timeout?.cancel()
+        launch.animator?.stopAnimation(true)
+        let flight = launch.flight
+        flight.end = currentSide(flight)
+        UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
+            self.apply(flight, 0)
+            launch.backdrop.alpha = 0
+        } completion: { _ in
+            flight.source.alpha = flight.sourceAlpha
+            flight.container.removeFromSuperview()
+            launch.backdrop.removeFromSuperview()
+            self.dropOverlayIfIdle()
+        }
+    }
+
+    private func currentSide(_ flight: Flight) -> Side {
+        let clip = flight.container.frame
+        let scaleX = flight.content.transform.a
+        let scaleY = flight.content.transform.d
+        let size = CGSize(width: flight.contentSize.width * scaleX, height: flight.contentSize.height * scaleY)
+        let center = CGPoint(x: flight.content.center.x + clip.minX, y: flight.content.center.y + clip.minY)
+        return Side(
+            clip: clip,
+            content: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height),
+            radius: flight.container.layer.cornerRadius
+        )
+    }
+
+    private static func color(_ hex: String?) -> UIColor? {
+        guard let hex, hex.count == 7, hex.hasPrefix("#"), let value = Int(hex.dropFirst(), radix: 16) else { return nil }
+        return UIColor(
+            red: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255, alpha: 1
+        )
+    }
+
     func clear() {
+        fadeFloor = 0
         for flight in flights + Array(captured.values) {
             flight.source.alpha = flight.sourceAlpha
             flight.destination?.alpha = flight.destinationAlpha

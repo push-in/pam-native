@@ -7144,6 +7144,12 @@ $assert(
         && !array_key_exists('returnDurationMs', json_decode(SharedTransitionStyle::timing()->toJson(), true)),
     'Any template element takes a `shared` tag (null leaves it untagged) and a style with a return curve.',
 );
+$launchConfig = json_decode(SharedTransitionStyle::spring(360)->returning(200)->launchOnTap()->toJson(), true);
+$assert(
+    $launchConfig['launch'] === true && $launchConfig['launchBackdrop'] === '#000000' && $launchConfig['returnDurationMs'] === 200
+        && !array_key_exists('launch', json_decode(SharedTransitionStyle::spring(360)->toJson(), true)),
+    'launchOnTap() marks the tapped element to fly on the tap itself and keeps the other options.',
+);
 
 $permission = new PermissionDecision(
     PermissionKind::Photos,

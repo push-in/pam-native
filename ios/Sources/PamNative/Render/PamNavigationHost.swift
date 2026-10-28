@@ -117,11 +117,50 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         screenEdgeGesture.delegate = self
         screenEdgeGesture.maximumNumberOfTouches = 1
         addGestureRecognizer(screenEdgeGesture)
+        addGestureRecognizer(launchTap)
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if event?.type == .touches { sharedElements.touched(point) }
+        if event?.type == .touches {
+            sharedElements.touched(point)
+            if event?.timestamp != tapTouchTimestamp {
+                tapTouchTimestamp = event?.timestamp ?? 0
+                tapBeganAt = CACurrentMediaTime()
+            }
+        }
         return super.hitTest(point, with: event)
+    }
+
+    private var tapTouchTimestamp: TimeInterval = 0
+    private var tapBeganAt: CFTimeInterval = 0
+
+    /// Short taps on a `launch` element start its flight at touch-up, before
+    /// the app handles the press (Android parity). Never cancels touches.
+    private lazy var launchTap: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleLaunchTap(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    @objc private func handleLaunchTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, CACurrentMediaTime() - tapBeganAt < 0.17,
+              !PamMotionPolicy.isReduced, presentedNavigationController == nil,
+              let route = incomingViewForLaunch() else { return }
+        sharedElements.launchFromTap(route: route, point: recognizer.location(in: self))
+    }
+
+    private func incomingViewForLaunch() -> UIView? {
+        routeViews.last { !$0.isHidden }
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === launchTap
     }
 
     /// Which recognizer handles the pop for the current configuration.
@@ -228,6 +267,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     override func gestureRecognizerShouldBegin(
         _ gestureRecognizer: UIGestureRecognizer
     ) -> Bool {
+        if gestureRecognizer === launchTap { return true }
         guard gestureEnabled, routeViews.count >= 2,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
@@ -720,6 +760,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         sharedElements.attach(incoming: incoming)
     }
 
+    var sharedFadeFloor: CGFloat { sharedElements.fadeFloor }
+
     func sharedElementAnimator(duration: TimeInterval, alongside: @escaping () -> Void) -> UIViewPropertyAnimator {
         sharedElements.animator(duration: duration, alongside: alongside)
     }
@@ -879,10 +921,11 @@ final class PamSharedFadeTransition: NSObject, UIViewControllerTransitioningDele
                 view.frame = context.finalFrame(for: controller)
             }
             context.containerView.addSubview(view)
-            view.alpha = 0
             view.layoutIfNeeded()
         }
         if let incoming { host?.attachSharedElements(incoming: incoming) }
+        // A launch backdrop already darkened the screen: the fade continues from it.
+        if presenting { view.alpha = host?.sharedFadeFloor ?? 0 }
         let presenting = presenting
         let animator = host?.sharedElementAnimator(duration: duration) {
             view.alpha = presenting ? 1 : 0

@@ -7,6 +7,13 @@
   flew in as its placeholder until its own media draws, with no time limit,
   instead of the flight disappearing after 0.7 s over a black frame
   (Android, iOS).
+- Shared elements: `SharedTransitionStyle::launchOnTap()` on a tapped
+  element (a thumbnail) starts its flight on the tap itself, natively, in the
+  next frame: toward the media contain-fit on the whole screen over a fading
+  backdrop, before the app has handled the press. The pushed route takes the
+  flight over (it continues from where it is to the real frame, and the route
+  fade continues from the backdrop); with no route it flies back home
+  (Android, iOS).
 - Shared elements: when one tag is on screen more than once (an author's
   avatar on several posts), the instance under the finger that opened the
   route flies, and the flight home lands on it (Android, iOS).

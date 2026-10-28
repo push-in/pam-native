@@ -116,6 +116,7 @@ internal object PamSharedGeometry {
             1 -> t
             3 -> if (t >= 1f) 1f else spring(t * durationMs / 1000f, damping, stiffness, mass).coerceIn(0f, 1f)
             4 -> t * t * t
+            5 -> 1f - (1f - t) * (1f - t) * (1f - t)
             else -> t * t * (3f - 2f * t)
         }
     }
@@ -154,6 +155,9 @@ internal class PamSharedElements(private val host: ViewGroup) {
         val mass: Float = 1f,
         val returnDurationMs: Long? = null,
         val returnEasing: Int? = null,
+        /** Starts flying on the tap itself, toward a predicted full-screen frame. */
+        val launch: Boolean = false,
+        val launchBackdrop: Int = android.graphics.Color.BLACK,
     ) {
         /** The curve of a flight back home (the element's route is popped). */
         fun returning(): Config = copy(
@@ -219,11 +223,16 @@ internal class PamSharedElements(private val host: ViewGroup) {
 
     fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long, popping: Boolean = false) {
         clear()
+        val launched = launch?.takeIf { !popping && it.source.isAttachedToWindow && isInside(it.source, outgoing) }
+        launch?.takeIf { it !== launched }?.let(::returnLaunch)
+        launch = null
+        val destinations = taggedViews(incoming)
+        if (launched != null) handOff(launched, destinations, incoming)
         val sources = taggedViews(outgoing)
         if (sources.isEmpty()) return
-        val destinations = taggedViews(incoming)
         for ((tag, candidates) in sources) {
             if (flights.size >= 16) break
+            if (tag == launched?.tag) continue
             val source = pick(candidates, outgoing, minimumShare = 0.5f) ?: continue
             val destination = pick(destinations[tag], incoming, minimumShare = 0f) ?: continue
             val top = if (popping) source else destination
@@ -241,6 +250,160 @@ internal class PamSharedElements(private val host: ViewGroup) {
             it.destination.alpha = 0f
             host.overlay.add(it.view)
         }
+    }
+
+    /**
+     * Alpha the incoming route already shows through a launch backdrop: its
+     * fade continues from there instead of starting at 0.
+     */
+    var fadeFloor = 0f
+        private set
+
+    private class Launch(
+        val tag: String,
+        val source: View,
+        val sourceAlpha: Float,
+        val start: Side,
+        val predicted: Side,
+        val view: FlightView,
+        val backdrop: View,
+        val content: PamSharedContent,
+        val owned: MutableList<Bitmap>,
+        val config: Config,
+        val startedAt: Long,
+    ) {
+        var animator: android.animation.ValueAnimator? = null
+        var eased = 0f
+    }
+
+    private var launch: Launch? = null
+    private val launchTimeout = Runnable { launch?.let(::returnLaunch); launch = null }
+
+    /**
+     * A tap on an element whose style says `launch` starts its flight on
+     * this very frame, toward the frame it will most likely land on (the
+     * media contain-fit on the whole screen) over a fading backdrop, before
+     * the app has even handled the tap. When the route it opens is pushed,
+     * the flight is handed to the real destination ([prepare]); if no route
+     * comes, it flies back home.
+     */
+    fun launchFromTap(route: View, x: Float, y: Float): Boolean {
+        if (launch != null || flights.isNotEmpty()) return false
+        val source = taggedViews(route).entries.asSequence()
+            .flatMap { (tag, views) -> views.asSequence().map { tag to it } }
+            .filter { (_, view) -> config(view)?.launch == true }
+            .filter { (_, view) -> onScreen(view, route, 0.5f) }
+            .lastOrNull { (_, view) ->
+                rectInHost(view, RectF(0f, 0f, view.width.toFloat(), view.height.toFloat())).contains(x, y)
+            } ?: return false
+        val (tag, view) = source
+        val config = config(view) ?: return false
+        val media = contentView(view) ?: return false
+        val fit = media.sharedFit ?: return false
+        val content = media.sharedContent() ?: return false
+        val start = side(view, media as View, fit, content) ?: run {
+            content.owned?.takeIf { !it.isRecycled }?.recycle()
+            return false
+        }
+        val fitted = PamSharedGeometry.fit(
+            host.width.toFloat(), host.height.toFloat(), content.width.toFloat(), content.height.toFloat(), PamSharedFit.CONTAIN,
+        )
+        val box = RectF(fitted[0], fitted[1], fitted[2], fitted[3])
+        val predicted = Side(RectF(box), RectF(box), 0f)
+        val flightView = FlightView(host, content.drawable, content.width, content.height, null)
+        val backdrop = View(host.context).apply {
+            setBackgroundColor(config.launchBackdrop)
+            alpha = 0f
+            layout(0, 0, host.width, host.height)
+        }
+        val started = Launch(
+            tag, view, view.alpha, start, predicted, flightView, backdrop, content,
+            mutableListOf<Bitmap>().apply { content.owned?.let(::add) }, config, android.os.SystemClock.uptimeMillis(),
+        )
+        host.overlay.add(backdrop)
+        host.overlay.add(flightView)
+        flightView.set(start, predicted, 0f)
+        view.alpha = 0f
+        launch = started
+        started.animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = config.durationMs.coerceIn(1L, 2_000L)
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener {
+                val eased = PamSharedGeometry.ease(
+                    it.animatedValue as Float, config.easing, config.damping, config.stiffness, config.mass, config.durationMs,
+                )
+                started.eased = eased
+                flightView.set(start, predicted, eased)
+                backdrop.alpha = eased.coerceIn(0f, 1f)
+            }
+            start()
+        }
+        host.removeCallbacks(launchTimeout)
+        host.postDelayed(launchTimeout, config.durationMs + LAUNCH_WAIT_MS)
+        return true
+    }
+
+    /** The pushed route holds the launched tag: continue from where it is to the real frame. */
+    private fun handOff(launched: Launch, destinations: Map<String, List<View>>, incoming: View) {
+        host.removeCallbacks(launchTimeout)
+        launched.animator?.cancel()
+        val destination = pick(destinations[launched.tag], incoming, 0f)
+        if (destination == null) {
+            returnLaunch(launched)
+            return
+        }
+        val media = contentView(destination)
+        val fit = media?.sharedFit
+        val end = if (media != null && fit != null) side(destination, media as View, fit, launched.content) else null
+        val target = end ?: rectInHost(destination, RectF(0f, 0f, destination.width.toFloat(), destination.height.toFloat()))
+            .let { Side(RectF(it), RectF(it), cornerRadius(destination)) }
+        val now = launched.view.current()
+        val elapsed = android.os.SystemClock.uptimeMillis() - launched.startedAt
+        val remaining = (launched.config.durationMs - elapsed).coerceIn(120L, 2_000L)
+        fadeFloor = launched.backdrop.alpha
+        host.overlay.remove(launched.backdrop)
+        val flight = Flight(
+            launched.source, destination, launched.sourceAlpha, destination.alpha, now, target, launched.view,
+            launched.owned, media, Config(durationMs = remaining, easing = 5), launched.content,
+        )
+        destination.alpha = 0f
+        flights += flight
+    }
+
+    /** No route took the launched element (the tap did something else): it flies back home. */
+    private fun returnLaunch(launched: Launch) {
+        host.removeCallbacks(launchTimeout)
+        launched.animator?.cancel()
+        val from = launched.view.current()
+        val backdropFrom = launched.backdrop.alpha
+        android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 180L
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener {
+                val value = it.animatedValue as Float
+                launched.view.set(from, launched.start, value)
+                launched.backdrop.alpha = backdropFrom * (1f - value)
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    launched.source.alpha = launched.sourceAlpha
+                    host.overlay.remove(launched.backdrop)
+                    host.overlay.remove(launched.view)
+                    launched.view.drop()
+                    launched.owned.forEach { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+                }
+            })
+            start()
+        }
+    }
+
+    private fun isInside(view: View, root: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === root) return true
+            current = current.parent as? View
+        }
+        return false
     }
 
     /** Current crop and radius of every flight: left, top, right, bottom, radius (tests). */
@@ -269,6 +432,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
      * never draws).
      */
     fun finish() {
+        fadeFloor = 0f
         val ended = flights.toList()
         flights.clear()
         ended.forEach { flight ->
@@ -293,6 +457,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
     }
 
     fun clear() {
+        fadeFloor = 0f
         flights.forEach {
             it.source.alpha = it.sourceAlpha
             it.destination.alpha = it.destinationAlpha
@@ -543,6 +708,10 @@ internal class PamSharedElements(private val host: ViewGroup) {
                 mass = json.optDouble("mass", 1.0).toFloat().coerceIn(0.1f, 10f),
                 returnDurationMs = json.optLong("returnDurationMs", -1L).takeIf { it >= 0 }?.coerceAtMost(2_000L),
                 returnEasing = json.optInt("returnEasing", 0).takeIf { it in 1..4 },
+                launch = json.optBoolean("launch", false),
+                launchBackdrop = runCatching {
+                    android.graphics.Color.parseColor(json.optString("launchBackdrop", "#000000"))
+                }.getOrDefault(android.graphics.Color.BLACK),
             )
         }.getOrNull()
     }
@@ -585,6 +754,9 @@ internal class PamSharedElements(private val host: ViewGroup) {
 
         fun frame(): FloatArray = floatArrayOf(clip.left, clip.top, clip.right, clip.bottom, radius)
 
+        /** The side drawn right now (a handed-off flight continues from it). */
+        fun current(): Side = Side(RectF(clip), RectF(content), radius)
+
         fun drop() {
             drawable = null
             target = null
@@ -621,5 +793,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
 
     private companion object {
         const val HOLD_SAFETY_MS = 15_000L
+        /** How long a launched flight waits for its route beyond its own duration. */
+        const val LAUNCH_WAIT_MS = 900L
     }
 }
