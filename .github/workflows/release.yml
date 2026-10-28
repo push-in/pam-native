@@ -441,7 +441,8 @@ jobs:
             --strip-components=1 \
             "pam-native-android-renderer-${version}/target/aarch64-linux-android/release/libpam_native_engine.a" \
             "pam-native-android-renderer-${version}/target/x86_64-linux-android/release/libpam_native_engine.a"
-          printf '%s\n' "${version}" >"${candidate_package}/target/pam-native-engine-version"
+          protocol=$(sha256sum "${candidate_package}/crates/pam-native-protocol/src/lib.rs" | cut -c1-16)
+          printf '%s\nprotocol=%s\n' "${version}" "${protocol}" >"${candidate_package}/target/pam-native-engine-version"
           printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
           printf 'PAM_HOME=%s\n' "${pam_home}" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"

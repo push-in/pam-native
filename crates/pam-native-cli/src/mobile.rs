@@ -3107,7 +3107,7 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
         verify_release_checksum(&archive, &checksum, &asset)?;
 
         let root = format!("pam-native-android-renderer-{version}");
-        let paths = default_abis()
+        let mut paths = default_abis()
             .into_iter()
             .map(|abi| {
                 format!(
@@ -3116,6 +3116,7 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
                 )
             })
             .collect::<Vec<_>>();
+        paths.push(format!("{root}/{PROTOCOL_SOURCE}"));
         let listing = Command::new("tar")
             .args(["-tzf"])
             .arg(&archive)
@@ -3148,6 +3149,20 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
                 "Native renderer engine extraction failed: {status}"
             ));
         }
+        let archive_protocol = fs::read(extracted.join(&root).join(PROTOCOL_SOURCE))
+            .map(|source| protocol_fingerprint_of(&source))
+            .map_err(|error| format!("Native renderer archive has no protocol source: {error}"))?;
+        if let Some(local) = protocol_fingerprint(native_home)
+            && local != archive_protocol
+        {
+            // These sources are not the release the archive was built from
+            // (a branch or an unreleased commit on the same version): keep
+            // the archive out; the engine is compiled from source instead.
+            eprintln!(
+                "Pam Native {version} release engine has protocol {archive_protocol}, these sources have {local}; building the engine from source."
+            );
+            return Ok(());
+        }
         for abi in default_abis() {
             let relative = PathBuf::from(format!(
                 "target/{}/release/libpam_native_engine.a",
@@ -3172,8 +3187,8 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
                 .map_err(|error| format!("cannot activate {}: {error}", destination.display()))?;
         }
         write_atomic(
-            &native_home.join("target/pam-native-engine-version"),
-            format!("{version}\n").as_bytes(),
+            &native_home.join(ENGINE_MARKER),
+            engine_marker(version, &archive_protocol).as_bytes(),
         )
     })();
     let cleanup = fs::remove_dir_all(&temporary);
@@ -3545,6 +3560,26 @@ fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
         && runtime.ios_root.join("runtime.json").is_file()
 }
 
+/// The iOS engine xcframework must be built from these sources: same SDK
+/// version and protocol, recorded next to it like the Android engine marker.
+fn ios_engine_matches(ios_root: &Path, native_home: &Path) -> Result<(), String> {
+    let marker_path = ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version");
+    let marker = fs::read_to_string(&marker_path).unwrap_or_default();
+    if engine_marker_matches(&marker, native_home) && !marker.trim().is_empty() {
+        return Ok(());
+    }
+    let protocol = protocol_fingerprint(native_home).unwrap_or_else(|| "unknown".to_owned());
+    Err(format!(
+        "the iOS Pam Native engine at {} was not built from these sources (expected SDK {} with protocol {protocol}, found {}); rebuild PamNativeEngine.xcframework from {} (cargo build --release -p pam-native-engine for aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios) and record it with: printf '{}' > {}",
+        ios_root.join("PamNativeEngine.xcframework").display(),
+        env!("CARGO_PKG_VERSION"),
+        if marker.trim().is_empty() { "no marker".to_owned() } else { marker.split_whitespace().collect::<Vec<_>>().join(" ") },
+        native_home.display(),
+        engine_marker(env!("CARGO_PKG_VERSION"), &protocol).replace('\n', "\\n"),
+        marker_path.display(),
+    ))
+}
+
 fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
@@ -3622,6 +3657,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             runtime.ios_root.display()
         ));
     }
+    ios_engine_matches(&runtime.ios_root, &native_home)?;
     write_runtime_lock(project, &runtime)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;
@@ -8314,10 +8350,22 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
     if engine_ready_at(native_home, abi) && !is_source_checkout(native_home) {
         return Ok(());
     }
-    let installed = installed_rust_targets()?;
+    let mismatch = native_engine_path(native_home, abi).is_file() && !engine_ready_at(native_home, abi);
+    let installed = installed_rust_targets().map_err(|error| {
+        if mismatch {
+            format!("{}; building it from source needs Rust: {error}", engine_mismatch_detail(native_home))
+        } else {
+            error
+        }
+    })?;
     if !installed.contains(abi.rust_target()) {
+        let reason = if mismatch {
+            format!("{}, so it must be built from source, but ", engine_mismatch_detail(native_home))
+        } else {
+            String::new()
+        };
         return Err(format!(
-            "Rust target {} is missing; run `rustup target add {}`",
+            "{reason}Rust target {} is missing; run `rustup target add {}`",
             abi.rust_target(),
             abi.rust_target()
         ));
@@ -8354,6 +8402,12 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
         .status()
         .map_err(|error| format!("cannot build Pam Native engine: {error}"))?;
     if status.success() {
+        if let Some(protocol) = protocol_fingerprint(native_home) {
+            write_atomic(
+                &native_home.join(ENGINE_MARKER),
+                engine_marker(env!("CARGO_PKG_VERSION"), &protocol).as_bytes(),
+            )?;
+        }
         Ok(())
     } else {
         Err(format!(
@@ -8381,8 +8435,56 @@ fn engine_ready_at(native_home: &Path, abi: AndroidAbi) -> bool {
         return false;
     }
     is_source_checkout(native_home)
-        || fs::read_to_string(native_home.join("target/pam-native-engine-version"))
-            .is_ok_and(|version| version.trim() == env!("CARGO_PKG_VERSION"))
+        || fs::read_to_string(native_home.join(ENGINE_MARKER))
+            .is_ok_and(|marker| engine_marker_matches(&marker, native_home))
+}
+
+/// Marker next to a prebuilt engine: the SDK version and the wire protocol
+/// the archive was compiled from.
+const ENGINE_MARKER: &str = "target/pam-native-engine-version";
+const PROTOCOL_SOURCE: &str = "crates/pam-native-protocol/src/lib.rs";
+
+/// Fingerprint of a protocol definition (its source bytes). Two engines with
+/// the same SDK version but different property or event tables differ here.
+fn protocol_fingerprint_of(source: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(source))[..16].to_owned()
+}
+
+/// Protocol fingerprint of the sources at `native_home`, when they ship them.
+fn protocol_fingerprint(native_home: &Path) -> Option<String> {
+    fs::read(native_home.join(PROTOCOL_SOURCE))
+        .ok()
+        .map(|source| protocol_fingerprint_of(&source))
+}
+
+fn engine_marker(version: &str, protocol: &str) -> String {
+    format!("{version}\nprotocol={protocol}\n")
+}
+
+/// A prebuilt engine is reusable only for this exact SDK version and, when the
+/// sources are present, for exactly their protocol. A version-only marker
+/// (older archives) or another protocol never matches: the engine is then
+/// compiled from these sources or the build stops with a clear error.
+fn engine_marker_matches(marker: &str, native_home: &Path) -> bool {
+    let mut lines = marker.lines().map(str::trim);
+    if lines.next() != Some(env!("CARGO_PKG_VERSION")) {
+        return false;
+    }
+    match protocol_fingerprint(native_home) {
+        Some(expected) => lines.any(|line| line == format!("protocol={expected}")),
+        None => true,
+    }
+}
+
+fn engine_mismatch_detail(native_home: &Path) -> String {
+    let found = fs::read_to_string(native_home.join(ENGINE_MARKER))
+        .map(|marker| marker.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_else(|_| "no marker".to_owned());
+    format!(
+        "the prebuilt Pam Native engine ({found}) does not match SDK {} with protocol {}",
+        env!("CARGO_PKG_VERSION"),
+        protocol_fingerprint(native_home).unwrap_or_else(|| "unknown".to_owned()),
+    )
 }
 
 fn installed_rust_targets() -> Result<HashSet<String>, String> {
@@ -10601,6 +10703,56 @@ mod tests {
         )
         .expect("matching marker");
         assert!(engine_ready_at(&root, AndroidAbi::Arm64));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn packaged_engine_is_reused_only_for_the_same_protocol() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-engine-protocol-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let engine = native_engine_path(&root, AndroidAbi::Arm64);
+        fs::create_dir_all(engine.parent().expect("engine parent")).expect("directory");
+        fs::write(&engine, b"engine").expect("engine");
+        let protocol = root.join(PROTOCOL_SOURCE);
+        fs::create_dir_all(protocol.parent().expect("protocol parent")).expect("protocol dir");
+        fs::write(&protocol, b"ListWindowed = 542,").expect("protocol");
+        let version = env!("CARGO_PKG_VERSION");
+        let marker = root.join(ENGINE_MARKER);
+
+        // A version-only marker (the published archive of this version) is not
+        // proof that the engine knows these sources' properties.
+        fs::write(&marker, format!("{version}\n")).expect("legacy marker");
+        assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
+
+        let current = protocol_fingerprint(&root).expect("fingerprint");
+        fs::write(&marker, engine_marker(version, &current)).expect("matching marker");
+        assert!(engine_ready_at(&root, AndroidAbi::Arm64));
+
+        // Same SDK version, one more property: the engine must be rebuilt.
+        fs::write(&protocol, b"ListWindowed = 542,\nNext = 543,").expect("changed protocol");
+        assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
+        assert!(engine_mismatch_detail(&root).contains(&current));
+
+        fs::write(&marker, engine_marker("0.0.0", &protocol_fingerprint(&root).expect("fp"))).expect("old version");
+        assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
+
+        // iOS: the same rule for the engine xcframework, with a clear error.
+        let ios_root = root.join("ios-runtime");
+        fs::create_dir_all(ios_root.join("PamNativeEngine.xcframework")).expect("xcframework");
+        let error = ios_engine_matches(&ios_root, &root).expect_err("no marker");
+        assert!(error.contains("was not built from these sources"), "{error}");
+        fs::write(
+            ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version"),
+            engine_marker(version, &protocol_fingerprint(&root).expect("fp")),
+        )
+        .expect("ios marker");
+        assert!(ios_engine_matches(&ios_root, &root).is_ok());
         fs::remove_dir_all(root).expect("cleanup");
     }
 
