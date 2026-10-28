@@ -626,7 +626,8 @@ fn layout_node(
     // degenerate computation (for example an over-constrained box) must
     // never ship one. Negative origins are valid and kept.
     .sanitized();
-    let keyboard = surface_keyboard_avoidance(node, frame);
+    let keyboard = surface_keyboard_avoidance(node, frame)
+        .or_else(|| root_keyboard_avoidance(context, node, frame));
     let frame = match keyboard {
         Some(SurfaceKeyboardAvoidance::Resize(overlap)) => Layout {
             height: frame.height - overlap,
@@ -4350,6 +4351,51 @@ fn surface_keyboard_avoidance(node: &Node, frame: Layout) -> Option<SurfaceKeybo
         Some(KEYBOARD_PADDING) => SurfaceKeyboardAvoidance::Padding(overlap),
         Some(KEYBOARD_PAN) => SurfaceKeyboardAvoidance::Position(overlap),
         _ => SurfaceKeyboardAvoidance::Resize(overlap),
+    })
+}
+
+/// A resize/padding `KeyboardAvoidingView` outside any modal, where the host
+/// window does not shrink for the IME (surfaces in the window, iOS): the
+/// root keyboard inset avoids it like React Native's `behavior="height"` /
+/// `"padding"`. Android resizes these views natively (`adjustResize`), and a
+/// trailing panning view is kept above the IME by [`reserve_keyboard_space`].
+fn root_keyboard_avoidance(
+    context: &LayoutContext<'_>,
+    node: &Node,
+    frame: Layout,
+) -> Option<SurfaceKeyboardAvoidance> {
+    if node.kind != NodeKind::KeyboardAvoidingView
+        || crate::text_measure::surface_policy() != crate::surface::SurfacePolicy::InWindow
+        || crate::text_measure::surface_keyboard_top().is_some()
+    {
+        return None;
+    }
+    let behavior = integer(node, PropKey::KeyboardBehavior).unwrap_or(KEYBOARD_RESIZE);
+    if !matches!(behavior, KEYBOARD_RESIZE | KEYBOARD_PADDING)
+        || matches!(
+            node.properties.get(&PropKey::KeyboardAvoidingEnabled),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        )
+    {
+        return None;
+    }
+    let keyboard = crate::text_measure::keyboard_inset();
+    if keyboard <= 0.0 || inside_modal(context.tree, node) {
+        return None;
+    }
+    let viewport = context.viewport.get();
+    let keyboard_top = viewport.y + viewport.height - keyboard;
+    let offset = number(node, PropKey::KeyboardVerticalOffset)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    let overlap = (frame.y + frame.height + offset - keyboard_top).clamp(0.0, frame.height);
+    if overlap <= 0.0 {
+        return None;
+    }
+    Some(if behavior == KEYBOARD_PADDING {
+        SurfaceKeyboardAvoidance::Padding(overlap)
+    } else {
+        SurfaceKeyboardAvoidance::Resize(overlap)
     })
 }
 
@@ -8926,9 +8972,22 @@ mod css_flex_tests {
         )
         .unwrap();
         assert_eq!(
+            resize[&5].height, 0.0,
+            "in-window hosts (iOS): a resize view at the root loses the keyboard overlap (RN behavior=\"height\")"
+        );
+        drop(_scope);
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 320.0)
+                .with_surface_policy(crate::surface::SurfacePolicy::SystemWindows);
+        let resize = calculate(
+            &chat(vec![(PropKey::KeyboardBehavior, PropValue::Integer(1))]),
+            viewport,
+        )
+        .unwrap();
+        assert_eq!(
             resize[&5].y + resize[&5].height,
             800.0,
-            "resize/padding keep their native viewport reduction"
+            "Android keeps its native viewport reduction for resize/padding"
         );
         let mut disabled = pan.clone();
         disabled.push((PropKey::KeyboardAvoidingEnabled, off.clone()));

@@ -1286,6 +1286,64 @@ mod tests {
     }
 
     #[test]
+    fn root_keyboard_inset_resizes_a_height_keyboard_avoiding_view_in_window_hosts() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = |behavior: i64| Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::KeyboardAvoidingView,
+                        vec![
+                            (PropKey::KeyboardBehavior, PropValue::Integer(behavior)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        vec![(PropKey::FlexGrow, PropValue::Float(1.0))],
+                    ),
+                ),
+            ]),
+        };
+        let mut engine = Engine::default();
+        engine.set_viewport(400.0, 800.0).expect("viewport");
+        engine.commit(&tree(1).encode().expect("tree")).expect("commit");
+        assert_eq!(engine.layouts[&3].height, 800.0, "keyboard hidden");
+        assert!(engine.set_keyboard_inset(300.0).expect("inset"));
+        engine.relayout(400.0, 800.0).expect("relayout");
+        assert_eq!(engine.layouts[&2].height, 500.0, "height behavior loses the overlap");
+        assert_eq!(engine.layouts[&3].height, 500.0, "content laid out above the keyboard");
+
+        engine.commit(&tree(3).encode().expect("tree")).expect("padding");
+        assert_eq!(engine.layouts[&2].height, 800.0, "padding keeps the frame");
+        assert_eq!(engine.layouts[&3].height, 500.0, "padding insets the content");
+
+        // Android resizes the window (adjustResize) and the view natively.
+        engine.set_surface_policy(SurfacePolicy::SystemWindows);
+        engine.commit(&tree(1).encode().expect("tree")).expect("android");
+        engine.relayout(400.0, 800.0).expect("relayout");
+        assert_eq!(engine.layouts[&3].height, 800.0);
+    }
+
+    #[test]
     fn remount_replays_the_retained_tree_for_a_new_surface() {
         let mut engine = Engine::new();
         let mut empty = Vec::new();
