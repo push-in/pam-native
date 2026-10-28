@@ -20,6 +20,27 @@
   view gives focus to its descendants first, so parking focus on it handed
   it straight back to the first input.
 
+## 1.45.0 - 2026-10-28
+
+Architecture v2, the extension protocol table and the Android/iOS parity
+fixes ship together. Everything is backward compatible: the APIs that
+architecture v2 replaces (`routes.json`, `Routing\Route::stack()`,
+`Routing\Navigation`, `RouteTarget`, direct `Navigator` use, `mount()` with
+`own()`, `effects()`/`watchers()`, `initialState()`) are `@deprecated` and keep
+working; the core protocol identifiers do not change. Upgrade notes:
+
+- `Component` no longer declares an empty `setup()`, so a component can declare
+  `setup()` with typed route parameters. A `setup(): void` override keeps
+  working; only a `parent::setup()` call on the old no-op hook has to go.
+- A host that exports a renderer contract makes the PHP SDK refuse an
+  incompatible ABI or protocol at boot; hosts without one keep working with
+  core identifiers.
+- The Android renderer archive carries its engine marker
+  (`target/pam-native-engine-version`: version, `protocol=` and `engine=`).
+  `pam-native` installs a release engine only when its engine sources match
+  the local ones and records `engine=` in the installed marker.
+
+
 - iOS `<Switch checked>`: the switch follows `checked` (sent by the template
   Switch and `Toggle::make`), like the Android Switch. It only reached the
   accessibility state, so every template switch stayed visually off (a

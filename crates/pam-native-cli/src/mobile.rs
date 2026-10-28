@@ -1498,7 +1498,7 @@ fn merge_route_links(manifest: &mut NativeManifest, routes: &crate::routes::Rout
     let Some(links) = manifest.links.clone() else {
         return;
     };
-    for link in crate::routes::derive_links(&links, &routes) {
+    for link in crate::routes::derive_links(&links, routes) {
         let exists = manifest.android.deep_links.iter().any(|current| {
             current.scheme.eq_ignore_ascii_case(&link.scheme)
                 && current.host == link.host
@@ -3162,6 +3162,7 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
             })
             .collect::<Vec<_>>();
         paths.push(format!("{root}/{PROTOCOL_SOURCE}"));
+        let archive_marker = format!("{root}/{ENGINE_MARKER}");
         let listing = Command::new("tar")
             .args(["-tzf"])
             .arg(&archive)
@@ -3176,6 +3177,11 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
         for line in String::from_utf8_lossy(&listing.stdout).lines() {
             if !safe_android_renderer_archive_path(Path::new(line), &root) {
                 return Err(format!("unsafe Native renderer archive path: {line}"));
+            }
+            // Archives since 1.45.0 carry the engine marker they were built
+            // with (version, protocol= and engine=); older ones do not.
+            if line == archive_marker {
+                paths.push(archive_marker.clone());
             }
         }
         let extracted = temporary.join("extracted");
@@ -3208,6 +3214,20 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
             );
             return Ok(());
         }
+        let archive_engine = fs::read_to_string(extracted.join(&root).join(ENGINE_MARKER))
+            .ok()
+            .and_then(|marker| recorded_engine_fingerprint(&marker));
+        if let (Some(recorded), Some(local)) =
+            (&archive_engine, engine_source_fingerprint(native_home))
+            && *recorded != local
+        {
+            // Same protocol, different engine sources (an engine-only fix
+            // after the release): compile the engine from these sources.
+            eprintln!(
+                "Pam Native {version} release engine was built from engine sources {recorded}, these sources are {local}; building the engine from source."
+            );
+            return Ok(());
+        }
         for abi in default_abis() {
             let relative = PathBuf::from(format!(
                 "target/{}/release/libpam_native_engine.a",
@@ -3231,10 +3251,11 @@ fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
             fs::rename(&staged, &destination)
                 .map_err(|error| format!("cannot activate {}: {error}", destination.display()))?;
         }
-        write_atomic(
-            &native_home.join(ENGINE_MARKER),
-            engine_marker(version, &archive_protocol).as_bytes(),
-        )
+        let mut marker = engine_marker(version, &archive_protocol);
+        if let Some(engine) = archive_engine {
+            marker.push_str(&format!("engine={engine}\n"));
+        }
+        write_atomic(&native_home.join(ENGINE_MARKER), marker.as_bytes())
     })();
     let cleanup = fs::remove_dir_all(&temporary);
     match (result, cleanup) {
@@ -8565,6 +8586,15 @@ fn engine_source_fingerprint(native_home: &Path) -> Option<String> {
     Some(format!("{:x}", listing.finalize())[..16].to_owned())
 }
 
+/// The `engine=` fingerprint a marker records, when it has one.
+fn recorded_engine_fingerprint(marker: &str) -> Option<String> {
+    marker
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("engine="))
+        .filter(|engine| !engine.is_empty())
+        .map(str::to_owned)
+}
+
 /// The marker recorded next to an engine compiled from `native_home`:
 /// SDK version, protocol and, when the sources are there, their fingerprint.
 fn engine_marker_for(native_home: &Path, version: &str, protocol: &str) -> String {
@@ -8590,7 +8620,10 @@ fn engine_marker_matches(marker: &str, native_home: &Path, require_source: bool)
         return false;
     }
     if let Some(expected) = protocol_fingerprint(native_home) {
-        if !lines.iter().any(|line| *line == format!("protocol={expected}")) {
+        if !lines
+            .iter()
+            .any(|line| *line == format!("protocol={expected}"))
+        {
             return false;
         }
     }
@@ -10891,6 +10924,21 @@ mod tests {
     }
 
     #[test]
+    fn a_release_marker_hands_its_engine_fingerprint_to_the_installer() {
+        assert_eq!(
+            recorded_engine_fingerprint(
+                "1.45.0\nprotocol=0123456789abcdef\nengine=fedcba9876543210\n"
+            ),
+            Some("fedcba9876543210".to_owned())
+        );
+        assert_eq!(
+            recorded_engine_fingerprint("1.44.0\nprotocol=0123456789abcdef\n"),
+            None
+        );
+        assert_eq!(recorded_engine_fingerprint("1.45.0\nengine=\n"), None);
+    }
+
+    #[test]
     fn an_engine_fix_without_a_protocol_change_invalidates_the_marker() {
         let root = std::env::temp_dir().join(format!(
             "pam-native-engine-source-{}-{}",
@@ -10906,7 +10954,11 @@ mod tests {
         let layout = root.join("crates/pam-native-engine/src/layout.rs");
         fs::create_dir_all(layout.parent().expect("engine src")).expect("engine dir");
         fs::write(&layout, b"fn cross_margin() -> f32 { 0.0 }").expect("engine source");
-        fs::write(root.join("crates/pam-native-engine/Cargo.toml"), b"[package]").expect("manifest");
+        fs::write(
+            root.join("crates/pam-native-engine/Cargo.toml"),
+            b"[package]",
+        )
+        .expect("manifest");
         let version = env!("CARGO_PKG_VERSION");
         let fp = protocol_fingerprint(&root).expect("fp");
 
@@ -10926,12 +10978,19 @@ mod tests {
         // Engine-only fix: same protocol, different layout source.
         fs::write(&layout, b"fn cross_margin() -> f32 { -16.0 }").expect("engine fix");
         let error = ios_engine_matches(&ios_root, &root).expect_err("stale engine");
-        assert!(error.contains(&engine_source_fingerprint(&root).expect("engine fp")), "{error}");
+        assert!(
+            error.contains(&engine_source_fingerprint(&root).expect("engine fp")),
+            "{error}"
+        );
 
         // Android prebuilt archives: a recorded engine line must match too;
         // an archive marker without one keeps the protocol rule.
         assert!(!engine_marker_matches(&recorded, &root, false));
-        assert!(engine_marker_matches(&engine_marker(version, &fp), &root, false));
+        assert!(engine_marker_matches(
+            &engine_marker(version, &fp),
+            &root,
+            false
+        ));
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -11769,8 +11828,10 @@ mod bundle_exclusion_tests {
         );
 
         for bundle in ["single", "com.bad_underscore", "com..empty", ""] {
-            let mut ios = IosOptions::default();
-            ios.bundle_identifier = Some(bundle.to_owned());
+            let ios = IosOptions {
+                bundle_identifier: Some(bundle.to_owned()),
+                ..IosOptions::default()
+            };
             assert!(
                 validate_ios_app_options(&ios).is_err(),
                 "accepted {bundle:?}"
@@ -11780,8 +11841,10 @@ mod bundle_exclusion_tests {
         ios.usage_descriptions
             .insert("CameraPermission".to_owned(), "x".to_owned());
         assert!(validate_ios_app_options(&ios).is_err());
-        let mut ios = IosOptions::default();
-        ios.orientations = vec![IosOrientation::Portrait, IosOrientation::Portrait];
+        let ios = IosOptions {
+            orientations: vec![IosOrientation::Portrait, IosOrientation::Portrait],
+            ..IosOptions::default()
+        };
         assert!(validate_ios_app_options(&ios).is_err());
     }
 
@@ -11819,12 +11882,16 @@ mod bundle_exclusion_tests {
         assert!(untouched.get("CFBundleLocalizations").is_none());
 
         for tag in ["", "p", "portuguese", "pt_BR", "pt-", "pt-BR\""] {
-            let mut ios = IosOptions::default();
-            ios.development_region = Some(tag.to_owned());
+            let ios = IosOptions {
+                development_region: Some(tag.to_owned()),
+                ..IosOptions::default()
+            };
             assert!(validate_ios_app_options(&ios).is_err(), "accepted {tag:?}");
         }
-        let mut ios = IosOptions::default();
-        ios.localizations = vec!["pt-BR".to_owned(), "pt-br".to_owned()];
+        let ios = IosOptions {
+            localizations: vec!["pt-BR".to_owned(), "pt-br".to_owned()],
+            ..IosOptions::default()
+        };
         assert!(validate_ios_app_options(&ios).is_err());
     }
 

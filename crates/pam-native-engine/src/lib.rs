@@ -1325,20 +1325,35 @@ mod tests {
         };
         let mut engine = Engine::default();
         engine.set_viewport(400.0, 800.0).expect("viewport");
-        engine.commit(&tree(1).encode().expect("tree")).expect("commit");
+        engine
+            .commit(&tree(1).encode().expect("tree"))
+            .expect("commit");
         assert_eq!(engine.layouts[&3].height, 800.0, "keyboard hidden");
         assert!(engine.set_keyboard_inset(300.0).expect("inset"));
         engine.relayout(400.0, 800.0).expect("relayout");
-        assert_eq!(engine.layouts[&2].height, 500.0, "height behavior loses the overlap");
-        assert_eq!(engine.layouts[&3].height, 500.0, "content laid out above the keyboard");
+        assert_eq!(
+            engine.layouts[&2].height, 500.0,
+            "height behavior loses the overlap"
+        );
+        assert_eq!(
+            engine.layouts[&3].height, 500.0,
+            "content laid out above the keyboard"
+        );
 
-        engine.commit(&tree(3).encode().expect("tree")).expect("padding");
+        engine
+            .commit(&tree(3).encode().expect("tree"))
+            .expect("padding");
         assert_eq!(engine.layouts[&2].height, 800.0, "padding keeps the frame");
-        assert_eq!(engine.layouts[&3].height, 500.0, "padding insets the content");
+        assert_eq!(
+            engine.layouts[&3].height, 500.0,
+            "padding insets the content"
+        );
 
         // Android resizes the window (adjustResize) and the view natively.
         engine.set_surface_policy(SurfacePolicy::SystemWindows);
-        engine.commit(&tree(1).encode().expect("tree")).expect("android");
+        engine
+            .commit(&tree(1).encode().expect("tree"))
+            .expect("android");
         engine.relayout(400.0, 800.0).expect("relayout");
         assert_eq!(engine.layouts[&3].height, 800.0);
     }
