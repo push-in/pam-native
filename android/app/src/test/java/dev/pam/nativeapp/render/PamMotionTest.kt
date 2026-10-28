@@ -222,5 +222,9 @@ class PamMotionTest {
         val disarmed = PamTapEffect.parse("ref=like;tilt=0;origin=center;trigger=tap;armed=0$program")!!
         assertEquals(PamTapEffect.ORIGIN_CENTER, disarmed.origin)
         assertTrue(!disarmed.playsOn(PamTapEffect.TRIGGER_TAP))
+
+        val toggle = PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap;when=unselected$program")!!
+        assertTrue(toggle.playsOn(PamTapEffect.TRIGGER_TAP, selected = false))
+        assertTrue(!toggle.playsOn(PamTapEffect.TRIGGER_TAP, selected = true))
     }
 }

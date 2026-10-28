@@ -19,8 +19,11 @@
 - TapEffect `origin` (`Touch`, `Center`, `Anchor`), `trigger` (`DoubleTap`,
   `Tap`) and `armed`. `TapEffect::pop($ref)` plays a squash-and-spring on the
   anchor in place on a single tap, on the UI thread before PHP hears the
-  press, for like/save toggles; `armed(false)` silences it (a toggle that is
-  already on). The double-tap heart keeps its encoding.
+  press, for like/save toggles; `armed(false)` silences it, and
+  `unlessSelected()` silences it while the Pressable is `accessibilitySelected`
+  (a toggle that is already on), so the effect string never changes between
+  renders and a toggle patches one flag. The double-tap heart keeps its
+  encoding.
 - iOS MediaPlayer: `autoPlay=false` on a ready player called the POSIX
   `pause()` (suspending the main thread until a signal) instead of pausing the
   player; it now pauses the AVPlayer.

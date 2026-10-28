@@ -140,6 +140,7 @@ $likePop = \Pam\Native\Animation\TapEffect::pop('like-icon');
 $assert(
     str_starts_with($likePop->encode(), "ref=like-icon;tilt=0;origin=anchor;trigger=tap\npam-motion 1 ")
         && str_starts_with($likePop->armed(false)->encode(), "ref=like-icon;tilt=0;origin=anchor;trigger=tap;armed=0\n")
+        && str_starts_with($likePop->unlessSelected()->encode(), "ref=like-icon;tilt=0;origin=anchor;trigger=tap;when=unselected\n")
         && str_starts_with(
             TapEffect::make('heart', tilt: 0)->origin(\Pam\Native\Animation\TapEffectOrigin::Center)->encode(),
             "ref=heart;tilt=0;origin=center\n",

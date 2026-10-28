@@ -3712,6 +3712,7 @@ class PamRenderer(
                     else -> View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 }
             PropKey.ACCESSIBILITY_SELECTED -> {
+                (view as? PamPressable)?.tapEffectSelected = value.flag()
                 configureAccessibilityDelegate(view, state)
                 notifyAccessibilityChanged(view)
             }
@@ -4212,6 +4213,7 @@ class PamRenderer(
                 view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
             }
             PropKey.ACCESSIBILITY_SELECTED -> {
+                (view as? PamPressable)?.tapEffectSelected = false
                 configureAccessibilityDelegate(view, state)
                 notifyAccessibilityChanged(view)
             }

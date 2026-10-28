@@ -299,12 +299,14 @@ final class PamMotionCoordinator {
         pressable: UIView,
         source: String?,
         point: CGPoint,
-        gesture: PamTapEffect.Trigger = .doubleTap
+        gesture: PamTapEffect.Trigger = .doubleTap,
+        selected: Bool = false
     ) {
-        guard let source, let effect = PamTapEffect.parse(source), effect.plays(on: gesture),
+        guard let source, let effect = PamTapEffect.parse(source), effect.plays(on: gesture, selected: selected),
               let anchor = pressable.pamFindNativeRef(effect.ref),
               let container = anchor.superview else { return }
-        let animated = firstChild(Int64(anchor.tag)) ?? anchor
+        // In place, the anchor itself pops; otherwise it is moved and its first child plays.
+        let animated = effect.origin == .anchor ? anchor : (firstChild(Int64(anchor.tag)) ?? anchor)
         var transform = PamMotionTarget.transform(of: anchor)
         if effect.origin != .anchor {
             let origin = effect.origin == .center
@@ -314,10 +316,12 @@ final class PamMotionCoordinator {
             transform.translateX = target.x - anchor.center.x
             transform.translateY = target.y - anchor.center.y
         }
-        transform.rotationDegrees = effect.tiltDegrees > 0
-            ? CGFloat(Double.random(in: -effect.tiltDegrees...effect.tiltDegrees))
-            : 0
-        PamMotionTarget.setTransform(transform, on: anchor)
+        if effect.origin != .anchor || effect.tiltDegrees > 0 {
+            transform.rotationDegrees = effect.tiltDegrees > 0
+                ? CGFloat(Double.random(in: -effect.tiltDegrees...effect.tiltDegrees))
+                : 0
+            PamMotionTarget.setTransform(transform, on: anchor)
+        }
         let motion = state(nodeId)
         motion.tapEffectRunner?.cancel()
         let timeline = PamMotionTimeline.build(

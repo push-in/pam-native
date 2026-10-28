@@ -1829,7 +1829,8 @@ public final class PamRenderer: @unchecked Sendable {
                 pressable: view,
                 source: self.nodes[nodeId]?.properties[PamConstants.pressTapEffect]?.textOrNil(),
                 point: point,
-                gesture: gesture
+                gesture: gesture,
+                selected: self.nodes[nodeId]?.properties[PamConstants.accessibilitySelected]?.boolOrNil() ?? false
             )
         }
         let hasTapEffect = state.properties[PamConstants.pressTapEffect] != nil

@@ -33,6 +33,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var clickPointer: PamPressPointer? = null
     private var lastTap: PamPressPointer? = null
     private var tapEffect: PamTapEffect? = null
+    /** `accessibilitySelected` of this Pressable (TapEffect `when=unselected`). */
+    var tapEffectSelected = false
     private var tapEffectRunner: PamMotionRunner? = null
     internal val drag = PamDragController(this)
     private var onPressIn: ((PamPressPointer) -> Unit)? = null
@@ -666,9 +668,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     private fun playTapEffect(pointer: PamPressPointer, gesture: Int) {
-        val effect = tapEffect?.takeIf { it.playsOn(gesture) } ?: return
+        val effect = tapEffect?.takeIf { it.playsOn(gesture, tapEffectSelected) } ?: return
         val anchor = PamDragController.findRef(this, effect.ref) ?: return
-        val animated = (anchor as? ViewGroup)?.getChildAt(0) ?: anchor
+        // In place, the anchor itself pops; otherwise it is moved and its first child plays.
+        val animated = if (effect.origin == PamTapEffect.ORIGIN_ANCHOR) {
+            anchor
+        } else {
+            (anchor as? ViewGroup)?.getChildAt(0) ?: anchor
+        }
         if (effect.origin != PamTapEffect.ORIGIN_ANCHOR) {
             var offsetX = 0f
             var offsetY = 0f
@@ -683,10 +690,12 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             anchor.translationX = x - offsetX - anchor.left - anchor.width / 2f
             anchor.translationY = y - offsetY - anchor.top - anchor.height / 2f
         }
-        anchor.rotation = if (effect.tiltDegrees > 0f) {
-            ((Math.random() - 0.5) * 2.0 * effect.tiltDegrees).toFloat()
-        } else {
-            0f
+        if (effect.origin != PamTapEffect.ORIGIN_ANCHOR || effect.tiltDegrees > 0f) {
+            anchor.rotation = if (effect.tiltDegrees > 0f) {
+                ((Math.random() - 0.5) * 2.0 * effect.tiltDegrees).toFloat()
+            } else {
+                0f
+            }
         }
         tapEffectRunner?.cancel()
         val timeline = PamMotionTimeline.build(
@@ -921,7 +930,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 }
 
 /**
- * `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0]`
+ * `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0][;when=unselected]`
  * line followed by a `pam-motion` program.
  */
 internal data class PamTapEffect(
@@ -931,9 +940,11 @@ internal data class PamTapEffect(
     val origin: Int = ORIGIN_TOUCH,
     val trigger: Int = TRIGGER_DOUBLE_TAP,
     val armed: Boolean = true,
+    val unlessSelected: Boolean = false,
 ) {
-    /** Whether [gesture] (a `TRIGGER_*`) plays this effect. */
-    fun playsOn(gesture: Int): Boolean = armed && trigger == gesture
+    /** Whether [gesture] (a `TRIGGER_*`) plays this effect on a Pressable [selected] or not. */
+    fun playsOn(gesture: Int, selected: Boolean = false): Boolean =
+        armed && trigger == gesture && !(unlessSelected && selected)
 
     companion object {
         const val ORIGIN_TOUCH = 1
@@ -967,6 +978,7 @@ internal data class PamTapEffect(
                 },
                 trigger = if (options["trigger"] == "tap") TRIGGER_TAP else TRIGGER_DOUBLE_TAP,
                 armed = options["armed"] != "0",
+                unlessSelected = options["when"] == "unselected",
             )
         }
     }

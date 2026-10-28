@@ -179,6 +179,10 @@ final class PamMotionTests: XCTestCase {
         let disarmed = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=center;trigger=tap;armed=0" + program))
         XCTAssertEqual(disarmed.origin, .center)
         XCTAssertFalse(disarmed.plays(on: .tap))
+
+        let toggle = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap;when=unselected" + program))
+        XCTAssertTrue(toggle.plays(on: .tap, selected: false))
+        XCTAssertFalse(toggle.plays(on: .tap, selected: true))
     }
 
     // iOS-specific coverage.
