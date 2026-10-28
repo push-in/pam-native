@@ -624,6 +624,28 @@ class PamRenderer(
     var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
 
     /**
+     * A prop the native view rejected (bad value, platform exception). The
+     * prop is skipped and the rest of the tree keeps mounting; the host shows
+     * it as a non-fatal error in the debug overlay. Each node/prop/message is
+     * reported once.
+     */
+    var onPropertyError: ((String) -> Unit)? = null
+    private val reportedPropertyErrors = HashSet<String>()
+
+    private inline fun guardProperty(state: NodeState, key: PropKey, apply: () -> Unit) {
+        try {
+            apply()
+        } catch (error: RuntimeException) {
+            val message = "Invalid prop ${key.name} on ${state.kind.name} #${state.id} ignored: " +
+                "${error.javaClass.simpleName}: ${error.message}"
+            if (reportedPropertyErrors.size < MAX_REPORTED_PROPERTY_ERRORS && reportedPropertyErrors.add(message)) {
+                Log.e("PamNative", message, error)
+                onPropertyError?.invoke(message)
+            }
+        }
+    }
+
+    /**
      * IME inset (dp from the root window bottom, 0 when hidden) over the
      * Modal/BottomSheet window of a node; the runtime lays that modal's
      * resize/padding KeyboardAvoidingViews out above it (engine surface
@@ -1378,6 +1400,7 @@ class PamRenderer(
     }
 
     override fun close() {
+        onPropertyError = null
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
         onSurfaceKeyboardInset = null
@@ -1791,9 +1814,9 @@ class PamRenderer(
             val view = views[id]
             if (view != null) {
                 if (value == null) {
-                    resetProperty(view, state, key)
+                    guardProperty(state, key) { resetProperty(view, state, key) }
                 } else {
-                    applyProperty(view, state, key, value)
+                    guardProperty(state, key) { applyProperty(view, state, key, value) }
                 }
             }
         }
@@ -3040,7 +3063,9 @@ class PamRenderer(
         state.applyingInitialProperties = true
         state.pressableConfiguredDuringInitialization = false
         try {
-            state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
+            state.properties.forEach { (key, value) ->
+                guardProperty(state, key) { applyProperty(view, state, key, value) }
+            }
         } finally {
             state.initialTextUpdates = null
             state.initialBackgroundUpdate = null
@@ -9979,6 +10004,7 @@ class PamRenderer(
 
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
+        const val MAX_REPORTED_PROPERTY_ERRORS = 64
         /** One prewarm slice; PHP's first batch waits at most this long behind it. */
         const val PREWARM_SLICE_NANOS = 2_000_000L
         const val DRAG_SNAP_REQUEST_STRIDE = 64L

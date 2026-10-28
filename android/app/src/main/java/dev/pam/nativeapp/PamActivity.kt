@@ -156,6 +156,11 @@ class PamActivity : FragmentActivity() {
             runtime.dispatchEvent(nodeId, kind, payload)
         }
         activeRenderer = renderer
+        // One bad prop never takes the tree down: it is skipped by the
+        // renderer and surfaces here as a non-fatal native error.
+        renderer.onPropertyError = { message ->
+            handleRuntimeReport(RuntimeErrorReport.native(message, fatal = false, phase = "render"))
+        }
         val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {
             devTools.update(it)
             errorOverlay?.onFrameCommitted()
@@ -593,11 +598,12 @@ class PamActivity : FragmentActivity() {
      * are logged only (PHP App::onError() listeners already received them);
      * fatal ones retry with backoff and then show the friendly fallback.
      */
-    private fun handleRuntimeError(message: String) {
+    private fun handleRuntimeError(message: String) = handleRuntimeReport(RuntimeErrorReport.parse(message))
+
+    private fun handleRuntimeReport(report: RuntimeErrorReport) {
         // Whatever the error UI is (overlay, fallback or a recovery frame),
         // the window must be allowed to draw it.
         releaseSplash()
-        val report = RuntimeErrorReport.parse(message)
         devTools.record(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, "${report.shortType}: ${report.message}".take(160)))
         Log.e(ERROR_TAG, report.copyText().take(4_000))
         if (errors.developerMode) {

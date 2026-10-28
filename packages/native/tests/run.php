@@ -168,6 +168,7 @@ use Pam\Native\System\MediaLibrary;
 use Pam\Native\LocationPosition;
 use Pam\Native\System\AudioRecorder;
 use Pam\Native\Storage\Storage;
+use Pam\Native\Modules\NativeModuleException;
 use Pam\Native\AudioRecording;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
@@ -4181,6 +4182,52 @@ $assert(
     'Storage get must treat an empty successful payload as a cache miss.',
 );
 
+// Every Storage key reaches the native store in its accepted form
+// ([A-Za-z0-9_.-]{1,128}): Android and iOS reject anything else.
+$storageKeyCases = [
+    'chat.draft.missing' => 'chat.draft.missing',
+    'composer:emoji-recents:v1' => 'composer-emoji-recents-v1',
+    'account/42 ação' => Storage::safeKey('account/42 ação'),
+    '' => Storage::safeKey(''),
+    str_repeat('feed:', 60) => Storage::safeKey(str_repeat('feed:', 60)),
+];
+foreach ($storageKeyCases as $rawStorageKey => $expectedStorageKey) {
+    $rawStorageKey = (string) $rawStorageKey;
+    $assert(
+        preg_match(Storage::KEY_PATTERN, $expectedStorageKey) === 1
+            && Storage::safeKey($expectedStorageKey) === $expectedStorageKey,
+        'Storage safeKey must produce a native key and leave it unchanged when applied again.',
+    );
+    TestDiagnostics::$typedCall = null;
+    $storageGetFailure = null;
+    $keyedGet = Storage::get($rawStorageKey, static function (?string $value): void {}, static function (NativeModuleException $error) use (&$storageGetFailure): void {
+        $storageGetFailure = $error;
+    });
+    $keyedGetCall = TestDiagnostics::$typedCall;
+    $assert(
+        $keyedGetCall !== null
+            && $keyedGetCall['operation'] === NativeOperation::StorageGet->value
+            && Wire::decodeMap($keyedGetCall['payload']) === ['key' => $expectedStorageKey],
+        'Storage get must send the safeKey() form of any key to the native store.',
+    );
+    Runtime::dispatchModuleResult($keyedGet, ModuleResultStatus::Success->value, '');
+    TestDiagnostics::$typedCall = null;
+    $keyedSet = Storage::set($rawStorageKey, 'value', null, static function (): void {});
+    $keyedSetCall = TestDiagnostics::$typedCall;
+    $assert(
+        $keyedSetCall !== null
+            && $keyedSetCall['operation'] === NativeOperation::StorageSet->value
+            && Wire::decodeMap($keyedSetCall['payload']) === ['key' => $expectedStorageKey, 'value' => 'value'],
+        'Storage set must send the safeKey() form of any key to the native store.',
+    );
+    Runtime::dispatchModuleResult($keyedSet, ModuleResultStatus::Success->value, '');
+    $assert($storageGetFailure === null, 'A normalized Storage key must not fail.');
+}
+$assert(
+    Storage::safeKey('a:b') === Storage::safeKey('a-b'),
+    'safeKey keeps its documented lossy mapping (callers that need distinct owners hash them).',
+);
+
 $batchRequestId = SQLite::executeMany(
     'nitro.db',
     'INSERT INTO messages (id, body) VALUES (?, ?)',
@@ -8172,5 +8219,6 @@ require __DIR__.'/list_window.php';
 require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
 require __DIR__.'/protocol_extension.php';
+require __DIR__.'/memory_bounds.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

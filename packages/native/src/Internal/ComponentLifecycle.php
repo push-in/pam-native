@@ -131,6 +131,15 @@ final class ComponentLifecycle
         } catch (\Throwable $error) {
             $states[$component] = $state;
             array_pop(self::$renderStack);
+            if (!$state->mounted) {
+                // A mount() that threw never unmounts: release what it owned
+                // (subscriptions, listeners, timers) now, or every retried
+                // render of the error boundary stacked another copy.
+                try {
+                    $component->__pamDisposeResources();
+                } catch (\Throwable) {
+                }
+            }
 
             throw $error;
         }

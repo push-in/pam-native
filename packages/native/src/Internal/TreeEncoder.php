@@ -33,6 +33,9 @@ final class TreeEncoder
     private const MAX_FONT_SCALE = PropKey::TextMaxFontSizeMultiplier->value;
     private const ALLOW_FONT_SCALING = PropKey::TextAllowFontScaling->value;
 
+    /** Encoded subtrees kept per element (one per path it was last shown at). */
+    private const SUBTREE_PATHS_PER_ELEMENT = 2;
+
     private const EVENT_PROPERTIES = EventProperties::MAP;
 
     /** @var array<int, true> ids of the frame being encoded (outside reused subtrees) */
@@ -183,13 +186,26 @@ final class TreeEncoder
                 $this->collision($tree);
             }
             $frame = $this->fullFrame($rootId, $nodes);
+            if (count($this->idIdentities) > count($nodes)) {
+                // A full frame after a remount: drop identities of nodes it no longer has.
+                foreach (array_diff_key($this->idIdentities, $nodes) as $staleId => $_) {
+                    $this->forget($staleId);
+                }
+            }
         } else {
             [$frame, $nodes] = $this->patchFrame($rootId, $tree);
         }
 
         foreach ($this->built as [$element, $path, $subtree]) {
             $entries = $this->subtreeCache[$element] ?? [];
+            unset($entries[$path]);
             $entries[$path] = $subtree;
+            if (count($entries) > self::SUBTREE_PATHS_PER_ELEMENT) {
+                // A retained element (a remembered screen, a memoized row)
+                // shown again under a new path (a new route instance) kept
+                // every older path's encoded subtree alive: keep the newest.
+                $entries = array_slice($entries, -self::SUBTREE_PATHS_PER_ELEMENT, null, true);
+            }
             $this->subtreeCache[$element] = $entries;
         }
         $this->built = [];
@@ -669,6 +685,19 @@ final class TreeEncoder
         $path = substr($identity, 0, (int) strrpos($identity, '|'));
 
         throw new LogicException("Element identity collision at {$path}; assign a unique key.");
+    }
+
+    /** @internal Sizes of the identity memo (leak validators). @return array{identities: int, paths: int, placements: int} */
+    public function identityMemoSizes(): array
+    {
+        return [
+            'identities' => count($this->idIdentities),
+            'paths' => count($this->childPaths),
+            'placements' => array_sum(array_map(
+                static fn (array $segments): int => array_sum(array_map('count', $segments)),
+                $this->childPaths,
+            )),
+        ];
     }
 
     private function nodeId(string $path, ?string $domIdentity, int $kind): int
