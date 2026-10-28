@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.46.4 - 2026-10-28
+
+One fix on top of 1.46.3, no protocol change.
+
+- Android: a motion program on a view that is not laid out yet starts on its
+  first pre-draw instead of a posted runnable, so entrance initial values
+  (opacity 0, offset) apply on that frame; the posted start ran after the
+  first draw and flashed the end state for one frame (list rows entering).
+
 ## 1.46.3 - 2026-10-28
 
 Real shared elements on top of 1.46.2, no protocol change (core and extension identifiers as in 1.46.2; the shared tag and style use the existing core keys).
