@@ -22,6 +22,17 @@
   `ScrollPhaseEvent::$contentWidth`/`$contentHeight`/`$layoutWidth`/
   `$layoutHeight`, and `ScrollPhaseEvent::distanceFromEnd()` tells how far the
   viewport is from the content's end (Android, iOS).
+
+## 1.46.1 - 2026-10-28
+
+Fixes on top of 1.46.0, no protocol change (core and extension identifiers as in 1.46.0).
+
+- Android Back: a Back that never drags (the Back key, which on Android 15+
+  also starts a predictive back) moves no route. Routes are prepared on the
+  first progress past 0, so a Back the app consumes through
+  `Navigator::interceptSystemBack()` (closing a GIF or emoji panel) changes
+  nothing on screen instead of flickering the route, and one that pops plays
+  its normal transition, like React Navigation with a consuming BackHandler.
 - `TapEffect::layer()`: a tap effect can animate more than one layer. Each
   extra program plays on the anchor's next child alongside the first (Android,
   iOS; the protocol string carries one `pam-motion` program per layer).
