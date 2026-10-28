@@ -22,12 +22,14 @@ CHANGELOG: conteúdo das duas ondas consolidado sob Unreleased/1.46.0, conservan
 - protocol-parity.py: 1/1.
 - cargo test --locked -j4: 274/274 (CLI 98, engine 162, protocol 14).
 - Kotlin compile + JVM, núcleo e plugins das duas ondas (audio, location, contacts, sensors, media, auth, share-extension, notifications, webview e editor privado candidato): 388/388, zero falhas, 95 suítes. O plugin-api não possui testes JVM próprios. Três falhas iniciais de caminhos de fixtures foram resolvidas configurando pam.plugin.dir no harness externo, sem alteração de produção.
-- Validadores do real-world app: em execução no worktree próprio.
+- Todos os validadores do real-world app: 485/485 após repetições; registrados no Composer: 59/59. Build integrity da árvore final: 3195 arquivos verificados; alinhamento visual: 279 ícones, desvio máximo 0,5 px. O relatório do app detalha as rodadas e correções.
 
 ## Recursos e limites
 
 Cargo e Gradle usam o lock compartilhado /tmp/pam-gradle.lock.d. Gradle: heap máximo 3 GB, quatro workers, Kotlin no processo, modo offline e --stop após cada rodada. Nenhum workflow foi disparado. Mac e S10 não utilizados; Swift e QA em dispositivo não foram executados.
 
-## Pendências em acompanhamento
+## Entrega e pendências
 
-Concluir validadores do real-world app e gerar bundle para build-integrity. O media-editor privado 0.5.0 publicado não inclui as APIs ImageEditor extraídas: merge privado preparado e testes PHP aprovados, aguardando definição de entrega do plugin. Não publicar o núcleo.
+PR #180 reconhecido como MERGED pelo GitHub; merge 0168f10d e relatório 5bd1c220 enviados à integrate. O media-editor privado 0.5.0 não continha as APIs extraídas; integração privada 4b6d3c9 e correção f878c22 entregues como tag/release privada v0.5.1, sem publicação em serviço público. O real-world app conserva ^0.5.0 e instala 0.5.1.
+
+Nenhum gate solicitado pendente. Swift e QA/perfilamento em dispositivo continuam fora desta execução; não há números de CPU/PSS/FPS. Nenhuma tag/release do núcleo foi criada. O commit deste relatório registra os resultados finais.
