@@ -2214,6 +2214,9 @@ public final class PamRenderer: @unchecked Sendable {
             } : nil
             media.onError = eventProperties.contains(PamConstants.onMediaError) ? {
                 [weak self] message in
+                #if DEBUG
+                NSLog("[PamNative] media error node=%lld: %@", nodeId, message)
+                #endif
                 let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
                 self?.dispatchEvent(nodeId, EventKind.mediaError.rawValue, payload)
             } : nil
@@ -6913,6 +6916,13 @@ public final class PamRenderer: @unchecked Sendable {
         ) -> Bool {
             if gestureRecognizer === semanticGesture {
                 return semanticGestureComposition == 2
+            }
+            if gestureRecognizer === pressPointer, pressMoveKind == nil {
+                // A press-in/out observer (began on touch down) must not hold
+                // the touch against a parent scroll view's pan: like RN, the
+                // list still scrolls and the scroll cancels the press. Pointer
+                // tracking with onPressMove (scrubbers) keeps exclusivity.
+                return true
             }
             if gestureRecognizer === tap || gestureRecognizer === longPress || gestureRecognizer === pressPointer {
                 // Press-in/out, long press and tap of one node coexist (hold
