@@ -479,6 +479,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         clearSharedElements()
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
+            sharedElements.touched(event.x, event.y)
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             gestureTracking = false

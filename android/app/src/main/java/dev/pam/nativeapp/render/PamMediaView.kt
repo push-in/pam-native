@@ -430,6 +430,18 @@ internal class PamMediaView(
         return if (poster.visibility == VISIBLE) poster.sharedContent() else null
     }
 
+    /**
+     * The poster slot shows the picture that flew in until the real poster
+     * decodes (the loader replaces it) or the first frame hides the poster:
+     * a video opened from a thumbnail never shows a black frame.
+     */
+    override fun adoptSharedPlaceholder(content: PamSharedContent): Boolean {
+        if (hasSharedContent) return false
+        poster.setImageDrawable(content.drawable)
+        poster.visibility = VISIBLE
+        return true
+    }
+
     fun setResizeMode(value: Int) {
         resizeMode = value.coerceIn(1, 5)
         poster.scaleType = when (resizeMode) {

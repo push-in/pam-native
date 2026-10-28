@@ -45,6 +45,14 @@ internal interface PamSharedContentView {
      * view's own instance). [PamSharedContent.owned] is recycled afterwards.
      */
     fun sharedContent(): PamSharedContent?
+
+    /**
+     * Shows [content] (the picture that just flew in) until this view draws
+     * its own media: the decoded image or poster replaces it, or the first
+     * video frame covers it. False when the view already draws or cannot
+     * take it; the flight then stays on top until the view draws.
+     */
+    fun adoptSharedPlaceholder(content: PamSharedContent): Boolean = false
 }
 
 internal class PamSharedContent(
@@ -164,9 +172,10 @@ internal class PamSharedElements(private val host: ViewGroup) {
         val start: Side,
         val end: Side,
         val view: FlightView,
-        val owned: List<Bitmap>,
+        val owned: MutableList<Bitmap>,
         val destinationContent: PamSharedContentView?,
         val config: Config,
+        val content: PamSharedContent? = null,
     )
 
     private val flights = ArrayList<Flight>(2)
@@ -187,6 +196,27 @@ internal class PamSharedElements(private val host: ViewGroup) {
      * element on the top route (the destination of a push, the source of a
      * pop, which then uses its return curve).
      */
+    private var touchX = Float.NaN
+    private var touchY = Float.NaN
+
+    /**
+     * The last touch in host coordinates. When one tag is on screen more than
+     * once (the same author's avatar on several posts), the instance under
+     * the finger that opened the route flies, and the flight home lands there.
+     */
+    fun touched(x: Float, y: Float) {
+        touchX = x
+        touchY = y
+    }
+
+    private fun pick(candidates: List<View>?, route: View, minimumShare: Float): View? {
+        val visible = candidates?.filter { onScreen(it, route, minimumShare) }.orEmpty()
+        if (visible.size <= 1 || touchX.isNaN()) return visible.firstOrNull()
+        return visible.firstOrNull {
+            rectInHost(it, RectF(0f, 0f, it.width.toFloat(), it.height.toFloat())).contains(touchX, touchY)
+        } ?: visible.first()
+    }
+
     fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long, popping: Boolean = false) {
         clear()
         val sources = taggedViews(outgoing)
@@ -194,9 +224,8 @@ internal class PamSharedElements(private val host: ViewGroup) {
         val destinations = taggedViews(incoming)
         for ((tag, candidates) in sources) {
             if (flights.size >= 16) break
-            val source = candidates.firstOrNull { onScreen(it, outgoing, minimumShare = 0.5f) } ?: continue
-            val destination = destinations[tag]?.firstOrNull { onScreen(it, incoming, minimumShare = 0f) }
-                ?: continue
+            val source = pick(candidates, outgoing, minimumShare = 0.5f) ?: continue
+            val destination = pick(destinations[tag], incoming, minimumShare = 0f) ?: continue
             val top = if (popping) source else destination
             val below = if (popping) destination else source
             val styled = config(top) ?: config(below)
@@ -232,8 +261,12 @@ internal class PamSharedElements(private val host: ViewGroup) {
 
     /**
      * Ends the flights. A destination whose media is not drawn yet (an image
-     * still decoding) keeps its flight on top, at the end frame, until it
-     * draws or [HOLD_LIMIT_MS] pass: the screen never shows an empty box.
+     * still decoding, a video before its poster or first frame) keeps the
+     * picture that flew in as its placeholder until its own media draws, so
+     * the screen never shows an empty or black box. A destination that cannot
+     * take it keeps the flight on top until it draws, is removed, or the next
+     * navigation starts ([HOLD_SAFETY_MS] only guards against a view that
+     * never draws).
      */
     fun finish() {
         val ended = flights.toList()
@@ -241,11 +274,19 @@ internal class PamSharedElements(private val host: ViewGroup) {
         ended.forEach { flight ->
             flight.source.alpha = flight.sourceAlpha
             flight.destination.alpha = flight.destinationAlpha
-            if (flight.destinationContent?.hasSharedContent == false) {
-                flight.view.set(flight.start, flight.end, 1f)
-                holding += flight
-            } else {
-                release(flight)
+            val target = flight.destinationContent
+            val content = flight.content
+            when {
+                target == null || target.hasSharedContent -> release(flight)
+                content != null && target.adoptSharedPlaceholder(content) -> {
+                    // The destination owns the picture now: never recycle it.
+                    content.owned?.let(flight.owned::remove)
+                    release(flight)
+                }
+                else -> {
+                    flight.view.set(flight.start, flight.end, 1f)
+                    holding += flight
+                }
             }
         }
         if (holding.isNotEmpty()) pollHolding(System.currentTimeMillis())
@@ -264,7 +305,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
 
     private fun pollHolding(startedAt: Long) {
         host.postOnAnimation {
-            val expired = System.currentTimeMillis() - startedAt >= HOLD_LIMIT_MS
+            val expired = System.currentTimeMillis() - startedAt >= HOLD_SAFETY_MS
             holding.toList().forEach { flight ->
                 if (expired || flight.destinationContent?.hasSharedContent != false ||
                     !flight.destination.isAttachedToWindow
@@ -306,7 +347,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
             val view = FlightView(host, content.drawable, content.width, content.height, null)
             return Flight(
                 source, destination, source.alpha, destination.alpha, start, end, view, owned,
-                destinationMedia, config,
+                destinationMedia, config, content,
             )
         }
         owned.forEach { if (!it.isRecycled) it.recycle() }
@@ -347,7 +388,7 @@ internal class PamSharedElements(private val host: ViewGroup) {
         )
         return Flight(
             source, destination, source.alpha, destination.alpha, startSide, endSide, view,
-            listOfNotNull(bitmap, target), null, config,
+            mutableListOf<Bitmap>().apply { add(bitmap); target?.let(::add) }, null, config,
         )
     }
 
@@ -579,6 +620,6 @@ internal class PamSharedElements(private val host: ViewGroup) {
     }
 
     private companion object {
-        const val HOLD_LIMIT_MS = 700L
+        const val HOLD_SAFETY_MS = 15_000L
     }
 }

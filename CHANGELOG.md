@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Shared elements: a destination whose media is not drawn yet (a video before
+  its poster or first frame, an image still decoding) keeps the picture that
+  flew in as its placeholder until its own media draws, with no time limit,
+  instead of the flight disappearing after 0.7 s over a black frame
+  (Android, iOS).
+- Shared elements: when one tag is on screen more than once (an author's
+  avatar on several posts), the instance under the finger that opened the
+  route flies, and the flight home lands on it (Android, iOS).
+
 ## 1.46.4 - 2026-10-28
 
 One fix on top of 1.46.3, no protocol change.

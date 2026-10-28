@@ -14,6 +14,9 @@ enum PamSharedFit {
 struct PamSharedContent {
     let view: UIView
     let size: CGSize
+    /// The picture as an image when there is one (a destination can keep it
+    /// as its placeholder); a video frame snapshot has none.
+    var image: UIImage?
 }
 
 /// A view that draws media (an image, a video frame). Its flight draws the
@@ -23,6 +26,9 @@ protocol PamSharedContentView: UIView {
     var sharedFit: Int? { get }
     var hasSharedContent: Bool { get }
     func sharedContent() -> PamSharedContent?
+    /// Shows [image] (what just flew in) until the view draws its own media;
+    /// false when it already draws or cannot take it.
+    func adoptSharedPlaceholder(_ image: UIImage) -> Bool
 }
 
 extension PamImageView: PamSharedContentView {
@@ -45,7 +51,14 @@ extension PamImageView: PamSharedContentView {
         let copy = UIImageView(image: image)
         copy.contentMode = .scaleToFill
         copy.frame = CGRect(origin: .zero, size: image.size)
-        return PamSharedContent(view: copy, size: image.size)
+        return PamSharedContent(view: copy, size: image.size, image: image)
+    }
+
+    /// Until the decoded image arrives (the loader replaces it).
+    func adoptSharedPlaceholder(_ image: UIImage) -> Bool {
+        guard !hasSharedContent else { return false }
+        self.image = image
+        return true
     }
 }
 
@@ -146,6 +159,7 @@ final class PamSharedElementFlights {
         let container = UIView()
         var content: UIView
         var contentSize: CGSize
+        var image: UIImage?
         var target: UIView?
         var config: Config
         /// The source's media view when it draws content; the destination's,
@@ -197,6 +211,19 @@ final class PamSharedElementFlights {
     /// The curve of the longest flight (2 ease-in-out, 3 spring, 1 linear).
     var leadingConfig: Config? { flights.max { $0.config.durationMs < $1.config.durationMs }?.config }
 
+    private var touch: CGPoint?
+
+    /// The last touch in host coordinates: when a tag is on screen more than
+    /// once (one author's avatar on several posts) the instance under the
+    /// finger flies, and the flight home lands there (Android parity).
+    func touched(_ point: CGPoint) { touch = point }
+
+    private func pick(_ candidates: [UIView], route: UIView, minimumShare: CGFloat) -> UIView? {
+        let visible = candidates.filter { onScreen($0, route: route, minimumShare: minimumShare) }
+        guard visible.count > 1, let touch else { return visible.first }
+        return visible.first { $0.convert($0.bounds, to: host).contains(touch) } ?? visible.first
+    }
+
     /// Phase 1: measures and copies the on-screen sources while the outgoing
     /// route is still in the window (a video frame needs it), then hides them.
     func capture(outgoing: UIView, defaultDuration: TimeInterval, popping: Bool = false) {
@@ -205,7 +232,7 @@ final class PamSharedElementFlights {
         defaultConfig = Config(durationMs: Int(defaultDuration * 1000))
         for (tag, candidates) in taggedViews(in: outgoing) {
             guard captured.count < 16,
-                  let source = candidates.first(where: { onScreen($0, route: outgoing, minimumShare: 0.5) }) else { continue }
+                  let source = pick(candidates, route: outgoing, minimumShare: 0.5) else { continue }
             let config = Self.config(for: source) ?? defaultConfig
             if let flight = makeFlight(source: source, config: config) {
                 captured[tag] = flight
@@ -219,7 +246,7 @@ final class PamSharedElementFlights {
     func attach(incoming: UIView) {
         let destinations = taggedViews(in: incoming)
         for (tag, flight) in captured {
-            guard let destination = destinations[tag]?.first(where: { onScreen($0, route: incoming, minimumShare: 0) }),
+            guard let destination = pick(destinations[tag] ?? [], route: incoming, minimumShare: 0),
                   let end = endSide(flight, destination: destination) else {
                 flight.source.alpha = flight.sourceAlpha
                 continue
@@ -328,15 +355,22 @@ final class PamSharedElementFlights {
         for flight in ended {
             flight.source.alpha = flight.sourceAlpha
             flight.destination?.alpha = flight.destinationAlpha
-            if flight.destinationMedia?.hasSharedContent == false {
-                holding.append(flight)
+            if let media = flight.destinationMedia, !media.hasSharedContent {
+                // The picture that flew in stays as the placeholder until the
+                // destination draws (never an empty or black box).
+                if let image = flight.image, media.adoptSharedPlaceholder(image) {
+                    flight.container.removeFromSuperview()
+                } else {
+                    holding.append(flight)
+                }
             } else {
                 flight.container.removeFromSuperview()
             }
         }
         if !holding.isEmpty {
             holdGeneration += 1
-            pollHolding(generation: holdGeneration, deadline: CACurrentMediaTime() + 0.7)
+            // Only a guard against a destination that never draws.
+            pollHolding(generation: holdGeneration, deadline: CACurrentMediaTime() + 15)
         }
         dropOverlayIfIdle()
     }
@@ -379,10 +413,12 @@ final class PamSharedElementFlights {
         let media = contentView(of: source)
         if let media, let fit = media.sharedFit, let content = media.sharedContent(),
            let start = side(tagged: source, media: media, fit: fit, contentSize: content.size) {
-            return Flight(
+            let flight = Flight(
                 source: source, start: start, content: content.view, contentSize: content.size,
                 target: nil, config: config, sourceMedia: media, contentFromSource: true
             )
+            flight.image = content.image
+            return flight
         }
         if let media, media.sharedFit != nil, !media.hasSharedContent {
             // Media still loading: the destination will provide the pixels.
@@ -418,6 +454,7 @@ final class PamSharedElementFlights {
                ) {
                 flight.content = content.view
                 flight.contentSize = content.size
+                flight.image = content.image ?? flight.image
             }
             if flight.contentSize != .zero {
                 return side(tagged: destination, media: media, fit: fit, contentSize: flight.contentSize)

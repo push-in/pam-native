@@ -119,6 +119,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         addGestureRecognizer(screenEdgeGesture)
     }
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if event?.type == .touches { sharedElements.touched(point) }
+        return super.hitTest(point, with: event)
+    }
+
     /// Which recognizer handles the pop for the current configuration.
     private var usesScreenEdgeGesture: Bool {
         gestureDirection == 1 && !fullScreenGestureEnabled
