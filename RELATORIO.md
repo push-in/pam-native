@@ -27,3 +27,7 @@ medir PSS/CPU/frames no emulador. Locks de emulador e Gradle pertencem a
 outras tarefas e o disco voltou a ficar abaixo de 20 GB livres. Nenhum
 teste nativo/build/emulador/aparelho físico foi executado nesta tarefa.
 Sem conflito de rebase com a branch de integração. Sem dependências novas.
+
+Após cinco minutos de espera, o disco ficou em 12 GB livres. O real-world
+app removeu seu vendor temporário; a repetição isolada de memória e o QA
+nativo continuam pendentes. A integração permanece intacta.
