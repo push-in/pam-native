@@ -31,3 +31,8 @@ Sem conflito de rebase com a branch de integração. Sem dependências novas.
 Após cinco minutos de espera, o disco ficou em 12 GB livres. O real-world
 app removeu seu vendor temporário; a repetição isolada de memória e o QA
 nativo continuam pendentes. A integração permanece intacta.
+
+A integração avançou para `c384abb6` no último pull. O rebase foi
+preservado junto ao histórico já publicado por merge da branch própria,
+sem force-push. Os 8/8 testes são anteriores a esse último rebase; a
+revalidação do topo atual também depende da recuperação do piso de disco.
