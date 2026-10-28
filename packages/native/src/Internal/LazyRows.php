@@ -34,6 +34,12 @@ final class LazyRows
     /** @var WeakReference<Component>|null the component whose render created these rows */
     private ?WeakReference $owner;
 
+    /** Whether an encoder walked these rows (settle() ran). */
+    private bool $settled = false;
+
+    /** @var WeakReference<self>|null the themed copy the encoder built (mapped()) */
+    private ?WeakReference $themed = null;
+
     /**
      * @param list<mixed> $items
      * @param list<string> $keys one unique key per item
@@ -67,7 +73,7 @@ final class LazyRows
     {
         $previous = $this->transform;
 
-        return new self(
+        $copy = new self(
             $this->items,
             $this->keys,
             $this->render,
@@ -76,6 +82,42 @@ final class LazyRows
             $this->window,
             $this->fixed,
         );
+        $this->themed = WeakReference::create($copy);
+
+        return $copy;
+    }
+
+    /**
+     * The rows as the encoder last sent them, for tests and dev tools: each
+     * built row, or the placeholder standing for it. Rows no encoder walked
+     * yet (a render outside the runtime) are built as the first frame
+     * would: the window's first rows, or the first 48 of a long list.
+     *
+     * @return list<Element>
+     */
+    public function shown(): array
+    {
+        $rows = $this->themed?->get() ?? $this;
+        if (!$rows->settled) {
+            $count = count($this->keys);
+            $ranges = $this->window?->firstRows($this)
+                ?? [[0, $count > TreeEncoder::WINDOW_MIN_ROWS ? TreeEncoder::WINDOW_INITIAL_ROWS : $count]];
+            foreach ($ranges as [$from, $to]) {
+                for ($index = max(0, $from); $index < min($to, $count); $index++) {
+                    $rows->row($index);
+                }
+            }
+        }
+        $shown = [];
+        foreach ($this->keys as $index => $_) {
+            $built = $rows->built[$index] ?? null;
+            if ($built === false) {
+                continue;
+            }
+            $shown[] = $built ?? $rows->placeholder($index);
+        }
+
+        return $shown;
     }
 
     /** The same rows planned by $window (`windowSize`). */
@@ -239,5 +281,6 @@ final class LazyRows
             }
         }
         $this->touched = [];
+        $this->settled = true;
     }
 }

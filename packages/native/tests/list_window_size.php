@@ -391,4 +391,15 @@ $assert($builtList !== null && $materialized() === 4, 'windowSize(1) builds one 
 $assert($builtEncoder->extendWindowRows($builtList, 20, 22), 'The builder list moves its window.');
 $builtTree->apply($builtEncoder->encode($built)['frame']);
 $assert($materialized() === 3, 'windowSize(1) keeps only the rows on screen.');
+$shown = $built->lazyRows->shown();
+$assert(
+    count($shown) === 30 && $shown[21]->children() !== [] && $shown[0]->children() === [],
+    'LazyRows::shown() lists the rows as sent: built rows and placeholders.',
+);
+$fresh = WindowList::make(...array_map(
+    static fn (int $row): WindowView => WindowView::make(Text::make("fresh {$row}"))->key("fresh-{$row}"),
+    range(0, 199),
+));
+$freshShown = $fresh->lazyRows === null ? $fresh->children() : $fresh->lazyRows->shown();
+$assert(count($freshShown) === 200, 'An eager long list keeps its children.');
 echo "LIST_WINDOW_SIZE_OK rows=50 window=3 heights=measured encoder=pruned builder=1\n";

@@ -43,7 +43,7 @@ final class TreeEncoder
     public const WINDOW_MIN_ROWS = 96;
 
     /** Rows materialized when a list first mounts (and around initialScrollIndex). */
-    private const WINDOW_INITIAL_ROWS = 48;
+    public const WINDOW_INITIAL_ROWS = 48;
 
     /**
      * Smallest margin materialized beyond the rows native reports visible.

@@ -180,6 +180,28 @@ final class ListWindow
     }
 
     /**
+     * The rows a first frame of $rows materializes (or the current window
+     * once planned), for LazyRows::shown().
+     *
+     * @return list<array{0: int, 1: int}>
+     */
+    public function firstRows(LazyRows $rows): array
+    {
+        if ($this->ranges === null || !$this->reported) {
+            $this->keys = $rows->keys;
+            $this->fixed = $rows->fixed;
+            $ranges = [$this->rowsAround(0.0)];
+        } else {
+            $ranges = $this->ranges;
+        }
+        foreach ($rows->fixed as $row => $_) {
+            $ranges = self::addRange($ranges, $row, $row + 1);
+        }
+
+        return $ranges;
+    }
+
+    /**
      * The host shows rows $first..$last: keeps `(windowSize - 1) / 2` of
      * those screens materialized on each side. True when the window moved.
      */
