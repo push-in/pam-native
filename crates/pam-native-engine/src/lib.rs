@@ -1,3 +1,4 @@
+mod auto_safe_area;
 pub mod bridge_v2;
 mod ffi;
 pub mod fiber;
@@ -21,6 +22,7 @@ use pam_native_protocol::{
     Tree, encode_batch_into,
 };
 
+pub use auto_safe_area::{ContentKind as SafeAreaContentKind, SafeAreaViolation};
 pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
@@ -46,6 +48,9 @@ pub struct Engine {
     keyboard_inset: f32,
     surface_keyboard_insets: BTreeMap<u64, f32>,
     surface_policy: surface::SurfacePolicy,
+    /// Sticky automatic safe-area padding per surface content container.
+    auto_safe_area: BTreeMap<u64, [f32; 4]>,
+    automatic_safe_area: bool,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -74,6 +79,8 @@ impl Default for Engine {
             keyboard_inset: 0.0,
             surface_keyboard_insets: BTreeMap::new(),
             surface_policy: surface::SurfacePolicy::InWindow,
+            auto_safe_area: BTreeMap::new(),
+            automatic_safe_area: true,
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -269,6 +276,10 @@ impl Engine {
         )
         .with_surface_policy(self.surface_policy)
         .with_surface_keyboard_insets(&self.surface_keyboard_insets);
+        let auto_scope = auto_safe_area::Scope::enter_with(
+            std::mem::take(&mut self.auto_safe_area),
+            self.automatic_safe_area,
+        );
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -276,6 +287,7 @@ impl Engine {
             self.text_scale,
             text_metrics,
         )?;
+        self.auto_safe_area = auto_scope.finish();
         self.performance.record(
             performance::PerformanceStage::Layout,
             layout_started.elapsed(),
@@ -400,6 +412,10 @@ impl Engine {
         )
         .with_surface_policy(self.surface_policy)
         .with_surface_keyboard_insets(&self.surface_keyboard_insets);
+        let auto_scope = auto_safe_area::Scope::enter_with(
+            std::mem::take(&mut self.auto_safe_area),
+            self.automatic_safe_area,
+        );
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -407,6 +423,7 @@ impl Engine {
             self.text_scale,
             text_metrics,
         )?;
+        self.auto_safe_area = auto_scope.finish();
         self.performance.record(
             performance::PerformanceStage::Layout,
             layout_started.elapsed(),
@@ -518,6 +535,10 @@ impl Engine {
             )
             .with_surface_policy(self.surface_policy)
             .with_surface_keyboard_insets(&self.surface_keyboard_insets);
+            let auto_scope = auto_safe_area::Scope::enter_with(
+                std::mem::take(&mut self.auto_safe_area),
+                self.automatic_safe_area,
+            );
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
@@ -527,6 +548,7 @@ impl Engine {
                 &self.layouts,
                 &layout_dirty_nodes,
             );
+            self.auto_safe_area = auto_scope.finish();
             let calculated = match calculated {
                 Ok((layouts, _visited_nodes)) => layouts,
                 Err(error) => {
@@ -641,6 +663,10 @@ impl Engine {
         )
         .with_surface_policy(self.surface_policy)
         .with_surface_keyboard_insets(&self.surface_keyboard_insets);
+        let auto_scope = auto_safe_area::Scope::enter_with(
+            std::mem::take(&mut self.auto_safe_area),
+            self.automatic_safe_area,
+        );
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -648,6 +674,7 @@ impl Engine {
             self.text_scale,
             text_metrics,
         )?;
+        self.auto_safe_area = auto_scope.finish();
         self.performance.record(
             performance::PerformanceStage::Layout,
             layout_started.elapsed(),
@@ -678,6 +705,34 @@ impl Engine {
         self.commits = self.commits.saturating_add(1);
         self.patch_commits = self.patch_commits.saturating_add(1);
         self.encode_mutations(output, &mut mutations)
+    }
+
+    /// Turns the automatic safe area off (`true` by default). Only tooling
+    /// uses it: `pam-native safe-area-lint --explicit-only` checks that an
+    /// application clears the insets by itself, as on renderers before it.
+    pub fn set_automatic_safe_area(&mut self, enabled: bool) {
+        self.automatic_safe_area = enabled;
+        if !enabled {
+            self.auto_safe_area.clear();
+        }
+    }
+
+    /// Content (text, inputs, buttons, pressables, list ends) of the current
+    /// layout that ends inside a window inset: the safe-area lint used by the
+    /// debug overlay and by `pam-native safe-area-lint` in CI. Empty when the
+    /// host has not reported insets.
+    #[must_use]
+    pub fn safe_area_violations(&self) -> Vec<SafeAreaViolation> {
+        let (Some(tree), Some(insets)) = (self.current.as_ref(), self.safe_area) else {
+            return Vec::new();
+        };
+        layout::safe_area_violations(
+            tree,
+            &self.layouts,
+            self.viewport,
+            insets,
+            self.surface_policy,
+        )
     }
 
     #[must_use]

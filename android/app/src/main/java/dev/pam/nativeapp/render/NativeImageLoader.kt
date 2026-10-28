@@ -247,6 +247,16 @@ internal fun isSynchronousInlineSource(source: String): Boolean =
     source.length <= INLINE_SYNC_MAX_CHARS && isInlineImageSource(source)
 
 /**
+ * Packaged `asset://` images up to this size (an app's `assets/icons`, icon
+ * masks referenced by path instead of a `data:` URI) also decode in the frame
+ * and live in the inline cache, like iOS `PamInlineImages.smallAsset`.
+ */
+internal const val ASSET_SYNC_MAX_BYTES = 16 * 1024
+
+internal fun isPackagedAssetSource(source: String): Boolean =
+    source.regionMatches(0, "asset://", 0, "asset://".length, ignoreCase = true)
+
+/**
  * One shared load per decoded key. The future is registered before its work
  * starts and leaves the map by identity when it completes, on whichever
  * thread completes it. A load that finished before its caller returned used
@@ -739,7 +749,7 @@ internal class NativeImageLoader(
     private fun memoryCacheFor(source: String) =
         if (isInline(source)) inlineCache else cache
 
-    /** data: glyphs and packaged files of at most [INLINE_SYNC_MAX_CHARS] bytes (icon masks). */
+    /** data: glyphs and packaged files of at most [ASSET_SYNC_MAX_BYTES] bytes (icon masks). */
     private fun isInline(source: String): Boolean =
         isInlineImageSource(source) || smallAssets[source] == true
 
@@ -749,19 +759,19 @@ internal class NativeImageLoader(
      * wire per node); null for larger files, which load like photos.
      */
     private fun smallAssetBytes(source: String): ByteArray? {
-        if (!source.regionMatches(0, "asset://", 0, 8, ignoreCase = true)) return null
+        if (!isPackagedAssetSource(source)) return null
         if (smallAssets[source] == false) return null
         val path = normalizedPamAssetPath(source) ?: return null
         val bytes = runCatching {
             context.assets.open(path).use { input ->
-                val buffer = ByteArray(INLINE_SYNC_MAX_CHARS + 1)
+                val buffer = ByteArray(ASSET_SYNC_MAX_BYTES + 1)
                 var length = 0
                 while (length < buffer.size) {
                     val read = input.read(buffer, length, buffer.size - length)
                     if (read < 0) break
                     length += read
                 }
-                if (length > INLINE_SYNC_MAX_CHARS) null else buffer.copyOf(length)
+                if (length > ASSET_SYNC_MAX_BYTES) null else buffer.copyOf(length)
             }
         }.getOrNull()
         if (smallAssets.size < MAX_SMALL_ASSETS) smallAssets[source] = bytes != null

@@ -72,6 +72,13 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.31.0 | App text scale | ✅ (uncompiled) | `PamTextScale` (UserDefaults) multiplies the Dynamic Type scale given to the engine in `PamNativeViewController.start/updateViewport`; `accessibility` module `textScale`/`setTextScale`. Values apply on the next launch, like Android. |
 | 1.31.0 | Biometrics and secure storage | ✅ (uncompiled) | `BiometricsModule` (LocalAuthentication, `deviceOwnerAuthenticationWithBiometrics`; apps declare `NSFaceIDUsageDescription`) and `SecureStorageModule` (Keychain, `WhenUnlockedThisDeviceOnly`, SHA-256 account names) in `Modules/SecurityModules.swift`. |
 | 1.31.0 | Named secure-screen claims | n/a | PHP only (`Screen::claim/release`); the native `window.secure` call is unchanged. |
+| next | Safe area by default, dynamic sheet sizing, safe-area inspector | ✅ (uncompiled) | Engine-side padding and lint are shared. `PamModalHost.setBottomSheetSnapPoints([])`/`setDynamicSheetContentHeight` size the sheet from the engine frame of its content (`sheetHeight`); `PamSafeAreaInspector` (debug) scans the window after each commit against `safeAreaInsets` and logs `PamSafeArea:` lines, `PAM_SAFE_AREA_OVERLAY=1` paints the insets. |
+| next | UI polish: styled `Toast::message()` (border, radius, strip, elevation, paddings, `titleLines`, `fitContent`, glyph or `asset://` PNG icon, offsets from the safe area, bottom toast above the keyboard) | ✅ (uncompiled) | `PamToastSpec` decodes the new keys; `PamToastPresenter.cardView/iconView`; XCTest `testToastMessageDecodesCardStyleAndIcon`. |
+| next | UI polish: `asset://` icons ≤16 KiB decode in the frame | ✅ | Already on iOS (`PamInlineImages.smallAsset`); Android now matches it. |
+| next | UI polish: paused `MediaPlayer` draws the frame at `currentTime` | ✅ | Already on iOS (seek on `readyToPlay` when it will not play); Android MediaPlayer path now seeks too. |
+| next | UI polish: Modal remounted with the same key reports `on:layout` again | ✅ | Already on iOS (`layoutEvents.forget` on remove); Android now clears its layout-event caches. |
+| next | UI polish: list `followEndOnResize` (extension PropKey 1001) | n/a | iOS lists never follow the end on resize; `PamConstants.listFollowEndOnResize` only names the key. |
+| next | UI polish: gray focus veil after the keyboard closes | n/a | Android-only (`defaultFocusHighlightEnabled`); UIKit draws no focus highlight on touch. |
 | 1.43.0 | Zoomed child keeps its tap target (Android `hasIndependentTouchTargetAt`) | n/a | Android-only cause; UIKit hit testing already applies the full transform. |
 | 1.43.0 | Bounded photo zoom (`gestureNativeBounds`, `gestureNativeContentAspect`) | ✅ (uncompiled) | `PamNativeGestureTransform.bounded/settled`: pan and pinch clamp the translation to the contained content scaled around the layer's anchor point; the last bounded gesture on the surface (`boundedGestures`) springs to rest and reports it. XCTest `testBoundedPhotoTransformKeepsTheContainedContentCoveringTheViewport`. |
 | 1.32.0 | Focal pinch zoom (`gestureNativeFocalZoom`) | ✅ (uncompiled) | `PamNativeGestureTransform.apply(focal:pivot:)`: the pinch keeps the content point under `location(in:)` fixed around the child's untranslated `center`; an adjacent pan rebases while the surface is in `focalZoomTargets`. XCTest `testFocalPinchKeepsTheContentPointUnderTheFingersAndPanResumesFromIt`. |
@@ -385,3 +392,18 @@ Compiled and unit-tested on the Simulator (`PamAnimatedImageTests`,
   to iOS. Android plays WebM through ExoPlayer.
 - Hidden (not covered) videos release their decoder after 5 s and resume at
   the same position when shown.
+
+## UI polish (Unreleased)
+
+Not compiled on Linux. On a Mac:
+
+- `swift test --filter PamComponentParityTests` (toast decoding).
+- On an iPhone with a Dynamic Island: `Toast::message()` at the top starts
+  below the island (offset from the safe area, not the window top); a bottom
+  toast with the keyboard open rests above it and drops back when it closes.
+- Styled toast (`borderColor`, `cornerRadius: 16`, `accentWidth: 0`,
+  `fitContent: true`, `titleLines: 2`, glyph `icon`): hairline border, no
+  strip, icon left of a bold two-line text, the card hugs short text and
+  wraps long text inside 16 pt gutters; light and dark backgrounds.
+- `icon: 'asset://…png'` (≤16 KiB) shows immediately; a missing asset draws
+  the toast without icon.

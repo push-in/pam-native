@@ -29,6 +29,39 @@ final class PamComponentParityTests: XCTestCase {
         XCTAssertEqual(plain.durationMs, 3_500)
     }
 
+    func testToastMessageDecodesCardStyleAndIcon() {
+        let spec = PamToastSpec.decode([
+            "title": .text("Link copiado"),
+            "borderColor": .integer(0xFF33_3333),
+            "borderWidth": .decimal(0.5),
+            "cornerRadius": .decimal(16),
+            "accentWidth": .decimal(0),
+            "elevation": .decimal(6),
+            "titleLines": .integer(2),
+            "fitContent": .flag(true),
+            "minHeight": .decimal(0),
+            "iconGlyph": .text("\u{F2B4}"),
+            "iconFontFamily": .text("asset://assets/fonts/Ionicons.ttf"),
+            "iconColor": .integer(0xFF00_C853),
+            "iconSize": .decimal(18),
+        ])
+        XCTAssertEqual(spec.borderColor, 0xFF33_3333)
+        XCTAssertEqual(spec.borderWidth, 0.5)
+        XCTAssertEqual(spec.cornerRadius, 16)
+        XCTAssertEqual(spec.accentWidth, 0)
+        XCTAssertEqual(spec.titleLines, 2)
+        XCTAssertTrue(spec.fitContent)
+        XCTAssertEqual(spec.minHeight, 0)
+        XCTAssertEqual(spec.iconGlyph, "\u{F2B4}")
+        XCTAssertEqual(spec.iconColor, 0xFF00_C853)
+        let defaults = PamToastSpec.decode(["title": .text("Saved")])
+        XCTAssertEqual(defaults.accentWidth, 5)
+        XCTAssertEqual(defaults.cornerRadius, 6)
+        XCTAssertEqual(defaults.titleLines, 1)
+        XCTAssertNil(defaults.borderColor)
+        XCTAssertNil(defaults.iconGlyph)
+    }
+
     func testModalPropsReachTheModalHost() throws {
         let (_, renderer, view) = PamRenderTestSupport.render([
             PamConstants.modalAnimationType: .integer(4),

@@ -599,6 +599,8 @@ final class PamVirtualListView: UIScrollView {
     /// the item starts (Android `applyInitialPosition`); an explicit scroll
     /// request of the same commit wins.
     var pamInitialScrollIndex = 0
+    /// `followEndOnResize` (extension property 1001), on by default.
+    var pamFollowEndOnResize = true
     var pamInitialScrollIndexApplied = false
 
     /// RN `windowSize`-like item prefetch (`ListPrefetch`): minimum number of
@@ -666,7 +668,15 @@ final class PamVirtualListView: UIScrollView {
             anchorMaximum = maximum
             anchorOffset = horizontal ? contentOffset.x : contentOffset.y
         }
-        guard anchorMaximum > 0, maximum != anchorMaximum,
+        // `followEndOnResize` (Android PamRecyclerList.followsEnd): a list
+        // opened at its end (`initialScrollIndex`, a chat timeline) follows it
+        // even while all of its rows still fit, so a keyboard or composer that
+        // then shrinks the viewport keeps the newest rows visible; a list
+        // scrolled to its end follows it too. An inverted list keeps its
+        // newest rows natively.
+        let followsEnd = pamFollowEndOnResize && !pamInverted &&
+            (anchorMaximum > 0 || (anchorMaximum == 0 && pamInitialScrollIndex > 0))
+        guard followsEnd, maximum != anchorMaximum,
               anchorOffset >= anchorMaximum - 1,
               !isTracking, !isDragging, !isDecelerating else { return }
         if abs(offset - maximum) > 0.5 {
@@ -2663,6 +2673,8 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private var transparent = false
     private var allowSwipeDismissal = false
     private var bottomSheetSnapPoints: [CGFloat] = [0.5, 0.9]
+    private var dynamicSheetSizing = false
+    private var dynamicSheetHeight: CGFloat = 0
     private var bottomSheetIndex = 0
     private var bottomSheetDismissible = true
     private var bottomSheetBackdropDismiss = true
@@ -2910,8 +2922,29 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         allowSwipeDismissal = value
     }
 
+    var usesDynamicSheetSizing: Bool {
+        presentation == Presentation.sheet && dynamicSheetSizing
+    }
+
+    /// Engine height of a dynamically sized sheet's content.
+    func setDynamicSheetContentHeight(_ height: CGFloat) {
+        guard usesDynamicSheetSizing, height > 0, abs(height - dynamicSheetHeight) > 0.5 else { return }
+        dynamicSheetHeight = height
+        let available = max(1, bounds.height - safeAreaInsets.top)
+        bottomSheetSnapPoints = [min(max(height / available, 0.05), 1)]
+        bottomSheetIndex = 0
+        setNeedsLayout()
+    }
+
     func setBottomSheetSnapPoints(_ values: [CGFloat]) {
-        guard !values.isEmpty else { return }
+        guard !values.isEmpty else {
+            dynamicSheetSizing = true
+            bottomSheetIndex = 0
+            setNeedsLayout()
+            return
+        }
+        dynamicSheetSizing = false
+        dynamicSheetHeight = 0
         bottomSheetSnapPoints = Array(values.map { min(max($0, 0.05), 1) }.sorted().prefix(16))
         bottomSheetIndex = min(bottomSheetIndex, bottomSheetSnapPoints.count - 1)
         updatePresentationLayout()
@@ -3112,6 +3145,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     /// minus the top safe-area inset (@gorhom/bottom-sheet).
     private var sheetHeight: CGFloat {
         let available = max(1, bounds.height - safeAreaInsets.top)
+        if dynamicSheetSizing, dynamicSheetHeight > 0 {
+            return min(dynamicSheetHeight, available)
+        }
         return available * bottomSheetSnapPoints[bottomSheetIndex]
     }
 

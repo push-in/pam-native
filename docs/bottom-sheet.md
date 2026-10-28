@@ -60,6 +60,42 @@ IME while the list above it shrinks (React Native @gorhom sheet with
 
 On Android the sheet window is always edge to edge (1.34), like the @gorhom
 sheet inside React Native's edge-to-edge root: the backdrop covers the status
-and navigation bars and the sheet reaches the bottom of the screen. Wrap
-bottom content in a `SafeAreaView` (or pad it with the bottom inset) so it
-stays above the navigation bar, as on Android 15+ and iOS.
+and navigation bars and the sheet reaches the bottom of the screen. The
+sheet's content stays above the navigation bar, the gesture handle and the
+iOS home indicator by default: the engine pads the sheet's content container
+by `max(bottom inset, the padding it already has)` (see
+`docs/android-safe-area.md`, *Safe area by default*). No `SafeAreaView` or
+`windowMetrics()->safeAreaBottom` padding is needed; existing manual padding
+keeps working and is not doubled.
+
+## Lists inside a sheet
+
+A `FlatList`/`SectionList`/`VirtualizedList` in a sheet keeps its scroll
+offset while the sheet animates its height (opening, snapping, keyboard).
+Only a list opened at its end (`initialScrollIndex`) or scrolled to its end
+by the user follows the end when its viewport resizes, like a chat timeline
+above a growing composer; inverted lists never move. Pass
+`->followEndOnResize(false)` (template `followEndOnResize="false"`) to keep
+the offset even then. iOS lists never follow the end on resize, so the prop
+has no effect there.
+
+## Dynamic sizing
+
+A sheet without snap points fits its content (@gorhom
+`enableDynamicSizing`): the engine measures the content, adds the part of the
+bottom inset the content does not already clear and caps it at the available
+height (window minus the status bar).
+
+```php
+BottomSheet::make($content, []);            // or ->dynamicSizing()
+```
+
+```html
+<BottomSheet snapPoints="content"> ... </BottomSheet>
+```
+
+Prefer it over a fixed detent for menus and pickers whose content grows (a
+row of recent photos, a new option): a fixed detent that is too short clips
+the last rows, and `pam-native safe-area-lint` reports them. Content taller
+than the available height must scroll (`ScrollView` / `VirtualizedList` with
+`flexGrow` inside the sheet).

@@ -118,6 +118,17 @@ final class VirtualizedList extends Element
         return $this->withProperty(PropKey::ListInverted, $inverted);
     }
 
+    /**
+     * Whether a list resting at its end (opened there with
+     * `initialScrollIndex` or scrolled there) keeps the end visible when its
+     * viewport resizes. Default true; pass false for lists in sheets/modals
+     * that must keep their offset whatever the container animates.
+     */
+    public function followEndOnResize(bool $follow = true): self
+    {
+        return $this->withProperty(PropKey::ListFollowEndOnResize, $follow);
+    }
+
     public function initialScrollIndex(int $index): self
     {
         return $this->withProperty(PropKey::ListInitialScrollIndex, max(0, $index));

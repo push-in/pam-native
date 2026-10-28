@@ -1771,6 +1771,10 @@ class PamRenderer(
         statusBarIds.remove(id)
         nodes.remove(id)
         frames.remove(id)
+        // Ids derive from keys: a node mounted again with the same key must
+        // report on:layout again even when its frame is unchanged.
+        lastLayoutEvents.remove(id)
+        pendingLayoutEvents.remove(id)
         if (id == rootId) rootId = 0L
         if (removedStatusBar) applyMergedStatusBar()
     }
@@ -2789,6 +2793,8 @@ class PamRenderer(
         // relayouts (SafeArea/KAV/focus) still describe the activity viewport;
         // applying those frames here would replace BOTTOM with TOP and stretch
         // the sheet behind the status bar. Descendants use this reduced viewport.
+        (parentView as? PamModalHost)?.takeIf { it.usesDynamicSheetSizing() }
+            ?.setDynamicSheetContentHeight(vertical.extent)
         (parentView as? PamModalHost)?.sheetChildLayoutParams()?.let { placement ->
             width = placement.width
             height = placement.height
@@ -3702,6 +3708,10 @@ class PamRenderer(
                 (view as? PamRecyclerList)?.setColumns(value.integer().toInt())
             PropKey.LIST_INVERTED ->
                 (view as? PamRecyclerList)?.setInverted(value.flag())
+            PropKey.LIST_FOLLOW_END_ON_RESIZE ->
+                (view as? PamRecyclerList)?.setFollowEndOnResize(value.flag())
+            // Reserved extension keys whose behaviour lands with their own change.
+            PropKey.SCROLL_PAGE_TRANSFORM, PropKey.MEDIA_START_BUFFER_MS -> Unit
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(value.integer().toInt())
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
@@ -4349,6 +4359,7 @@ class PamRenderer(
             PropKey.LIST_HORIZONTAL -> (view as? PamRecyclerList)?.setHorizontal(false)
             PropKey.LIST_NUM_COLUMNS -> (view as? PamRecyclerList)?.setColumns(1)
             PropKey.LIST_INVERTED -> (view as? PamRecyclerList)?.setInverted(false)
+            PropKey.LIST_FOLLOW_END_ON_RESIZE -> (view as? PamRecyclerList)?.setFollowEndOnResize(true)
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(0)
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
@@ -5016,7 +5027,8 @@ class PamRenderer(
         source.order(ByteOrder.LITTLE_ENDIAN)
         require(source.remaining() >= 2) { "Invalid Bottom Sheet snap points" }
         val count = source.short.toInt() and 0xffff
-        require(count in 1..16 && source.remaining() == count * 8) {
+        // count 0: dynamic sizing (the sheet fits its content).
+        require(count in 0..16 && source.remaining() == count * 8) {
             "Invalid Bottom Sheet snap points"
         }
         return List(count) { source.double.toFloat() }

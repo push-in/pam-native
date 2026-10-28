@@ -94,6 +94,8 @@ name = "pam-native-cli"
 version = "1.44.0"
 dependencies = [
  "miniz_oxide",
+ "pam-native-engine",
+ "pam-native-protocol",
  "serde",
  "serde_json",
  "sha2",

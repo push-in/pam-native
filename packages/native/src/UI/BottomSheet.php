@@ -24,7 +24,9 @@ use function is_int;
 final class BottomSheet extends Element
 {
     /**
-     * @param list<float> $snapPoints Fractions of the available height in ascending order.
+     * @param list<float> $snapPoints Fractions of the available height in
+     *     ascending order. An empty list sizes the sheet to its content
+     *     (dynamic sizing) up to the available height.
      */
     public static function make(
         Renderable $content,
@@ -33,7 +35,7 @@ final class BottomSheet extends Element
         bool $visible = true,
     ): self {
         $points = self::validateSnapPoints($snapPoints);
-        if ($index < 0 || $index >= count($points)) {
+        if ($points === [] ? $index !== 0 : ($index < 0 || $index >= count($points))) {
             throw new InvalidArgumentException('Bottom Sheet index must reference a snap point.');
         }
 
@@ -63,6 +65,18 @@ final class BottomSheet extends Element
                 PropKey::BottomSheetKeyboardBehavior,
                 BottomSheetKeyboardBehavior::Interactive->value,
             );
+    }
+
+    /**
+     * Sizes the sheet to its content (@gorhom `enableDynamicSizing`): the
+     * engine measures the content, adds the bottom safe-area inset the
+     * content does not already clear and caps it at the available height.
+     */
+    public function dynamicSizing(): self
+    {
+        return $this
+            ->withProperty(PropKey::BottomSheetSnapPoints, new BinaryValue(self::encodeSnapPoints([])))
+            ->withProperty(PropKey::BottomSheetIndex, 0);
     }
 
     public function index(int $index): self
@@ -131,9 +145,9 @@ final class BottomSheet extends Element
     /** @param list<float> $points */
     private static function validateSnapPoints(array $points): array
     {
-        if ($points === [] || count($points) > 16) {
+        if (count($points) > 16) {
             throw new InvalidArgumentException(
-                'Bottom Sheet requires between one and sixteen snap points.',
+                'Bottom Sheet accepts at most sixteen snap points (none sizes it to its content).',
             );
         }
         $normalized = [];

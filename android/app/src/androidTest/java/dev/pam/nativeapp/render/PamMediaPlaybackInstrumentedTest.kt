@@ -312,6 +312,57 @@ class PamMediaPlaybackInstrumentedTest {
         }
     }
 
+    /**
+     * autoPlay=false: the paused player draws the frame at currentTime (like
+     * expo-video) instead of a black surface. The clip is red for 1 s, then
+     * blue. MediaPlayer renders nothing until it starts or seeks.
+     */
+    @Test fun pausedMediaPlayerDrawsTheFirstFrame() = pausedFrame(forwardBufferSeconds = 0, at = 0.0, red = true)
+
+    @Test fun pausedMediaPlayerDrawsTheFrameAtCurrentTime() = pausedFrame(forwardBufferSeconds = 0, at = 1.5, red = false)
+
+    @Test fun pausedExoPlayerDrawsTheFrameAtCurrentTime() = pausedFrame(forwardBufferSeconds = 4, at = 1.5, red = false)
+
+    private fun pausedFrame(forwardBufferSeconds: Int, at: Double, red: Boolean) =
+        withMedia(forwardBufferSeconds = forwardBufferSeconds) { media, _, _ ->
+            val clip = File(media.context.cacheDir, "pam-red-blue.mp4")
+            InstrumentationRegistry.getInstrumentation().context.assets.open("pam-video/red-blue.mp4").use { input ->
+                clip.outputStream().use(input::copyTo)
+            }
+            try {
+                val ready = CountDownLatch(1)
+                main {
+                    media.onReady = { ready.countDown() }
+                    media.setAutoPlay(false)
+                    if (at > 0) media.seek(at)
+                    media.setSource(clip.toURI().toString())
+                }
+                assertTrue("Video prepares", ready.await(10, TimeUnit.SECONDS))
+                val deadline = SystemClock.uptimeMillis() + 5_000
+                var color = 0
+                while (SystemClock.uptimeMillis() < deadline) {
+                    main {
+                        val texture = field(media, "video") as android.view.TextureView
+                        color = texture.getBitmap(8, 8)?.let { bitmap ->
+                            bitmap.getPixel(4, 4).also { bitmap.recycle() }
+                        } ?: 0
+                    }
+                    val r = android.graphics.Color.red(color)
+                    val b = android.graphics.Color.blue(color)
+                    if (if (red) r > 180 && b < 80 else b > 180 && r < 80) break
+                    SystemClock.sleep(50)
+                }
+                val expected = if (red) "red" else "blue"
+                assertTrue(
+                    "Paused frame at $at s should be $expected, was %08x".format(color),
+                    if (red) android.graphics.Color.red(color) > 180 else android.graphics.Color.blue(color) > 180,
+                )
+                assertStopped(media)
+            } finally {
+                clip.delete()
+            }
+        }
+
     private fun field(media: PamMediaView, name: String): Any? =
         PamMediaView::class.java.getDeclaredField(name).apply { isAccessible = true }.get(media)
 

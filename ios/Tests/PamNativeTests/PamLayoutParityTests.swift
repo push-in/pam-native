@@ -121,6 +121,23 @@ final class PamLayoutParityTests: XCTestCase {
         XCTAssertEqual(list.contentOffset.y, 100, accuracy: 0.5, "a list away from the end keeps its offset")
     }
 
+    func testVirtualListOpenedAtItsEndFollowsItWhenTheViewportShrinksUnderFittingRows() {
+        let list = PamVirtualListView(frame: CGRect(x: 0, y: 0, width: 100, height: 500))
+        list.pamInitialScrollIndex = 12
+        list.contentSize = CGSize(width: 100, height: 480)
+        list.maintainEndAnchor()
+        list.frame.size.height = 300
+        list.maintainEndAnchor()
+        XCTAssertEqual(list.contentOffset.y, 180, accuracy: 0.5, "the newest row stays above the shrunk viewport")
+
+        let inbox = PamVirtualListView(frame: CGRect(x: 0, y: 0, width: 100, height: 500))
+        inbox.contentSize = CGSize(width: 100, height: 480)
+        inbox.maintainEndAnchor()
+        inbox.frame.size.height = 300
+        inbox.maintainEndAnchor()
+        XCTAssertEqual(inbox.contentOffset.y, 0, accuracy: 0.5, "a list opened at its start keeps its first rows")
+    }
+
     func testKeyboardOverlapOnlyCountsTheCoveredPart() {
         let view = CGRect(x: 0, y: 100, width: 390, height: 600)
         XCTAssertEqual(PamKeyboardInsetObserver.overlap(keyboard: CGRect(x: 0, y: 500, width: 390, height: 344), viewInWindow: view), 200)

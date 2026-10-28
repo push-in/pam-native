@@ -474,6 +474,7 @@ final class TemplateRenderer
         'prefetch' => PropKey::ListPrefetch,
         'numColumns' => PropKey::ListNumColumns,
         'inverted' => PropKey::ListInverted,
+        'followEndOnResize' => PropKey::ListFollowEndOnResize,
         'initialScrollIndex' => PropKey::ListInitialScrollIndex,
         'removeClippedSubviews' => PropKey::ListRemoveClippedSubviews,
         'endReachedThreshold' => PropKey::EndReachedThreshold,
@@ -7647,6 +7648,10 @@ final class TemplateRenderer
     /** @return list<float> */
     private static function bottomSheetSnapPoints(mixed $value): array
     {
+        // `snapPoints="content"` (or an empty list): dynamic sizing.
+        if ($value === 'content') {
+            return [];
+        }
         if (!is_array($value)) {
             throw new InvalidArgumentException('BottomSheet snapPoints must be an array.');
         }
