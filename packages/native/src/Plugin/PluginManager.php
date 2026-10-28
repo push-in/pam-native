@@ -277,6 +277,12 @@ final class PluginManager
         self::$booted = false;
     }
 
+    /** @internal The application root: the nearest directory with vendor/composer/installed.json. */
+    public static function projectRoot(): ?string
+    {
+        return self::findProjectRoot();
+    }
+
     private static function findProjectRoot(): ?string
     {
         $candidates = [];

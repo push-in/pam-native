@@ -23,6 +23,14 @@ src/
   Api/ Middleware/ Composables/ Screens/ Components/
 ```
 
+Components are discovered by convention. When `App::components()` has not
+been called, `App::run()` registers every `*.pam.php` under `<project root>/src`
+and keeps the compiled cache in `<project root>/.pam-native/components`. The
+project root is the nearest directory with `vendor/composer/installed.json`;
+without one, it is the directory of the entry script. To use other paths,
+call `App::components($path, $cache)` before `App::run()`. That explicit call
+turns the convention off.
+
 ```php
 use Pam\Native\App;
 use function Pam\Native\{useColorScheme, useSafeAreaInsets, useNetwork};

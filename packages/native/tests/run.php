@@ -8164,5 +8164,6 @@ require __DIR__.'/arch_v2_setup_lifecycle.php';
 require __DIR__.'/arch_v2_globals.php';
 require __DIR__.'/arch_v2_composables.php';
 require __DIR__.'/arch_v2_resource.php';
+require __DIR__.'/arch_v2_component_discovery.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

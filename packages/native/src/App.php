@@ -28,6 +28,9 @@ final class App
 
     private static ?AppState $currentState = null;
 
+    /** True once components were registered explicitly or discovered by convention. */
+    private static bool $componentsConfigured = false;
+
     private function __construct()
     {
     }
@@ -35,6 +38,7 @@ final class App
     public static function run(Renderable|Closure $root): void
     {
         try {
+            self::discoverConventionalComponents();
             PluginManager::boot();
             if ($root instanceof TabNavigator) {
                 Runtime::onDimensions($root->dimensions(...));
@@ -98,6 +102,7 @@ final class App
         string $path,
         ?string $cachePath = null,
     ): void {
+        self::$componentsConfigured = true;
         try {
             PamPhpRegistry::discover(
                 $path,
@@ -108,6 +113,38 @@ final class App
 
             throw $error;
         }
+    }
+
+    /**
+     * Architecture v2 convention: without an App::components() call, App::run()
+     * registers the components under `<project root>/src` with the compiled
+     * cache in `<project root>/.pam-native/components`. Call App::components()
+     * before App::run() to use other paths.
+     *
+     * @internal
+     */
+    public static function discoverConventionalComponents(?string $projectRoot = null): bool
+    {
+        if (self::$componentsConfigured) {
+            return false;
+        }
+        $root = $projectRoot ?? PluginManager::projectRoot();
+        if ($root === null) {
+            $script = $_SERVER['SCRIPT_FILENAME'] ?? null;
+            $root = is_string($script) && $script !== '' ? dirname($script) : null;
+        }
+        if ($root === null || !is_dir($root.'/src')) {
+            return false;
+        }
+        self::components($root.'/src', $root.'/.pam-native/components');
+
+        return true;
+    }
+
+    /** @internal Test hook: forget whether components were configured. */
+    public static function resetComponentDiscovery(): void
+    {
+        self::$componentsConfigured = false;
     }
 
     /** @param array<string, mixed> $props */
