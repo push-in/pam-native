@@ -371,7 +371,7 @@ bool node_id(Encoder& encoder, std::string_view path, zend_string* dom, zend_lon
     }
     identity.push_back('|');
     char digits[24];
-    const int written = std::snprintf(digits, sizeof(digits), ZEND_LONG_FMT, kind);
+    const int written = snprintf(digits, sizeof(digits), ZEND_LONG_FMT, kind);
     identity.append(digits, static_cast<std::size_t>(written));
     auto known = encoder.identity_ids.find(std::string_view(identity));
     if (known != encoder.identity_ids.end()) {
@@ -598,7 +598,7 @@ bool encode_properties_unchecked(Encoder& encoder, zend_object* element, std::ui
         ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(events), kind, string_key, callback) {
             if (string_key != nullptr) continue;
             char key[48];
-            const int length = std::snprintf(key, sizeof(key), "%llu:" ZEND_LONG_FMT,
+            const int length = snprintf(key, sizeof(key), "%llu:" ZEND_LONG_FMT,
                                              static_cast<unsigned long long>(id), static_cast<zend_long>(kind));
             Z_TRY_ADDREF_P(callback);
             zend_symtable_str_update(Z_ARRVAL(encoder.callbacks), key, static_cast<std::size_t>(length), callback);
@@ -753,17 +753,17 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
             segment.append("key:", 4);
             segment.append(ZSTR_VAL(key), ZSTR_LEN(key));
         } else {
-            segment.append(digits, static_cast<std::size_t>(std::snprintf(digits, sizeof(digits), ZEND_LONG_FMT ":", child_kind)));
+            segment.append(digits, static_cast<std::size_t>(snprintf(digits, sizeof(digits), ZEND_LONG_FMT ":", child_kind)));
             zval* slot = prop(child, layout.identity_slot);
             if (Z_TYPE_P(slot) == IS_STRING) {
                 segment.append(Z_STRVAL_P(slot), Z_STRLEN_P(slot));
             } else if (Z_TYPE_P(slot) == IS_LONG) {
-                segment.append(digits, static_cast<std::size_t>(std::snprintf(digits, sizeof(digits), ZEND_LONG_FMT, Z_LVAL_P(slot))));
+                segment.append(digits, static_cast<std::size_t>(snprintf(digits, sizeof(digits), ZEND_LONG_FMT, Z_LVAL_P(slot))));
             } else {
-                segment.append(digits, static_cast<std::size_t>(std::snprintf(digits, sizeof(digits), ZEND_ULONG_FMT, child_index)));
+                segment.append(digits, static_cast<std::size_t>(snprintf(digits, sizeof(digits), ZEND_ULONG_FMT, child_index)));
             }
             if (!positional.insert(segment).second) {
-                segment.assign(digits, static_cast<std::size_t>(std::snprintf(
+                segment.assign(digits, static_cast<std::size_t>(snprintf(
                     digits, sizeof(digits), ZEND_LONG_FMT ":#" ZEND_ULONG_FMT, child_kind, child_index)));
                 positional.insert(segment);
             }
@@ -810,7 +810,7 @@ bool encode_node(Encoder& encoder, zend_object* element, std::uint64_t id, std::
         if (run_start < 0) return true;
         char digits[32];
         segment.assign("rows:", 5);
-        segment.append(digits, static_cast<std::size_t>(std::snprintf(digits, sizeof(digits), ZEND_LONG_FMT, run_start)));
+        segment.append(digits, static_cast<std::size_t>(snprintf(digits, sizeof(digits), ZEND_LONG_FMT, run_start)));
         path.push_back('/');
         path.append(segment);
         std::uint64_t child_id = 0;
