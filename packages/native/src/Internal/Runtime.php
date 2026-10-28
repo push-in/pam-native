@@ -65,6 +65,9 @@ final class Runtime
     private static ?Closure $backHandler = null;
     private static ?Closure $appStateHandler = null;
     private static ?Closure $dimensionsHandler = null;
+    /** @var array<int, Closure(WindowMetrics): void> */
+    private static array $metricsListeners = [];
+    private static int $nextMetricsListener = 1;
     private static ?Closure $memoryPressureHandler = null;
     private static ?TreeEncoder $encoder = null;
     private static bool $rendering = false;
@@ -556,6 +559,11 @@ final class Runtime
                     DependencyTracker::invalidateAll();
                 }
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
+                if (self::$windowMetrics !== $previousMetrics) {
+                    foreach (self::$metricsListeners as $listener) {
+                        $listener(self::$windowMetrics);
+                    }
+                }
                 self::afterDispatch();
 
                 return;
@@ -912,6 +920,47 @@ final class Runtime
     public static function onDimensions(Closure $handler): void
     {
         self::$dimensionsHandler = $handler;
+    }
+
+    /**
+     * Adds a listener for real window metric changes (size, insets, font
+     * scale, density...). Unlike onDimensions(), any number may be active.
+     *
+     * @param Closure(WindowMetrics): void $listener
+     */
+    public static function onWindowMetrics(Closure $listener): int
+    {
+        $id = self::$nextMetricsListener++;
+        self::$metricsListeners[$id] = $listener;
+
+        return $id;
+    }
+
+    public static function offWindowMetrics(int $subscription): void
+    {
+        unset(self::$metricsListeners[$subscription]);
+    }
+
+    /** Active onWindowMetrics() listeners, for leak diagnostics and tests. */
+    public static function windowMetricsListeners(): int
+    {
+        return \count(self::$metricsListeners);
+    }
+
+    /** @internal Test hook: installs metrics as if the host had sent them. */
+    public static function replaceWindowMetrics(WindowMetrics $metrics): void
+    {
+        $previous = self::windowMetrics();
+        self::$windowMetrics = $metrics;
+        if ($metrics == $previous) {
+            self::$windowMetrics = $previous;
+
+            return;
+        }
+        DependencyTracker::invalidateAll();
+        foreach (self::$metricsListeners as $listener) {
+            $listener($metrics);
+        }
     }
 
     public static function onMemoryPressure(Closure $handler): void

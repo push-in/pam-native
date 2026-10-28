@@ -48,6 +48,39 @@ final class App
     }
 
     /**
+     * Registers application-wide values, visible as `$name` in every template
+     * and as `$this->name` in every component. Adds to what is already
+     * registered; a repeated key overwrites. Values may be anything: a signal,
+     * a composable (`useColorScheme()`), an object, an array, a scalar or a
+     * closure. Reactive values re-render whoever reads them.
+     *
+     * ```php
+     * App::globals(['scheme' => useColorScheme(), 'insets' => useSafeAreaInsets()]);
+     * ```
+     *
+     * @param array<string, mixed> $values
+     */
+    public static function globals(array $values): void
+    {
+        Globals::merge($values);
+    }
+
+    /**
+     * Registers one global. Registering a name twice without `replace: true`
+     * is an error in development builds.
+     */
+    public static function global(string $name, mixed $value, bool $replace = false): void
+    {
+        Globals::set($name, $value, $replace);
+    }
+
+    /** Removes a global; readers re-render without it. */
+    public static function forget(string $name): void
+    {
+        Globals::forget($name);
+    }
+
+    /**
      * Creates a retained, queryable visual document that can be passed directly
      * to App::run(). The document remains the mutation handle for its lifetime.
      */

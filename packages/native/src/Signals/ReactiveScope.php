@@ -26,6 +26,24 @@ final class ReactiveScope
         self::$stack[$index]->dependOn($source);
     }
 
+    /**
+     * Runs $callback without subscribing the current observer to what it reads.
+     *
+     * @template T
+     * @param Closure(): T $callback
+     * @return T
+     */
+    public static function untracked(Closure $callback): mixed
+    {
+        $stack = self::$stack;
+        self::$stack = [];
+        try {
+            return $callback();
+        } finally {
+            self::$stack = $stack;
+        }
+    }
+
     public static function evaluate(ReactiveObserver $observer, Closure $callback): mixed
     {
         self::$stack[] = $observer;

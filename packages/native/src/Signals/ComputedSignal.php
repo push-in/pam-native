@@ -7,8 +7,12 @@ namespace Pam\Native\Signals;
 use Closure;
 use WeakMap;
 
-/** @template T */
-final class ComputedSignal implements ReactiveObserver, ReactiveSource
+/**
+ * @template T
+ * @implements ReadableSignal<T>
+ * @property-read T $value reactive alias of get()
+ */
+final class ComputedSignal implements ReactiveObserver, ReactiveSource, ReadableSignal
 {
     /** @var WeakMap<ReactiveSource, true> */
     private WeakMap $dependencies;
@@ -35,6 +39,37 @@ final class ComputedSignal implements ReactiveObserver, ReactiveSource
             $this->dirty = false;
         }
         return $this->value;
+    }
+
+    /** @return T */
+    public function peek(): mixed
+    {
+        if ($this->dirty) {
+            $this->clearDependencies();
+            $this->value = ReactiveScope::evaluate($this, $this->compute);
+            $this->dirty = false;
+        }
+
+        return $this->value;
+    }
+
+    public function __get(string $name): mixed
+    {
+        if ($name !== 'value') {
+            throw new \LogicException("Unknown computed property {$name}; use ->value.");
+        }
+
+        return $this->get();
+    }
+
+    public function __set(string $name, mixed $value): void
+    {
+        throw new \LogicException('A computed value is read-only.');
+    }
+
+    public function __isset(string $name): bool
+    {
+        return $name === 'value';
     }
 
     public function dependencyChanged(): void

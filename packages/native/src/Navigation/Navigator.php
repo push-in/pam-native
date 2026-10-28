@@ -1367,6 +1367,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             if ($previousInstance instanceof NavigationLifecycleAware) {
                 $previousInstance->navigationBlurred($this->contextFor($previous));
             }
+            if ($previousInstance instanceof \Pam\Native\Component) {
+                $previousInstance->__pamNavigationFocus(false);
+            }
             $this->focusedEntryKey = null;
             $this->emitNavigation(NavigationEventType::Blur, ['route' => $this->contextFor($previous)], false, $this->entryKey($previous));
             $this->emitNavigation(NavigationEventType::Focus, ['route' => $this->contextFor($current)], false, $this->entryKey($current));
@@ -1536,6 +1539,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         \Pam\Native\Notifications\PushRendering::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
         if ($instance instanceof NavigationLifecycleAware) {
             $instance->navigationFocused($this->contextFor($entry));
+        }
+        if ($instance instanceof \Pam\Native\Component) {
+            $instance->__pamNavigationFocus(true);
         }
     }
 

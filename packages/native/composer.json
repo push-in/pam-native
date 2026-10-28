@@ -20,7 +20,8 @@
     },
     "autoload": {
         "files": [
-            "src/Polyfill/mbstring_functions.php"
+            "src/Polyfill/mbstring_functions.php",
+            "src/functions.php"
         ],
         "psr-4": {
             "Pam\\Native\\": "src/"
