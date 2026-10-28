@@ -29,9 +29,10 @@ public struct PamStatusBarConfig: Equatable {
     }
 
     /// The colour of the band painted behind the status bar; `nil` paints
-    /// none (no colour, a fully transparent colour, or translucent).
+    /// none (no colour, a fully transparent colour, translucent, or a hidden
+    /// bar: immersive screens draw into the notch with nothing over them).
     public var bandColor: UIColor? {
-        guard !translucent, let backgroundColor else { return nil }
+        guard !translucent, !hidden, let backgroundColor else { return nil }
         let alpha = (UInt64(truncatingIfNeeded: backgroundColor) >> 24) & 0xFF
         guard alpha != 0 else { return nil }
         return UIColor(argb: backgroundColor)

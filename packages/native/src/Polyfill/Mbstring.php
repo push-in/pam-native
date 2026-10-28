@@ -1211,8 +1211,9 @@ final class Mbstring
             foreach ($units as $unit) {
                 if (is_string($unit)) {
                     $out .= $unit;
-                } elseif ($unit !== self::BAD && $unit < 0x110000
-                    && ($unit < 0xD800 || $unit > 0xDFFF)) {
+                } elseif ($unit !== self::BAD && $unit < 0x110000) {
+                    // Like ext-mbstring, a lone surrogate decoded from UCS-2/4
+                    // is written as its three-byte form, not substituted.
                     $out .= self::character($unit);
                 } else {
                     $out .= self::failure($unit, $name);

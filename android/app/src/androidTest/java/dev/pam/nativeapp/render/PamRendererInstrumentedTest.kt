@@ -2277,6 +2277,54 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun hiddenStatusBarPaintsNoBandOverTheCutout() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(
+                                node(
+                                    1,
+                                    0,
+                                    NodeKind.VIEW,
+                                    mapOf(
+                                        PropKey.BACKGROUND_COLOR to
+                                            PropValue.Integer(Color.WHITE.toLong()),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.STATUS_BAR,
+                                    mapOf(
+                                        PropKey.STATUS_BAR_COLOR to
+                                            PropValue.Integer(Color.BLACK.toLong()),
+                                        PropKey.STATUS_BAR_HIDDEN to PropValue.Flag(true),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 0f, 0f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                activity.host.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(Color.TRANSPARENT, activity.host.statusBarSurfaceColor)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun intrinsicTextFollowsTheParentsRelevantCenteringAxis() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

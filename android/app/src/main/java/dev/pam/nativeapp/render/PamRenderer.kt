@@ -8900,7 +8900,7 @@ class PamRenderer(
 
     private fun applyStatusBarConfig(config: StatusBarConfig) {
         applyStatusBarTranslucent(config.translucent)
-        applyStatusBarColor(config.color, config.animated)
+        applyStatusBarColor(config.color, config.animated, bandVisible = !config.hidden)
         applyStatusBarAppearance(config.appearance)
         applyNavigationBarAppearance(config)
         applyStatusBarHidden(config.hidden)
@@ -9007,9 +9007,11 @@ class PamRenderer(
     }
 
     @Suppress("DEPRECATION")
-    private fun applyStatusBarColor(color: Int, animated: Boolean) {
+    private fun applyStatusBarColor(color: Int, animated: Boolean, bandVisible: Boolean = true) {
         val window = activity()?.window ?: return
-        (host as? PamRootHost)?.setStatusBarSurfaceColor(color)
+        // A hidden status bar (immersive screens drawn into the display
+        // cutout) never leaves a painted band over the content.
+        (host as? PamRootHost)?.setStatusBarSurfaceColor(if (bandVisible) color else Color.TRANSPARENT)
         if (Build.VERSION.SDK_INT >= 35) {
             window.decorView.setBackgroundColor(color)
             return

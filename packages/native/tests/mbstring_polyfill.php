@@ -81,11 +81,12 @@ $polyfill('mb_substitute_character', 'none');
 $assert($polyfill('mb_scrub', "a\xFFb") === 'ab', 'Substitution mode "none" must drop invalid sequences.');
 $polyfill('mb_substitute_character', 0x3F);
 $assert(
-    $polyfill('mb_convert_encoding', hex2bin('dff0'), 'UTF-8', 'UCS-2BE') === '?'
-        && $polyfill('mb_convert_encoding', hex2bin('f0df'), 'UTF-8', 'UCS-2LE') === '?'
+    $polyfill('mb_convert_encoding', hex2bin('dff0'), 'UTF-8', 'UCS-2BE') === hex2bin('edbfb0')
+        && $polyfill('mb_convert_encoding', hex2bin('f0df'), 'UTF-8', 'UCS-2LE') === hex2bin('edbfb0')
+        && $polyfill('mb_convert_encoding', hex2bin('dfff'), 'UTF-16BE', 'UCS-2BE') === hex2bin('dfff')
         && $polyfill('mb_check_encoding', hex2bin('dff0'), 'UCS-2BE')
         && $polyfill('mb_scrub', hex2bin('dff0'), 'UCS-2BE') === hex2bin('dff0'),
-    'PHP 8.5 UCS-2 conversion must substitute isolated surrogate code units.',
+    'PHP 8.5 UCS-2 conversion must keep isolated surrogate code units (three-byte form in UTF-8), like ext-mbstring.',
 );
 
 $converted = ['x' => "caf\xE9"];

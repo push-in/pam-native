@@ -95,18 +95,16 @@ impl FontMetricsCache {
                 continue;
             };
             let files = &mut self.files;
-            let cached = self
-                .fonts
-                .entry(family.clone())
-                .or_insert_with(|| CachedFont {
-                    bytes: Arc::clone(
-                        files
-                            .entry(path)
-                            .or_insert_with_key(|path| Arc::from(fs::read(path).unwrap_or_default())),
-                    ),
-                    advances: BTreeMap::new(),
-                    snapshot: Arc::new(BTreeMap::new()),
-                });
+            let cached =
+                self.fonts
+                    .entry(family.clone())
+                    .or_insert_with(|| CachedFont {
+                        bytes: Arc::clone(files.entry(path).or_insert_with_key(|path| {
+                            Arc::from(fs::read(path).unwrap_or_default())
+                        })),
+                        advances: BTreeMap::new(),
+                        snapshot: Arc::new(BTreeMap::new()),
+                    });
             if cached.bytes.is_empty() {
                 continue;
             }
