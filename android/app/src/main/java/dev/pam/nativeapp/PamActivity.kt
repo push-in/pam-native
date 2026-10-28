@@ -758,7 +758,14 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                 private var interactive = false
 
                 override fun onBackStarted(backEvent: BackEvent) {
-                    interactive = if (errorOverlay?.isBlocking == true || runtime.hasPresentedModal()) {
+                    interactive = if (
+                        errorOverlay?.isBlocking == true
+                        || runtime.hasPresentedModal()
+                        || !isEdgeSwipe(backEvent)
+                    ) {
+                        // A Back the user does not drag (the Back key or
+                        // button) never moves the route: the runtime either
+                        // pops with its own transition or consumes it.
                         false
                     } else {
                         rootHost.startPredictiveBack()
@@ -812,6 +819,11 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             )
         }
     }
+
+    /** API 36 marks a Back key/button with EDGE_NONE; earlier ones report no drag (progress stays 0). */
+    @SuppressLint("NewApi")
+    private fun isEdgeSwipe(backEvent: BackEvent): Boolean =
+        Build.VERSION.SDK_INT < 36 || backEvent.swipeEdge != BackEvent.EDGE_NONE
 
     internal fun suppressNextPamBack() {
         suppressBackUntil = SystemClock.uptimeMillis() + BACK_SUPPRESSION_WINDOW_MS

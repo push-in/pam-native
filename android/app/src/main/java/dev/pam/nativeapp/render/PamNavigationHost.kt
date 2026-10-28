@@ -398,20 +398,30 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         this.onGestureCancel = onGestureCancel
     }
 
+    /**
+     * A predictive back started. Nothing moves yet: the routes are prepared
+     * on the first progress past 0, so a Back that never drags (the Back
+     * key, which on Android 15+ also starts a predictive back) leaves every
+     * route untouched while the runtime decides whether it pops (a normal
+     * pop transition) or is consumed by the app (nothing happens), like
+     * React Navigation with a consuming BackHandler.
+     */
     fun startPredictiveBack(): Boolean {
         endGestureSettle()
         if (!gestureEnabled || childCount < 2 || running != null || gesturePrepared) return false
         predictiveBackActive = true
         predictiveBackCommitted = false
         predictiveBackProgress = 0f
-        prepareGesture()
-        applyGestureProgress(0f, layoutDirection == View.LAYOUT_DIRECTION_RTL)
         return true
     }
 
     fun updatePredictiveBack(progress: Float) {
         if (!predictiveBackActive) return
         predictiveBackProgress = progress.coerceIn(0f, 1f)
+        if (!gesturePrepared) {
+            if (predictiveBackProgress <= 0f) return
+            prepareGesture()
+        }
         applyGestureProgress(
             predictiveBackProgress,
             layoutDirection == View.LAYOUT_DIRECTION_RTL,
@@ -421,6 +431,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     fun cancelPredictiveBack() {
         if (!predictiveBackActive) return
         predictiveBackActive = false
+        if (!gesturePrepared) {
+            predictiveBackProgress = 0f
+            return
+        }
         settleGesture(
             predictiveBackProgress,
             complete = false,
@@ -433,12 +447,17 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
      * The user released a predictive back. The routes stay where the gesture
      * left them until the runtime answers: a pop completes it, while a Back
      * the app consumed (a frame with no navigation, see resolvePredictiveBack)
-     * settles them back like a cancelled gesture. A key Back starts at
-     * progress 0, so a consumed one changes nothing on screen.
+     * settles them back like a cancelled gesture. A Back that never dragged
+     * prepared nothing: it is a plain Back, so a pop plays its own
+     * transition and a consumed one changes nothing on screen.
      */
     fun commitPredictiveBack() {
         if (!predictiveBackActive) return
         predictiveBackActive = false
+        if (!gesturePrepared) {
+            predictiveBackProgress = 0f
+            return
+        }
         predictiveBackAwaiting = true
         predictiveBackNavigated = false
         removeCallbacks(predictiveBackTimeout)
@@ -703,7 +722,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             predictiveBackNavigated = false
             removeCallbacks(predictiveBackTimeout)
         }
-        val wasPrepared = gesturePrepared || predictiveBackActive
+        // A predictive back that never dragged moved no route.
+        val wasPrepared = gesturePrepared
         val incoming = gestureIncoming
         val outgoing = gestureOutgoing
         gesturePrepared = false
