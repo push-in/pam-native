@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- iOS `followEndOnResize` (extension property 1001, on by default): a
+  VirtualizedList opened at its end (`initialScrollIndex`) or scrolled there
+  keeps its end visible when its viewport shrinks, even while all of its rows
+  still fit, as on Android. A real-world app's chat timeline hid its newest
+  messages behind the composer when the keyboard opened. Inverted lists are
+  left alone, and `followEndOnResize=false` turns the behaviour off.
+
 ### Protocol
 
 - Protocol: the core identifier tables are closed (properties `1`–`543`,

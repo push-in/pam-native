@@ -599,6 +599,8 @@ final class PamVirtualListView: UIScrollView {
     /// the item starts (Android `applyInitialPosition`); an explicit scroll
     /// request of the same commit wins.
     var pamInitialScrollIndex = 0
+    /// `followEndOnResize` (extension property 1001), on by default.
+    var pamFollowEndOnResize = true
     var pamInitialScrollIndexApplied = false
 
     /// RN `windowSize`-like item prefetch (`ListPrefetch`): minimum number of
@@ -666,7 +668,15 @@ final class PamVirtualListView: UIScrollView {
             anchorMaximum = maximum
             anchorOffset = horizontal ? contentOffset.x : contentOffset.y
         }
-        guard anchorMaximum > 0, maximum != anchorMaximum,
+        // `followEndOnResize` (Android PamRecyclerList.followsEnd): a list
+        // opened at its end (`initialScrollIndex`, a chat timeline) follows it
+        // even while all of its rows still fit, so a keyboard or composer that
+        // then shrinks the viewport keeps the newest rows visible; a list
+        // scrolled to its end follows it too. An inverted list keeps its
+        // newest rows natively.
+        let followsEnd = pamFollowEndOnResize && !pamInverted &&
+            (anchorMaximum > 0 || (anchorMaximum == 0 && pamInitialScrollIndex > 0))
+        guard followsEnd, maximum != anchorMaximum,
               anchorOffset >= anchorMaximum - 1,
               !isTracking, !isDragging, !isDecelerating else { return }
         if abs(offset - maximum) > 0.5 {

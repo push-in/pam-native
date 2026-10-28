@@ -3109,6 +3109,8 @@ public final class PamRenderer: @unchecked Sendable {
             }
         case PamConstants.listInverted:
             (view as? PamVirtualListView)?.pamInverted = value.boolOrNil() ?? false
+        case PamConstants.listFollowEndOnResize:
+            (view as? PamVirtualListView)?.pamFollowEndOnResize = value.boolOrNil() ?? true
         case PamConstants.listInitialScrollIndex:
             if let list = view as? PamVirtualListView {
                 let index = max(0, Int(value.integerOrNil() ?? 0))
@@ -3660,6 +3662,8 @@ public final class PamRenderer: @unchecked Sendable {
             }
         case PamConstants.listInverted:
             (view as? PamVirtualListView)?.pamInverted = false
+        case PamConstants.listFollowEndOnResize:
+            (view as? PamVirtualListView)?.pamFollowEndOnResize = true
         case PamConstants.listInitialScrollIndex:
             (view as? PamVirtualListView)?.pamInitialScrollIndex = 0
         case PamConstants.listPrefetch:
