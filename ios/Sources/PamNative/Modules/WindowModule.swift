@@ -261,6 +261,11 @@ final class ImagePrefetchModule: NativeModule, ClosableNativeModule, @unchecked 
 
     /// Synchronous on the prefetch queue; returns stored bytes or nil.
     private func fetch(source: String, headers: [String: String], cacheKey: String?) -> Int64? {
+        // A packaged image has nothing to download: decode it now and keep
+        // it for the process, so its first Image paints in the bind frame.
+        if source.range(of: "asset://", options: [.anchored, .caseInsensitive]) != nil {
+            return PamInlineImages.preloadAsset(source)
+        }
         guard let url = URL(string: source), let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http", url.host != nil else { return nil }
         let cache = PamMediaDiskCache.shared

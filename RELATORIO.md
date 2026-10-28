@@ -33,3 +33,21 @@ Cargo e Gradle usam o lock compartilhado /tmp/pam-gradle.lock.d. Gradle: heap m�
 PR #180 reconhecido como MERGED pelo GitHub; merge 0168f10d e relatório 5bd1c220 enviados à integrate. O media-editor privado 0.5.0 não continha as APIs extraídas; integração privada 4b6d3c9 e correção f878c22 entregues como tag/release privada v0.5.1, sem publicação em serviço público. O real-world app conserva ^0.5.0 e instala 0.5.1.
 
 Nenhum gate solicitado pendente. Swift e QA/perfilamento em dispositivo continuam fora desta execução; não há números de CPU/PSS/FPS. Nenhuma tag/release do núcleo foi criada. O commit deste relatório registra os resultados finais.
+
+
+## v3 — memoização dos consumidores de signals (2026-10-28)
+
+Correção `ce4bd91b`: `Signals::changed()` e o fechamento de batch usam
+`Runtime::scheduleRender()`. `Signal::set()` já invalida os consumidores;
+remover a invalidação global preserva linhas memoizadas sem alterações.
+Regressão cobre consumidor atualizado, componente alheio, ausência de
+consumidores e batch. Documentação em `docs/architecture-v2.md`.
+
+Rebase concluído sobre `e416f326`. Revalidação PHP 8.5: **8/8** verdes:
+`arch_v2_signals`, `arch_v2_signal_fanout`, `arch_v2_composables`,
+`arch_v2_signal_rendering`, `arch_v2_resource`, `arch_v2_resource_options`,
+`arch_v2_resource_production` e a suíte completa `packages/native/tests/run.php`.
+TMPDIR exclusivo: `/tmp/codex-inbox-resource-validation/framework-v3-tmp`.
+Resultados: `/tmp/codex-inbox-resource-validation/framework-v3-results.json`.
+Sem alterações de dependências, plugins ou código nativo nesta correção.
+A integração desta correção não atesta QA nativo do aplicativo consumidor.

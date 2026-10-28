@@ -19,6 +19,18 @@
   element flight). Drag drivers resolve `nativeRef`s on the whole screen when
   the detector does not contain them.
 
+## 1.46.2 - 2026-10-28
+
+Fixes and one addition on top of 1.46.1, no protocol change (core and extension identifiers as in 1.46.1).
+
+- `Image::prefetch()` accepts packaged `asset://` images: each is decoded once
+  per process at full resolution, off the UI thread, and kept (a GPU bitmap on
+  Android 9+; at most 8 images / 48 MiB, dropped on a critical memory trim or
+  iOS memory warning). An Image with that exact source then paints in the
+  frame that binds it, before layout, with no decode, cache-size match or
+  fade, and a theme switch between two preloaded sources only swaps the
+  bitmap (Android, iOS). Use it for a screen background that must be there in
+  the first frame of a push.
 - Lists (Android): a list opened at its end (`initialScrollIndex`) that the
   reader scrolled away from is no longer pulled back to the end when a row
   re-measures (an image finished loading), its viewport resizes or rows land;
@@ -31,6 +43,17 @@
   `ScrollPhaseEvent::$contentWidth`/`$contentHeight`/`$layoutWidth`/
   `$layoutHeight`, and `ScrollPhaseEvent::distanceFromEnd()` tells how far the
   viewport is from the content's end (Android, iOS).
+
+## 1.46.1 - 2026-10-28
+
+Fixes on top of 1.46.0, no protocol change (core and extension identifiers as in 1.46.0).
+
+- Android Back: a Back that never drags (the Back key, which on Android 15+
+  also starts a predictive back) moves no route. Routes are prepared on the
+  first progress past 0, so a Back the app consumes through
+  `Navigator::interceptSystemBack()` (closing a GIF or emoji panel) changes
+  nothing on screen instead of flickering the route, and one that pops plays
+  its normal transition, like React Navigation with a consuming BackHandler.
 - `TapEffect::layer()`: a tap effect can animate more than one layer. Each
   extra program plays on the anchor's next child alongside the first (Android,
   iOS; the protocol string carries one `pam-motion` program per layer).

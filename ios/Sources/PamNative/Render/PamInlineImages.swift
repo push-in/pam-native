@@ -71,9 +71,56 @@ enum PamInlineImages {
         return decoded
     }
 
-    /// A small asset already decoded (no bundle lookup, no file read).
+    /// A small or preloaded asset already decoded (no bundle lookup, no file read).
     static func cachedAsset(_ source: String) -> UIImage? {
-        cache.object(forKey: source as NSString)
+        assetLock.lock()
+        let preloaded = preloadedAssets[source]
+        assetLock.unlock()
+        return preloaded ?? cache.object(forKey: source as NSString)
+    }
+
+    /// `Image::prefetch()` with `asset://` sources (a screen background):
+    /// decoded once per process at full resolution and kept, so an Image
+    /// with that exact source paints in the frame that binds it, and a theme
+    /// switch between two preloaded sources only swaps the image. Bounded
+    /// like Android's PamPreloadedImages; a memory warning drops them.
+    static let preloadMaxEntries = 8
+    static let preloadMaxBytes = 48 * 1_024 * 1_024
+    private static var preloadedAssets: [String: UIImage] = [:]
+    private static var preloadedBytes = 0
+    private static var preloadObserver: NSObjectProtocol?
+
+    /// Worker thread. Returns the decoded byte count (0 when already loaded), nil on failure.
+    static func preloadAsset(_ source: String) -> Int64? {
+        assetLock.lock()
+        let known = preloadedAssets[source] != nil
+        assetLock.unlock()
+        if known { return 0 }
+        guard let path = try? normalizedPamAssetPath(source),
+              let url = pamAssetFileURL(path),
+              let data = try? Data(contentsOf: url),
+              let image = UIImage(data: data) else { return nil }
+        let decoded = image.preparingForDisplay() ?? image
+        let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+        assetLock.lock()
+        defer { assetLock.unlock() }
+        if preloadedAssets[source] != nil { return 0 }
+        guard preloadedAssets.count < preloadMaxEntries, preloadedBytes + cost <= preloadMaxBytes else { return nil }
+        if preloadObserver == nil {
+            preloadObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: nil
+            ) { _ in
+                assetLock.lock()
+                preloadedAssets.removeAll()
+                preloadedBytes = 0
+                assetLock.unlock()
+            }
+        }
+        preloadedAssets[source] = decoded
+        preloadedBytes += cost
+        return Int64(cost)
     }
 
     static func decode(_ source: String) -> Data? {
