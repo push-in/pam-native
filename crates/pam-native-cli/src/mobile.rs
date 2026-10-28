@@ -10819,7 +10819,14 @@ mod tests {
             .android
             .deep_links
             .iter()
-            .map(|link| (link.scheme.as_str(), link.host.as_deref(), link.path_prefix.as_deref(), link.auto_verify))
+            .map(|link| {
+                (
+                    link.scheme.as_str(),
+                    link.host.as_deref(),
+                    link.path_prefix.as_deref(),
+                    link.auto_verify,
+                )
+            })
             .collect();
         assert_eq!(
             links,
@@ -10830,10 +10837,17 @@ mod tests {
             ]
         );
         assert_eq!(manifest.ios.url_schemes, vec!["ROUTES"]);
-        assert_eq!(manifest.ios.associated_domains, vec!["applinks:app.example.com"]);
+        assert_eq!(
+            manifest.ios.associated_domains,
+            vec!["applinks:app.example.com"]
+        );
         validate_ios_links(&manifest.ios).expect("valid iOS links");
         merge_route_links(&mut manifest, &routes);
-        assert_eq!(manifest.android.deep_links.len(), 3, "merging twice adds nothing");
+        assert_eq!(
+            manifest.android.deep_links.len(),
+            3,
+            "merging twice adds nothing"
+        );
     }
 
     fn share_app(plugins: serde_json::Value) -> NativeManifest {

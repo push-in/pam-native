@@ -152,7 +152,7 @@ final class Route
         $routes?->__invoke();
     }
 
-    /** Opt out of system deep links (`zechat://...`) for the whole router. */
+    /** Opt out of system deep links (`myapp://...`) for the whole router. */
     public static function linking(bool $enabled): void
     {
         RouteCollection::current()->linking = $enabled;
@@ -227,7 +227,7 @@ final class Route
         return self::navigator()->refresh();
     }
 
-    /** Handles an incoming link (`zechat://chat/5`, `https://host/chat/5`). */
+    /** Handles an incoming link (`myapp://chat/5`, `https://host/chat/5`). */
     public static function open(string $uri): bool
     {
         return self::navigator()->open($uri);

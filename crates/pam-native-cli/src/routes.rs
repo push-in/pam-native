@@ -16,7 +16,7 @@ pub const MANIFEST_PATH: &str = ".pam-native/routes.manifest.json";
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LinkOptions {
-    /// Custom URI schemes (`zechat` handles `zechat://chat/5`).
+    /// Custom URI schemes (`example` handles `example://chat/5`).
     #[serde(default)]
     pub schemes: Vec<String>,
     /// HTTPS hosts for Android App Links / iOS universal links.
@@ -245,12 +245,15 @@ mod tests {
     #[test]
     fn links_cover_schemes_and_each_route_prefix_once_per_host() {
         let options = LinkOptions {
-            schemes: vec!["zechat".into()],
+            schemes: vec!["example".into()],
             hosts: vec!["app.example.com".into()],
             auto_verify: true,
         };
         let links = derive_links(&options, &manifest());
-        let custom: Vec<_> = links.iter().filter(|link| link.scheme == "zechat").collect();
+        let custom: Vec<_> = links
+            .iter()
+            .filter(|link| link.scheme == "example")
+            .collect();
         assert_eq!(custom.len(), 1);
         assert!(custom[0].host.is_none() && !custom[0].auto_verify);
         let prefixes: Vec<_> = links
@@ -259,10 +262,12 @@ mod tests {
             .map(|link| link.path_prefix.clone().unwrap())
             .collect();
         assert_eq!(prefixes, vec!["/chat/", "/chats", "/group/", "/login"]);
-        assert!(links
-            .iter()
-            .filter(|link| link.scheme == "https")
-            .all(|link| link.auto_verify && link.host.as_deref() == Some("app.example.com")));
+        assert!(
+            links
+                .iter()
+                .filter(|link| link.scheme == "https")
+                .all(|link| link.auto_verify && link.host.as_deref() == Some("app.example.com"))
+        );
     }
 
     #[test]
@@ -273,7 +278,7 @@ mod tests {
     #[test]
     fn ios_domains_and_scheme_merge_skip_duplicates() {
         let options = LinkOptions {
-            schemes: vec!["zechat".into()],
+            schemes: vec!["example".into()],
             hosts: vec!["a.example.com".into(), "b.example.com".into()],
             auto_verify: false,
         };
@@ -281,11 +286,11 @@ mod tests {
             associated_domains(&options),
             vec!["applinks:a.example.com", "applinks:b.example.com"]
         );
-        let mut schemes = vec!["ZECHAT".to_owned()];
+        let mut schemes = vec!["EXAMPLE".to_owned()];
         merge_unique(&mut schemes, options.schemes.clone());
-        assert_eq!(schemes, vec!["ZECHAT"]);
+        assert_eq!(schemes, vec!["EXAMPLE"]);
         merge_unique(&mut schemes, vec!["other".to_owned()]);
-        assert_eq!(schemes, vec!["ZECHAT", "other"]);
+        assert_eq!(schemes, vec!["EXAMPLE", "other"]);
     }
 
     #[test]
@@ -295,20 +300,31 @@ mod tests {
         let path = directory.join("routes.manifest.json");
         fs::write(&path, r#"{"version":2,"routes":[]}"#).unwrap();
         assert!(read_manifest(&path).unwrap_err().contains("unsupported"));
-        fs::write(&path, r#"{"version":1,"routes":[{"name":"a","path":"/a","linkable":true}]}"#).unwrap();
+        fs::write(
+            &path,
+            r#"{"version":1,"routes":[{"name":"a","path":"/a","linkable":true}]}"#,
+        )
+        .unwrap();
         assert_eq!(read_manifest(&path).unwrap().routes.len(), 1);
         fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
     fn apps_without_routes_php_skip_compilation() {
-        let directory = std::env::temp_dir().join(format!("pam-routes-none-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("pam-routes-none-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
-        assert!(compile(&directory, &RoutesOptions::default()).unwrap().is_none());
+        assert!(
+            compile(&directory, &RoutesOptions::default())
+                .unwrap()
+                .is_none()
+        );
         fs::write(directory.join("routes.php"), "<?php\n").unwrap();
-        assert!(compile(&directory, &RoutesOptions::default())
-            .unwrap_err()
-            .contains("pam-native-routes is missing"));
+        assert!(
+            compile(&directory, &RoutesOptions::default())
+                .unwrap_err()
+                .contains("pam-native-routes is missing")
+        );
         fs::remove_dir_all(&directory).unwrap();
     }
 }

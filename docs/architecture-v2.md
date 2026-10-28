@@ -3,9 +3,8 @@
 Architecture v2 makes a PAM Native app simple, typed and open, in the style of
 Vue, React Native and Laravel. It is additive: code that does not migrate keeps
 working. This page covers the component core: globals, `setup()`, lifecycle
-hooks, reactivity, framework composables and `useResource()`. Routes
-(`Route::screen()`, middleware, `navigate()`) and the HTTP client are
-documented in their own sections, added by the routing and HTTP work.
+hooks, reactivity, framework composables, `useResource()`, routing
+(`routes.php`, middleware, typed navigation, deep links) and the HTTP client.
 
 Every function on this page lives in the `Pam\Native` namespace and is
 autoloaded by Composer (`"files"`), so one `use function` line imports it:
@@ -255,6 +254,246 @@ The template compiler and its runtime evaluator (both code paths) resolve:
 An undefined name now says where it was looked up: `Template expression $x is
 undefined (not a loop variable, component property or App::global())`.
 
+## Routing
+
+Routes live in `routes.php`, Laravel style. The file returns nothing: every
+`Route::` call is collected, and `App::run(require __DIR__.'/routes.php')`
+boots them (`require` returns `1`; a file that returns the collection works
+too). Apps without routes keep `App::run(HomeScreen::class)`.
+
+```php
+use Pam\Native\Route;
+
+Route::screen('/login', LoginScreen::class)->name('login');
+
+Route::middleware('auth')->group(function () {
+    Route::tabs(function () {
+        Route::screen('/chats', ChatsScreen::class)->name('chats')->icon('chatbubbles')->label('Conversas');
+        Route::screen('/feed', FeedScreen::class)->name('feed')->icon('home');
+    });
+    Route::screen('/chat/{id}', ChatScreen::class)->name('chat')->gestures(false);
+    Route::modal('/settings', SettingsScreen::class)->name('settings')->presentation('sheet');
+});
+```
+
+| API | What it does |
+| --- | --- |
+| `Route::screen($path, Screen::class\|Closure)` | A stack route. Without `->name()`, the name comes from the path (`/settings/privacy` -> `settings.privacy`). |
+| `Route::modal($path, ...)` | A stack route presented modally (`->presentation('sheet')` for a form sheet). |
+| `Route::tabs(fn, name: 'tabs')` | Bottom tabs. Every `Route::screen()` inside is a tab; the group is one stack entry, so stack routes push over the tab bar. `->presentation()`, `->backBehavior()`. |
+| `Route::group([...], fn)` | Shared attributes: `middleware`, `name` (prefix), `prefix` (path), `transition` (`NavigationTransition` or `[transition, ms]`), `gestures`, `presentation`, `orientation`, `options` (`ScreenOptionsPatch`, closure or `RoutePreset`), `errorBoundary`. A `RoutePreset` or patch alone is the options shorthand. |
+| `Route::middleware('auth')->group(fn)`, `Route::name('settings.')`, `Route::prefix('/settings')` | Fluent groups. |
+| `Route::layout(AppShell::class, fn)` | Root layout (Laravel/Expo layouts). The component receives the `Navigator` (or the `RouteNavigator`) by type and draws the stack inside, with gates, banners and hosts around or over it. `App::run()` mounts it. |
+| `Route::errorBoundary(fn (Throwable $e, RouteContext $r, Closure $retry) => ...)` | Default boundary for every route without its own. |
+| `Route::linking(false)`, `Route::persist()` | Opt out of system links; restore the persisted stack on cold start (off by default). |
+
+Chained on a route: `->name()`, `->middleware()`, `->icon()`, `->label()`,
+`->title()`, `->gestures(bool)`, `->presentation('card'|'modal'|'fullScreen'|'transparent'|'sheet'|'contained')`,
+`->orientation('portrait'|'landscape'|'all'|...)`, `->statusBar('light'|'dark', hidden: false)`,
+`->transition(NavigationTransition, ms)`, `->sheet(detents)`, `->secure()`,
+`->keepAlive(bool|fn (RouteContext $r) => !$r->has('id'))`,
+`->unique(fn (RouteContext $r) => 'chat:'.$r->chatId)` (navigating to an entry
+with the same identity goes back to it instead of pushing another),
+`->alias('/group/{chatId}')` (repeatable; each alias is routed and becomes a
+deep link), `->errorBoundary(fn)`, `->initial()` and `->deepLink(false)`.
+
+The stack defaults are those of the pre-v2 `Route::stack()`: slide from right,
+240 ms, and a fresh boot from the initial route. The initial route is the one
+marked `->initial()`, else `/`, else the first tabs group, else the first
+route. Its middleware runs at boot, so a signed-out user starts on `login`.
+
+### Middleware
+
+```php
+use Pam\Native\{App, Middleware, Route};
+use function Pam\Native\redirect;
+
+final class Authenticate implements Middleware
+{
+    public function handle(Route $to, Closure $next): mixed
+    {
+        return Session::check() ? $next($to) : redirect('login');
+    }
+}
+
+App::middleware(['auth' => Authenticate::class]);   // in index.php
+```
+
+`$to` is the target route with its params (`$to->name()`, `$to->param('id')`,
+`$to->is('settings.*')`). Return `$next($to)` to continue, `redirect('login')`
+(`->reset()`, `->replace()`, `->push()`, `->with([...])`) to go elsewhere, or
+`false` to stay. Aliases take arguments (`'role:admin,editor'` calls
+`handle($to, $next, 'admin', 'editor')`), and closures work as middleware.
+Middleware also guards the stack (boot, links, `Route::refresh()` after login
+or logout), so it can run more than once per navigation: keep it a pure check.
+
+### Navigating
+
+```php
+use function Pam\Native\{navigate, back};
+
+navigate('chat', ['id' => $id]);
+navigate(ChatScreen::class, id: $id);
+navigate(Routes::chat(id: $id));          // generated, typed
+back();
+```
+
+`Route::navigate($route, $params, RedirectMode::Replace|Reset|Push)` picks the
+stack action (`navigate()` goes back to an existing entry, otherwise pushes).
+Params are validated against the screen before navigating: an unknown name, a
+missing required parameter or a value that cannot become the declared type
+throws. `Route::current()`, `Route::path('chat', ['id' => 5])`,
+`Route::has()`, `Route::refresh()` and `Route::open($uri)` complete the API.
+
+In templates:
+
+```html
+<Link route="chat" :params="{ id: chatId }"><Text>Open</Text></Link>
+```
+
+`<Link>` is a `Pressable` with the link accessibility role; `mode="replace"`
+changes the stack action. `:params` takes a PHP array or a `{ key: value }`
+object literal (bare names read template data; `{ id }` is shorthand for
+`{ id: id }`). `Link::to('chat', ['id' => $id], ...$children)` is the PHP form.
+
+### Screen parameters
+
+URL and navigation params arrive typed in `setup()`:
+
+```php
+final class ChatScreen extends Component
+{
+    public function setup(string $id, int $unread = 0): void { /* ... */ }
+}
+```
+
+Values from links are strings and are coerced to `int`, `float`, `bool` or a
+backed enum; anything else fails with a clear message. Class-typed parameters
+are services injected by type, not route params: `Navigator`, `RouteContext`
+and `RouteNavigator` reach constructors, `setup()`, screen closures and the
+layout. Pre-v2 screens with `__construct(Navigator $navigator, string $chatId)`
+keep working unchanged. The router hands params to the component through
+`RouteArguments::attach()` / `Component::__pamRouteParams()`, and screens
+the stack cannot see directly (tabs, screens wrapped for a status bar) still
+get `onFocus()` / `onBlur()`.
+
+### Typed routes and deep links (compiler)
+
+`pam-native-routes routes.php src/Navigation/Generated` (run by the PAM CLI
+before every build when `routes.php` exists) loads the routes, reads each
+screen's `setup()` (or constructor) signature, and:
+
+1. generates `RouteName` (string-backed enum) and `Routes`, whose helpers
+   carry the PHP types (`Routes::chat(string $id, int $unread = 0): TypedRoute`);
+2. writes `.pam-native/routes.manifest.json` for the CLI;
+3. checks every literal `navigate()`, `redirect()`, `Route::navigate()` and
+   `<Link route=...>` in `src/`: an unknown route, an unknown or missing
+   parameter, or a literal of the wrong type fails the build with
+   `file:line: route chat requires parameter id.`
+
+A path placeholder that is not a `setup()` parameter, or a tab that requires a
+parameter, is a compile error too. `--check-only` runs only the checks.
+
+Deep links come from the route paths. Declare once where they are reachable:
+
+```json
+"links": { "schemes": ["myapp"], "hosts": ["app.example.com"] },
+"routes": { "file": "routes.php", "namespace": "App\\Navigation\\Generated", "output": "src/Navigation/Generated" }
+```
+
+The CLI adds one Android intent filter for each custom scheme, and one
+`autoVerify` https filter per host and distinct static path prefix (`/chat/{id}`
+and its aliases become `/chat/`, `/group/`). It also adds the schemes to
+`ios.urlSchemes` and `applinks:<host>` to `ios.associatedDomains`, merged with
+what `android`/`ios` already declare. At runtime the router routes
+`myapp://chat/5` and `https://app.example.com/chat/5?unread=2` by path; only
+query keys the screen declares are kept. `PAM_NATIVE_SKIP_ROUTES=1` makes the
+CLI reuse the last manifest without running PHP.
+
+### Migrating from routes.json and Route::stack
+
+| Before (`@deprecated`) | Architecture v2 |
+| --- | --- |
+| `routes.json` + `pam-native-routes routes.json` + `Navigation/Generated/AppRoute` | `routes.php`; the compiler generates `RouteName` / `Routes` from it |
+| `Routing\Route::stack('main', initial: ..., routes: fn)` | `Route::screen()`/`modal()`/`tabs()` at the top level of `routes.php`; `->initial()` |
+| `Route::group(AppRoutePresets::chat(), fn () => Route::module(new ChatRoutes($runtime)))` | `Route::group(AppRoutePresets::chat(), fn)` with the module's routes inside (presets are accepted as is) |
+| `Route::guard($guard, fn)` / `->guard()` | `Route::middleware('auth')->group(fn)` / `->middleware('auth')` |
+| `->deepLink('/chat/{chatId}')->deepLink('/group/{chatId}')` | the route path plus `->alias('/group/{chatId}')` |
+| `->identifyBy(fn)` | `->unique(fn)` |
+| `$navigator->push(AppRoute::Chat, ['chatId' => $id])`, `Routes::chat(...)->push()` | `navigate('chat', ['chatId' => $id])`, `navigate(Routes::chat(chatId: $id))` |
+| `Routing\Navigation::navigate()`, `RouteTarget` | `navigate()` / `TypedRoute` (middleware and validation included) |
+| `new AppShell($navigator)` around `Route::stack()` | `Route::layout(AppShell::class, fn)` |
+| Manual `android.deepLinks` / `ios.associatedDomains` lists per path | `links` in `pam-native.json`; entries are derived from the routes |
+
+## HTTP
+
+`Http::create()` returns an axios-style client over the native transport
+(`Pam\Native\Http\Http`): requests run on the native networking stack and PHP
+only receives the settled result.
+
+```php
+use Pam\Native\Http\{Http, HttpClient, HttpError, Request};
+
+final class Api
+{
+    public static function client(): HttpClient
+    {
+        static $client;
+
+        return $client ??= Http::create(baseUrl: 'https://api.example.com', timeout: 15_000, retry: 2)
+            ->onRequest(fn (Request $r) => $r->withToken(Session::token()))
+            ->onError(fn (HttpError $e) => $e->status === 401 ? Session::expire() : null);
+    }
+}
+
+Api::client()->get('/feed', ['cursor' => $cursor])->json()
+    ->then(fn (array $feed) => $this->feed->set($feed))
+    ->catch(fn (HttpError $e) => $this->error->set($e->json('message', 'Falha na rede.')));
+```
+
+- `Http::create(baseUrl, headers, timeout, retry, retryDelay)`. The client is
+  immutable: `onRequest()`, `onResponse()`, `onError()`, `withHeaders()`,
+  `withBaseUrl()`, `withTimeout()` and `withRetry()` return a copy.
+- `get($url, $query)`, `delete($url, $query)`, `post/put/patch($url, $data)`
+  (arrays and objects as JSON, strings as is) and `request()`.
+- `multipart($url, fn (MultipartRequest $form) => $form->field(...)->file(...), $progress)`
+  and `upload($url, $privatePath, $headers, $progress)` keep the native
+  transfers with byte progress; the interceptors apply to them too.
+- They return a `PendingResponse`: a `Thenable` (`then()`, `catch()`,
+  `finally()`, `cancel()`) of `Response`, plus `json($key)` and `text()`
+  shortcuts that return a Thenable of the decoded body.
+- `Request` is immutable: `withToken()`, `withHeader()`, `withHeaders()`,
+  `withoutHeader()`, `withQuery()`, `withJson()`, `withBody()`,
+  `withTimeout()` and `withContext()` (values interceptors share).
+- `Response`: `status`, `headers` (lower-case), `body`, `json($dotKey)`,
+  `header()`, `ok()`.
+- `HttpError` (rejection reason): `status`, `request`, `response`,
+  `isNetworkError()`, `isTimeout()`, `isClientError()`, `isServerError()` and
+  `json($key)`. Statuses >= 400 and transport failures reject.
+
+Interceptors run in registration order and may be asynchronous (return a
+Thenable). `onRequest` returns the new `Request` or null. `onResponse` returns
+a `Response` or null. `onError` returns a `Response` to recover, a `Request` to
+resend it (for example after refreshing a token; at most 3 resends, and every
+resend goes through `onRequest` again), or null to let the rejection continue.
+
+Retry applies only to idempotent requests (GET, PUT, DELETE), after a
+transport failure, 408, 429 or 5xx. It waits `retryDelay * 2^n` or the
+`Retry-After` header, capped at 60 s, on a native timer (no polling).
+
+`useResource()` accepts the PendingResponse directly and cancels it when its
+scope unmounts:
+
+```php
+$feed = useResource(fn (?string $cursor) => Api::client()->get('/feed', ['cursor' => $cursor])->json(),
+    paginate: true, refreshOnFocus: true);
+```
+
+`Pam\Native\Async\Promise` is the Thenable behind it (`resolved()`,
+`rejected()`, `all()`, `from()`). It is single-threaded: callbacks run when the
+native result arrives. Cancelling a derived promise cancels its source, which
+is what a request chain needs.
+
 ## Migration
 
 | Before | Architecture v2 |
@@ -269,4 +508,6 @@ undefined (not a loop variable, component property or App::global())`.
 | `effects()` / `watchers()` returning `Effect::watch(...)`, `Watch::value()` | `watch()` inside `setup()` (`@deprecated`) |
 | `initialState()` + `$this->state->x` | `signal()` properties created in `setup()` (`@deprecated`) |
 | Constructor route parameters | `setup(string $id)` (constructors still work) |
+| `routes.json`, `Routing\Route::stack()`, `Navigator->push()` | `routes.php`, `navigate()` (see [Routing](#migrating-from-routesjson-and-routestack)) |
+| `Http::get($url, $callback)` | `Http::create(...)->get($url)->then(...)` (the callback API still works) |
 | App-specific singletons reached through statics | `App::globals()` |

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Architecture v2 routing: Laravel-style `routes.php` with `Pam\Native\Route`
+  (`screen`, `modal`, `tabs`, `group`, `middleware`, `name`, `prefix`,
+  `layout`, chained screen options, `->alias()`, `->unique()`,
+  `->keepAlive(rule)`, error boundaries), the `Middleware` interface with
+  `App::middleware()` aliases, `navigate()` / `back()` / `redirect()`, typed
+  `setup()` params with `Navigator`/`RouteContext` injected by type, and the
+  `<Link route :params>` template component (`{ key: value }` object literals
+  in template expressions). `App::run(require 'routes.php')` boots them.
+- `pam-native-routes routes.php <dir>` (run by the CLI before every build)
+  generates typed `RouteName`/`Routes` helpers and a route manifest, and fails
+  the build on a wrong route name, parameter or literal type in
+  `navigate()`/`redirect()`/`<Link>`. The CLI derives Android app links and
+  iOS URL schemes / associated domains from route paths through the new
+  `links` manifest key. `routes.json`, `Routing\Route::stack()`,
+  `Routing\Navigation`, `RouteTarget` and direct `Navigator` use are
+  `@deprecated` (they keep working).
+- Axios-style HTTP: `Http::create()` returns an immutable `HttpClient` with
+  `onRequest`/`onResponse`/`onError` interceptors, timeout, retry for
+  idempotent requests, `multipart()` and `upload()` with progress, immutable
+  `Request` (`withToken`, `withHeader`, ...), `Response` (`json()`, `status`,
+  `headers`), `HttpError`, and `PendingResponse` (a `Thenable` that
+  `useResource()` accepts and cancels). `Pam\Native\Async\Promise` backs it.
+
 - Keyboard height (Android and iOS): `Keyboard::height()`, `lastHeight()`,
   `metrics()` and `onChange(fn (KeyboardMetrics $k))`/`offChange()`, like
   React Native `Keyboard.metrics()` and the `keyboardWill*` events. Hosts
