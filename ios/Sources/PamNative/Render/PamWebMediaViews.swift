@@ -347,7 +347,10 @@ final class PamMediaView: UIView {
         if thumbnailRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(thumbnailRequestId)
         }
-        releasePlayer()
+        // No poster reload while deallocating: loadThumbnail() captures
+        // `[weak self]`, and forming a weak reference to an object in deinit
+        // aborts the process (a loops page recycled while its video played).
+        releasePlayer(restoresPoster: false)
     }
 
     override func didMoveToWindow() {
@@ -1052,7 +1055,7 @@ final class PamMediaView: UIView {
         }
     }
 
-    private func releasePlayer() {
+    private func releasePlayer(restoresPoster: Bool = true) {
         cancelStartBuffer()
         if photoVideoRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(photoVideoRequestId)
@@ -1073,7 +1076,7 @@ final class PamMediaView: UIView {
         videoReadyForDisplay = false
         playerView.playerLayer.player = nil
         controller?.player = nil
-        updatePoster()
+        if restoresPoster { updatePoster() }
     }
 
     /// Player state for tests.
