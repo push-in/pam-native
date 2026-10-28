@@ -61,7 +61,7 @@ reservados; o núcleo encaminha as operações pelos registros genéricos.
 Nenhum arquivo reservado de chat, listas, shared elements ou perfil foi alterado.
 
 Publicados em push-in/pam-native-drawer e push-in/pam-native-toast: tags e releases
-0.1.0; registro no Packagist solicitado pelo utilitário packagist-publish.
+0.1.0; registro no Packagist confirmado com success pelo packagist-publish.
 Sem tag do núcleo. Rebase sobre origin/integrate/port3-20261027 concluído; conflitos
 apenas de relatório, preservando o texto anterior da integração.
 
@@ -75,3 +75,8 @@ Logs em /tmp/codex-x5-validation/. Builds próprios removidos após a etapa.
 QA visual/instrumentado e medições no dispositivo não realizados nesta rodada.
 Integração autorizada pelo pedido x5 com validadores verdes sem QA visual.
 Somente Android; não houve execução de Swift, Mac, dispositivos físicos ou emulador.
+
+Aplicativo consumidor validado: 6/6 checks PHP pertinentes com o SDK integrado
+e 6/6 com o SDK estável do lock; dependência Toast 0.1.0 e lockfile definitivos.
+Disco caiu abaixo de 20 GB por consumo concorrente; builds e vendor próprios
+removidos. Sem QA visual, conforme autorizado nesta rodada.
