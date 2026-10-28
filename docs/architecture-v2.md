@@ -258,5 +258,7 @@ undefined (not a loop variable, component property or App::global())`.
 | `App::onStateChange()` / `offStateChange()` | `useAppState()` |
 | `DeviceStatus::watch()` / `unwatch()` for connectivity | `useNetwork()` |
 | `AsyncResource` + `subscribe()` + manual state | `useResource()` |
+| `effects()` / `watchers()` returning `Effect::watch(...)`, `Watch::value()` | `watch()` inside `setup()` (`@deprecated`) |
+| `initialState()` + `$this->state->x` | `signal()` properties created in `setup()` (`@deprecated`) |
 | Constructor route parameters | `setup(string $id)` (constructors still work) |
 | App-specific singletons reached through statics | `App::globals()` |

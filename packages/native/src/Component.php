@@ -221,19 +221,33 @@ abstract class Component implements Renderable
     {
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * @deprecated Since architecture v2. Keep local state in signals created
+     * in setup(): `$this->count = signal(0)`, read as `$count.value`.
+     *
+     * @return array<string, mixed>
+     */
     protected function initialState(): array
     {
         return [];
     }
 
-    /** @return list<Effect> */
+    /**
+     * @deprecated Since architecture v2. Call `watch($source, fn ($next, $previous) => ...)`
+     * inside setup(); it stops on unmount.
+     *
+     * @return list<Effect>
+     */
     protected function effects(): array
     {
         return [];
     }
 
-    /** @return list<Effect> */
+    /**
+     * @deprecated Since architecture v2. Call `watch()` inside setup().
+     *
+     * @return list<Effect>
+     */
     protected function watchers(): array
     {
         return [];
