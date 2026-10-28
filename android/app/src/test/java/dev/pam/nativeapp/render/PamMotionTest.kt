@@ -226,5 +226,18 @@ class PamMotionTest {
         val toggle = PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap;when=unselected$program")!!
         assertTrue(toggle.playsOn(PamTapEffect.TRIGGER_TAP, selected = false))
         assertTrue(!toggle.playsOn(PamTapEffect.TRIGGER_TAP, selected = true))
+        assertTrue(heart.layers.isEmpty())
+    }
+
+    @Test
+    fun tapEffectParsesLayerProgramsAfterTheFirst() {
+        val heart = "pam-motion 1 id=3 iterations=1\n0 scale set(0) spring(1,320,9,0.55,0,0)"
+        val ring = "pam-motion 1 id=4 iterations=1\n0 opacity set(0.55) timing(0,560,ease-out-cubic,0)\n0 scale set(0.35) timing(1.4,560,ease-out-cubic,0)"
+        val effect = PamTapEffect.parse("ref=heart;tilt=13\n$heart\n$ring")!!
+        assertEquals(3L, effect.program.id)
+        assertEquals(listOf(4L), effect.layers.map { it.id })
+        assertEquals(2, effect.layers.single().phases.single().size)
+        assertNull(PamTapEffect.parse("ref=heart;tilt=13\n$heart\npam-motion 1 id=5 iterations=1\n0 bogus set(1)"))
+        assertEquals(3L, PamTapEffect.parse("ref=heart;tilt=13\n\n$heart")!!.program.id)
     }
 }

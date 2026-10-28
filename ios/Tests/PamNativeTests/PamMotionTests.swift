@@ -183,6 +183,18 @@ final class PamMotionTests: XCTestCase {
         let toggle = try XCTUnwrap(PamTapEffect.parse("ref=like;tilt=0;origin=anchor;trigger=tap;when=unselected" + program))
         XCTAssertTrue(toggle.plays(on: .tap, selected: false))
         XCTAssertFalse(toggle.plays(on: .tap, selected: true))
+        XCTAssertTrue(heart.layers.isEmpty)
+    }
+
+    func testTapEffectParsesLayerProgramsAfterTheFirst() throws {
+        let heart = "pam-motion 1 id=3 iterations=1\n0 scale set(0) spring(1,320,9,0.55,0,0)"
+        let ring = "pam-motion 1 id=4 iterations=1\n0 opacity set(0.55) timing(0,560,ease-out-cubic,0)\n0 scale set(0.35) timing(1.4,560,ease-out-cubic,0)"
+        let effect = try XCTUnwrap(PamTapEffect.parse("ref=heart;tilt=13\n" + heart + "\n" + ring))
+        XCTAssertEqual(effect.program.id, 3)
+        XCTAssertEqual(effect.layers.map(\.id), [4])
+        XCTAssertEqual(effect.layers.first?.phases.first?.count, 2)
+        XCTAssertNil(PamTapEffect.parse("ref=heart;tilt=13\n" + heart + "\npam-motion 1 id=5 iterations=1\n0 bogus set(1)"))
+        XCTAssertEqual(PamTapEffect.parse("ref=heart;tilt=13\n\n" + heart)?.program.id, 3)
     }
 
     // iOS-specific coverage.

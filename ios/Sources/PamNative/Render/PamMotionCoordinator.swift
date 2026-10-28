@@ -32,15 +32,15 @@ final class PamNodeMotion {
     var dragSnapRequest: Int64 = .min
     var textLayoutSignature = ""
     var textLayoutScheduled = false
-    var tapEffectRunner: PamMotionRunner?
+    var tapEffectRunners: [PamMotionRunner] = []
 
     func cancel() {
         runner?.cancel()
         runner = nil
         transitionRunners.values.forEach { $0.cancel() }
         transitionRunners = [:]
-        tapEffectRunner?.cancel()
-        tapEffectRunner = nil
+        tapEffectRunners.forEach { $0.cancel() }
+        tapEffectRunners = []
     }
 }
 
@@ -53,17 +53,20 @@ final class PamMotionCoordinator {
     private let wants: (Int64, Int) -> Bool
     /// First renderer-managed child of a node (not UIKit-internal subviews).
     private let firstChild: (Int64) -> UIView?
+    private let childAt: (Int64, Int) -> UIView?
 
     init(
         dispatch: @escaping (Int64, Int, Data) -> Void,
         isMounted: @escaping (Int64) -> Bool,
         wants: @escaping (Int64, Int) -> Bool,
-        firstChild: @escaping (Int64) -> UIView?
+        firstChild: @escaping (Int64) -> UIView?,
+        childAt: @escaping (Int64, Int) -> UIView? = { _, _ in nil }
     ) {
         self.dispatch = dispatch
         self.isMounted = isMounted
         self.wants = wants
         self.firstChild = firstChild
+        self.childAt = childAt
     }
 
     func state(_ nodeId: Int64) -> PamNodeMotion {
@@ -87,9 +90,9 @@ final class PamMotionCoordinator {
                 motion.runner?.cancel()
                 motion.runner = nil
             }
-            if motion.tapEffectRunner?.animatesTransform == true {
-                motion.tapEffectRunner?.cancel()
-                motion.tapEffectRunner = nil
+            if motion.tapEffectRunners.contains(where: { $0.animatesTransform }) {
+                motion.tapEffectRunners.forEach { $0.cancel() }
+                motion.tapEffectRunners = []
             }
         }
         view.layer.removeAnimation(forKey: "transform")
@@ -323,15 +326,24 @@ final class PamMotionCoordinator {
             PamMotionTarget.setTransform(transform, on: anchor)
         }
         let motion = state(nodeId)
-        motion.tapEffectRunner?.cancel()
-        let timeline = PamMotionTimeline.build(
-            effect.program,
-            current: { PamMotionTarget.read(animated, $0) },
-            resolve: { PamMotionTarget.resolve(animated, $0, $1) }
-        )
-        let runner = PamMotionRunner(view: animated, timeline: timeline, iterations: effect.program.iterations)
-        motion.tapEffectRunner = runner
-        runner.start(reducedMotion: PamMotionPolicy.isReduced)
+        motion.tapEffectRunners.forEach { $0.cancel() }
+        // Each layer program plays on the anchor's next child (a burst's ring beside its heart).
+        var targets: [(UIView, PamMotionProgram)] = [(animated, effect.program)]
+        if effect.origin != .anchor {
+            for (index, program) in effect.layers.enumerated() {
+                if let child = childAt(Int64(anchor.tag), index + 1) { targets.append((child, program)) }
+            }
+        }
+        motion.tapEffectRunners = targets.map { view, program in
+            let timeline = PamMotionTimeline.build(
+                program,
+                current: { PamMotionTarget.read(view, $0) },
+                resolve: { PamMotionTarget.resolve(view, $0, $1) }
+            )
+            let runner = PamMotionRunner(view: view, timeline: timeline, iterations: program.iterations)
+            runner.start(reducedMotion: PamMotionPolicy.isReduced)
+            return runner
+        }
     }
 
     // MARK: Text layout and marquee

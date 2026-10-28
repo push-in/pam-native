@@ -17,6 +17,9 @@ use Stringable;
  * - `pop()`: single tap, anchor in place (like button squash + spring, RN
  *   `withSequence(withTiming(0.78), withSpring(1))` on press).
  *
+ * `layer()` adds a program for the anchor's next child, played with the
+ * first one (a moved effect only): a burst's ring expanding under its heart.
+ *
  * `armed(false)` keeps the effect configured but silent. `unlessSelected()`
  * does the same from the Pressable's `accessibilitySelected` (RN
  * `accessibilityState.selected`), so a like toggle pops only while it is not
@@ -32,6 +35,8 @@ final readonly class TapEffect implements Stringable
         private TapEffectTrigger $trigger = TapEffectTrigger::DoubleTap,
         private bool $armed = true,
         private bool $unlessSelected = false,
+        /** @var list<Animation> */
+        private array $layers = [],
     ) {
     }
 
@@ -58,23 +63,29 @@ final readonly class TapEffect implements Stringable
 
     public function origin(TapEffectOrigin $origin): self
     {
-        return new self($this->ref, $this->animation, $this->tilt, $origin, $this->trigger, $this->armed, $this->unlessSelected);
+        return new self($this->ref, $this->animation, $this->tilt, $origin, $this->trigger, $this->armed, $this->unlessSelected, $this->layers);
     }
 
     public function trigger(TapEffectTrigger $trigger): self
     {
-        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $trigger, $this->armed, $this->unlessSelected);
+        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $trigger, $this->armed, $this->unlessSelected, $this->layers);
     }
 
     public function armed(bool $armed = true): self
     {
-        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $this->trigger, $armed, $this->unlessSelected);
+        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $this->trigger, $armed, $this->unlessSelected, $this->layers);
     }
 
     /** Silent while the Pressable is `accessibilitySelected` (a toggle that is on). */
     public function unlessSelected(bool $enabled = true): self
     {
-        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $this->trigger, $this->armed, $enabled);
+        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $this->trigger, $this->armed, $enabled, $this->layers);
+    }
+
+    /** Plays [animation] on the anchor's next child alongside the first one (ignored by `TapEffectOrigin::Anchor`). */
+    public function layer(Animation $animation): self
+    {
+        return new self($this->ref, $this->animation, $this->tilt, $this->origin, $this->trigger, $this->armed, $this->unlessSelected, [...$this->layers, $animation]);
     }
 
     public function encode(): string
@@ -85,7 +96,12 @@ final readonly class TapEffect implements Stringable
         if (!$this->armed) $header .= ';armed=0';
         if ($this->unlessSelected) $header .= ';when=unselected';
 
-        return $header."\n".$this->animation->encode();
+        $body = $this->animation->encode();
+        foreach ($this->layers as $layer) {
+            $body .= "\n".$layer->encode();
+        }
+
+        return $header."\n".$body;
     }
 
     public function __toString(): string

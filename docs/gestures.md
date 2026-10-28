@@ -239,6 +239,9 @@ public function like(PressEvent $event): void { /* $event->x, $event->y */ }
 
 The `nativeRef` anchor is translated so its centre sits on the tap (and
 rotated by a random angle up to `tilt`); the animation runs on its first child.
+`->layer($animation)` adds a program for the next child, played at the same
+time (a ring expanding under the heart, a second glyph): layer `i` animates the
+anchor's child `i + 1`. Layers are ignored by `TapEffectOrigin::Anchor`.
 
 ## Native drags (pan + spring/decay release)
 

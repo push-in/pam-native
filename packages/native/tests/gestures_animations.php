@@ -152,6 +152,17 @@ $assert(
     'TapEffect encodes origin/trigger/armed only when they differ from the double-tap-at-touch default.',
 );
 
+$ring = \Pam\Native\Animation\Animation::timing(['opacity' => 0.0], 560);
+$layered = TapEffect::make('heart', tilt: 13)->layer($ring)->armed(false);
+$layeredText = $layered->encode();
+$assert(
+    substr_count($layeredText, "pam-motion 1 ") === 2
+        && str_starts_with($layeredText, "ref=heart;tilt=13;armed=0\npam-motion 1 ")
+        && str_ends_with(rtrim($layeredText), rtrim(substr($ring->encode(), strpos($ring->encode(), "\n"))))
+        && substr_count(TapEffect::make('heart')->encode(), "pam-motion 1 ") === 1,
+    'TapEffect layers append one program per extra child after the first, kept through the option withers.',
+);
+
 // --- Scroll page transform and media start buffer ------------------------------
 $cubePager = \Pam\Native\UI\ScrollView::make(Text::make('page'))->horizontal()->pageTransform(\Pam\Native\ScrollPageTransform::Cube);
 $assert(

@@ -82,6 +82,10 @@ public final class PamRenderer: @unchecked Sendable {
         firstChild: { [weak self] id in
             guard let self, let child = self.children[id]?.first else { return nil }
             return self.views[child]
+        },
+        childAt: { [weak self] id, index in
+            guard let self, let children = self.children[id], children.indices.contains(index) else { return nil }
+            return self.views[children[index]]
         }
     )
     /// Adjacent native detectors share their first managed content View.

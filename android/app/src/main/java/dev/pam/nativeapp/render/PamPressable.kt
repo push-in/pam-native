@@ -35,7 +35,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var tapEffect: PamTapEffect? = null
     /** `accessibilitySelected` of this Pressable (TapEffect `when=unselected`). */
     var tapEffectSelected = false
-    private var tapEffectRunner: PamMotionRunner? = null
+    private var tapEffectRunners: List<PamMotionRunner> = emptyList()
     internal val drag = PamDragController(this)
     private var onPressIn: ((PamPressPointer) -> Unit)? = null
     private var onPressOut: ((PamPressPointer) -> Unit)? = null
@@ -697,14 +697,23 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 0f
             }
         }
-        tapEffectRunner?.cancel()
-        val timeline = PamMotionTimeline.build(
-            effect.program,
-            current = { PamMotionTarget.read(animated, it) },
-            resolve = { property, value -> PamMotionTarget.resolve(animated, property, value) },
-        )
-        tapEffectRunner = PamMotionRunner(animated, timeline, effect.program.iterations).also {
-            it.start(PamMotionPolicy.isReduced(context))
+        tapEffectRunners.forEach(PamMotionRunner::cancel)
+        // Each layer program plays on the anchor's next child (a burst's ring beside its heart).
+        val layers = if (effect.origin == PamTapEffect.ORIGIN_ANCHOR) {
+            emptyList()
+        } else {
+            effect.layers.mapIndexedNotNull { index, program ->
+                (anchor as? ViewGroup)?.getChildAt(index + 1)?.let { it to program }
+            }
+        }
+        val reduced = PamMotionPolicy.isReduced(context)
+        tapEffectRunners = (listOf(animated to effect.program) + layers).map { (view, program) ->
+            val timeline = PamMotionTimeline.build(
+                program,
+                current = { PamMotionTarget.read(view, it) },
+                resolve = { property, value -> PamMotionTarget.resolve(view, property, value) },
+            )
+            PamMotionRunner(view, timeline, program.iterations).also { it.start(reduced) }
         }
     }
 
@@ -726,8 +735,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         cancelGesture(emitOut = false)
         removeCallbacks(singleTapRunnable)
         pendingSingleTap = null
-        tapEffectRunner?.cancel()
-        tapEffectRunner = null
+        tapEffectRunners.forEach(PamMotionRunner::cancel)
+        tapEffectRunners = emptyList()
         drag.detach()
         nativeTransformTarget = null
         super.onDetachedFromWindow()
@@ -931,7 +940,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
 /**
  * `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0][;when=unselected]`
- * line followed by a `pam-motion` program.
+ * line followed by a `pam-motion` program and, optionally, more programs
+ * ([layers]): with a moved origin, layer `i` plays on the anchor's child `i + 1`.
  */
 internal data class PamTapEffect(
     val ref: String,
@@ -941,6 +951,7 @@ internal data class PamTapEffect(
     val trigger: Int = TRIGGER_DOUBLE_TAP,
     val armed: Boolean = true,
     val unlessSelected: Boolean = false,
+    val layers: List<PamMotionProgram> = emptyList(),
 ) {
     /** Whether [gesture] (a `TRIGGER_*`) plays this effect on a Pressable [selected] or not. */
     fun playsOn(gesture: Int, selected: Boolean = false): Boolean =
@@ -966,7 +977,9 @@ internal data class PamTapEffect(
                 if (parts.size == 2) parts[0] to parts[1] else null
             }.toMap()
             val ref = options["ref"]?.takeIf(String::isNotEmpty) ?: return null
-            val program = PamMotionProgram.parse(source.substring(newline + 1)) ?: return null
+            val programs = splitPrograms(source.substring(newline + 1))
+                .map { PamMotionProgram.parse(it) ?: return null }
+            val program = programs.firstOrNull() ?: return null
             return PamTapEffect(
                 ref = ref,
                 tiltDegrees = (options["tilt"]?.toFloatOrNull() ?: 0f).coerceIn(0f, 180f),
@@ -979,7 +992,19 @@ internal data class PamTapEffect(
                 trigger = if (options["trigger"] == "tap") TRIGGER_TAP else TRIGGER_DOUBLE_TAP,
                 armed = options["armed"] != "0",
                 unlessSelected = options["when"] == "unselected",
+                layers = programs.drop(1),
             )
+        }
+
+        /** Programs of a tap effect body, each starting at its `pam-motion` header line. */
+        internal fun splitPrograms(body: String): List<String> {
+            val programs = mutableListOf<StringBuilder>()
+            for (line in body.lineSequence()) {
+                if (programs.isEmpty() && line.isBlank()) continue
+                if (line.trimStart().startsWith("pam-motion ") || programs.isEmpty()) programs += StringBuilder()
+                programs.last().append(line).append('\n')
+            }
+            return programs.map(StringBuilder::toString)
         }
     }
 }

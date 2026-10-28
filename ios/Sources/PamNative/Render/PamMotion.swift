@@ -757,7 +757,8 @@ enum PamTransitionSpec {
 }
 
 /// `ref=<nativeRef>;tilt=<deg>[;origin=touch|center|anchor][;trigger=double|tap][;armed=0][;when=unselected]`
-/// line followed by a `pam-motion` program.
+/// line followed by a `pam-motion` program and, optionally, more programs
+/// (`layers`): with a moved origin, layer `i` plays on the anchor's child `i + 1`.
 struct PamTapEffect {
     enum Origin: Equatable { case touch, center, anchor }
     enum Trigger: Equatable { case doubleTap, tap }
@@ -770,6 +771,7 @@ struct PamTapEffect {
     var armed = true
     /// `when=unselected`: silent while the Pressable is accessibilitySelected.
     var unlessSelected = false
+    var layers: [PamMotionProgram] = []
 
     /// Whether [gesture] plays this effect on a Pressable [selected] or not.
     func plays(on gesture: Trigger, selected: Bool = false) -> Bool {
@@ -783,8 +785,12 @@ struct PamTapEffect {
             let parts = item.trimmingCharacters(in: .whitespaces).split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 { options[parts[0]] = parts[1] }
         }
-        guard let ref = options["ref"], !ref.isEmpty,
-              let program = PamMotionProgram.parse(String(source[source.index(after: newline)...])) else {
+        var programs: [PamMotionProgram] = []
+        for text in splitPrograms(String(source[source.index(after: newline)...])) {
+            guard let parsed = PamMotionProgram.parse(text) else { return nil }
+            programs.append(parsed)
+        }
+        guard let ref = options["ref"], !ref.isEmpty, let program = programs.first else {
             return nil
         }
         return PamTapEffect(
@@ -794,7 +800,19 @@ struct PamTapEffect {
             origin: options["origin"] == "center" ? .center : (options["origin"] == "anchor" ? .anchor : .touch),
             trigger: options["trigger"] == "tap" ? .tap : .doubleTap,
             armed: options["armed"] != "0",
-            unlessSelected: options["when"] == "unselected"
+            unlessSelected: options["when"] == "unselected",
+            layers: Array(programs.dropFirst())
         )
+    }
+
+    /// Programs of a tap effect body, each starting at its `pam-motion` header line.
+    static func splitPrograms(_ body: String) -> [String] {
+        var programs: [String] = []
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if programs.isEmpty && line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            if programs.isEmpty || line.trimmingCharacters(in: .whitespaces).hasPrefix("pam-motion ") { programs.append("") }
+            programs[programs.count - 1] += line + "\n"
+        }
+        return programs
     }
 }

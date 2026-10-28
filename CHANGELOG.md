@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `TapEffect::layer()`: a tap effect can animate more than one layer. Each
+  extra program plays on the anchor's next child alongside the first (Android,
+  iOS; the protocol string carries one `pam-motion` program per layer).
+
 ### 1.46.0 (prepared, unpublished)
 
 - Wave two: notifications, incoming shares, biometrics, media library/system
