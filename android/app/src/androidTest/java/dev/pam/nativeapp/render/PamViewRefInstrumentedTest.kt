@@ -55,9 +55,12 @@ class PamViewRefInstrumentedTest {
                         PropKey.NATIVE_REF to PropValue.Text("composer"),
                         PropKey.ON_CHANGE to PropValue.Flag(true),
                     )),
+                    node(4, 1, NodeKind.VIEW, mapOf(PropKey.NATIVE_REF to PropValue.Text("badge"))),
                     Mutation.Layout(1, Frame(0f, 0f, width, height)),
                     Mutation.Layout(2, Frame(10f, 40f, 200f, 120f)),
-                    Mutation.Layout(3, Frame(8f, 12f, 180f, 48f)),
+                    // Frames are page coordinates: the input sits at (8, 12) inside the card.
+                    Mutation.Layout(3, Frame(18f, 52f, 180f, 48f)),
+                    Mutation.Layout(4, Frame(10f, 200f, 40f, 40f)),
                     Mutation.SetRoot(1),
                 )))
                 val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
@@ -97,7 +100,9 @@ class PamViewRefInstrumentedTest {
             onMain {
                 val missing = runCatching { renderer.nativeRefFrame("missing") }.exceptionOrNull()
                 assertTrue(missing?.message.orEmpty().contains("No mounted view has nativeRef missing"))
-                val notInput = runCatching { renderer.nativeRefInputOperation("card", "focus") }.exceptionOrNull()
+                // A ref on an input's ancestor targets that input (like iOS);
+                // only a view with no input in its subtree is rejected.
+                val notInput = runCatching { renderer.nativeRefInputOperation("badge", "focus") }.exceptionOrNull()
                 assertTrue(notInput?.message.orEmpty().contains("not a text input"))
             }
         } finally {

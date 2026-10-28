@@ -1552,6 +1552,25 @@ class PamRenderer(
         return null
     }
 
+    /**
+     * Moves focus onto [root] itself. The window's decor view gives focus to
+     * its descendants first (FOCUS_AFTER_DESCENDANTS), so a plain
+     * requestFocus() there handed it straight back to the first input.
+     */
+    private fun parkFocusOn(root: View): Boolean {
+        val group = root as? android.view.ViewGroup
+        val descendants = group?.descendantFocusability
+        val focusableInTouchMode = root.isFocusableInTouchMode
+        group?.descendantFocusability = android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        root.isFocusableInTouchMode = true
+        val parked = root.requestFocus()
+        if (descendants != null) group.descendantFocusability = descendants
+        // Holding the focus it just took is fine; later touches must not make
+        // the root take focus again.
+        root.isFocusableInTouchMode = focusableInTouchMode
+        return parked
+    }
+
     private fun findTaggedDescendant(view: View, ref: String): View? {
         if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return view
         val group = view as? android.view.ViewGroup ?: return null
@@ -1601,12 +1620,7 @@ class PamRenderer(
                     ?.hideSoftInputFromWindow(input.windowToken, 0)
                 val root = input.rootView
                 // Park focus on the root so Android does not refocus the first input.
-                if (root != null && root !== input) {
-                    root.isFocusableInTouchMode = true
-                    if (!root.requestFocus()) input.clearFocus()
-                } else {
-                    input.clearFocus()
-                }
+                if (root == null || root === input || !parkFocusOn(root)) input.clearFocus()
             }
             "clear" -> input.text?.clear()
             "setSelection" -> {
