@@ -49,7 +49,12 @@ class PamModalRemountInstrumentedTest {
             awaitEntrance(instrumentation, renderer, "first mount")
             waitUntil(instrumentation, "first on:layout") { layouts.count { it == 3L } == 1 }
 
-            instrumentation.runOnMainSync { renderer.commit(listOf(listOf(Mutation.Remove(2)))) }
+            instrumentation.runOnMainSync { renderer.commit(listOf(listOf(
+                // The engine removes a subtree children first, one Remove per node.
+                Mutation.Remove(4),
+                Mutation.Remove(3),
+                Mutation.Remove(2),
+            ))) }
             waitUntil(instrumentation, "modal dismissed") { !renderer.hasPresentedModal() }
             Thread.sleep(300)
 

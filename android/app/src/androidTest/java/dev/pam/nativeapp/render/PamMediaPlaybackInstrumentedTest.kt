@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -376,6 +377,14 @@ class PamMediaPlaybackInstrumentedTest {
 
     private fun pausedFrame(forwardBufferSeconds: Int, at: Double, red: Boolean) =
         withMedia(forwardBufferSeconds = forwardBufferSeconds) { media, _, _ ->
+            // MediaPlayer decodes this clip with c2.android.avc.decoder; on the
+            // emulator its gralloc output reaches a TextureView without chroma
+            // (every frame reads green, also while playing), so only a device
+            // can check the colour of a MediaPlayer frame.
+            assumeFalse(
+                "software AVC frames render without chroma on the emulator",
+                forwardBufferSeconds == 0 && isEmulator(),
+            )
             val clip = File(media.context.cacheDir, "pam-red-blue.mp4")
             InstrumentationRegistry.getInstrumentation().context.assets.open("pam-video/red-blue.mp4").use { input ->
                 clip.outputStream().use(input::copyTo)
@@ -413,6 +422,10 @@ class PamMediaPlaybackInstrumentedTest {
                 clip.delete()
             }
         }
+
+    private fun isEmulator(): Boolean =
+        android.os.Build.HARDWARE in setOf("ranchu", "goldfish") ||
+            android.os.Build.PRODUCT.startsWith("sdk_gphone")
 
     private fun field(media: PamMediaView, name: String): Any? =
         PamMediaView::class.java.getDeclaredField(name).apply { isAccessible = true }.get(media)

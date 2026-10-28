@@ -1,6 +1,8 @@
 package dev.pam.nativeapp.render
 
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.res.AssetManager
 import android.util.LongSparseArray
 import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -43,7 +45,13 @@ class PamAssetIconInstrumentedTest {
             var failure: Throwable? = null
             lateinit var image: PamImageView
             instrumentation.runOnMainSync {
-                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                // The icons ship in the test APK (androidTest/assets), not in
+                // the app under test: read packaged files from there.
+                val testAssets = instrumentation.context.assets
+                val context = object : ContextWrapper(activity) {
+                    override fun getAssets(): AssetManager = testAssets
+                }
+                renderer = PamRenderer(context, activity.host) { _, _, _ -> }
                 renderer.commit(listOf(listOf(
                     Mutation.Create(NodeSpec(1, 0, 0, NodeKind.SCREEN, emptyMap())),
                     Mutation.Create(NodeSpec(2, 1, 0, NodeKind.IMAGE, mapOf(

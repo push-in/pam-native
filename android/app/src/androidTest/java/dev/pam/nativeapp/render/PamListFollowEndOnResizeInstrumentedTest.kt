@@ -45,7 +45,8 @@ class PamListFollowEndOnResizeInstrumentedTest {
         }
 
     @Test fun aListScrolledToItsEndFollowsIt() = withList(rows = 40, height = 900) { list ->
-        main { list.scrollBy(0, 40 * 80) }
+        // Row extents are dp: scroll by more than the content's pixel height.
+        main { list.scrollBy(0, list.computeVerticalScrollRange()) }
         awaitTrue("scrolled to the end") { !list.canScrollVertically(1) }
         resize(list, 600)
         awaitTrue("still at the end after shrinking") { !list.canScrollVertically(1) }

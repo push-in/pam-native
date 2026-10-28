@@ -100,7 +100,7 @@ class PamModalKeyboardAvoidingInstrumentedTest {
     private fun runComposer(behavior: Long, translucent: Boolean, sheet: Boolean = false) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         val keyboardEvents = Collections.synchronizedList(ArrayList<Boolean>())
-        val visibility = KeyboardVisibility { keyboardEvents.add(it) }
+        val visibility = KeyboardVisibility { visible, _ -> keyboardEvents.add(visible) }
         val engineInsets = Collections.synchronizedList(ArrayList<Float>())
         val lastFrames = HashMap<Long, dev.pam.nativeapp.protocol.Frame>()
         lateinit var tree: ByteArray

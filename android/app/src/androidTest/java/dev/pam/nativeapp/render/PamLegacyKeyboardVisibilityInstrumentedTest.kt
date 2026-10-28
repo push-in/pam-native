@@ -38,7 +38,7 @@ class PamLegacyKeyboardVisibilityInstrumentedTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         ) as PamTestActivity
         val events = Collections.synchronizedList(ArrayList<Boolean>())
-        val visibility = KeyboardVisibility { events.add(it) }
+        val visibility = KeyboardVisibility { visible, _ -> events.add(visible) }
         lateinit var renderer: PamRenderer
         var created = false
         lateinit var input: EditText
