@@ -46,6 +46,9 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
             findView = activity::viewForNativeRef,
         )
     }
+    private val viewRef = (context as? dev.pam.nativeapp.PamActivity)?.let { activity ->
+        ViewRefModule { activity.nativeRefRenderer() }
+    }
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
@@ -73,6 +76,7 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
         put("secure-storage", secureStorage)
         put("image", image)
         viewCapture?.let { put("view-capture", it) }
+        viewRef?.let { put("view-ref", it) }
         putAll(GeneratedPamModules.create(context))
     }
 

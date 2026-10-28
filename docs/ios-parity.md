@@ -407,3 +407,20 @@ Not compiled on Linux. On a Mac:
   wraps long text inside 16 pt gutters; light and dark backgrounds.
 - `icon: 'asset://…png'` (≤16 KiB) shows immediately; a missing asset draws
   the toast without icon.
+
+## Keyboard height and view refs
+
+- `Keyboard::height()`/`onChange()`: `PamKeyboardVisibility` publishes the
+  `keyboardWillChangeFrame`/`WillHide` end frame (window-covered height) and
+  its duration as `<visible>;<height>;<durationMs>`; a resume reads the
+  window keyboard layout guide. Equal settled heights are not republished.
+- `ViewRef` (module `view-ref`): `ViewRefModule` finds the view by
+  `nativeRef` in every window, focuses with `becomeFirstResponder`, clears
+  with an `editingChanged` action (UITextField) or `textViewDidChange`
+  (UITextView), selects through `UITextInput` offsets (UTF-16) and measures
+  with `convert(_:to:)` (window and root view).
+
+Mac validation (not compiled on Linux): `swift test --filter
+PamKeyboardVisibilityTests` and `--filter ViewRefModuleTests`; on a device,
+show/hide the keyboard, switch to the emoji keyboard (one height change),
+and run focus/selection/clear/measure on a composer inside a sheet.

@@ -704,9 +704,8 @@ public final class PamRuntime {
 
     private lazy var keyboardVisibility: PamKeyboardVisibility = {
         let visibility = PamKeyboardVisibility()
-        visibility.onChange = { [weak self] visible in
-            self?.dispatchEvent(0, kind: EventKind.keyboardVisibility.rawValue,
-                payload: Data((visible ? "1" : "0").utf8))
+        visibility.onChange = { [weak self] frame in
+            self?.dispatchEvent(0, kind: EventKind.keyboardVisibility.rawValue, payload: frame.payload)
         }
         return visibility
     }()
@@ -796,7 +795,13 @@ public final class PamRuntime {
         let visible = PamKeyboardVisibility.guideIsVisible(
             guide.layoutFrame, in: window.bounds, safeBottom: window.safeAreaInsets.bottom
         )
-        keyboardVisibility.update(surface: 0, bottom: visible ? 1 : 0)
+        let overlap = guide.layoutFrame.intersection(window.bounds)
+        keyboardVisibility.update(
+            surface: 0,
+            visible: visible,
+            height: visible && !overlap.isNull ? Float(window.bounds.maxY - overlap.minY) : 0,
+            durationMs: 0
+        )
     }
 
     private func keyboardChanged(_ notification: Notification, hiding: Bool) {
@@ -808,7 +813,16 @@ public final class PamRuntime {
         let frame = host.convert(host.bounds, to: window)
         // Visibility is independent of avoidance: interactive sheets already
         // ride above the IME and deliberately publish zero avoidance inset.
-        keyboardVisibility.update(surface: 0, bottom: hiding || !keyboard.intersects(window.bounds) ? 0 : 1)
+        let keyboardVisible = !hiding && keyboard.intersects(window.bounds)
+        let covered = keyboard.intersection(window.bounds)
+        let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+            .doubleValue ?? 0
+        keyboardVisibility.update(
+            surface: 0,
+            visible: keyboardVisible,
+            height: keyboardVisible && !covered.isNull ? Float(window.bounds.maxY - covered.minY) : 0,
+            durationMs: Int((duration * 1000).rounded())
+        )
         // The keyboard of a presented sheet/modal input does not cover the
         // screen's composer below it (Android: the covered window ignores the
         // dialog's IME); only hiding applies.

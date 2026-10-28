@@ -654,6 +654,12 @@ class PamRenderer(
     var onSurfaceKeyboardInset: ((Long, Float) -> Unit)? = null
     private var legacyRootKeyboard: AutoCloseable? = null
     private var keyboardVisibilityActive = true
+    /**
+     * Settled IME height in dp over the root (surface 0) or a Modal/BottomSheet
+     * window (its node id), 0 when that surface has none. Never called per
+     * animation frame: `Keyboard::height()`.
+     */
+    var onKeyboardHeight: ((Long, Float) -> Unit)? = null
     var onKeyboardVisibility: ((Long, Boolean) -> Unit)? = null
         set(value) {
             field = value
@@ -684,6 +690,7 @@ class PamRenderer(
             // Share the single pre-30 measurement window with KAV/scrollers.
             // Visibility must also work for a plain Input without those views.
             legacyRootKeyboard = root.legacyImeInsets.subscribe(root) { inset ->
+                onKeyboardHeight?.invoke(0, inset / resourcesDensity())
                 onKeyboardVisibility?.invoke(0, inset > 0)
             }
         }
@@ -1405,6 +1412,7 @@ class PamRenderer(
         onNativeChildVisibility = null
         onSurfaceKeyboardInset = null
         onKeyboardVisibility = null
+        onKeyboardHeight = null
         prewarmActive = false
         main.removeCallbacks(prewarmSlice)
         destroyed = true
@@ -1508,6 +1516,123 @@ class PamRenderer(
             if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return view
         }
         return null
+    }
+
+    /**
+     * The node id and mounted view whose `nativeRef` is [ref], if any; with
+     * [within], the first such view inside the view whose `nativeRef` is
+     * [within] (a ref repeated by every row of a list).
+     */
+    private fun nativeRefTarget(ref: String, within: String = ""): Pair<Long, View>? {
+        if (within.isNotEmpty()) {
+            val (_, ancestor) = nativeRefTarget(within) ?: return null
+            val match = findTaggedDescendant(ancestor, ref) ?: return null
+            val index = views.indexOfValue(match)
+            return if (index >= 0) views.keyAt(index) to match else null
+        }
+        for (index in 0 until views.size()) {
+            val view = views.valueAt(index) ?: continue
+            if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return views.keyAt(index) to view
+        }
+        return null
+    }
+
+    private fun findTaggedDescendant(view: View, ref: String): View? {
+        if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return view
+        val group = view as? android.view.ViewGroup ?: return null
+        for (index in 0 until group.childCount) findTaggedDescendant(group.getChildAt(index), ref)?.let { return it }
+        return null
+    }
+
+    private fun describeRef(ref: String, within: String) = if (within.isEmpty()) ref else "$ref within $within"
+
+    /** The text field a `nativeRef` names: the view itself or its first EditText descendant. */
+    private fun nativeRefInput(ref: String, within: String = ""): Pair<Long, EditText> {
+        val (id, view) = nativeRefTarget(ref, within) ?: error("No mounted view has nativeRef ${describeRef(ref, within)}.")
+        val input = view as? EditText ?: firstEditText(view) ?: error("The view $ref is not a text input.")
+        return id to input
+    }
+
+    private fun firstEditText(view: View): EditText? {
+        if (view is EditText) return view
+        val group = view as? android.view.ViewGroup ?: return null
+        for (index in 0 until group.childCount) firstEditText(group.getChildAt(index))?.let { return it }
+        return null
+    }
+
+    /**
+     * Imperative input operations (`ViewRef::focus()`/`blur()`/`clear()`/
+     * `setSelection()`), React Native `TextInput` ref methods. Main thread only.
+     * Focus uses the autoFocus path: it waits for a presenting sheet/dialog
+     * window and opens the IME. Clear edits the text like the user, so the
+     * input's `on:change` reports the empty value and a controlled value follows.
+     */
+    internal fun nativeRefInputOperation(
+        ref: String,
+        operation: String,
+        start: Int = 0,
+        end: Int = 0,
+        within: String = "",
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val (id, input) = nativeRefInput(ref, within)
+        when (operation) {
+            "focus" -> {
+                check(input.isShown) { "The input $ref is not visible." }
+                requestAutoFocus(input, id)
+            }
+            "blur" -> if (input.hasFocus()) {
+                (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                    ?.hideSoftInputFromWindow(input.windowToken, 0)
+                val root = input.rootView
+                // Park focus on the root so Android does not refocus the first input.
+                if (root != null && root !== input) {
+                    root.isFocusableInTouchMode = true
+                    if (!root.requestFocus()) input.clearFocus()
+                } else {
+                    input.clearFocus()
+                }
+            }
+            "clear" -> input.text?.clear()
+            "setSelection" -> {
+                val length = input.text?.length ?: 0
+                val from = start.coerceIn(0, length)
+                input.setSelection(from, end.coerceIn(from, length))
+            }
+            "isFocused" -> Unit
+            else -> error("Unknown input operation $operation")
+        }
+    }
+
+    /** Whether the input named by [ref] has focus (`ViewRef::isFocused()`). */
+    internal fun nativeRefInputFocused(ref: String, within: String = ""): Boolean =
+        nativeRefInput(ref, within).second.hasFocus()
+
+    /**
+     * `ViewRef::measure()` / `measureInWindow()` in dp: the frame relative to
+     * the parent view, the position in the window (`getLocationInWindow`,
+     * transforms and scrolling included) and the position relative to this
+     * renderer's root (React Native `pageX`/`pageY`).
+     */
+    internal fun nativeRefFrame(ref: String, within: String = ""): DoubleArray {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val (_, view) = nativeRefTarget(ref, within) ?: error("No mounted view has nativeRef ${describeRef(ref, within)}.")
+        check(view.isAttachedToWindow && view.isLaidOut) { "The view $ref has not been laid out." }
+        val density = resourcesDensity().toDouble()
+        val window = IntArray(2)
+        view.getLocationInWindow(window)
+        val page = IntArray(2)
+        if (host.isAttachedToWindow && host.windowToken == view.windowToken) host.getLocationInWindow(page)
+        return doubleArrayOf(
+            view.left / density,
+            view.top / density,
+            view.width / density,
+            view.height / density,
+            window[0] / density,
+            window[1] / density,
+            (window[0] - page[0]) / density,
+            (window[1] - page[1]) / density,
+        )
     }
 
     fun prewarmViews() {
@@ -1654,6 +1779,7 @@ class PamRenderer(
                 val id = state?.id ?: return@also
                 modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
                 modal.onKeyboardVisibility = { visible -> onKeyboardVisibility?.invoke(id, visible) }
+                modal.onKeyboardHeight = { px -> onKeyboardHeight?.invoke(id, px / resourcesDensity()) }
                 modal.setKeyboardVisibilityActive(keyboardVisibilityActive)
             }
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {

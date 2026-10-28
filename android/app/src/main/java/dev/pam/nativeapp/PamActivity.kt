@@ -86,6 +86,9 @@ class PamActivity : FragmentActivity() {
     /** ViewCapture: the mounted view tagged with `nativeRef` [ref], if any. */
     internal fun viewForNativeRef(ref: String): View? = activeRenderer?.viewForNativeRef(ref)
 
+    /** ViewRef module: the renderer that owns `nativeRef` views of this surface. */
+    internal fun nativeRefRenderer(): dev.pam.nativeapp.render.PamRenderer? = activeRenderer
+
     /** Uptime of this Activity's first committed native frame (0 = none yet). */
     @Volatile
     internal var firstFrameUptimeMillis = 0L

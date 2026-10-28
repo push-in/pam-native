@@ -302,6 +302,9 @@ internal class PamModalHost @JvmOverloads constructor(
      */
     internal var onSurfaceKeyboardInset: ((Int, Boolean) -> Unit)? = null
     internal var onKeyboardVisibility: ((Boolean) -> Unit)? = null
+    /** Settled IME height in px over this modal's window (0 when hidden); never per frame. */
+    internal var onKeyboardHeight: ((Int) -> Unit)? = null
+    private var publishedKeyboardHeight = -1
     private var legacyKeyboardVisibility: PamLegacyImeObserver? = null
     private var keyboardVisibilityActive = true
     private var keyboardWindowFocusListener: android.view.ViewTreeObserver.OnWindowFocusChangeListener? = null
@@ -328,6 +331,7 @@ internal class PamModalHost @JvmOverloads constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R || !keyboardVisibilityActive || legacyKeyboardVisibility != null) return
         val decor = modal.window?.decorView ?: return
         legacyKeyboardVisibility = PamLegacyImeObserver(decor, { desiredVisible }) { inset ->
+            publishKeyboardHeight(if (desiredVisible) inset else 0)
             onKeyboardVisibility?.invoke(desiredVisible && inset > 0)
         }
     }
@@ -849,6 +853,7 @@ internal class PamModalHost @JvmOverloads constructor(
         ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
             if (insets.isVisible(WindowInsetsCompat.Type.ime())) finishAutoFocusKeyboard()
             if (!sheetImeAnimating) {
+                publishKeyboardHeight(rawKeyboardHeight(insets))
                 updateSheetKeyboardInset(sheetKeyboardLiftFor(insets))
                 publishSurfaceKeyboard(surfaceKeyboardInsetFor(insets), animating = false)
             }
@@ -881,6 +886,7 @@ internal class PamModalHost @JvmOverloads constructor(
                         if (animation.typeMask and WindowInsets.Type.ime() == 0) return
                         sheetImeAnimating = false
                         val settled = ViewCompat.getRootWindowInsets(decor)
+                        publishKeyboardHeight(settled?.let(::rawKeyboardHeight) ?: 0)
                         bottomSheetKeyboardInset = -1
                         updateSheetKeyboardInset(settled?.let(::sheetKeyboardLiftFor) ?: 0)
                         publishSurfaceKeyboard(
@@ -915,6 +921,18 @@ internal class PamModalHost @JvmOverloads constructor(
             containedSheet = presentation == PRESENTATION_SHEET &&
                 bottomSheetKeyboardBehavior == KEYBOARD_CONTAIN,
         )
+    }
+
+    /** The whole IME over this modal's window, in px (0 when hidden or closing). */
+    private fun rawKeyboardHeight(insets: WindowInsetsCompat): Int =
+        if (desiredVisible && insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
+        } else 0
+
+    private fun publishKeyboardHeight(px: Int) {
+        if (px == publishedKeyboardHeight) return
+        publishedKeyboardHeight = px
+        onKeyboardHeight?.invoke(px)
     }
 
     private fun publishSurfaceKeyboard(inset: Int, animating: Boolean, force: Boolean = false) {

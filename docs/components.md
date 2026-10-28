@@ -655,6 +655,41 @@ Inline properties remain useful for dynamic values and isolated exceptions:
 </Text>
 ```
 
+## Portals (render outside the parent tree)
+
+`<Portal>` renders its children in a `<PortalHost>` instead of in place, in the
+same window (React Native `@gorhom/portal`). Use it for menus, reaction bars,
+tooltips or a lifted copy of a message that must draw above the whole screen
+without a `Modal`: no new window opens, so a finger that started a long press
+keeps streaming to the gesture that opened the overlay.
+
+```html
+<View class="chat-screen">
+    <ChatTimeline />                 <!-- may open portals -->
+    <PortalHost />                   <!-- last child: draws above its siblings -->
+</View>
+
+<!-- inside a message row component -->
+<Portal p-if="$menuOpen" name="message-menu">
+    <MessageMenu :top="$anchorY" />
+</Portal>
+```
+
+PHP builders: `Portal::make('message-menu', ...$children)`,
+`Portal::to('sheet', 'picker', ...$children)` and `Portal::host('screen')`.
+
+- The host is a full-size, `pointerEvents: box-none` layer over its parent:
+  touches outside the portal content reach the screen below.
+- A portal lives while its component keeps rendering it. A re-render without
+  it, or the component's unmount, removes it; a memoized component keeps it.
+- Place the host after the components that open portals. A portal opened by a
+  component rendered after its host is drawn by one extra render pass in the
+  same frame.
+- Anchor content with `ViewRef::of($ref)->measureInWindow()` (window
+  coordinates); the host normally covers the window.
+- Pure PHP composition: Android and iOS render the content like any other
+  view.
+
 ## Modal presentation sizing
 
 On Android, a `StatusBar` rendered inside an active `Modal` configures the

@@ -142,9 +142,9 @@ class PamRuntime(
      */
     private val callsAwaitingModules = ArrayList<() -> Unit>()
 
-    private val keyboardVisibility = KeyboardVisibility { visible ->
+    private val keyboardVisibility = KeyboardVisibility { visible, heightDp ->
         dispatchEvent(0, dev.pam.nativeapp.protocol.EventKind.KEYBOARD_VISIBILITY.value,
-            (if (visible) "1" else "0").toByteArray())
+            KeyboardVisibility.payload(visible, heightDp))
     }
 
     init {
@@ -186,6 +186,9 @@ class PamRuntime(
         target.onKeyboardVisibility = { surface, visible ->
             keyboardVisibility.update(surface, if (visible) 1f else 0f)
         }
+        target.onKeyboardHeight = { surface, heightDp ->
+            keyboardVisibility.updateHeight(surface, heightDp)
+        }
     }
 
     val isRunning: Boolean
@@ -216,6 +219,7 @@ class PamRuntime(
             previousRenderer.onNativeChildVisibility = null
             previousRenderer.onSurfaceKeyboardInset = null
             previousRenderer.onKeyboardVisibility = null
+            previousRenderer.onKeyboardHeight = null
             if (attachedSurface) runCatching { previousRenderer.close() }
             renderer.engineManagedSafeArea = previousRenderer.engineManagedSafeArea
             this.renderer = renderer
@@ -382,6 +386,10 @@ class PamRuntime(
      */
     fun updateKeyboardInset(bottomDp: Float) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            // Root insets arrive as end-state dispatches (plus a settled
+            // reconciliation), not animation frames: record the height first
+            // so a show transition already carries it.
+            keyboardVisibility.updateHeight(0, bottomDp)
             keyboardVisibility.update(0, bottomDp)
         }
         synchronized(handleLock) {
