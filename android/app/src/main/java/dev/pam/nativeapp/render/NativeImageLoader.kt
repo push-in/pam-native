@@ -386,6 +386,9 @@ internal class NativeImageLoader(
      */
     fun prefetch(source: String, requestHeaders: String? = null, cacheKey: String? = null): Long {
         check(!closed.get()) { "Image loader is closed" }
+        // A packaged image has nothing to download: decode it now and keep
+        // it for the process, so its first Image paints in the bind frame.
+        if (normalizedPamAssetPath(source) != null) return PamPreloadedImages.preload(context, source)
         val request = NativeImageRequest(
             source = source,
             requestHeaders = requestHeaders,
@@ -419,7 +422,10 @@ internal class NativeImageLoader(
         }
         // Inline glyphs are tiny and decode again synchronously; only a
         // critical trim drops them.
-        if (critical) synchronized(inlineCache) { inlineCache.evictAll() }
+        if (critical) {
+            synchronized(inlineCache) { inlineCache.evictAll() }
+            PamPreloadedImages.clear()
+        }
     }
 
     override fun close() {
@@ -446,6 +452,19 @@ internal class NativeImageLoader(
         val pending = active[view]
             ?.takeIf { it.token == token && !it.finished }
             ?: return
+        if (pending.request.sourceSet == null) {
+            PamPreloadedImages.get(pending.request.source)?.let { bitmap ->
+                // Preloaded by Image::prefetch(asset://): painted in this
+                // frame, before layout, at full resolution (ImageView scales).
+                finishSuccess(
+                    view,
+                    pending,
+                    NativeImageResult(pending.request.source, bitmap, bitmap.width, bitmap.height, null),
+                    animate = false,
+                )
+                return
+            }
+        }
         if (measuredWidth <= 0 || measuredHeight <= 0) return
 
         val source = resolveSource(

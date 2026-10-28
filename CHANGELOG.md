@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `Image::prefetch()` accepts packaged `asset://` images: each is decoded once
+  per process at full resolution, off the UI thread, and kept (a GPU bitmap on
+  Android 9+; at most 8 images / 48 MiB, dropped on a critical memory trim or
+  iOS memory warning). An Image with that exact source then paints in the
+  frame that binds it, before layout, with no decode, cache-size match or
+  fade, and a theme switch between two preloaded sources only swaps the
+  bitmap (Android, iOS). Use it for a screen background that must be there in
+  the first frame of a push.
 - Lists (Android): a list opened at its end (`initialScrollIndex`) that the
   reader scrolled away from is no longer pulled back to the end when a row
   re-measures (an image finished loading), its viewport resizes or rows land;

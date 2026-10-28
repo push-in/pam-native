@@ -290,6 +290,11 @@ $assert(
 Runtime::dispatchModuleResult($prefetch['requestId'], ModuleResultStatus::Success->value, Wire::map(['succeeded' => 1, 'failed' => 1, 'bytes' => 2048]));
 $assert($prefetched instanceof ImagePrefetchResult && $prefetched->succeeded === 1 && !$prefetched->complete(), 'Image::prefetch must report a typed result.');
 $assert($rejects(static fn () => Image::prefetch(['file:///etc/passwd'])) && $rejects(static fn () => Image::prefetch([])), 'Image::prefetch accepts only remote images.');
+Image::prefetch(['asset://assets/bg-light.webp', 'asset://assets/bg-dark.webp']);
+$assert(
+    json_decode((string) $lastCall()['values']['urls'], true) === ['asset://assets/bg-light.webp', 'asset://assets/bg-dark.webp'],
+    'Image::prefetch preloads packaged asset:// images.',
+);
 
 // 8. Permission kinds.
 $assert(

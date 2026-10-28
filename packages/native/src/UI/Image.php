@@ -34,6 +34,13 @@ final class Image extends Element
      * Downloads remote images into the shared image disk cache ahead of
      * rendering. Pass the same headers/cache keys the Image will use.
      *
+     * Packaged `asset://` images (a screen background) are decoded once per
+     * process at full resolution and kept in memory instead, so an Image with
+     * that exact source paints in the frame that binds it, with no decode and
+     * no fade; a theme switch between two preloaded sources only swaps them.
+     * Bounded natively (8 images, 48 MiB); prefetch them while a previous
+     * screen shows, not for images that may never render.
+     *
      * @param list<string> $urls
      * @param array<string, string> $headers
      * @param array<string, string> $cacheKeys Optional url => stable cache key map.
@@ -55,8 +62,8 @@ final class Image extends Element
         }
         foreach ($urls as $url) {
             $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-            if (strlen($url) > 8_192 || !in_array($scheme, ['https', 'http'], true)) {
-                throw new InvalidArgumentException('Only remote HTTP(S) images can be prefetched.');
+            if (strlen($url) > 8_192 || !in_array($scheme, ['https', 'http', 'asset'], true)) {
+                throw new InvalidArgumentException('Only remote HTTP(S) or packaged asset:// images can be prefetched.');
             }
         }
         $packedHeaders = (new self(NodeKind::Image))->headers($headers)->properties()[PropKey::ImageRequestHeaders->value] ?? '';
