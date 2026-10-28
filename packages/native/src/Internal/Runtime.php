@@ -951,6 +951,10 @@ final class Runtime
         self::$lastTheme = null;
         self::$environmentKey = null;
         self::$themed = null;
+        // Composable sources first: stopping them unsubscribes from the
+        // platform listeners reset below, and a hot reload must not keep a
+        // source whose signal still points at the previous request's state.
+        \Pam\Native\Composables\Sources::reset();
         Appearance::resetRuntime();
         \Pam\Native\System\Keyboard::resetRuntime();
         PortalRegistry::reset();

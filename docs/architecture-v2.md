@@ -186,6 +186,9 @@ example in `index.php` for `App::globals()`, lives as long as the app.
   convert to an array with `toArray()`.
 - `useNetwork()` assumes the app is online until the host sends its first
   status. Until then, `known` is `false`.
+- `Runtime::shutdown()` (hot reload, test teardown) stops every shared
+  source, including the app-lifetime ones from `index.php`. The next
+  composable call starts a fresh subscription.
 - For window metrics, `Runtime::onWindowMetrics()` and `offWindowMetrics()`
   allow any number of listeners. `App::onDimensions()`, which keeps a single
   handler, is unchanged.

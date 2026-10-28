@@ -158,6 +158,17 @@ try {
     $readOnly = true;
 }
 $assert($readOnly, 'Composable properties must be read-only.');
+// Runtime::shutdown() (hot reload, tests) stops every shared source.
+useKeyboard();
+$assert(SharedSource::active() === ['appearance' => 1, 'keyboard' => 1], 'App-lifetime composables keep their sources until shutdown.');
+Runtime::shutdown();
+$assert(
+    SharedSource::active() === [] && $count(Appearance::class, 'listeners') === 0
+        && Runtime::windowMetricsListeners() === 0,
+    'Runtime::shutdown() must reset SharedSource and release its platform listeners: '.json_encode(SharedSource::active()),
+);
+$fresh = useColorScheme();
+$assert(SharedSource::active() === ['appearance' => 1] && $fresh->value === 'light', 'A composable after shutdown starts a fresh source.');
 Sources::reset();
 Appearance::resetRuntime();
 Keyboard::resetRuntime();
