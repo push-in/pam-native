@@ -127,7 +127,7 @@ internal class HotReloadClient(
         schedule(delay)
     }
 
-    private fun backoff(): Long = minOf(MAX_BACKOFF_MILLIS, RETRY_MILLIS shl minOf(failures - 1, 3))
+    private fun backoff(): Long = backoffDelayMillis(failures)
 
     private fun schedule(delayMillis: Long) {
         if (closed.get()) return
@@ -301,7 +301,7 @@ internal class HotReloadClient(
 
     private data class HotReloadReport(val version: String, val files: Int, val bytes: Long)
 
-    private companion object {
+    internal companion object {
         const val TAG = "PamNativeHotReload"
         const val BASE_URL = "http://127.0.0.1:39100"
         const val CONNECT_TIMEOUT_MILLIS = 500
@@ -313,7 +313,23 @@ internal class HotReloadClient(
         const val SYNC_MAGIC = "PNS1 "
         const val PENDING_POLL_MILLIS = 50L
         const val RETRY_MILLIS = 300L
-        const val MAX_BACKOFF_MILLIS = 2_000L
+        const val QUICK_BACKOFF_MILLIS = 2_000L
+        const val QUICK_RETRIES = 6
+        const val MAX_BACKOFF_MILLIS = 30_000L
+
+        /**
+         * Retry delay after [failures] consecutive failed syncs: a quick ramp to
+         * 2 s covers a dev server restart (about 10 s), then the delay doubles to
+         * a 30 s ceiling, so a debug build with no server stops waking the radio
+         * and the CPU every 2 s for the life of the app.
+         */
+        fun backoffDelayMillis(failures: Int): Long {
+            val count = maxOf(failures, 1)
+            if (count <= QUICK_RETRIES) {
+                return minOf(QUICK_BACKOFF_MILLIS, RETRY_MILLIS shl minOf(count - 1, 3))
+            }
+            return minOf(MAX_BACKOFF_MILLIS, QUICK_BACKOFF_MILLIS shl minOf(count - QUICK_RETRIES, 5))
+        }
         const val OUTCOME_SUCCEEDED = 1
         const val OUTCOME_FAILED = 2
     }

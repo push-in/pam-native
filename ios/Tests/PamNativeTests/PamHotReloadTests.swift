@@ -2,6 +2,18 @@ import XCTest
 @testable import PamNative
 
 final class PamHotReloadTests: XCTestCase {
+    func testRetryBacksOffToThirtySecondsWhenTheDevServerStaysAway() {
+        let delays = (1...12).map { PamHotReloadClient.backoffDelay(failures: $0) }
+
+        XCTAssertEqual(delays[0], 0.3, accuracy: 0.001)
+        XCTAssertEqual(delays[3], 2.0, accuracy: 0.001)
+        XCTAssertEqual(delays[5], 2.0, accuracy: 0.001)
+        XCTAssertEqual(delays[6], 4.0, accuracy: 0.001)
+        XCTAssertEqual(delays[11], 30.0, accuracy: 0.001)
+        XCTAssertEqual(PamHotReloadClient.backoffDelay(failures: 500), 30.0, accuracy: 0.001)
+        XCTAssertEqual(zip(delays, delays.dropFirst()).filter { $0.0 > $0.1 }.count, 0)
+    }
+
     func testMeasuresOneConfirmedVersionThroughItsFirstCommittedFrame() throws {
         let latency = PamHotReloadLatency()
         try latency.begin(confirmedAtNanos: 1_000, bundleBytes: 4_096)

@@ -218,8 +218,23 @@ final class PamHotReloadClient {
     }
 
     private func backoff() -> TimeInterval {
-        min(2.0, 0.3 * pow(2.0, Double(min(failures - 1, 3))))
+        Self.backoffDelay(failures: failures)
     }
+
+    /// Retry delay after `failures` consecutive failed syncs: a quick ramp to
+    /// 2 s covers a dev server restart (about 10 s), then the delay doubles to
+    /// a 30 s ceiling, so a debug build with no server running stops waking
+    /// the radio and the CPU every 2 s for the life of the app.
+    static func backoffDelay(failures: Int) -> TimeInterval {
+        let count = max(failures, 1)
+        if count <= quickRetries {
+            return min(2.0, 0.3 * pow(2.0, Double(min(count - 1, 3))))
+        }
+        return min(maxBackoff, 2.0 * pow(2.0, Double(min(count - quickRetries, 5))))
+    }
+
+    static let quickRetries = 6
+    static let maxBackoff: TimeInterval = 30
 
     private func syncOnce() throws {
         let base = store.currentLiveManifest
