@@ -7034,7 +7034,7 @@ fn remove_empty_directories(directory: &Path) -> Result<(), String> {
 }
 
 /// The host PHP used for build-time steps: PAM_NATIVE_PHP, PAM_PHP, `pam`, then `php`.
-fn host_php() -> String {
+pub(crate) fn host_php() -> String {
     std::env::var("PAM_NATIVE_PHP")
         .ok()
         .filter(|value| !value.is_empty())

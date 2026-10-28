@@ -195,7 +195,10 @@ pub fn compile(root: &Path, options: &RoutesOptions) -> Result<Option<RouteManif
             compiler.display()
         ));
     }
-    let output = Command::new("php")
+    // Same host PHP as every other build step (PAM_NATIVE_PHP, PAM_PHP,
+    // `pam`, then `php`): build hosts with only the PAM toolchain have no
+    // `php` on PATH.
+    let output = Command::new(crate::mobile::host_php())
         .arg(&compiler)
         .arg(&file)
         .arg(root.join(&options.output))
