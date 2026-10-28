@@ -44,7 +44,7 @@ final class Signals
             self::$batchDepth--;
             if (self::$batchDepth === 0 && self::$renderPending) {
                 self::$renderPending = false;
-                Runtime::requestRender();
+                Runtime::scheduleRender();
             }
         }
     }
@@ -56,6 +56,8 @@ final class Signals
             self::$renderPending = true;
             return;
         }
-        Runtime::requestRender();
+        // Signal::set already invalidated the components that read the signal.
+        // A resource's loading flag must not invalidate unrelated list rows.
+        Runtime::scheduleRender();
     }
 }
