@@ -139,6 +139,18 @@ $assert(
         && array_filter($horizontalRows, $isPlaceholder) === [],
     'Lists up to 96 rows and horizontal lists must not be windowed.',
 );
+// Each encoder keeps the identity bookkeeping of its whole tree (about 1.7 KB
+// per node: a fully encoded 10,000-row horizontal list holds ~50 MB). That is
+// bounded by the live tree, not a leak: releasing the encoder frees it at
+// once, without the cycle collector. Release each one after its assertions so
+// this file stays far below the 128M memory_limit inside run.php.
+$horizontalRef = WeakReference::create($horizontalEncoder);
+$memoryBeforeRelease = memory_get_usage();
+unset($shortEncoder, $shortList, $shortRows, $horizontalEncoder, $horizontalList, $horizontalRows);
+$assert(
+    $horizontalRef->get() === null && memory_get_usage() < $memoryBeforeRelease - 20 * 1024 * 1024,
+    'A released encoder must free its tree immediately (no static or cyclic retention).',
+);
 
 // Grids keep one placeholder per cell (runs would break the column flow).
 $gridEncoder = new TreeEncoder();
@@ -148,6 +160,7 @@ $assert(
     count($gridChildren) === 10_000 && count(array_filter($gridChildren, $isPlaceholder)) === 10_000 - 48 - 1,
     'Multi-column lists must keep one placeholder per cell.',
 );
+unset($gridEncoder, $gridChildren);
 
 // initialScrollIndex materializes the rows around it too.
 $initialEncoder = new TreeEncoder();
@@ -160,6 +173,7 @@ $assert(
         && $isPlaceholder($initialRows[6_935]),
     'initialScrollIndex must be inside the first window.',
 );
+unset($initialEncoder, $initialChildren, $initialRows);
 
 // Filtering the rows (a new, shorter tree) keeps working on the same window.
 $filtered = VirtualizedList::make(...array_slice($rows, 0, 200))->estimatedRowHeight(64)->toElement();
@@ -263,3 +277,4 @@ $generator = (static function () use ($closureRows) {
 $generatorEncoder = new TreeEncoder();
 $generatorEncoder->encode(VirtualizedList::make($generator)->toElement());
 $assert($closureBuilt === 48, "A generator of closure rows must be deferred too (built {$closureBuilt}).");
+unset($encoder, $lazyEncoder, $closureEncoder, $generatorEncoder, $shortLazy, $rows, $list, $lazyList, $closureRows, $generator, $nodes, $listRows, $lazyRows, $lazyNodes, $listChildren, $lazyChildren, $filteredChildren, $filteredRows, $sticky, $built);
