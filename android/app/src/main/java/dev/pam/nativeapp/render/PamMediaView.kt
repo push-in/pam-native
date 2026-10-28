@@ -121,6 +121,13 @@ internal class PamMediaView(
     private var suspended = false
     private var pendingRestore = false
 
+    /**
+     * `idleSurface`: no player, decoder or cache work while true, but the
+     * view and its TextureView stay mounted, so the same list cell playing
+     * again reuses its surface instead of building a new video view.
+     */
+    private var idleSurface = false
+
     /** Views bound to a player `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer. */
     var boundViews: (() -> List<View>)? = null
 
@@ -157,8 +164,8 @@ internal class PamMediaView(
      */
     private val progress = object : Runnable {
         override fun run() {
-            // A covered, suspended or hidden player has nothing to report; restoring restarts the loop.
-            if (covered || suspended || hiddenRelease) return
+            // A covered, suspended, hidden or idle player has nothing to report; restoring restarts the loop.
+            if (covered || suspended || hiddenRelease || idleSurface) return
             val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
@@ -229,8 +236,8 @@ internal class PamMediaView(
         sourceGeneration++
         pendingRestore = false
         if (value.isNotEmpty() && appInBackground && !keepAliveWhenCovered) suspended = true
-        if (value.isEmpty() || covered || suspended || hiddenRelease) {
-            // A covered (or hidden) route prepares its player when it is visible again;
+        if (value.isEmpty() || covered || suspended || hiddenRelease || idleSurface) {
+            // A covered (or hidden, or idle) route prepares its player when it is visible again;
             // a suspended app when it is active again.
             releasePlayer()
             if (suspended && value.isNotEmpty()) pendingRestore = true
@@ -266,7 +273,7 @@ internal class PamMediaView(
                     error = { onError?.invoke(it) },
                 ),
             ) { cached ->
-                if (generation == sourceGeneration && !covered && !suspended && !hiddenRelease) {
+                if (generation == sourceGeneration && !covered && !suspended && !hiddenRelease && !idleSurface) {
                     prepareMedia(
                         if (shouldUseResolvedMediaUri(cached == Uri.EMPTY, cached.scheme)) {
                             resolved
@@ -391,8 +398,12 @@ internal class PamMediaView(
         playback.hostActive(true)
         if (suspended) {
             suspended = false
-            // Only the player with play intent comes back now.
-            if (playback.wantsPlay) restoreOnDemand()
+            if (idleSurface) {
+                if (!covered) ensureVideoAttached()
+            } else if (playback.wantsPlay) {
+                // Only the player with play intent comes back now.
+                restoreOnDemand()
+            }
         }
         syncVisibility()
     }
@@ -402,14 +413,46 @@ internal class PamMediaView(
         if (keepAliveWhenCovered || suspended) return
         suspended = true
         if (source.isEmpty()) return
-        if (!covered) releaseDecoder()
+        if (idleSurface) {
+            // The retained empty surface goes too: its GPU buffers are freed in background.
+            if (video.parent === this) removeViewInLayout(video)
+        } else if (!covered) {
+            releaseDecoder()
+        }
         pendingRestore = true
     }
 
     private fun restoreOnDemand() {
-        if (!pendingRestore || suspended || covered || hiddenRelease || source.isEmpty()) return
+        if (!pendingRestore || suspended || covered || hiddenRelease || idleSurface || source.isEmpty()) return
         restoreAfterCover()
     }
+
+    fun setIdleSurface(value: Boolean) {
+        if (idleSurface == value) return
+        idleSurface = value
+        if (value) {
+            main.removeCallbacks(progress)
+            // An idle cell starts over when it plays again (no resume point).
+            resumeSource = ""
+            resumeAtSeconds = 0.0
+            sourceGeneration++
+            releasePlayer()
+            pendingRestore = false
+            return
+        }
+        if (covered || suspended || hiddenRelease) {
+            // Prepared when the route is visible / the app is active again.
+            if (suspended && source.isNotEmpty()) pendingRestore = true
+            return
+        }
+        restoreAfterCover()
+    }
+
+    /** True while the view keeps only its empty surface (tests, diagnostics). */
+    internal val holdsIdleSurface: Boolean get() = idleSurface && preparedPlayer == null && exo == null && !creatingPlayer
+
+    /** The TextureView kept by an idle view (tests, diagnostics). */
+    internal val surfaceView: View get() = video
 
     /** True while background suspension holds this player released (tests, diagnostics). */
     internal val releasedForBackground: Boolean get() = suspended
@@ -444,7 +487,7 @@ internal class PamMediaView(
             removeCallbacks(releaseHidden)
             if (hiddenRelease && isAttachedToWindow && shown) {
                 hiddenRelease = false
-                if (!covered && !suspended) restoreAfterCover()
+                if (!covered && !suspended && !idleSurface) restoreAfterCover()
             }
             return
         }
@@ -458,7 +501,7 @@ internal class PamMediaView(
         val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
         if (nowCovered == covered) return
         covered = nowCovered
-        if (nowCovered) releaseDecoder() else if (!suspended && !hiddenRelease) restoreAfterCover()
+        if (nowCovered) releaseDecoder() else if (!suspended && !hiddenRelease && !idleSurface) restoreAfterCover() else if (!suspended && idleSurface) ensureVideoAttached()
     }
 
     /** Frees the decoder, player and video surface (covered route, background), keeping its position. */
@@ -936,7 +979,7 @@ internal class PamMediaView(
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !suspended && !hiddenRelease) {
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !suspended && !hiddenRelease && !idleSurface) {
             val current = source
             source = ""
             setSource(current)

@@ -3021,6 +3021,8 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.mediaSource:
             if let media = view as? PamMediaView, let state = nodes[nodeId] {
                 configureMediaCache(media, state: state)
+                // An idle view never starts preparing its source (key order applies the source first).
+                media.setIdleSurface(state.properties[PamConstants.mediaIdleSurface]?.boolOrNil() ?? false)
             }
             (view as? PamMediaView)?.setSource(value.textOrNil() ?? "")
         case PamConstants.mediaType:
@@ -3041,6 +3043,8 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamMediaView)?.setPlaybackRate(Float(value.decimalOrZero()))
         case PamConstants.mediaKeepAliveWhenCovered:
             (view as? PamMediaView)?.setKeepAliveWhenCovered(value.boolOrNil() ?? false)
+        case PamConstants.mediaIdleSurface:
+            (view as? PamMediaView)?.setIdleSurface(value.boolOrNil() ?? false)
         case PamConstants.mediaClock:
             view.pamMediaClockRef = value.textOrNil()
             mediaBoundIds.insert(nodeId)
@@ -3600,6 +3604,8 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamMediaView)?.setPlaybackRate(1)
         case PamConstants.mediaKeepAliveWhenCovered:
             (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
+        case PamConstants.mediaIdleSurface:
+            (view as? PamMediaView)?.setIdleSurface(false)
         case PamConstants.mediaClock:
             view.pamMediaClockRef = nil
             if state.properties[PamConstants.mediaProgress] == nil { mediaBoundIds.remove(nodeId) }

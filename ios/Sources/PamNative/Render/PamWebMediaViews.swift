@@ -291,6 +291,9 @@ final class PamMediaView: UIView {
     private(set) var pendingRestore = false
     /// Set by the renderer between `didEnterBackground` and `didBecomeActive`.
     static var appInBackground = false
+    /// `idleSurface`: no AVPlayer or cache work while true; the view and its
+    /// player layer stay mounted for the same cell to play again.
+    private(set) var idleSurface = false
     private var coverageObserver: NSObjectProtocol?
     /// Views bound to this player's `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer.
     var boundViews: (() -> [UIView])?
@@ -363,10 +366,34 @@ final class PamMediaView: UIView {
             rememberResumePoint()
             sourceGeneration &+= 1
             releasePlayer()
-        } else if !releasedForBackground {
+        } else if !releasedForBackground, !idleSurface {
             restorePlayer()
         }
     }
+
+    func setIdleSurface(_ value: Bool) {
+        guard idleSurface != value else { return }
+        idleSurface = value
+        if value {
+            // An idle cell starts over when it plays again (no resume point).
+            resumeSource = ""
+            resumeAt = 0
+            resumePlaying = false
+            pendingRestore = false
+            sourceGeneration &+= 1
+            releasePlayer()
+            return
+        }
+        if releasedForBackground {
+            if !source.isEmpty { pendingRestore = true }
+            return
+        }
+        guard !releasedForCover, !source.isEmpty else { return }
+        restorePlayer()
+    }
+
+    /// True while the view keeps only its empty surface (tests, diagnostics).
+    var holdsIdleSurface: Bool { idleSurface && player == nil && playerView.superview === self }
 
     /// Keeps the position and play intent of the player about to be released.
     private func rememberResumePoint() {
@@ -437,6 +464,8 @@ final class PamMediaView: UIView {
         releasePlayer()
         pendingRestore = false
         guard !value.isEmpty else { return }
+        // An idle surface prepares nothing until it is active again.
+        if idleSurface { return }
         // A suspended app never allocates a decoder; resume prepares it.
         if Self.appInBackground, !keepAliveWhenCovered { releasedForBackground = true }
         if releasedForBackground {
@@ -664,7 +693,7 @@ final class PamMediaView: UIView {
 
     func setAutoPlay(_ value: Bool) {
         autoPlay = value
-        if value, pendingRestore, !releasedForBackground, !releasedForCover {
+        if value, pendingRestore, !releasedForBackground, !releasedForCover, !idleSurface {
             restorePlayer()
             return
         }
@@ -901,7 +930,7 @@ final class PamMediaView: UIView {
     }
     func seek(_ seconds: Double) {
         currentTime = max(seconds, 0)
-        if pendingRestore, !releasedForBackground, !releasedForCover {
+        if pendingRestore, !releasedForBackground, !releasedForCover, !idleSurface {
             // A seek on a suspended paused player draws that frame on demand.
             resumeSource = source
             resumeAt = currentTime
@@ -963,7 +992,7 @@ final class PamMediaView: UIView {
             return
         }
         releasedForBackground = false
-        guard pendingRestore, !releasedForCover, !source.isEmpty else { return }
+        guard pendingRestore, !releasedForCover, !idleSurface, !source.isEmpty else { return }
         if autoPlay || resumePlaying {
             restorePlayer()
         }

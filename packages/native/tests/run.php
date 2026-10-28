@@ -8256,5 +8256,6 @@ require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
+require __DIR__.'/media_idle_surface.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

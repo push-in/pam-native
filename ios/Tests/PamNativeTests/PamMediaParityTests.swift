@@ -155,6 +155,39 @@ final class PamMediaParityTests: XCTestCase {
         XCTAssertTrue(paused.hasPlayer, "a seek restores it")
     }
 
+    func testIdleSurfaceReleasesThePlayerButKeepsTheView() throws {
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        media.setControls(false)
+        window.addSubview(media)
+        let url = try Self.makeVideo().absoluteString
+        media.setSource(url)
+        XCTAssertTrue(media.hasPlayer)
+        media.setIdleSurface(true)
+        XCTAssertFalse(media.hasPlayer, "idle: no AVPlayer")
+        XCTAssertTrue(media.holdsIdleSurface, "the view and its layer stay mounted")
+        media.setSource(url + "#next")
+        XCTAssertFalse(media.hasPlayer, "an idle view prepares nothing")
+        media.setIdleSurface(false)
+        XCTAssertTrue(media.hasPlayer, "active again: the same view prepares its source")
+    }
+
+    func testIdleSurfaceStaysIdleAcrossBackground() throws {
+        let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        media.setControls(false)
+        media.setIdleSurface(true)
+        media.setAutoPlay(true)
+        media.setSource(try Self.makeVideo().absoluteString)
+        media.onHostPause()
+        media.onHostBackground()
+        media.onHostResume()
+        XCTAssertFalse(media.hasPlayer, "resume never prepares an idle view")
+        media.setIdleSurface(false)
+        XCTAssertTrue(media.hasPlayer)
+    }
+
     func testKeepAlivePlayerOnlyPausesInBackground() throws {
         let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
         media.setControls(false)
