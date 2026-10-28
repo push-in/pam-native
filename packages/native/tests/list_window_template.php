@@ -69,6 +69,8 @@ final class LazyTile extends Component
     </Pressable>
 </template>
 PAM);
+// The host has a scoped sheet, as app screens do: its rows take the compiled
+// fast path (componentTag) and an unchanged row is reused through reuseCall().
 file_put_contents($lazyDirectory.'/LazyHost.pam.php', <<<'PAM'
 <?php
 
@@ -103,6 +105,106 @@ final class LazyHost extends Component
         </VirtualizedList>
     </Column>
 </template>
+
+<style scoped>
+    .lazy-host { flex: 1; }
+</style>
+PAM);
+// A row component whose press comes from a child component (a feed card and
+// its action row): the child relays to the row, the row to the host.
+file_put_contents($lazyDirectory.'/LazyCardButton.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\LazyTemplate;
+
+use Pam\Native\Component;
+
+final class LazyCardButton extends Component
+{
+    public function __construct(public string $item)
+    {
+    }
+
+    public function tap(): void
+    {
+        $this->emit('tap', $this->item);
+    }
+}
+?>
+
+<template>
+    <Pressable :accessibilityLabel="'card:'.$item" @press="tap">
+        <Text>{{ $item }}</Text>
+    </Pressable>
+</template>
+PAM);
+file_put_contents($lazyDirectory.'/LazyCard.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\LazyTemplate;
+
+use Pam\Native\Component;
+
+final class LazyCard extends Component
+{
+    public function __construct(public string $item)
+    {
+    }
+
+    public function tapped(string $item): void
+    {
+        $this->emit('hit', $item);
+    }
+}
+?>
+
+<template>
+    <Column class="card">
+        <LazyCardButton :item="$item" @tap="tapped" />
+    </Column>
+</template>
+
+<style scoped>
+    .card { padding: 4px; }
+</style>
+PAM);
+file_put_contents($lazyDirectory.'/LazyCardHost.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\LazyTemplate;
+
+use Pam\Native\Component;
+
+final class LazyCardHost extends Component
+{
+    /** @var list<string> */
+    public array $items = [];
+
+    /** @var list<string> */
+    public array $log = [];
+
+    public function hit(string $value): void
+    {
+        $this->log[] = $value;
+    }
+}
+?>
+
+<template>
+    <VirtualizedList class="cards" estimatedRowHeight="64">
+        <LazyCard p-for="$item in $items" :key="$item" :item="$item" @hit="hit" />
+    </VirtualizedList>
+</template>
+
+<style scoped>
+    .cards { flex: 1; }
+</style>
 PAM);
 App::components($lazyDirectory, $lazyDirectory.'/.cache');
 $lazyHost = App::make('Pam\\Native\\Tests\\LazyTemplate\\LazyHost');
@@ -190,6 +292,25 @@ $assert(
     'Rows the window slid away from must unmount; the head stays.',
 );
 
+// A row that comes back into the window of a reused owner is rebuilt from
+// its kept instance (unchanged call site): the rows still shown keep theirs
+// too, with their listeners, so a press on them still reaches the owner.
+Runtime::dispatchEvent($listId, EventKind::ListWindow->value, '@998,1008');
+$syncNative();
+$tiles = $lazyTiles();
+$assert(
+    isset($tiles['item-1000:0'], $tiles['item-3:1']) && !isset($tileClass::$unmounts['item-3']),
+    'A row back in the window must not unmount the rows still shown.',
+);
+Runtime::dispatchEvent($tiles['item-3:1'], EventKind::Press->value, $pointer);
+$syncNative();
+$tiles = $lazyTiles();
+$assert(
+    $lazyHost->log === ['item-3:1', 'item-3:2'] && isset($tiles['item-3:2']),
+    'A press on a row kept in the window must still reach the owner after another row came back ('
+        .implode(',', $lazyHost->log).').',
+);
+
 // Reordering keeps identity: item-3's state follows its key.
 $lazyHost->items = array_reverse($lazyHost->items);
 $lazyHost->items = array_merge(['item-3'], array_values(array_diff($lazyHost->items, ['item-3'])));
@@ -198,7 +319,7 @@ Runtime::render();
 $syncNative();
 $tiles = $lazyTiles();
 $assert(
-    isset($tiles['item-3:1']) && ($tileClass::$mounts['item-3'] ?? 0) === 1,
+    isset($tiles['item-3:2']) && ($tileClass::$mounts['item-3'] ?? 0) === 1,
     'A reordered lazy row must keep its component state by key.',
 );
 
@@ -209,9 +330,56 @@ Runtime::render();
 $syncNative();
 $tiles = $lazyTiles();
 $assert(
-    count($tiles) === 2 && isset($tiles['item-3:1']) && ($tileClass::$unmounts['item-1990'] ?? 0) === 1
+    count($tiles) === 2 && isset($tiles['item-3:2'])
+        && ($tileClass::$unmounts['item-1990'] ?? 0) === ($tileClass::$mounts['item-1990'] ?? -1)
         && !isset($tileClass::$unmounts['item-3']) && $lazyPlaceholders() === [],
     'Rows that leave the list must unmount; short lists render eagerly.',
+);
+Runtime::shutdown();
+$GLOBALS['pamIdentityFrames'] = [];
+
+// A row whose press comes from a child component keeps working after it
+// left the window and came back (its kept instance must not show the
+// element of the children released when it unmounted), and while other
+// rows come back into the window of the reused owner.
+$cardHost = App::make('Pam\\Native\\Tests\\LazyTemplate\\LazyCardHost');
+$cardHost->items = array_map(static fn (int $i): string => "card-{$i}", range(0, 1_999));
+App::run($cardHost);
+$syncNative();
+$cardNodes = static function () use ($nativeTree): array {
+    $cards = [];
+    foreach ($nativeTree->order() as $nodeId) {
+        $label = $nativeTree->nodes[$nodeId]['props'][PropKey::AccessibilityLabel->value] ?? null;
+        if ($label !== null && str_contains($label, 'card:')) {
+            $cards[substr($label, strpos($label, 'card:') + 5)] = $nodeId;
+        }
+    }
+
+    return $cards;
+};
+$cardList = null;
+foreach ($nativeTree->order() as $nodeId) {
+    if (isset($nativeTree->nodes[$nodeId]['props'][PropKey::ListPlaceholder->value])) {
+        $cardList = $nativeTree->nodes[$nodeId]['parent'];
+        break;
+    }
+}
+$assert($cardList !== null && isset($cardNodes()['card-3']), 'The card list must render its window.');
+// card-1000 joins the window, leaves it (unmounts) and comes back.
+foreach (['@998,1008', '@1980,1990', '@998,1008'] as $range) {
+    Runtime::dispatchEvent($cardList, EventKind::ListWindow->value, $range);
+    $syncNative();
+}
+$cards = $cardNodes();
+$assert(isset($cards['card-1000'], $cards['card-3']), 'The rows back in the window must be shown.');
+foreach (['card-1000', 'card-3'] as $card) {
+    Runtime::dispatchEvent($cards[$card], EventKind::Press->value, $pointer);
+    $syncNative();
+}
+$assert(
+    $cardHost->log === ['card-1000', 'card-3'],
+    'A press inside a row that came back into the window, and inside a row that stayed, must reach the owner ('
+        .implode(',', $cardHost->log).').',
 );
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];

@@ -992,6 +992,11 @@ abstract class Component implements Renderable
             }
         }
         $this->pamFocusOwner = null;
+        // The child components of the last render are released with this
+        // unmount (PamPhpRegistry::finishRender()): a kept instance that
+        // mounts again (a lazy row back in the window) renders anew instead
+        // of reusing an element whose handlers reach released children.
+        $this->pamLastElement = null;
         foreach ($owned as $resource) {
             try {
                 $resource->dispose();

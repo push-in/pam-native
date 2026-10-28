@@ -357,12 +357,7 @@ final class PamPhpRegistry
         $cacheKey = $className.'@'.$identity;
         $seen = self::$seen ??= ++self::$pass;
         if ($bucket->pass !== $seen) {
-            $bucket->pass = $seen;
-            // An owner reused this pass renders here only through a lazy
-            // list row: what it rendered before stays, as in finishRender().
-            $bucket->active = $owner instanceof Component && ComponentLifecycle::retainedWithoutRender($owner)
-                ? array_fill_keys(array_keys($bucket->instances), true)
-                : [];
+            self::openPass($bucket, $owner, $seen);
         }
         $bucket->active[$cacheKey] = true;
         $instance = $bucket->instances[$cacheKey] ?? null;
@@ -505,12 +500,28 @@ final class PamPhpRegistry
         }
         $seen = self::$seen ??= ++self::$pass;
         if ($bucket->pass !== $seen) {
-            $bucket->pass = $seen;
-            $bucket->active = [];
+            // A lazy row coming back into the window of a reused owner
+            // reaches here too: like component(), it must keep the rows
+            // still shown, or finishRender() releases their instances
+            // (listeners cleared) while their elements stay on screen.
+            self::openPass($bucket, $owner, $seen);
         }
         $bucket->active[$call->cacheKey] = true;
 
         return $instance;
+    }
+
+    /**
+     * First use of $owner's instances in this pass. An owner reused this pass
+     * renders here only through a lazy list row: what it rendered before
+     * stays, as in finishRender().
+     */
+    private static function openPass(ComponentInstances $bucket, object $owner, int $seen): void
+    {
+        $bucket->pass = $seen;
+        $bucket->active = $owner instanceof Component && ComponentLifecycle::retainedWithoutRender($owner)
+            ? array_fill_keys(array_keys($bucket->instances), true)
+            : [];
     }
 
     /**
