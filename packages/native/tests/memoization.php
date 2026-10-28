@@ -142,6 +142,17 @@ $assert(Runtime::flush() && MemoTestParent::$renders === 5
     && str_contains((string) Runtime::lastFrame(), 'count-9')
     && !Runtime::flush(),
     'flush() must render a coalesced burst exactly once.');
+// Device hosts defer rendering and only call flush(): queued tasks (a
+// useResource loader) must run there, even when nothing is pending to render.
+$scheduledRuns = 0;
+\Pam\Native\Scheduling\Scheduler::schedule(static function () use (&$scheduledRuns): void {
+    $scheduledRuns++;
+}, \Pam\Native\Scheduling\TaskPriority::UserBlocking);
+Runtime::flush();
+$assert(
+    $scheduledRuns === 1 && \Pam\Native\Scheduling\Scheduler::pending() === 0,
+    'flush() must run the tasks queued since the last turn (deferred hosts never drain the scheduler elsewhere).',
+);
 Runtime::deferRendering(false);
 
 $beforeModel = MemoTestParent::$renders;

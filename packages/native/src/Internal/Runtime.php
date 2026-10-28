@@ -509,20 +509,46 @@ final class Runtime
         }
     }
 
-    /** Renders once if anything was dispatched or scheduled since the last render. */
+    /**
+     * Renders once if anything was dispatched or scheduled since the last
+     * render. With deferred rendering (the device hosts) this is the only
+     * place the host hands PHP its turn, so the task queue runs here too:
+     * work scheduled by handlers (useResource loaders) before the render,
+     * work scheduled while rendering (a resource first read in setup())
+     * right after it, and one more render for what those tasks changed.
+     */
     public static function flush(): bool
     {
-        if (!self::$pending || self::$root === null) {
+        if (self::$root === null) {
             return false;
         }
-        self::$pending = false;
-        try {
-            self::render();
-        } catch (Throwable $error) {
-            self::reportError($error, RuntimeErrorPhase::Render);
+        self::drainScheduledTasks();
+        if (!self::$pending) {
+            return false;
+        }
+        for ($pass = 0; $pass < 2 && self::$pending; $pass++) {
+            self::$pending = false;
+            try {
+                self::render();
+            } catch (Throwable $error) {
+                self::reportError($error, RuntimeErrorPhase::Render);
+            }
+            self::drainScheduledTasks();
         }
 
         return true;
+    }
+
+    private static function drainScheduledTasks(): void
+    {
+        if (Scheduler::pending() === 0) {
+            return;
+        }
+        try {
+            Scheduler::drain();
+        } catch (Throwable $error) {
+            self::reportError($error, RuntimeErrorPhase::Render);
+        }
     }
 
     public static function hasPendingRender(): bool
