@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Lists (Android): a list opened at its end (`initialScrollIndex`) that the
+  reader scrolled away from is no longer pulled back to the end when a row
+  re-measures (an image finished loading), its viewport resizes or rows land;
+  nothing re-pins a list while it is dragged or flung, and a list scrolled back
+  to its end follows it again. Previously `followEndOnResize` treated every
+  list opened at its end as still resting there, so a long chat timeline
+  snapped back to the bottom while the reader scrolled up.
+- Scroll phases (`on:scrollBeginDrag`, `on:scrollEndDrag`,
+  `on:momentumScrollEnd`) carry RN's `contentSize`/`layoutMeasurement` as
+  `ScrollPhaseEvent::$contentWidth`/`$contentHeight`/`$layoutWidth`/
+  `$layoutHeight`, and `ScrollPhaseEvent::distanceFromEnd()` tells how far the
+  viewport is from the content's end (Android, iOS).
 - `TapEffect::layer()`: a tap effect can animate more than one layer. Each
   extra program plays on the anchor's next child alongside the first (Android,
   iOS; the protocol string carries one `pam-motion` program per layer).
