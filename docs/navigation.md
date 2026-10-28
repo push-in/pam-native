@@ -382,10 +382,54 @@ PHP value and is encoded before it reaches the retained tree:
 ```
 
 `timing()` uses native ease-in-out movement. `spring()` adds bounded damping,
-stiffness and mass. Resize modes are `Scale`, `Clip` and `None`; crossfade uses
-separate source and destination snapshots so asynchronous image changes do not
+stiffness and mass. Resize modes are `Scale`, `Clip` and `None`; crossfade (snapshot
+flights) uses separate source and destination snapshots so asynchronous image changes do not
 flash during the handoff. The legacy one-argument `sharedTransition($tag)`
 remains valid and uses the route transition duration.
+
+Any element takes a tag in templates with `shared` (and `sharedStyle`); `null`
+or `''` leaves it untagged, so list items can opt in per row:
+
+```php
+<Pressable on:press="open($item)">
+    <Image :source="$item['thumb']" resizeMode="cover" :shared="'media:'.$item['id']" />
+</Pressable>
+<!-- destination route -->
+<Image :source="$photo" resizeMode="contain" :shared="'media:'.$id" :sharedStyle="$style" />
+```
+
+What flies, with no app measuring or animation code:
+
+- **Media.** When the tagged view is an `Image` or `MediaPlayer` (or contains
+  one that fills it), the flight draws the whole media once, reusing the
+  decoded bitmap (Android) / `UIImage` (iOS), or for a playing video its
+  current frame, and interpolates three things together: the content rect,
+  the visible crop (a `cover` thumbnail becomes a `contain` full-screen view
+  without stretching) and the corner radius, including the radius of a
+  rounded parent that clips the view. Other views fly as a snapshot.
+- **On screen only.** A tag takes part when its view is on screen on both
+  routes (at least half visible on the leaving one). An element on an
+  off-screen pager page or a row scrolled away has no flight: the route
+  transition runs alone, so a gallery that paged to another photo returns
+  into that photo's thumbnail, or fades when it is gone.
+- **Which style.** The style of the element on the top route wins: the
+  destination of a push, the source of a pop. `returning($ms, $easing)` gives
+  the flight home its own curve (spring in, `EaseIn` home).
+- **Pace.** While elements fly, the route transition follows their duration
+  and curve; with `NavigationTransition::Fade` only the top route fades (the
+  screen below stays put, a `TransparentModal` keeps it visible). A pop uses
+  the transition of the route being removed.
+- **Interactive.** Predictive back (Android) and the edge-swipe back (iOS)
+  drive the flights with the finger and settle or cancel them. For a drag to
+  dismiss, `Drag::holdAt(...)` keeps the dragged view where it was released,
+  and the pop that follows flies it home from there.
+- **Late destination.** A destination image still decoding keeps its flight
+  on top (up to 0.7 s) instead of showing an empty frame.
+- **Platforms.** Android draws flights in the navigation host overlay from the
+  transition animator; iOS animates them with a `UIViewPropertyAnimator`
+  (`UISpringTimingParameters` for springs) above the routes, and presents a
+  `TransparentModal` + `Fade` route with a custom
+  `UIViewControllerAnimatedTransitioning` so the flights run there too.
 
 At most 16 matching elements participate in one transition. Reduced Motion or
 disabled platform animations bypasses the effect, and cleanup always restores

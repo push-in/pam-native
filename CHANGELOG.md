@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Shared elements: any element takes a `shared` tag in templates
+  (`sharedStyle` for its motion). Media flights reuse the decoded image or
+  the current video frame and morph frame, crop (cover to contain) and corner
+  radius (also of a rounded clipping parent); only elements on screen on both
+  routes fly, otherwise the route transition runs alone. The top route's
+  style wins and `SharedTransitionStyle::returning()` sets the curve home
+  (`SharedTransitionEasing::EaseIn`); springs are physical (damping ratio,
+  stiffness, mass). With `Fade` only the top route fades, in step with the
+  flights; a `TransparentModal` + `Fade` route flies on iOS too (custom
+  presentation). Predictive back / edge swipe drive the flights (Android, iOS).
+- A pop animates with the transition of the route being removed (React
+  Navigation), not the screen below's.
+- `Drag::holdAt(...)`: a release toward those snaps keeps the view where the
+  finger let go and reports the settle at once (drag to dismiss into a shared
+  element flight). Drag drivers resolve `nativeRef`s on the whole screen when
+  the detector does not contain them.
+
 - Lists (Android): a list opened at its end (`initialScrollIndex`) that the
   reader scrolled away from is no longer pulled back to the end when a row
   re-measures (an image finished loading), its viewport resizes or rows land;
