@@ -33,7 +33,7 @@ final readonly class DeviceInfo
         public string $appVersion = '',
         /** Installed build number (Android versionCode, iOS CFBundleVersion); '' when unknown. */
         public string $buildNumber = '',
-        /** System language as a BCP 47 tag ("pt-BR"); '' when unknown. See I18n::resolve(). */
+        /** System language as a BCP 47 tag ("pt-BR"); '' when unknown. */
         public string $locale = '',
     ) {
     }

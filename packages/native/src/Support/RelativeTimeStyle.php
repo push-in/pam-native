@@ -4,15 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Support;
 
-/** Wording of Format::relative(). */
-enum RelativeTimeStyle: int
-{
-    /** pt-BR "há 5 min", "há 2 sem", then "12 out."; en "5m ago", "Oct 12". */
-    case Short = 1;
-    /** pt-BR "há 5 minutos", "12 de outubro"; en "5 minutes ago", "October 12". */
-    case Long = 2;
-    /** pt-BR "5 min", "2 h", "2 sem", then "12 out."; en "5m", "2h", "Oct 12". */
-    case Narrow = 3;
-    /** pt-BR "5m", "2h", "3d", "2sem", then "12 out."; en "5m", "2h", "3d", "2w". */
-    case Tiny = 4;
-}
+use Pam\Native\Plugin\MovedToPlugin;
+
+/** @deprecated Install pushinbr/pam-native-i18n and use Pam\Native\I18n\RelativeTimeStyle. */
+MovedToPlugin::alias('Pam\\Native\\Support\\RelativeTimeStyle', 'Pam\\Native\\I18n\\RelativeTimeStyle', 'pushinbr/pam-native-i18n');

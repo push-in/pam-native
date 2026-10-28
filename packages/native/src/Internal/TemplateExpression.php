@@ -35,6 +35,20 @@ final class TemplateExpression
 {
     private const CACHE_LIMIT = 8192;
 
+    /** @var array<string, Closure> Plugin helpers, fixed at application boot. */
+    private static array $functions = [];
+
+    public static function registerFunction(string $name, Closure $function): void
+    {
+        self::$functions[strtolower($name)] = $function;
+    }
+
+    public static function forgetFunction(string $name): void
+    {
+        unset(self::$functions[strtolower($name)]);
+    }
+
+
     /**
      * @internal Compiled expressions by source; the renderer's hot paths
      * call them directly (TemplateExpression::closure() fills misses).
@@ -1144,18 +1158,8 @@ final class TemplateExpression
         if (isset(self::STRING_HELPERS[$builtIn])) {
             return self::invokeStringHelper($builtIn, $arguments);
         }
-        // t('namespace.key', [params]): the message catalog, unless the
-        // component declares its own t().
-        if ($builtIn === 't' && ($scope === null || !method_exists($scope, $name))) {
-            if (
-                count($arguments) < 1 || count($arguments) > 2
-                || !is_string($arguments[0])
-                || (isset($arguments[1]) && !is_array($arguments[1]))
-            ) {
-                throw new RuntimeException('Template t() expects a message key and an optional parameter array.');
-            }
-
-            return \Pam\Native\I18n\I18n::t($arguments[0], $arguments[1] ?? []);
+        if (isset(self::$functions[$builtIn]) && ($scope === null || !method_exists($scope, $name))) {
+            return (self::$functions[$builtIn])(...$arguments);
         }
         $method = $scope === null ? null : (self::$scopeMethods[$scope::class][$name] ?? null);
         if ($method === null && ($scope === null || !method_exists($scope, $name))) {

@@ -210,28 +210,24 @@ if (!\function_exists('Pam\Native\useNetwork')) {
 }
 
 if (!\function_exists('Pam\Native\useLocale')) {
-    /** `->value` ("pt-BR"), `->language`, `->region`, `->device`, `->known`, `->overridden`, `->set(?string)`. */
+    /** `->value` ("pt-BR"), `->language`, `->region`, `->device`, `->known`. */
     function useLocale(): LocaleState
     {
         $device = Sources::device();
         $device->acquireForScope();
-        $overrides = Sources::i18n();
-        $overrides->acquireForScope();
 
-        return new LocaleState($device, $overrides);
+        return new LocaleState($device);
     }
 }
 
 if (!\function_exists('Pam\Native\useTimezone')) {
-    /** `->value` ("America/Sao_Paulo"), `->device`, `->known`, `->overridden`, `->zone()`, `->now()`, `->set(?string)`. */
+    /** `->value` ("America/Sao_Paulo"), `->device`, `->known`, `->zone()`, `->now()`. */
     function useTimezone(): TimezoneState
     {
         $device = Sources::device();
         $device->acquireForScope();
-        $overrides = Sources::i18n();
-        $overrides->acquireForScope();
 
-        return new TimezoneState($device, $overrides);
+        return new TimezoneState($device);
     }
 }
 
