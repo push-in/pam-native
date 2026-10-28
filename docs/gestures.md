@@ -345,6 +345,11 @@ reported without per-frame traffic:
 | `on:scrollEndDrag` | offset, release `velocityX`/`velocityY` (dp/s) |
 | `on:momentumScrollEnd` | offset and `page` once fling/paging settled |
 
+Every phase also carries RN's `contentSize`/`layoutMeasurement` as
+`contentWidth`/`contentHeight`/`layoutWidth`/`layoutHeight` (dp);
+`$event->distanceFromEnd()` is how far the viewport is from the content's end
+(a chat timeline deciding whether the reader still rests at its newest rows).
+
 ```xml
 <Scroll horizontal="true" pagingEnabled="true" decelerationRate="0.99"
     on:momentumScrollEnd="authorChanged">

@@ -556,26 +556,29 @@ class PamNavigationHostInstrumentedTest {
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
                 // A key Back: started and released at progress 0, then a
-                // frame with no navigation (the app closed a panel).
+                // frame with no navigation (the app closed a panel). It
+                // prepared nothing, so nothing settles or is cancelled.
                 assertTrue(navigation.startPredictiveBack())
                 navigation.commitPredictiveBack()
                 assertEquals(0f, second.translationX, 0.001f)
+                assertEquals(View.INVISIBLE, first.visibility)
                 navigation.resolvePredictiveBack()
             }
-            assertTrue(cancelled.await(1, TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
+                assertEquals(1L, cancelled.count)
                 assertTrue(navigation.isActiveRoute(second))
                 assertEquals(View.VISIBLE, second.visibility)
                 assertEquals(View.INVISIBLE, first.visibility)
                 assertEquals(0f, second.translationX, 0.001f)
-                // A dragged one that the app consumed returns to rest too.
+                // A dragged one that the app consumed returns to rest.
                 assertTrue(navigation.startPredictiveBack())
                 navigation.updatePredictiveBack(0.5f)
                 navigation.commitPredictiveBack()
                 assertTrue(second.translationX > 0f)
                 navigation.resolvePredictiveBack()
             }
+            assertTrue(cancelled.await(1, TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             Thread.sleep(400)
             instrumentation.waitForIdleSync()
@@ -584,6 +587,96 @@ class PamNavigationHostInstrumentedTest {
                 assertEquals(View.VISIBLE, second.visibility)
                 assertEquals(0f, second.translationX, 0.001f)
                 // A key Back that pops: the pop that follows completes it.
+                assertTrue(navigation.startPredictiveBack())
+                navigation.commitPredictiveBack()
+                navigation.operation = OPERATION_POP
+                navigation.navigate(2)
+                navigation.resolvePredictiveBack()
+            }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(400)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(first))
+                assertEquals(View.VISIBLE, first.visibility)
+                assertEquals(0f, first.translationX, 0.001f)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    /**
+     * A Back key (Android 15+ also starts a predictive back) that an app
+     * handler consumes, e.g. closing an emoji panel: no route moves on any
+     * frame, before or after the release, until well past the verdict
+     * timeout, like React Navigation with a consuming BackHandler.
+     */
+    @Test
+    fun consumedKeyBackNeverMovesTheRouteOnAnyFrame() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val gestureEvents = java.util.concurrent.atomic.AtomicInteger()
+        val samples = java.util.Collections.synchronizedList(mutableListOf<String>())
+        var sampling = true
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var first: View
+            lateinit var second: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    layout(0, 0, 1_080, 1_920)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    setGestureNavigation(
+                        enabled = true,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = { gestureEvents.incrementAndGet() },
+                        onTransitionEnd = null,
+                        onGestureStart = { gestureEvents.incrementAndGet() },
+                        onGestureEnd = { gestureEvents.incrementAndGet() },
+                        onGestureCancel = { gestureEvents.incrementAndGet() },
+                    )
+                }
+                activity.host.addView(navigation)
+                first = View(activity)
+                second = View(activity)
+                navigation.insert(first, 0)
+                navigation.insert(second, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                fun sample() {
+                    if (!sampling) return
+                    samples += "${second.translationX},${second.translationY},${first.translationX}," +
+                        "${first.visibility},${second.visibility},${navigation.isActiveRoute(second)}"
+                    android.view.Choreographer.getInstance().postFrameCallback { sample() }
+                }
+                sample()
+                // Key down: the system starts a predictive back at 0.
+                assertTrue(navigation.startPredictiveBack())
+                navigation.updatePredictiveBack(0f)
+            }
+            Thread.sleep(120)
+            onMain(instrumentation) {
+                // Key up: released, the runtime runs the handler, which
+                // closes the panel and commits a frame with no navigation.
+                navigation.commitPredictiveBack()
+            }
+            Thread.sleep(32)
+            onMain(instrumentation) { navigation.resolvePredictiveBack() }
+            Thread.sleep(1_300)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) { sampling = false }
+            val frames = synchronized(samples) { samples.toList() }
+            assertTrue("too few frames sampled: ${frames.size}", frames.size > 20)
+            val atRest = "0.0,0.0,0.0,${View.INVISIBLE},${View.VISIBLE},true"
+            frames.forEachIndexed { index, frame -> assertEquals("frame $index", atRest, frame) }
+            assertEquals(0, gestureEvents.get())
+            onMain(instrumentation) {
+                // The next Back that does pop still plays a pop.
                 assertTrue(navigation.startPredictiveBack())
                 navigation.commitPredictiveBack()
                 navigation.operation = OPERATION_POP
@@ -666,9 +759,11 @@ class PamNavigationHostInstrumentedTest {
             onMain(instrumentation) {
                 navigation.transition = TRANSITION_SLIDE_FROM_RIGHT
                 assertTrue(navigation.startPredictiveBack())
+                // Nothing is prepared until the gesture actually drags.
+                assertEquals(View.VISIBLE, source.visibility)
+                navigation.updatePredictiveBack(0.5f)
                 assertEquals(View.INVISIBLE, source.visibility)
                 assertEquals(View.INVISIBLE, destination.visibility)
-                navigation.updatePredictiveBack(0.5f)
                 navigation.cancelPredictiveBack()
             }
             assertTrue(cancelled.await(1, TimeUnit.SECONDS))

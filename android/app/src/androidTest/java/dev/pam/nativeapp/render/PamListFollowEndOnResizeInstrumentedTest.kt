@@ -64,11 +64,74 @@ class PamListFollowEndOnResizeInstrumentedTest {
             }
         }
 
+    @Test fun aListOpenedAtItsEndAndScrolledAwayIsNeverPulledBack() =
+        withList(rows = 40, height = 900, initialIndex = 39) { list ->
+            awaitTrue("opened at the end") { !list.canScrollVertically(1) }
+            // The reader scrolls up into the history.
+            main { list.scrollBy(0, -1_200) }
+            instrumentation.waitForIdleSync()
+            var before = ""
+            main { before = anchorOf(list) }
+            // A row above re-measures (an image finished loading) and the
+            // viewport shrinks (composer, banner): what is on screen stays.
+            remeasure(list, rows = 40, id = 2L, extent = 240f)
+            main { assertEquals("anchor kept after a row re-measured", before, anchorOf(list)) }
+            resize(list, 600)
+            main {
+                assertEquals("anchor kept after shrinking", before, anchorOf(list))
+                assertTrue("the end stays below", list.canScrollVertically(1))
+            }
+        }
+
+    @Test fun aRowReMeasuredAtTheEndKeepsTheEndVisible() =
+        withList(rows = 40, height = 900, initialIndex = 39) { list ->
+            awaitTrue("opened at the end") { !list.canScrollVertically(1) }
+            remeasure(list, rows = 40, id = 39L, extent = 300f)
+            awaitTrue("still at the end after the last rows grew") { !list.canScrollVertically(1) }
+        }
+
+    @Test fun aListScrolledBackToItsEndFollowsItAgain() =
+        withList(rows = 40, height = 900, initialIndex = 39) { list ->
+            awaitTrue("opened at the end") { !list.canScrollVertically(1) }
+            main { list.scrollBy(0, -1_200) }
+            instrumentation.waitForIdleSync()
+            main { list.scrollBy(0, list.computeVerticalScrollRange()) }
+            awaitTrue("back at the end") { !list.canScrollVertically(1) }
+            resize(list, 600)
+            awaitTrue("follows the end again") { !list.canScrollVertically(1) }
+        }
+
     @Test fun anInvertedListIsNeverMovedByAResize() = withList(rows = 40, height = 900, inverted = true) { list ->
         var before = 0
         main { before = list.computeVerticalScrollOffset() }
         resize(list, 600)
         main { assertEquals(before, list.computeVerticalScrollOffset()) }
+    }
+
+    /** First visible row and its top edge: what the reader sees. */
+    private fun anchorOf(list: PamRecyclerList): String {
+        val child = (0 until list.childCount).map(list::getChildAt).firstOrNull { it.bottom > 0 } ?: return ""
+        return "${list.getChildAdapterPosition(child)}@${child.top}"
+    }
+
+    private fun remeasure(list: PamRecyclerList, rows: Int, id: Long, extent: Float) {
+        main {
+            val ids = (1L..rows.toLong()).toList()
+            list.setRichItems(
+                ids = ids,
+                extents = ids.associateWith { if (it == id) extent else 80f },
+                mount = { _, holder ->
+                    holder.addView(
+                        View(list.context),
+                        FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+                    )
+                },
+                unmount = { _, holder -> holder.removeAllViews() },
+            )
+        }
+        instrumentation.waitForIdleSync()
+        SystemClock.sleep(48)
+        instrumentation.waitForIdleSync()
     }
 
     private fun resize(list: PamRecyclerList, height: Int) {

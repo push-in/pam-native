@@ -37,6 +37,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     // viewport grows under its last row (a sheet animating its height) is
     // not "at its end" and must keep its offset.
     private var scrolledToEnd = false
+    // A real scroll moved the list since its initial position: from then on
+    // only [scrolledToEnd] decides whether it follows its end. A list opened
+    // at its end (initialScrollIndex) that the user scrolled away from must
+    // never be pulled back by a resize, a re-measured row or a page landing.
+    private var scrollMoved = false
     private var prefetchItems = 5
     private var adaptivePrefetchItems = prefetchItems
     private var lastScrollNanos = 0L
@@ -111,6 +116,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 if ((if (horizontal) dx else dy) != 0) {
+                    scrollMoved = true
                     scrolledToEnd = restingAtEnd() && canScrollTowardStart()
                 }
                 updateAdaptivePrefetch(if (horizontal) dx else dy)
@@ -135,6 +141,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         android.os.Trace.beginSection("PamList.layout")
         try {
             super.onLayout(changed, left, top, right, bottom)
+            if (endStateAfterLayout) {
+                endStateAfterLayout = false
+                scrollMoved = true
+                scrolledToEnd = restingAtEnd() && canScrollTowardStart()
+            }
             updateAccessibilityVisibility()
         } finally {
             android.os.Trace.endSection()
@@ -158,12 +169,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // from its start follows the end.
         val wasAtEnd = followsEnd() && oldExtent > 0 && newExtent != oldExtent && restingAtEnd()
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (wasAtEnd && !inverted) {
-            post {
-                val count = adapter?.itemCount ?: 0
-                if (count > 0) (layoutManager as? LinearLayoutManager)?.scrollToPosition(count - 1)
-            }
-        }
+        if (wasAtEnd && !inverted) post(::keepEndAfterResize)
     }
 
     /**
@@ -265,11 +271,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
         } ?: emptyMap()
         val current = adapter as? RichRecyclerAdapter
-        if (keepEnd) {
-            post {
-                if (!inverted) (layoutManager as? LinearLayoutManager)?.scrollToPosition(ids.size - 1)
-            }
-        }
+        if (keepEnd) post(::keepEndAfterResize)
         if (current == null) {
             adapter = RichRecyclerAdapter(
                 context,
@@ -565,6 +567,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (!animated || !isLaidOut) {
             manager.scrollToPositionWithOffset(index, offset)
             dispatchViewport()
+            refreshEndStateAfterJump()
             return
         }
         val scroller = object : androidx.recyclerview.widget.LinearSmoothScroller(context) {
@@ -590,6 +593,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 if (!interrupted) {
                     manager.scrollToPositionWithOffset(index, offset)
                     dispatchViewport()
+                    refreshEndStateAfterJump()
                 }
             }
         }
@@ -639,6 +643,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (initialIndex == next && initialPositionApplied) return
         initialIndex = next
         initialPositionApplied = false
+        scrollMoved = false
+        scrolledToEnd = false
         applyInitialPosition()
     }
 
@@ -674,6 +680,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (enabled == (pagerSnap != null)) return
         pagerSnap?.attachToRecyclerView(null)
         pagerSnap = if (enabled) PagerSnapHelper().also { it.attachToRecyclerView(this) } else null
+    }
+
+    /**
+     * Content size in px (RN `contentSize`). Rich rows have known extents, so
+     * the list's axis is their exact sum (RecyclerView's own range is an
+     * average-row estimate); the cross axis is the viewport.
+     */
+    fun contentSizePx(): IntArray {
+        val exact = if (richIds.isNotEmpty() && layoutManager !is GridLayoutManager) {
+            var sum = 0
+            for (id in richIds) sum += richExtents[id] ?: dp(rowHeight)
+            sum + if (horizontal) paddingLeft + paddingRight else paddingTop + paddingBottom
+        } else {
+            null
+        }
+        return if (horizontal) {
+            intArrayOf(exact ?: computeHorizontalScrollRange(), height)
+        } else {
+            intArrayOf(width, exact ?: computeVerticalScrollRange())
+        }
     }
 
     fun pageIndex(): Int {
@@ -1002,7 +1028,33 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (horizontal) canScrollHorizontally(-1) else canScrollVertically(-1)
 
     private fun followsEnd(): Boolean =
-        followEndOnResize && !inverted && initialPositionApplied && (initialIndex > 0 || scrolledToEnd)
+        followEndOnResize && !inverted && initialPositionApplied &&
+            !isUserScrolling() &&
+            (if (scrollMoved) scrolledToEnd else initialIndex > 0)
+
+    /** A finger on the list or its fling: never pulled anywhere meanwhile. */
+    private fun isUserScrolling(): Boolean = scrollState != SCROLL_STATE_IDLE
+
+    /**
+     * Runs a frame after a resize or re-measure that found the list resting
+     * at its end. A drag or fling that started in between, or a scroll that
+     * already left the end, wins: the list is not pulled back.
+     */
+    private fun keepEndAfterResize() {
+        if (!followsEnd()) return
+        val count = adapter?.itemCount ?: 0
+        if (count > 0) (layoutManager as? LinearLayoutManager)?.scrollToPosition(count - 1)
+    }
+
+    /**
+     * Explicit jumps move the list without a scroll delta: its end state is
+     * re-read once the jump was laid out (see [onLayout]).
+     */
+    private var endStateAfterLayout = false
+
+    private fun refreshEndStateAfterJump() {
+        endStateAfterLayout = true
+    }
 
     private fun restingAtEnd(): Boolean {
         val count = adapter?.itemCount ?: 0

@@ -6650,11 +6650,20 @@ class PamRenderer(
                 else -> EventKind.MOMENTUM_SCROLL_END to PropKey.ON_MOMENTUM_SCROLL_END
             }
             if (state.properties[key] == null) return@install
-            val page = when (val view = views[state.id]) {
+            val view = views[state.id]
+            val page = when (view) {
                 is PamScrollContainer -> view.pageIndex()
                 is PamRecyclerList -> view.pageIndex()
                 else -> 0
             }
+            // RN `contentSize` / `layoutMeasurement` (dp): lets a handler
+            // tell how far the viewport is from the content's end.
+            val content = when (view) {
+                is PamScrollContainer -> view.contentSizePx()
+                is PamRecyclerList -> view.contentSizePx()
+                else -> null
+            }
+            val density = (view?.resources?.displayMetrics?.density ?: 1f).coerceAtLeast(0.01f)
             dispatchBytes(
                 state.id,
                 event.value,
@@ -6665,6 +6674,10 @@ class PamRenderer(
                         "velocityX" to WireValue.Decimal(vx.toDouble()),
                         "velocityY" to WireValue.Decimal(vy.toDouble()),
                         "page" to WireValue.Integer(page.toLong()),
+                        "contentWidth" to WireValue.Decimal(((content?.get(0) ?: 0) / density).toDouble()),
+                        "contentHeight" to WireValue.Decimal(((content?.get(1) ?: 0) / density).toDouble()),
+                        "layoutWidth" to WireValue.Decimal(((view?.width ?: 0) / density).toDouble()),
+                        "layoutHeight" to WireValue.Decimal(((view?.height ?: 0) / density).toDouble()),
                     ),
                 ),
             )
