@@ -7654,6 +7654,7 @@ require __DIR__.'/memory_bounds.php';
 require __DIR__.'/media_idle_surface.php';
 require __DIR__.'/arch_v2_signals.php';
 require __DIR__.'/arch_v2_signal_fanout.php';
+require __DIR__.'/arch_v2_signal_rendering.php';
 require __DIR__.'/arch_v2_setup_lifecycle.php';
 require __DIR__.'/arch_v2_globals.php';
 require __DIR__.'/arch_v2_composables.php';

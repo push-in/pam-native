@@ -155,6 +155,11 @@ final class ChatScreen extends Component
 
 ## Reactivity
 
+Signal writes schedule a render of their tracked consumers. They preserve
+memoized components that do not read the changed signal, including list rows
+beside a resource whose loading state changes. `Signals::batch()` preserves
+the same dependency tracking while coalescing its render request.
+
 | Function | Returns | Notes |
 | --- | --- | --- |
 | `signal(mixed $value)` | `Signals\Signal` | Read and write `->value` (`$count->value++`), or use `get()`/`set()`/`update()`. In templates: `$count.value`. |
