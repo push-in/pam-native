@@ -97,15 +97,30 @@ internal object PamSharedGeometry {
 
     fun lerp(from: Float, to: Float, progress: Float): Float = from + (to - from) * progress
 
-    fun ease(progress: Float, easing: Int, damping: Float, stiffness: Float, mass: Float): Float =
-        when (easing) {
-            1 -> progress
-            3 -> {
-                val frequency = sqrt(stiffness / mass) * 0.12f
-                (1f - exp(-damping * 7f * progress) * cos(frequency * progress)).coerceIn(0f, 1.08f)
-            }
-            else -> progress * progress * (3f - 2f * progress)
+    /**
+     * Eased value at [progress] (linear time, 0..1) of a [durationMs] flight.
+     * 3 is a damped spring (damping ratio, stiffness, mass) whose overshoot is
+     * clamped and which lands exactly at the end; 4 is a cubic ease-in.
+     */
+    fun ease(progress: Float, easing: Int, damping: Float, stiffness: Float, mass: Float, durationMs: Long = 500L): Float {
+        val t = progress.coerceIn(0f, 1f)
+        return when (easing) {
+            1 -> t
+            3 -> if (t >= 1f) 1f else spring(t * durationMs / 1000f, damping, stiffness, mass).coerceIn(0f, 1f)
+            4 -> t * t * t
+            else -> t * t * (3f - 2f * t)
         }
+    }
+
+    /** Unit step response of a damped spring at [seconds] (Reanimated/RN spring physics). */
+    fun spring(seconds: Float, damping: Float, stiffness: Float, mass: Float): Float {
+        val omega = sqrt(stiffness / mass)
+        val zeta = damping.coerceIn(0.01f, 1f)
+        if (zeta >= 0.999f) return 1f - exp(-omega * seconds) * (1f + omega * seconds)
+        val damped = omega * sqrt(1f - zeta * zeta)
+        val envelope = exp(-zeta * omega * seconds)
+        return 1f - envelope * (cos(damped * seconds) + zeta * omega / damped * kotlin.math.sin(damped * seconds))
+    }
 }
 
 /**
@@ -129,7 +144,15 @@ internal class PamSharedElements(private val host: ViewGroup) {
         val damping: Float = 0.82f,
         val stiffness: Float = 220f,
         val mass: Float = 1f,
-    )
+        val returnDurationMs: Long? = null,
+        val returnEasing: Int? = null,
+    ) {
+        /** The curve of a flight back home (the element's route is popped). */
+        fun returning(): Config = copy(
+            durationMs = returnDurationMs ?: durationMs,
+            easing = returnEasing ?: easing,
+        )
+    }
 
     private class Side(val clip: RectF, val content: RectF, val radius: Float)
 
@@ -153,7 +176,18 @@ internal class PamSharedElements(private val host: ViewGroup) {
     val count: Int get() = flights.size
     val durationMs: Long get() = flights.maxOfOrNull { it.config.durationMs } ?: 0L
 
-    fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long) {
+    /** Eased progress of the longest flight, for a route fade that follows it. */
+    fun eased(progress: Float): Float {
+        val config = flights.maxByOrNull { it.config.durationMs }?.config ?: return progress
+        return PamSharedGeometry.ease(progress, config.easing, config.damping, config.stiffness, config.mass, config.durationMs)
+    }
+
+    /**
+     * Pairs every tag on screen on both routes. The style comes from the
+     * element on the top route (the destination of a push, the source of a
+     * pop, which then uses its return curve).
+     */
+    fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long, popping: Boolean = false) {
         clear()
         val sources = taggedViews(outgoing)
         if (sources.isEmpty()) return
@@ -163,8 +197,14 @@ internal class PamSharedElements(private val host: ViewGroup) {
             val source = candidates.firstOrNull { onScreen(it, outgoing, minimumShare = 0.5f) } ?: continue
             val destination = destinations[tag]?.firstOrNull { onScreen(it, incoming, minimumShare = 0f) }
                 ?: continue
-            val config = config(destination) ?: config(source)
-                ?: Config(durationMs = defaultDurationMs.coerceIn(0L, 2_000L))
+            val top = if (popping) source else destination
+            val below = if (popping) destination else source
+            val styled = config(top) ?: config(below)
+            val config = when {
+                styled == null -> Config(durationMs = defaultDurationMs.coerceIn(0L, 2_000L))
+                popping -> styled.returning()
+                else -> styled
+            }
             createFlight(source, destination, config)?.let(flights::add)
         }
         flights.forEach {
@@ -174,10 +214,18 @@ internal class PamSharedElements(private val host: ViewGroup) {
         }
     }
 
+    /** Current crop and radius of every flight: left, top, right, bottom, radius (tests). */
+    fun frames(): List<FloatArray> = flights.map { it.view.frame() }
+
+    /** A finger-driven progress (back gesture): no curve, the finger is the curve. */
+    fun applyTracking(progress: Float) {
+        flights.forEach { it.view.set(it.start, it.end, progress.coerceIn(0f, 1f)) }
+    }
+
     fun apply(progress: Float) {
         flights.forEach { flight ->
             val config = flight.config
-            val eased = PamSharedGeometry.ease(progress, config.easing, config.damping, config.stiffness, config.mass)
+            val eased = PamSharedGeometry.ease(progress, config.easing, config.damping, config.stiffness, config.mass, config.durationMs)
             flight.view.set(flight.start, flight.end, eased)
         }
     }
@@ -446,12 +494,14 @@ internal class PamSharedElements(private val host: ViewGroup) {
             val json = JSONObject(encoded)
             Config(
                 durationMs = json.optLong("durationMs", 500L).coerceIn(0L, 2_000L),
-                easing = json.optInt("easing", 2).coerceIn(1, 3),
+                easing = json.optInt("easing", 2).coerceIn(1, 4),
                 resizeMode = json.optInt("resizeMode", 1).coerceIn(1, 3),
                 crossFade = json.optBoolean("crossFade", true),
                 damping = json.optDouble("damping", 0.82).toFloat().coerceIn(0.01f, 1f),
                 stiffness = json.optDouble("stiffness", 220.0).toFloat().coerceIn(1f, 1_000f),
                 mass = json.optDouble("mass", 1.0).toFloat().coerceIn(0.1f, 10f),
+                returnDurationMs = json.optLong("returnDurationMs", -1L).takeIf { it >= 0 }?.coerceAtMost(2_000L),
+                returnEasing = json.optInt("returnEasing", 0).takeIf { it in 1..4 },
             )
         }.getOrNull()
     }
@@ -491,6 +541,8 @@ internal class PamSharedElements(private val host: ViewGroup) {
             progress = value.coerceIn(0f, 1f)
             invalidate()
         }
+
+        fun frame(): FloatArray = floatArrayOf(clip.left, clip.top, clip.right, clip.bottom, radius)
 
         fun drop() {
             drawable = null

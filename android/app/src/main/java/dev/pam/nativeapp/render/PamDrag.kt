@@ -445,7 +445,7 @@ internal class PamDragController(private val host: ViewGroup) {
         val rawDp = rawPx?.div(density) ?: positionDp
         val extentDp = (if (current.horizontal) target.width else target.height) / density
         for (driver in current.drivers) {
-            val view = if (driver.ref.isEmpty()) target else findRef(host, driver.ref) ?: continue
+            val view = if (driver.ref.isEmpty()) target else driverView(driver.ref) ?: continue
             val input = driver.input.map { if (it.percent) extentDp * it.number / 100.0 else it.number }
             val output = driver.output.map { PamMotionTarget.resolve(view, driver.property, it) }
             val value = if (driver.raw) {
@@ -459,6 +459,31 @@ internal class PamDragController(private val host: ViewGroup) {
             val view = findRef(host, driver.ref) as? TextView ?: continue
             val label = driver.label(positionDp, extentDp)
             if (view.text.toString() != label) view.text = label
+        }
+    }
+
+    private val driverRefs = HashMap<String, java.lang.ref.WeakReference<View>>()
+
+    /**
+     * A driver's `nativeRef`: inside the detector first, else anywhere on the
+     * same screen (route), e.g. a backdrop behind the dragged pager. Cached,
+     * so a frame never walks the screen again.
+     */
+    private fun driverView(ref: String): View? {
+        driverRefs[ref]?.get()
+            ?.takeIf { it.isAttachedToWindow && it.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref }
+            ?.let { return it }
+        val found = findRef(host, ref) ?: screenRoot()?.let { findRef(it, ref) }
+        if (found != null) driverRefs[ref] = java.lang.ref.WeakReference(found) else driverRefs.remove(ref)
+        return found
+    }
+
+    private fun screenRoot(): View? {
+        var view: View = host
+        while (true) {
+            val parent = view.parent as? View ?: return view
+            if (parent is PamNavigationHost) return view
+            view = parent
         }
     }
 

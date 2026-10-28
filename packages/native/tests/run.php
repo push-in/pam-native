@@ -107,6 +107,7 @@ use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
 use Pam\Native\Navigation\SharedTransitionResizeMode;
+use Pam\Native\Navigation\SharedTransitionEasing;
 use Pam\Native\Navigation\SharedTransitionStyle;
 use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationRef;
@@ -7124,6 +7125,24 @@ $assert(
         && $sharedTagImage->properties()[PropKey::SharedTransitionConfig->value]
             === $templateSharedStyle->toJson(),
     'PAM templates must expose typed shared-element tags and motion styles.',
+);
+$returnStyle = SharedTransitionStyle::spring(durationMs: 360, damping: 0.82, stiffness: 240, mass: 0.9)
+    ->returning(200);
+$sharedTagView = TemplateRenderer::render(
+    TemplateCompiler::compile('<View shared="avatar:7" :sharedStyle="$style"><Text>A</Text></View>'),
+    null,
+    ['style' => $returnStyle],
+);
+$untaggedView = TemplateRenderer::render(TemplateCompiler::compile('<View :shared="$tag" />'), null, ['tag' => null]);
+$returnConfig = json_decode($returnStyle->toJson(), true);
+$assert(
+    $sharedTagView->properties()[PropKey::SharedTransitionTag->value] === 'avatar:7'
+        && $sharedTagView->properties()[PropKey::SharedTransitionConfig->value] === $returnStyle->toJson()
+        && !array_key_exists(PropKey::SharedTransitionTag->value, $untaggedView->properties())
+        && $returnConfig['returnDurationMs'] === 200
+        && $returnConfig['returnEasing'] === SharedTransitionEasing::EaseIn->value
+        && !array_key_exists('returnDurationMs', json_decode(SharedTransitionStyle::timing()->toJson(), true)),
+    'Any template element takes a `shared` tag (null leaves it untagged) and a style with a return curve.',
 );
 
 $permission = new PermissionDecision(

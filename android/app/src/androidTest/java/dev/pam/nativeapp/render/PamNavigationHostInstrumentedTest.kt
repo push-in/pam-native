@@ -762,14 +762,17 @@ class PamNavigationHostInstrumentedTest {
                 // Nothing is prepared until the gesture actually drags.
                 assertEquals(View.VISIBLE, source.visibility)
                 navigation.updatePredictiveBack(0.5f)
-                assertEquals(View.INVISIBLE, source.visibility)
-                assertEquals(View.INVISIBLE, destination.visibility)
+                // The flight draws in the overlay; both views are hidden by
+                // alpha (visibility would stop their image loads).
+                assertEquals(0f, source.alpha, 0f)
+                assertEquals(0f, destination.alpha, 0f)
+                assertEquals(1, navigation.activeSharedElementCount())
                 navigation.cancelPredictiveBack()
             }
             assertTrue(cancelled.await(1, TimeUnit.SECONDS))
             onMain(instrumentation) {
-                assertEquals(View.VISIBLE, source.visibility)
-                assertEquals(View.VISIBLE, destination.visibility)
+                assertEquals(1f, source.alpha, 0f)
+                assertEquals(1f, destination.alpha, 0f)
                 assertTrue(navigation.startPredictiveBack())
                 navigation.updatePredictiveBack(0.65f)
                 navigation.commitPredictiveBack()
@@ -778,11 +781,143 @@ class PamNavigationHostInstrumentedTest {
             }
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
-                assertEquals(View.VISIBLE, source.visibility)
-                assertEquals(View.VISIBLE, destination.visibility)
+                assertEquals(1f, source.alpha, 0f)
+                assertEquals(1f, destination.alpha, 0f)
+                assertEquals(0, navigation.activeSharedElementCount())
                 assertTrue(navigation.isActiveRoute(navigation.getChildAt(0)))
             }
         } finally {
+            activity.finish()
+        }
+    }
+
+    /**
+     * A rounded cover thumbnail flies into a contained full-screen image and
+     * back. Frames are sampled on every Choreographer frame: the crop grows
+     * from the bubble to the letterboxed photo (and shrinks back), the radius
+     * goes 14 dp -> 0 -> 14 dp, both views stay hidden only by alpha while
+     * the flight draws, and nothing is left in the overlay afterwards.
+     */
+    @Test
+    fun mediaSharedElementMorphsCropRadiusAndFitBothWays() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        assumeTrue(
+            Settings.Global.getFloat(
+                instrumentation.targetContext.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) > 0f,
+        )
+        val activity = launchActivity(instrumentation)
+        val pushed = CountDownLatch(1)
+        val popped = CountDownLatch(1)
+        var phase = 0
+        val pushFrames = java.util.Collections.synchronizedList(mutableListOf<FloatArray>())
+        val popFrames = java.util.Collections.synchronizedList(mutableListOf<FloatArray>())
+        var sampling: MutableList<FloatArray>? = null
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var thumbnail: PamImageView
+            lateinit var viewer: PamImageView
+            lateinit var viewerRoute: FrameLayout
+            val density = activity.resources.displayMetrics.density
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    setGestureNavigation(
+                        enabled = false, edgeWidth = 24f, threshold = 0.35f, onPop = null,
+                        onTransitionEnd = { if (phase == 1) pushed.countDown() else if (phase == 2) popped.countDown() },
+                        onGestureStart = null, onGestureEnd = null, onGestureCancel = null,
+                    )
+                }
+                activity.host.addView(navigation, FrameLayout.LayoutParams(1_080, 1_920))
+                val photo = android.graphics.Bitmap.createBitmap(400, 300, android.graphics.Bitmap.Config.ARGB_8888)
+                    .apply { eraseColor(Color.rgb(30, 120, 200)) }
+                val chat = FrameLayout(activity)
+                val bubble = PamContainer(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(200, 200).apply { leftMargin = 100; topMargin = 200 }
+                    setOverflowClip(true, FloatArray(8) { 14f * density })
+                }
+                thumbnail = PamImageView(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(200, 200)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    setImageDrawable(android.graphics.drawable.BitmapDrawable(resources, photo))
+                    setTag(R.id.pam_shared_transition_tag, "media:1")
+                }
+                bubble.addView(thumbnail)
+                chat.addView(bubble)
+                viewerRoute = FrameLayout(activity).apply { setBackgroundColor(Color.BLACK) }
+                viewer = PamImageView(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(1_080, 1_920)
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                    setImageDrawable(android.graphics.drawable.BitmapDrawable(resources, photo))
+                    setTag(R.id.pam_shared_transition_tag, "media:1")
+                    setTag(
+                        R.id.pam_shared_transition_config,
+                        """{"durationMs":360,"easing":3,"resizeMode":1,"crossFade":true,"damping":0.816,"stiffness":240,"mass":0.9,"returnDurationMs":200,"returnEasing":4}""",
+                    )
+                }
+                viewerRoute.addView(viewer)
+                navigation.insert(chat, 0)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            val sampler = object : android.view.Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    val target = sampling ?: return
+                    navigation.activeSharedElementFrames().firstOrNull()?.let { target += it.copyOf() }
+                    android.view.Choreographer.getInstance().postFrameCallback(this)
+                }
+            }
+            onMain(instrumentation) {
+                navigation.transition = TRANSITION_FADE
+                navigation.durationMs = 300L
+                phase = 1
+                navigation.insert(viewerRoute, 1)
+                navigation.navigate(2)
+                sampling = pushFrames
+                android.view.Choreographer.getInstance().postFrameCallback(sampler)
+            }
+            assertTrue(pushed.await(3, TimeUnit.SECONDS))
+            onMain(instrumentation) {
+                assertEquals(0, navigation.activeSharedElementCount())
+                assertEquals(1f, thumbnail.alpha, 0f)
+                assertEquals(1f, viewer.alpha, 0f)
+                sampling = popFrames
+                phase = 2
+                navigation.operation = OPERATION_POP
+                navigation.navigate(3)
+            }
+            assertTrue(popped.await(3, TimeUnit.SECONDS))
+            onMain(instrumentation) { sampling = null }
+            assertTrue("push sampled ${pushFrames.size} frames", pushFrames.size >= 8)
+            assertTrue("pop sampled ${popFrames.size} frames", popFrames.size >= 4)
+            val first = pushFrames.first()
+            assertEquals(100f, first[0], 40f)
+            assertEquals(200f, first[1], 40f)
+            assertTrue("opens with the bubble radius", first[4] > 8f * density)
+            val last = pushFrames.last()
+            // Contained 4:3 photo in 1080x1920: 1080x810 centered vertically.
+            assertEquals(0f, last[0], 60f)
+            assertEquals(555f, last[1], 80f)
+            assertEquals(1_365f, last[3], 80f)
+            assertTrue("lands square", last[4] < 4f * density)
+            for (index in 1 until pushFrames.size) {
+                val widthBefore = pushFrames[index - 1][2] - pushFrames[index - 1][0]
+                val width = pushFrames[index][2] - pushFrames[index][0]
+                assertTrue("the crop grows without a jump back (frame $index)", width >= widthBefore - 2f)
+            }
+            val home = popFrames.last()
+            assertEquals(100f, home[0], 60f)
+            assertEquals(300f, home[2], 60f)
+            assertTrue("returns into the rounded bubble", home[4] > 6f * density)
+            onMain(instrumentation) {
+                assertEquals(0, navigation.activeSharedElementCount())
+                assertEquals(1f, thumbnail.alpha, 0f)
+            }
+        } finally {
+            sampling = null
             activity.finish()
         }
     }
@@ -1245,6 +1380,7 @@ class PamNavigationHostInstrumentedTest {
         const val OPERATION_POP = 3
         const val OPERATION_RESET = 5
         const val TRANSITION_SLIDE_FROM_RIGHT = 2
+        const val TRANSITION_FADE = 5
         const val TRANSITION_NONE = 8
         const val TYPE_PERMANENT = 4
         const val TYPE_FRONT = 1

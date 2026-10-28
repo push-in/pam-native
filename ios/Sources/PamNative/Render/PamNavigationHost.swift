@@ -76,6 +76,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private var onGestureEnd: (() -> Void)?
     private var onGestureCancel: (() -> Void)?
     private var interactivePopCommitted = false
+    /// Retains the custom fade of a presented transparent modal.
+    private var modalFade: PamSharedFadeTransition?
     /// A Fade transition with a shared element only fades the top route.
     private var sharedFadeOnlyTop = false
     /// Bumped per transition; a finish from an older one only resets its
@@ -265,7 +267,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         setRouteHidden(incoming, false)
         if let outgoing { setRouteHidden(outgoing, false) }
         layoutIfNeeded()
-        prepareSharedElements(incoming: incoming, outgoing: outgoing)
+        prepareSharedElements(incoming: incoming, outgoing: outgoing, popping: operation == 3)
         let kind = transition == 1 ? 2 : transition
         sharedFadeOnlyTop = sharedElements.count > 0
         if PamMotionPolicy.isReduced || duration == 0 || kind == 8 {
@@ -282,7 +284,19 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         let sharedDuration = sharedElements.duration
         let generation = transitionGeneration
-        sharedElements.animate(duration: min(max(max(duration, sharedDuration), 0), 2))
+        if sharedElements.count > 0 {
+            // The shared elements set the pace and the curve; the routes move
+            // in the same animator (a spring in, an ease-in home).
+            let animator = sharedElements.animator(duration: min(max(duration, 0), 2)) {
+                self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
+            }
+            animator.addCompletion { _ in
+                if !outgoingRasterized { outgoing?.layer.shouldRasterize = false }
+                self.finish(incoming: incoming, outgoing: outgoing, generation: generation)
+            }
+            animator.startAnimation()
+            return
+        }
         UIView.animate(
             withDuration: min(max(max(duration, sharedDuration), 0), 2),
             delay: 0,
@@ -398,10 +412,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
     }
 
-    private func prepareSharedElements(incoming: UIView, outgoing: UIView?) {
+    private func prepareSharedElements(incoming: UIView, outgoing: UIView?, popping: Bool = true) {
         sharedElements.clear()
         guard !PamMotionPolicy.isReduced, duration > 0, let outgoing else { return }
-        sharedElements.capture(outgoing: outgoing, defaultDuration: duration)
+        sharedElements.capture(outgoing: outgoing, defaultDuration: duration, popping: popping)
         sharedElements.attach(incoming: incoming)
     }
 
@@ -587,8 +601,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         if operation == 3, let presented = presentedNavigationController {
+            if let fade = presented.transitioningDelegate as? PamSharedFadeTransition,
+               !PamMotionPolicy.isReduced, let outgoing {
+                // Measured while the modal is still on screen: the flight
+                // home starts where the element is (dragged, zoomed, paged).
+                sharedElements.capture(outgoing: outgoing, defaultDuration: duration, popping: true)
+                fade.incoming = incoming
+            }
             presented.dismiss(animated: !PamMotionPolicy.isReduced) { [weak self] in
                 self?.presentedNavigationController = nil
+                self?.modalFade = nil
                 self?.finish(incoming: incoming, outgoing: outgoing)
                 self?.applyControllerChrome()
             }
@@ -599,7 +621,21 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             let baseControllers = Array(allControllers.dropLast())
             navigation.setViewControllers(baseControllers, animated: false)
             let modal = UINavigationController(rootViewController: controller)
-            configurePresentation(modal)
+            if transition == 5, [5, 6].contains(screenPresentation), !PamMotionPolicy.isReduced {
+                // A transparent modal that fades: a custom transition fades it
+                // over the screen below and flies its shared elements.
+                let fade = PamSharedFadeTransition(host: self, duration: min(max(duration, 0), 2))
+                fade.incoming = incoming
+                modal.transitioningDelegate = fade
+                modal.modalPresentationStyle = .custom
+                modalFade = fade
+                if let outgoing {
+                    sharedElements.capture(outgoing: outgoing, defaultDuration: duration, popping: false)
+                }
+            } else {
+                modalFade = nil
+                configurePresentation(modal)
+            }
             presentedNavigationController = modal
             applyControllerChrome()
             // Present from the host's owning controller. The embedded
@@ -621,7 +657,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         // frame needs it) and hidden before the cross-fade captures them.
         sharedElements.clear()
         if animated, let outgoing {
-            sharedElements.capture(outgoing: outgoing, defaultDuration: duration)
+            sharedElements.capture(outgoing: outgoing, defaultDuration: duration, popping: operation == 3)
         }
         if animated {
             let animation = CATransition()
@@ -672,6 +708,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         presentedNavigationController?.sheetPresentationController?.detents.count ?? 0
     }
     internal var activeSharedElementCount: Int { sharedElements.count }
+
+    /// Pairs the captured sources with the laid-out incoming route (a
+    /// presented modal attaches its own view first).
+    func attachSharedElements(incoming: UIView) {
+        sharedElements.attach(incoming: incoming)
+    }
+
+    func sharedElementAnimator(duration: TimeInterval, alongside: @escaping () -> Void) -> UIViewPropertyAnimator {
+        sharedElements.animator(duration: duration, alongside: alongside)
+    }
 
     private func applyControllerChrome() {
         guard let navigation = presentedNavigationController ?? navigationController else { return }
@@ -772,4 +818,81 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             userInfo: ["hidden": autoHideHomeIndicator]
         )
     }
+}
+
+
+/// Fade presentation for a transparent modal route (`TransparentModal` +
+/// `Fade`) that flies its shared elements: the modal fades in over the
+/// screen below, which stays visible, and fades out on dismiss while its
+/// elements fly home. UIKit's own transitions would slide the modal and skip
+/// the host's flights.
+final class PamSharedFadeTransition: NSObject, UIViewControllerTransitioningDelegate, UIViewControllerAnimatedTransitioning {
+    private weak var host: PamNavigationHost?
+    private let duration: TimeInterval
+    private var presenting = true
+    weak var incoming: UIView?
+
+    init(host: PamNavigationHost, duration: TimeInterval) {
+        self.host = host
+        self.duration = duration
+    }
+
+    func animationController(
+        forPresented presented: UIViewController,
+        presenting: UIViewController,
+        source: UIViewController
+    ) -> UIViewControllerAnimatedTransitioning? {
+        self.presenting = true
+        return self
+    }
+
+    func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+        presenting = false
+        return self
+    }
+
+    func presentationController(
+        forPresented presented: UIViewController,
+        presenting: UIViewController?,
+        source: UIViewController
+    ) -> UIPresentationController? {
+        PamOverPresentation(presentedViewController: presented, presenting: presenting)
+    }
+
+    func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
+        duration
+    }
+
+    func animateTransition(using context: UIViewControllerContextTransitioning) {
+        let key: UITransitionContextViewKey = presenting ? .to : .from
+        guard let view = context.view(forKey: key) else {
+            context.completeTransition(!context.transitionWasCancelled)
+            return
+        }
+        if presenting {
+            if let controller = context.viewController(forKey: .to) {
+                view.frame = context.finalFrame(for: controller)
+            }
+            context.containerView.addSubview(view)
+            view.alpha = 0
+            view.layoutIfNeeded()
+        }
+        if let incoming { host?.attachSharedElements(incoming: incoming) }
+        let presenting = presenting
+        let animator = host?.sharedElementAnimator(duration: duration) {
+            view.alpha = presenting ? 1 : 0
+        } ?? UIViewPropertyAnimator(duration: duration, curve: .easeInOut) {
+            view.alpha = presenting ? 1 : 0
+        }
+        animator.addCompletion { _ in
+            if !presenting { view.removeFromSuperview() }
+            context.completeTransition(!context.transitionWasCancelled)
+        }
+        animator.startAnimation()
+    }
+}
+
+/// Keeps the presenting screen in the window under a transparent modal.
+private final class PamOverPresentation: UIPresentationController {
+    override var shouldRemovePresentersView: Bool { false }
 }

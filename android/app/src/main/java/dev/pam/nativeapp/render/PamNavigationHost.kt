@@ -17,6 +17,7 @@ import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.SearchView
 import android.widget.Toolbar
@@ -99,6 +100,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var predictiveBackNavigated = false
     private val predictiveBackTimeout = Runnable { resolvePredictiveBack() }
     private val sharedElements = PamSharedElements(this)
+    private val routeCurve = DecelerateInterpolator(1.75f)
     private val routeControllers = IdentityHashMap<View, PamRouteFragment>()
     private var suppressControllerRemoval = false
     private var nextControllerId = 1L
@@ -602,6 +604,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val incoming = gestureIncoming ?: return
         val outgoing = gestureOutgoing ?: return
         val sign = if (rtl) -1f else 1f
+        if (!sharedElements.isEmpty && transition == TRANSITION_FADE) {
+            // A faded route with a shared element goes back the way it came:
+            // it fades while the element follows the finger home.
+            outgoing.alpha = 1f - progress
+            sharedElements.applyTracking(progress)
+            return
+        }
         if (gestureDirection == 2) {
             outgoing.translationY = height * progress
             incoming.translationY = -height * 0.12f * (1f - progress)
@@ -610,7 +619,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             incoming.translationX = -sign * width * 0.28f * (1f - progress)
         }
         incoming.alpha = 0.82f + 0.18f * progress
-        applySharedElementProgress(progress)
+        sharedElements.applyTracking(progress)
     }
 
     private fun settleGesture(start: Float, complete: Boolean, rtl: Boolean) {
@@ -845,7 +854,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
         }
 
-        prepareSharedElements(incoming, outgoing)
+        prepareSharedElements(incoming, outgoing, popping = operation == OPERATION_POP)
 
         val actualTransition =
             if (transition == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else transition
@@ -853,7 +862,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val actualDuration = if (durationMs <= 0L || animationsDisabled()) {
             0L
         } else {
-            maxOf(durationMs, sharedDuration).coerceAtMost(2_000L)
+            // A shared element sets the pace: the route moves in step with it.
+            (if (sharedElements.isEmpty) durationMs else sharedDuration).coerceAtMost(2_000L)
         }
         transformedRoutes += incoming
         outgoing?.let { transformedRoutes += it }
@@ -872,8 +882,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         }
         running = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = actualDuration
-            interpolator = DecelerateInterpolator(1.75f)
-            addUpdateListener { applyProgress(incoming, outgoing, actualTransition, it.animatedValue as Float) }
+            // Linear time: the routes take the platform deceleration, every
+            // shared element its own curve (a spring in, an ease-in home).
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val time = it.animatedValue as Float
+                applyProgress(incoming, outgoing, actualTransition, routeCurve.getInterpolation(time), time)
+            }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     if (running === animation) running = null
@@ -885,10 +900,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun prepare(incoming: View, outgoing: View?, kind: Int) {
-        applyProgress(incoming, outgoing, kind, 0f)
+        applyProgress(incoming, outgoing, kind, 0f, 0f)
     }
 
-    private fun applyProgress(incoming: View, outgoing: View?, kind: Int, progress: Float) {
+    private fun applyProgress(incoming: View, outgoing: View?, kind: Int, progress: Float, time: Float) {
         val width = width.coerceAtLeast(1).toFloat()
         val height = height.coerceAtLeast(1).toFloat()
         val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
@@ -935,11 +950,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 incoming.alpha = progress
                 outgoing?.alpha = 1f - progress
             } else if (popping) {
-                // With a shared element only the top route fades: the
-                // screen below stays put while its media flies home.
-                outgoing?.alpha = 1f - progress
+                // With a shared element only the top route fades, in step
+                // with the flight: the screen below stays put while the
+                // element flies home.
+                outgoing?.alpha = 1f - sharedElements.eased(time).coerceIn(0f, 1f)
             } else {
-                incoming.alpha = progress
+                incoming.alpha = sharedElements.eased(time).coerceIn(0f, 1f)
             }
             TRANSITION_FADE_FROM_BOTTOM -> {
                 incoming.alpha = progress
@@ -975,17 +991,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 else incoming.translationX = direction * width * (1f - progress)
             }
         }
-        applySharedElementProgress(progress)
+        sharedElements.apply(time)
     }
 
-    private fun prepareSharedElements(incoming: View, outgoing: View?) {
+    private fun prepareSharedElements(incoming: View, outgoing: View?, popping: Boolean = true) {
         sharedElements.clear()
         if (outgoing == null || animationsDisabled() || durationMs <= 0L) return
-        sharedElements.prepare(incoming, outgoing, durationMs)
-    }
-
-    private fun applySharedElementProgress(progress: Float) {
-        sharedElements.apply(progress)
+        sharedElements.prepare(incoming, outgoing, durationMs, popping)
     }
 
     private fun clearSharedElements() {
@@ -993,6 +1005,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     internal fun activeSharedElementCount(): Int = sharedElements.count
+
+    internal fun activeSharedElementFrames(): List<FloatArray> = sharedElements.frames()
 
     private fun finish(incoming: View, outgoing: View?) {
         layeredRoute?.setLayerType(View.LAYER_TYPE_NONE, null)

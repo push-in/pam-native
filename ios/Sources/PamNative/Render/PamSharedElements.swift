@@ -99,6 +99,35 @@ final class PamSharedElementFlights {
         var damping = 0.82
         var stiffness = 220.0
         var mass = 1.0
+        var returnDurationMs: Int?
+        var returnEasing: Int?
+
+        /// The curve of a flight back home (the element's route is popped).
+        func returning() -> Config {
+            var copy = self
+            copy.durationMs = returnDurationMs ?? durationMs
+            copy.easing = returnEasing ?? easing
+            return copy
+        }
+
+        /// Core Animation timing of this curve (Android `PamSharedGeometry.ease`).
+        var timing: UITimingCurveProvider {
+            switch easing {
+            case 1: return UICubicTimingParameters(animationCurve: .linear)
+            case 3:
+                // Damping ratio -> coefficient, like Reanimated's physics spring.
+                let coefficient = min(max(damping, 0.01), 1) * 2 * (stiffness * mass).squareRoot()
+                return UISpringTimingParameters(
+                    mass: CGFloat(mass), stiffness: CGFloat(stiffness),
+                    damping: CGFloat(coefficient), initialVelocity: .zero
+                )
+            case 4:
+                return UICubicTimingParameters(
+                    controlPoint1: CGPoint(x: 0.32, y: 0), controlPoint2: CGPoint(x: 0.67, y: 0)
+                )
+            default: return UICubicTimingParameters(animationCurve: .easeInOut)
+            }
+        }
     }
 
     private struct Side {
@@ -118,7 +147,7 @@ final class PamSharedElementFlights {
         var content: UIView
         var contentSize: CGSize
         var target: UIView?
-        let config: Config
+        var config: Config
         /// The source's media view when it draws content; the destination's,
         /// once attached, gives the end geometry.
         let sourceMedia: PamSharedContentView?
@@ -148,6 +177,10 @@ final class PamSharedElementFlights {
     }
 
     private unowned let host: UIView
+    /// Above every route and a presented modal: flights fly over both.
+    private var overlay: UIView?
+    private var popping = false
+    private var defaultConfig = Config()
     private var captured: [String: Flight] = [:]
     private var flights: [Flight] = []
     private var holding: [Flight] = []
@@ -166,12 +199,14 @@ final class PamSharedElementFlights {
 
     /// Phase 1: measures and copies the on-screen sources while the outgoing
     /// route is still in the window (a video frame needs it), then hides them.
-    func capture(outgoing: UIView, defaultDuration: TimeInterval) {
+    func capture(outgoing: UIView, defaultDuration: TimeInterval, popping: Bool = false) {
         clear()
+        self.popping = popping
+        defaultConfig = Config(durationMs: Int(defaultDuration * 1000))
         for (tag, candidates) in taggedViews(in: outgoing) {
             guard captured.count < 16,
                   let source = candidates.first(where: { onScreen($0, route: outgoing, minimumShare: 0.5) }) else { continue }
-            let config = Self.config(for: source) ?? Config(durationMs: Int(defaultDuration * 1000))
+            let config = Self.config(for: source) ?? defaultConfig
             if let flight = makeFlight(source: source, config: config) {
                 captured[tag] = flight
             }
@@ -192,6 +227,15 @@ final class PamSharedElementFlights {
             flight.destination = destination
             flight.destinationAlpha = destination.alpha
             flight.end = end
+            // The style of the element on the top route; a pop flies back
+            // with its return curve.
+            let top = popping ? flight.source : destination
+            let below = popping ? destination : flight.source
+            if let styled = Self.config(for: top) ?? Self.config(for: below) {
+                flight.config = popping ? styled.returning() : styled
+            } else {
+                flight.config = defaultConfig
+            }
             if flight.sourceMedia == nil, flight.config.crossFade, destination.window != nil {
                 flight.target = destination.snapshotView(afterScreenUpdates: true)
             }
@@ -205,7 +249,7 @@ final class PamSharedElementFlights {
                 target.alpha = 0
                 flight.container.addSubview(target)
             }
-            host.addSubview(flight.container)
+            overlayView().addSubview(flight.container)
             flights.append(flight)
         }
         captured.removeAll()
@@ -232,27 +276,46 @@ final class PamSharedElementFlights {
         }
     }
 
+    /// A property animator with the leading flight's curve (Core Animation
+    /// interpolates on the render server), running [alongside] in step: a
+    /// route fade follows the flight.
+    func animator(duration: TimeInterval, alongside: (() -> Void)? = nil) -> UIViewPropertyAnimator {
+        apply(0)
+        let config = leadingConfig ?? Config()
+        let span = flights.isEmpty ? duration : self.duration
+        let animator = UIViewPropertyAnimator(duration: max(span, 0.01), timingParameters: config.timing)
+        animator.addAnimations { [weak self] in
+            self?.apply(1)
+            alongside?()
+        }
+        return animator
+    }
+
     /// Animates every flight to its destination with its own curve.
     func animate(duration: TimeInterval) {
         guard !flights.isEmpty else { return }
-        apply(0)
-        let config = leadingConfig ?? Config()
-        let span = max(duration, self.duration)
-        if config.easing == 3 {
-            UIView.animate(
-                withDuration: span,
-                delay: 0,
-                usingSpringWithDamping: CGFloat(min(max(config.damping, 0.05), 1)),
-                initialSpringVelocity: 0,
-                options: [.beginFromCurrentState]
-            ) { self.apply(1) }
-        } else {
-            UIView.animate(
-                withDuration: span,
-                delay: 0,
-                options: [config.easing == 1 ? .curveLinear : .curveEaseInOut, .beginFromCurrentState]
-            ) { self.apply(1) }
+        animator(duration: duration).startAnimation()
+    }
+
+    private func overlayView() -> UIView {
+        let parent: UIView = host.window ?? host
+        if let overlay, overlay.superview === parent {
+            parent.bringSubviewToFront(overlay)
+            return overlay
         }
+        let view = overlay ?? UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.frame = parent === host ? host.bounds : host.convert(host.bounds, to: parent)
+        parent.addSubview(view)
+        overlay = view
+        return view
+    }
+
+    private func dropOverlayIfIdle() {
+        guard flights.isEmpty, holding.isEmpty else { return }
+        overlay?.removeFromSuperview()
+        overlay = nil
     }
 
     /// Ends the flights. A destination whose media is not drawn yet keeps its
@@ -275,6 +338,7 @@ final class PamSharedElementFlights {
             holdGeneration += 1
             pollHolding(generation: holdGeneration, deadline: CACurrentMediaTime() + 0.7)
         }
+        dropOverlayIfIdle()
     }
 
     func clear() {
@@ -288,6 +352,7 @@ final class PamSharedElementFlights {
         holding.forEach { $0.container.removeFromSuperview() }
         holding.removeAll()
         holdGeneration += 1
+        dropOverlayIfIdle()
     }
 
     private func pollHolding(generation: Int, deadline: CFTimeInterval) {
@@ -300,7 +365,11 @@ final class PamSharedElementFlights {
                 if expired || ready { flight.container.removeFromSuperview() }
                 return expired || ready
             }
-            if !self.holding.isEmpty { self.pollHolding(generation: generation, deadline: deadline) }
+            if self.holding.isEmpty {
+                self.dropOverlayIfIdle()
+            } else {
+                self.pollHolding(generation: generation, deadline: deadline)
+            }
         }
     }
 
@@ -478,7 +547,9 @@ final class PamSharedElementFlights {
             return nil
         }
         config.durationMs = min(max(config.durationMs, 0), 2_000)
-        config.easing = min(max(config.easing, 1), 3)
+        config.easing = min(max(config.easing, 1), 4)
+        config.returnEasing = config.returnEasing.flatMap { (1...4).contains($0) ? $0 : nil }
+        config.returnDurationMs = config.returnDurationMs.map { min(max($0, 0), 2_000) }
         config.resizeMode = min(max(config.resizeMode, 1), 3)
         config.damping = min(max(config.damping, 0.01), 1)
         config.stiffness = min(max(config.stiffness, 1), 1_000)

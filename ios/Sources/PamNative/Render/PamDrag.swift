@@ -445,6 +445,25 @@ final class PamDragController {
         current.snaps.map { PamMotionTarget.resolve(target, axisProperty(current), $0) }
     }
 
+    private var driverRefs: [String: WeakDriverView] = [:]
+
+    private struct WeakDriverView { weak var view: UIView? }
+
+    /// A driver's `nativeRef`: inside the detector first, else anywhere on
+    /// the same screen (a backdrop behind the dragged pager). Cached, so a
+    /// frame never walks the screen again (Android parity).
+    private func driverView(_ ref: String, host: UIView) -> UIView? {
+        if let cached = driverRefs[ref]?.view, cached.window != nil, cached.pamNativeRef == ref { return cached }
+        var found = host.pamFindNativeRef(ref)
+        if found == nil {
+            var root: UIView = host
+            while let parent = root.superview, !(parent is PamNavigationHost) { root = parent }
+            found = root.pamFindNativeRef(ref)
+        }
+        driverRefs[ref] = found.map { WeakDriverView(view: $0) }
+        return found
+    }
+
     private func applyDrivers(_ target: UIView, _ current: PamDragConfig) {
         guard !current.drivers.isEmpty || !current.textDrivers.isEmpty, let host else { return }
         let position = read(target, current)
@@ -452,7 +471,7 @@ final class PamDragController {
         let size = PamMotionTarget.size(of: target)
         let extent = Double(current.horizontal ? size.width : size.height)
         for driver in current.drivers {
-            let view = driver.ref.isEmpty ? target : host.pamFindNativeRef(driver.ref)
+            let view = driver.ref.isEmpty ? target : driverView(driver.ref, host: host)
             guard let view else { continue }
             let input = driver.input.map { $0.percent ? extent * $0.number / 100 : $0.number }
             let output = driver.output.map { PamMotionTarget.resolve(view, driver.property, $0) }

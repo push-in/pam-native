@@ -465,6 +465,10 @@ final class TemplateRenderer
         'animate' => PropKey::AnimateChanges,
         'transitionSpec' => PropKey::TransitionSpec,
         'nativeRef' => PropKey::NativeRef,
+        // Shared element on any element: equal tags on the outgoing and
+        // incoming routes fly between them (Element::sharedTransition()).
+        'shared' => PropKey::SharedTransitionTag,
+        'sharedStyle' => PropKey::SharedTransitionConfig,
         'animation' => PropKey::AnimationProgram,
         'motionKey' => PropKey::AnimationRestartKey,
         'animationKey' => PropKey::AnimationRestartKey,
@@ -3903,6 +3907,20 @@ final class TemplateRenderer
         return $element->__pamWithDomClasses($tokens);
     }
 
+    /** Template `shared`: a bounded safe identifier, or nothing for null/'' (an untagged item). */
+    private static function sharedTag(mixed $value): ?string
+    {
+        if ($value === null || $value === false || $value === '') {
+            return null;
+        }
+        $tag = self::stringValue($value, 'shared');
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/', $tag) !== 1) {
+            throw new InvalidArgumentException('Template shared tags must be bounded safe identifiers.');
+        }
+
+        return $tag;
+    }
+
     /** @param array<string, mixed> $values */
     private static function mediaCacheAttributes(
         Image|MediaPlayer $element,
@@ -5097,6 +5115,10 @@ final class TemplateRenderer
                 ? $value->encode()
                 : (is_string($value) && $value !== '' ? $value : null),
             PropKey::NativeRef => Drag::ref(self::stringValue($value, 'nativeRef')),
+            PropKey::SharedTransitionTag => self::sharedTag($value),
+            PropKey::SharedTransitionConfig => $value instanceof SharedTransitionStyle
+                ? $value->toJson()
+                : ($value === null || $value === false || $value === '' ? null : self::stringValue($value, 'sharedStyle')),
             PropKey::MediaClock,
             PropKey::MediaProgress,
             => $value === null || $value === false || $value === ''

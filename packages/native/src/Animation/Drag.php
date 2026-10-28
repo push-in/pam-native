@@ -168,6 +168,8 @@ final readonly class Drag implements Stringable
     /**
      * Interpolates [property] of `nativeRef` [ref] ('' = the target) from the
      * drag translation (dp or "%" of the target extent), clamped at the ends.
+     * [ref] is looked up inside the detector, then on the rest of the screen
+     * (a backdrop behind a dragged viewer).
      *
      * @param list<float|int|string> $input
      * @param list<float|int|string> $output
