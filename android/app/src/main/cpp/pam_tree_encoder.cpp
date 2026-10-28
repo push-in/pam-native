@@ -1363,6 +1363,19 @@ PHP_FUNCTION(pam_native_encoder_extend_window_rows) {
     RETURN_BOOL(extend_rows(encoder, list->second.path, first, last));
 }
 
+// Whether list node list_id was last encoded as a `windowSize` list.
+PHP_FUNCTION(pam_native_encoder_window_sized) {
+    zend_long handle, list_id;
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_LONG(handle)
+        Z_PARAM_LONG(list_id)
+    ZEND_PARSE_PARAMETERS_END();
+    Encoder* encoder = find_encoder(handle);
+    if (encoder == nullptr) RETURN_THROWS();
+    auto list = encoder->window_lists.find(static_cast<std::uint64_t>(list_id));
+    RETURN_BOOL(list != encoder->window_lists.end() && list->second.sized);
+}
+
 // A `windowSize` list's ListWindow moved: the next encode re-walks it.
 PHP_FUNCTION(pam_native_encoder_invalidate) {
     zend_long handle;
@@ -1498,6 +1511,11 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_create, 0, 5,
     ZEND_ARG_TYPE_INFO(0, requireExtension, IS_OBJECT, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_window_sized, 0, 2, _IS_BOOL, 0)
+    ZEND_ARG_TYPE_INFO(0, handle, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, listId, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_encoder_handle, 0, 1, IS_VOID, 0)
     ZEND_ARG_TYPE_INFO(0, handle, IS_LONG, 0)
 ZEND_END_ARG_INFO()
@@ -1518,6 +1536,7 @@ const zend_function_entry pam_tree_encoder_functions[] = {
     ZEND_RAW_FENTRY("pam_native_encoder_reset", pam_tree_encoder_detail::zif_pam_native_encoder_reset, arginfo_pam_native_encoder_handle, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_encode", pam_tree_encoder_detail::zif_pam_native_encoder_encode, arginfo_pam_native_encoder_encode, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_extend_window", pam_tree_encoder_detail::zif_pam_native_encoder_extend_window, arginfo_pam_native_encoder_extend_window, 0, nullptr, nullptr)
+    ZEND_RAW_FENTRY("pam_native_encoder_window_sized", pam_tree_encoder_detail::zif_pam_native_encoder_window_sized, arginfo_pam_native_encoder_window_sized, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_invalidate", pam_tree_encoder_detail::zif_pam_native_encoder_invalidate, arginfo_pam_native_encoder_handle, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_encoder_extend_window_rows", pam_tree_encoder_detail::zif_pam_native_encoder_extend_window_rows, arginfo_pam_native_encoder_extend_window_rows, 0, nullptr, nullptr)
     ZEND_RAW_FENTRY("pam_native_style_properties", pam_tree_encoder_detail::zif_pam_native_style_properties, arginfo_pam_native_style_properties, 0, nullptr, nullptr)

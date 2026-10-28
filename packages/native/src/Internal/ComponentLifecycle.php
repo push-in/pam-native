@@ -44,6 +44,13 @@ final class ComponentLifecycle
     /** @var array<class-string, int> */
     private static array $hotRoots = [];
 
+    /**
+     * Bumped when lazy list rows join or leave an owner after its render
+     * (renderFor/release): the flattened descendant lists ancestors cached
+     * for retainSubtree() are stale then, not only the owner's.
+     */
+    private static int $lazyJoins = 0;
+
     private function __construct()
     {
     }
@@ -262,6 +269,7 @@ final class ComponentLifecycle
         try {
             return self::capture($render);
         } finally {
+            ++self::$lazyJoins;
             DependencyTracker::suspend($owner);
             array_pop(self::$renderStack);
         }
@@ -279,6 +287,7 @@ final class ComponentLifecycle
         if ($components === []) {
             return;
         }
+        ++self::$lazyJoins;
         $holder = $owner === null ? null : (self::$children[$owner] ?? null);
         if ($holder !== null) {
             $holder->children = array_values(array_filter(
@@ -408,7 +417,11 @@ final class ComponentLifecycle
         // Their compiled instances stay with them: the registry keeps the
         // instances of owners retained without rendering.
         $pass = self::$pass;
-        foreach ($holder->retained ??= self::descendantStates($holder, $depth) as $state) {
+        if ($holder->retained === null || $holder->retainedJoins !== self::$lazyJoins) {
+            $holder->retained = self::descendantStates($holder, $depth);
+            $holder->retainedJoins = self::$lazyJoins;
+        }
+        foreach ($holder->retained as $state) {
             $state->seen = $pass;
         }
     }

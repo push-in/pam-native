@@ -72,8 +72,14 @@ final class ListWindow
 
     private ?int $request = null;
 
+    /** Whether the host reported its rows yet (until then the top is planned). */
+    private bool $reported = false;
+
     /** @var list<string> row keys of the last encode, in order */
     private array $keys = [];
+
+    /** @var array<int, true> rows always materialized (list header and footer) */
+    private array $fixed = [];
 
     /** @var array<string, float> measured row heights by key */
     private array $heights = [];
@@ -149,7 +155,10 @@ final class ListWindow
             $this->estimate = (float) $estimate;
         }
         $this->keys = $list->lazyRows?->keys ?? [];
-        if ($this->ranges === null) {
+        $this->fixed = $list->lazyRows?->fixed ?? [];
+        if (!$this->reported) {
+            // Rows joining before the host reports any (a list growing in
+            // chunks, measured headers) are planned from the top again.
             $this->ranges = [$this->rowsAround(0.0)];
         }
         $request = $properties[PropKey::ScrollRequest->value] ?? null;
@@ -158,11 +167,16 @@ final class ListWindow
             if ($this->request !== null && (is_float($target) || is_int($target)) && $target >= 0) {
                 [$start, $end] = $this->rowsAround((float) $target);
                 $this->ranges = self::addRange($this->ranges, $start, $end);
+                $this->reported = true;
             }
             $this->request = $request;
         }
+        $ranges = $this->ranges;
+        foreach ($this->fixed as $row => $_) {
+            $ranges = self::addRange($ranges, $row, $row + 1);
+        }
 
-        return $this->ranges;
+        return $ranges;
     }
 
     /**
@@ -177,6 +191,7 @@ final class ListWindow
         if ($last < $first) {
             [$first, $last] = [$last, $first];
         }
+        $this->reported = true;
         $margin = (int) ceil(($this->size - 1) / 2 * ($last - $first + 1));
         $start = max(0, $first - $margin);
         $end = $last + $margin + 1;
@@ -283,7 +298,8 @@ final class ListWindow
             if ($top > $to) {
                 break;
             }
-            $bottom = $top + ($this->heights[$key] ?? $this->estimate);
+            // The header and footer count only once measured.
+            $bottom = $top + ($this->heights[$key] ?? (isset($this->fixed[$row]) ? 0.0 : $this->estimate));
             if ($bottom >= $from) {
                 $start ??= $row;
                 $end = $row + 1;

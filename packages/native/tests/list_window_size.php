@@ -229,9 +229,12 @@ final class WindowHost extends Component
     /** @var list<float> */
     public array $drags = [];
 
+    public static ?self $last = null;
+
     public function __construct()
     {
         $this->rows = range(0, 49);
+        self::$last = $this;
     }
 
     #[\Pam\Native\Attributes\PureHandler]
@@ -249,10 +252,33 @@ final class WindowHost extends Component
     </VirtualizedList>
 </template>
 PAM);
+// The list's owner is nested: its ancestors cache their descendants, and
+// rows built later by the encoder must still count as mounted under them.
+file_put_contents($windowDirectory.'/WindowShell.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\ListWindow;
+
+use Pam\Native\Component;
+
+final class WindowShell extends Component
+{
+}
+?>
+
+<template>
+    <Column>
+        <Text>Shell</Text>
+        <WindowHost />
+    </Column>
+</template>
+PAM);
 App::components($windowDirectory, $windowDirectory.'/.cache');
 $windowRow = 'Pam\\Native\\Tests\\ListWindow\\WindowRow';
-$windowHost = App::make('Pam\\Native\\Tests\\ListWindow\\WindowHost');
-App::run($windowHost);
+App::run(App::make('Pam\\Native\\Tests\\ListWindow\\WindowShell'));
+$windowHost = (new ReflectionProperty('Pam\\Native\\Tests\\ListWindow\\WindowHost', 'last'))->getValue();
 $syncWindow = static function () use ($windowTree): void {
     foreach ($GLOBALS['pamIdentityFrames'] as $frame) {
         $windowTree->apply($frame);
@@ -271,8 +297,8 @@ $assert($listId !== null, 'A windowSize list is a windowed list.');
 $rowNodes = static fn (): array => array_slice($windowTree->children($listId), 1);
 $assert(count($rowNodes()) === 50, 'Every row keeps a native cell: mounted rows and placeholders.');
 // Before the host reports anything: a 900 pt screen and one screen of 100 pt
-// rows above and below (windowSize 3), the header included.
-$assert($live() === range(0, 17), 'Only the rows within the window mount (got '.implode(',', $live()).').');
+// rows above and below (windowSize 3); the header is always mounted.
+$assert($live() === range(0, 18), 'Only the rows within the window mount (got '.implode(',', $live()).').');
 $placeholder = $windowTree->nodes[$rowNodes()[30]];
 $assert(
     $windowTree->children($rowNodes()[30]) === []
@@ -298,7 +324,19 @@ Runtime::dispatchEvent($rowNodes()[3], EventKind::Layout->value, $layout(340.0, 
 $encoderSizes = static fn (): array => $sizes((new ReflectionProperty(Runtime::class, 'encoder'))->getValue());
 $window(30, 34);
 $assert($live() === range(24, 38), 'The window follows the rows on screen (got '.implode(',', $live()).').');
+// A later pass that renders nothing (a module result) keeps the rows the
+// encoder built mounted: the nested owner's ancestors cached their
+// descendants before those rows joined.
+$noop = Runtime::call('list.window.test', 'noop', '', static function (): void {});
+Runtime::dispatchModuleResult($noop, \Pam\Native\ModuleResultStatus::Success->value, '');
+$syncWindow();
+$assert($live() === range(24, 38), 'Rows built after the owner rendered stay mounted in later passes (got '.implode(',', $live()).').');
 $assert($windowTree->children($rowNodes()[5]) === [], 'Rows behind the window become placeholders.');
+$header = $windowTree->children($listId)[0];
+$assert(
+    !isset($windowTree->nodes[$header]['props'][PropKey::ListPlaceholder->value]),
+    'Static children around the loop (list header) stay mounted, like ListHeaderComponent.',
+);
 $assert(
     $windowTree->nodes[$rowNodes()[3]]['props'][PropKey::Height->value] === TreeEncoder::encodeProperty(180.0),
     'A placeholder keeps the height its row measured.',

@@ -41,6 +41,8 @@ final class LazyRows
      * @param (Closure(Element): Element)|null $transform applied to each built row
      * @param ListWindow|null $window the list's `windowSize` window: it plans
      *        the materialized rows, measures them and sizes their placeholders
+     * @param array<int, true> $fixed rows always materialized (the static
+     *        children around a template loop: list header and footer)
      */
     public function __construct(
         public readonly array $items,
@@ -49,6 +51,7 @@ final class LazyRows
         private readonly ?Closure $transform = null,
         ?Component $owner = null,
         public readonly ?ListWindow $window = null,
+        public readonly array $fixed = [],
     ) {
         $owner ??= ComponentLifecycle::current();
         $this->owner = $owner === null ? null : WeakReference::create($owner);
@@ -71,20 +74,23 @@ final class LazyRows
             $previous === null ? $transform : static fn (Element $row): Element => $transform($previous($row)),
             $this->owner?->get(),
             $this->window,
+            $this->fixed,
         );
     }
 
     /** The same rows planned by $window (`windowSize`). */
     public function windowed(ListWindow $window): self
     {
-        return new self($this->items, $this->keys, $this->render, $this->transform, $this->owner?->get(), $window);
+        return new self($this->items, $this->keys, $this->render, $this->transform, $this->owner?->get(), $window, $this->fixed);
     }
 
     /**
      * Rows built from children already rendered (kept as they are) and lazy
      * segments (a template `p-for`, built on demand), in order: one list of
      * rows, keyed by the child's key (`#<row>` without one) or the segment's
-     * keys. Null when two rows would share a key.
+     * keys. Null when two rows would share a key. With a segment, the other
+     * children are the list's header and footer: like React Native's
+     * ListHeaderComponent/ListFooterComponent they stay materialized.
      *
      * @param list<Element|self> $parts
      */
@@ -93,6 +99,11 @@ final class LazyRows
         $items = [];
         $keys = [];
         $seen = [];
+        $fixed = [];
+        $segments = false;
+        foreach ($parts as $part) {
+            $segments = $segments || $part instanceof self;
+        }
         foreach ($parts as $part) {
             if ($part instanceof self) {
                 foreach ($part->items as $index => $item) {
@@ -110,6 +121,9 @@ final class LazyRows
                 return null;
             }
             $seen[$key] = true;
+            if ($segments) {
+                $fixed[count($keys)] = true;
+            }
             $items[] = $part;
             $keys[] = $key;
         }
@@ -123,6 +137,7 @@ final class LazyRows
             null,
             null,
             $window,
+            $fixed,
         );
     }
 

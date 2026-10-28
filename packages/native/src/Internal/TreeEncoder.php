@@ -58,7 +58,7 @@ final class TreeEncoder
     /** @var array<string, list<array{0: int, 1: int}>> materialized [start, end) row ranges by list path */
     private array $windowRanges = [];
 
-    /** @var array<int, array{0: string, 1: array<int, int>}> windowed list id => [path, row id => index] */
+    /** @var array<int, array{0: string, 1: array<int, int>, 2: bool}> windowed list id => [path, row id => index, windowSize] */
     private array $windowLists = [];
 
     /** Bumped whenever a window grows; stale windowed subtrees are re-encoded. */
@@ -275,7 +275,12 @@ final class TreeEncoder
     public function extendWindowRows(int $listId, int $first, int $last): bool
     {
         $sized = ListWindow::forList($listId);
-        if ($sized !== null) {
+        if (
+            $sized !== null
+            && ($this->native !== null
+                ? pam_native_encoder_window_sized($this->native, $listId)
+                : ($this->windowLists[$listId][2] ?? false))
+        ) {
             // A `windowSize` list: its window moves in screens.
             if (!$sized->extend($first, $last)) {
                 return false;
@@ -898,7 +903,7 @@ final class TreeEncoder
                 $this->childPaths[$path] = $placements;
             }
             if ($window !== null) {
-                $this->windowLists[$id] = [$path, $rowIndexes];
+                $this->windowLists[$id] = [$path, $rowIndexes, $lazy?->window !== null];
             }
         }
         if ($window !== null) {

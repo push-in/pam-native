@@ -1058,7 +1058,9 @@ final class TemplateRenderer
     ): ?LazyRows {
         $loopNode = $for[6];
         $rowPlan = $loopNode->pamPlan ??= self::nodePlan($loopNode);
-        if ($rowPlan['for'] !== null || $rowPlan['control']) {
+        // A control-flow row (`<If p-for>` choosing the row's component) is
+        // deferred in a `windowSize` list; it must render one element.
+        if ($rowPlan['for'] !== null || ($rowPlan['control'] && !$windowed)) {
             return null;
         }
         $items = self::loopItems($for, $scope, $data);
@@ -1100,7 +1102,7 @@ final class TemplateRenderer
                     continue;
                 }
                 if (!$rendered instanceof Element || $element !== null) {
-                    throw new RuntimeException('Each virtualized row must render exactly one element.');
+                    throw new RuntimeException('Each virtualized row must render exactly one element (rows of a long or windowSize list are built one by one).');
                 }
                 $element = $rendered;
             }
