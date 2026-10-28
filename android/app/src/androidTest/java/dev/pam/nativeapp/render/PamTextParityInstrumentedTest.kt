@@ -2,15 +2,18 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.os.Build
 import android.os.SystemClock
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.UnderlineSpan
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.TextView
@@ -123,14 +126,42 @@ class PamTextParityInstrumentedTest {
     }
 
     @Test
-    fun lineHeightScalesWithTheAccessibilityFontScaleLikeReactNative() {
+    fun lineHeightFollowsTheSpScaleLikeReactNative() {
+        // React Native converts lineHeight like fontSize, through
+        // PixelUtil.toPixelFromSP = TypedValue.applyDimension(SP): linear
+        // below Android 14's non-linear threshold, FontScaleConverter above
+        // it (at an OS scale of 1.3 a 21 sp line is ~24.3 dp, not 27.3 dp).
+        val system = Resources.getSystem()
+        val systemScale = system.configuration.fontScale
+        fun reactNativePx(sp: Float): Float =
+            TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, system.displayMetrics) /
+                system.displayMetrics.density * density
+        assertEquals(reactNativePx(21f), PamTextLayout.scaledPx(21f, systemScale, density), 0.01f)
+        assertEquals(
+            kotlin.math.ceil(reactNativePx(16f)),
+            PamTextLayout.fontSizePx(16f, systemScale, density),
+            0.001f,
+        )
+        assertLinePitch(systemScale, kotlin.math.ceil(reactNativePx(21f)))
+        if (Build.VERSION.SDK_INT >= 34 && systemScale >= 1.3f) {
+            // Non-linear: the line grows less than the scale.
+            assertTrue(PamTextLayout.scaledPx(21f, systemScale, density) < 21f * systemScale * density - density)
+        }
+        // An app multiplier scales the style first, like RN's StyleSheet patch.
+        assertEquals(
+            reactNativePx(21f * 1.1f),
+            PamTextLayout.scaledPx(21f, systemScale * 1.1f, density),
+            0.01f,
+        )
+    }
+
+    private fun assertLinePitch(scale: Float, pitch: Float) {
         val text = "Linha um do corpo da mensagem que precisa quebrar em várias linhas para medir o espaçamento"
         val output = FloatArray(4)
-        val scaled = PamTextStyle(null, 16f, 1.1f, 400, false, 0f, 21f, true, 1, 1, 1, 0, null)
+        val scaled = PamTextStyle(null, 16f, scale, 400, false, 0f, 21f, true, 1, 1, 1, 0, null)
         PamTextLayout.measure(text, null, scaled, 200f, density, typefaces, output)
-        val pitch = kotlin.math.ceil(21f * 1.1f * density)
-        // Every line advances by ceil(21 × 1.1 × density); only the font
-        // padding of the first/last line may differ by a pixel or two.
+        // Every line advances by the pitch; only the font padding of the
+        // first/last line may differ by a pixel or two.
         assertEquals(output[3] * pitch, output[1] * density, 3.01f)
         val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG)
         PamTextLayout.configurePaint(paint, scaled, density, typefaces)
@@ -141,6 +172,16 @@ class PamTextParityInstrumentedTest {
             scaled,
         )
         assertEquals(pitch.toInt(), layout.getLineBottom(1) - layout.getLineBottom(0))
+    }
+
+    @Test
+    fun aTextWithoutAColourIsOpaqueSoEmojiAreNotFaded() {
+        val style = style(size = 24f)
+        val output = FloatArray(4)
+        PamTextLayout.measure("😂", null, style, 200f, density, typefaces, output)
+        renderText(properties("😂", style) - PropKey.TEXT_COLOR, output[0], output[1]) { view ->
+            assertEquals(0xFF, Color.alpha(view.currentTextColor))
+        }
     }
 
     @Test

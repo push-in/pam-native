@@ -1766,6 +1766,10 @@ class PamRenderer(
                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isFallbackLineSpacing = true
                 gravity = Gravity.CENTER_VERTICAL
+                // A text with no colour is opaque like React Native's (black
+                // paint): the light theme's 87 % primary colour also faded
+                // colour emoji glyphs, which take the paint alpha.
+                setTextColor(currentTextColor or 0xFF000000.toInt())
             }
             NodeKind.BUTTON -> Button(context).apply {
                 isAllCaps = false
@@ -7504,7 +7508,7 @@ class PamRenderer(
         val maximumPx = if (isRichTextView(view, state)) {
             PamTextLayout.fontSizePx(baseSize, effectiveScale, metrics.density)
         } else {
-            max(1f, baseSize * metrics.density * effectiveScale)
+            max(1f, PamTextLayout.scaledPx(baseSize, effectiveScale, metrics.density))
         }
         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumPx)
 

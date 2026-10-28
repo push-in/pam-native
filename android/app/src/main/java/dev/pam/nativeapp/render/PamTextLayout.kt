@@ -17,6 +17,8 @@ import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
 import android.text.style.StrikethroughSpan
 import android.text.style.UnderlineSpan
+import android.content.res.Resources
+import android.util.TypedValue
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -177,11 +179,37 @@ private val PAM_WORD_BOUNDARY = Regex("(?<=\\s)|(?=\\s)")
  */
 internal object PamTextLayout {
     fun fontSizePx(logical: Float, scale: Float, density: Float): Float =
-        max(1f, ceil((logical.coerceAtLeast(1f) * scale * density).toDouble()).toFloat())
+        max(1f, ceil(scaledPx(logical.coerceAtLeast(1f), scale, density).toDouble()).toFloat())
+
+    /**
+     * A font-relative length (font size, line height, letter spacing) in px,
+     * like React Native's `PixelUtil.toPixelFromSP` on a style its app scaled
+     * by `scale / system`: Android 14+ grows large OS scales non-linearly
+     * (`FontScaleConverter`), so at 1.3 a 20 sp line height is 23.6 dp, not
+     * 26 dp, and the font size follows the same curve. [scale] is the
+     * effective text scale (app multiplier x capped OS scale, see
+     * PamTextScale); below the non-linear threshold this is `logical x scale`.
+     */
+    fun scaledPx(logical: Float, scale: Float, density: Float): Float {
+        if (logical == 0f) return 0f
+        val system = Resources.getSystem()
+        val systemScale = system.configuration.fontScale
+        // Unscaled text (allowFontScaling false, or a scale of 1) is plain dp.
+        if (Build.VERSION.SDK_INT < 34 || scale <= 1f || systemScale <= 1f) {
+            return logical * scale * density
+        }
+        val metrics = system.displayMetrics
+        val sp = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP,
+            kotlin.math.abs(logical) * scale / systemScale,
+            metrics,
+        ) / metrics.density
+        return (if (logical < 0f) -sp else sp) * density
+    }
 
     fun letterSpacingEm(style: PamTextStyle, density: Float): Float {
         if (style.letterSpacing == 0f) return 0f
-        return style.letterSpacing * style.fontScale * density /
+        return scaledPx(style.letterSpacing, style.fontScale, density) /
             fontSizePx(style.fontSize, style.fontScale, density)
     }
 
@@ -231,13 +259,13 @@ internal object PamTextLayout {
         val length = builder.length
         if (style.lineHeight > 0f && length >= 0) {
             builder.setSpan(
-                PamLineHeightSpan(style.lineHeight * style.fontScale * density),
+                PamLineHeightSpan(scaledPx(style.lineHeight, style.fontScale, density)),
                 0,
                 length,
                 Spanned.SPAN_INCLUSIVE_INCLUSIVE,
             )
         }
-        val basePx = style.letterSpacing * style.fontScale * density
+        val basePx = scaledPx(style.letterSpacing, style.fontScale, density)
         for (spec in specs) {
             val start = offsets(spec.start)
             val end = offsets(spec.end)
@@ -257,7 +285,7 @@ internal object PamTextLayout {
                     ),
                 )
             }
-            val spacing = spec.letterSpacing?.let { it * style.fontScale * density }
+            val spacing = spec.letterSpacing?.let { scaledPx(it, style.fontScale, density) }
                 ?: basePx.takeIf { it != 0f && spec.fontSize != null }
             spacing?.let { set(PamLetterSpacingSpan(it)) }
             spec.color?.let { set(ForegroundColorSpan(it)) }

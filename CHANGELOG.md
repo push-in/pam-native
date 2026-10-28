@@ -21,6 +21,21 @@ Fixes on top of 1.45.0, no protocol change (core and extension identifiers as in
   with a translucent border blurs into transparency instead of clamping, so
   a glyph used as its own shadow no longer becomes a translucent square.
 
+- Android Back: a predictive back (Android 15+ also starts one for the
+  Back key) that the app consumes through `Navigator::interceptSystemBack()`
+  no longer leaves the screen. The released gesture waits for the next
+  committed frame: a pop completes it, and without one it settles back
+  (1 s safety timeout). Before, the stack host slid the route away while
+  PHP kept it, so closing a panel with Back looked like leaving the screen.
+- Android text: font size, line height and letter spacing convert like
+  React Native's `PixelUtil.toPixelFromSP`, through Android 14's non-linear
+  font scale (`TypedValue.applyDimension(SP)`); an app text scale applies
+  to the style first, as RN's StyleSheet patch does. At an OS scale of 1.3
+  a 20 dp line height is 23.6 dp instead of 26 dp, so multiline text is no
+  longer taller than in RN. iOS already scales `lineHeight` linearly like
+  RN (`RCTTextAttributes`). A text with no colour is opaque (RN draws
+  black): the light theme's 87 % primary colour faded colour emoji.
+
 - Signals: every watcher, computed value and effect of a signal sees every
   change. `Signal::set()` and `ComputedSignal` iterated their live observer
   `WeakMap` while each effect detached and re-attached itself on re-run,
