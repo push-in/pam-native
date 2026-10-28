@@ -6,10 +6,13 @@ namespace Pam\Native\Testing;
 
 use Closure;
 use LogicException;
+use Pam\Native\App;
+use Pam\Native\Component;
 use Pam\Native\Composables\Sources;
 use Pam\Native\Element;
 use Pam\Native\I18n\I18n;
 use Pam\Native\Internal\DependencyTracker;
+use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Renderable;
 use Pam\Native\Route;
@@ -38,6 +41,7 @@ final class Harness
 
     public static function mount(Renderable $root): Mounted
     {
+        if ($root instanceof Component) self::ensureView($root);
         self::boot();
         $mounted = new Mounted($root);
         self::$mounted[spl_object_id($mounted)] = $mounted;
@@ -59,9 +63,20 @@ final class Harness
 
     public static function unmount(Mounted $mounted): void
     {
+        // Never mounted, already unmounted or reset: nothing to release.
         if (!isset(self::$mounted[spl_object_id($mounted)])) return;
         unset(self::$mounted[spl_object_id($mounted)]);
         self::render();
+    }
+
+    /** The handle mounting $instance, if any. */
+    public static function handleOf(Renderable $instance): ?Mounted
+    {
+        foreach (self::$mounted as $mounted) {
+            if ($mounted->instance === $instance) return $mounted;
+        }
+
+        return null;
     }
 
     public static function mounted(Mounted $mounted): bool
@@ -79,8 +94,12 @@ final class Harness
         Runtime::render();
     }
 
-    /** Unmounts everything and resets the runtime and the app-wide registries tests touch. */
-    public static function reset(): void
+    /**
+     * Unmounts everything and resets the runtime. Route definitions and
+     * middleware aliases are kept (they are code, registered once per test
+     * file) unless $flushRoutes is true.
+     */
+    public static function reset(bool $flushRoutes = false): void
     {
         self::$mounted = [];
         if (self::$root !== null && Runtime::root() === self::$root) {
@@ -93,11 +112,29 @@ final class Harness
         if (Runtime::root() !== null) Runtime::shutdown();
         self::$root = null;
         RouteCollection::activate(null);
-        Route::flush();
-        MiddlewareRegistry::reset();
+        if ($flushRoutes) {
+            Route::flush();
+            MiddlewareRegistry::reset();
+        }
         Sources::reset();
         I18n::use(null);
         I18n::useTimezone(null);
+    }
+
+    /**
+     * A component without its own render() needs its .pam.php template: when
+     * nothing registered it, discover the app's src/ by convention, as
+     * App::run() does, instead of asking the test to call App::components().
+     */
+    private static function ensureView(Component $component): void
+    {
+        $class = $component::class;
+        if (PamPhpRegistry::has($class)) return;
+        if ((new \ReflectionMethod($component, 'render'))->getDeclaringClass()->getName() !== Component::class) return;
+        App::discoverConventionalComponents();
+        if (!PamPhpRegistry::has($class)) {
+            throw new LogicException("{$class} has no render() and its .pam.php template is not registered; call App::components(\$srcPath) before Testing\\mount().");
+        }
     }
 
     private static function boot(): void

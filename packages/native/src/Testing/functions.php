@@ -68,10 +68,10 @@ if (!\function_exists('Pam\Native\Testing\routes')) {
      * loads. Given a path, the routes are re-registered from scratch; given the
      * result of `require 'routes.php'`, the routes registered so far are used.
      *
-     * @param RouteCollection|string|int $routes path of routes.php, its require result, or a collection
+     * @param RouteCollection|string|int|null $routes path of routes.php, its require result, a collection, or null for the routes registered so far (kept by reset())
      * @param array<string, mixed>|null $middleware extra or overriding aliases
      */
-    function routes(RouteCollection|string|int $routes, ?array $middleware = null): RouteTester
+    function routes(RouteCollection|string|int|null $routes = null, ?array $middleware = null): RouteTester
     {
         $configRoot = PluginManager::projectRoot();
         if (is_string($routes)) {
@@ -175,11 +175,30 @@ if (!\function_exists('Pam\Native\Testing\environment')) {
 if (!\function_exists('Pam\Native\Testing\reset')) {
     /**
      * Teardown: unmounts every Testing root (releasing their scopes), shuts
-     * the runtime down and clears routes, middleware aliases, composable
-     * sources and I18n overrides.
+     * the runtime down and clears composable sources and I18n overrides.
+     * Registered routes and middleware aliases are kept, so
+     * `Testing\routes()` can mount them again; `flushRoutes: true` clears
+     * them too.
      */
-    function reset(): void
+    function reset(bool $flushRoutes = false): void
     {
-        Harness::reset();
+        Harness::reset($flushRoutes);
+    }
+}
+
+if (!\function_exists('Pam\Native\Testing\unmount')) {
+    /**
+     * Unmounts a handle, or the root mounting $component. A component that
+     * was never mounted (or already unmounted) is a no-op.
+     */
+    function unmount(Mounted|RouteTester|Renderable $target): void
+    {
+        if ($target instanceof RouteTester) {
+            $target->unmount();
+
+            return;
+        }
+        $mounted = $target instanceof Mounted ? $target : Harness::handleOf($target);
+        $mounted?->unmount();
     }
 }

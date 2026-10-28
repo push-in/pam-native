@@ -17,7 +17,7 @@ require_once __DIR__.'/../src/Routing/functions.php';
 require_once __DIR__.'/../src/Testing/functions.php';
 require_once __DIR__.'/Fixtures/TestingApp/bootstrap.php';
 
-Testing\reset();
+Testing\reset(flushRoutes: true);
 Log::$entries = [];
 
 // mount(): props, route params for setup(), the real lifecycle and focus.
@@ -84,14 +84,26 @@ $assert(
 $assert(in_array('chat7:setup', Log::$entries, true) && in_array('chat7:focus', Log::$entries, true), 'The routed screen must mount and focus: '.json_encode(Log::$entries));
 $app->navigate('home');
 $assert($app->current()?->routeName() === 'home' && $app->screen() instanceof HomeScreen, 'navigate() must work through the tester.');
-$app->unmount();
 
-// reset(): runtime, routes, middleware and sources are released for the next test.
+// Unmounting what was never mounted, or twice, is a no-op.
+$never = new ChatScreen('Never');
+Testing\unmount($never);
+$app->unmount();
+Testing\unmount($app);
+Testing\unmount($chat);
+
+// reset(): runtime and sources are released; routes and middleware aliases are kept and can be mounted again.
 Testing\reset();
 $assert(
-    Runtime::root() === null && SharedSource::active() === [] && App::middleware() === [],
-    'Testing\reset() must shut the runtime down and clear the registries.',
+    Runtime::root() === null && SharedSource::active() === [] && App::middleware() === ['auth' => Authenticate::class],
+    'Testing\reset() must shut the runtime down and keep routes and aliases.',
 );
+$again = Testing\routes();
+$assert($again->current()?->routeName() === 'home' && $again->text() === 'home', 'Testing\routes() without arguments mounts the routes kept by reset(): '.$again->current()?->routeName());
+$again->open('/chat/3');
+$assert($again->screen() instanceof ChatScreen && $again->screen()->id === '3', 'Kept routes keep working after reset().');
+Testing\reset(flushRoutes: true);
+$assert(App::middleware() === [] && \Pam\Native\Routing\RouteCollection::current()->isEmpty(), 'reset(flushRoutes: true) clears routes and aliases.');
 // Aliases set explicitly (index.php, or routes(middleware: [...])) win over config/middleware.php.
 $explicit = static fn ($to, Closure $next) => $next($to);
 App::middleware(['auth' => $explicit]);
@@ -102,9 +114,9 @@ $assert(
     'config/middleware.php must only fill aliases that are not registered yet.',
 );
 \Pam\Native\Routing\MiddlewareRegistry::reset();
-$remounted = Testing\mount(HomeScreen::class);
-$assert($remounted->text() === 'home', 'A fresh mount works after reset().');
-Testing\reset();
+$remounted = Testing\mount(new HomeScreen());
+$assert($remounted->text() === 'home', 'A component created with new mounts without any registry, also after reset().');
+Testing\reset(flushRoutes: true);
 Authenticate::$signedIn = false;
 
 echo "ARCH_V2_TESTING_OK mount props params focus multi-root unmount environment routes middleware-config reset\n";
