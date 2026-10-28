@@ -52,6 +52,35 @@ final class PamVirtualCellMarginTests: XCTestCase {
         XCTAssertEqual(first.frame, CGRect(x: 12, y: 6, width: 296, height: 40))
     }
 
+    /// RN contentContainerStyle paddingBottom (Android: RecyclerView padding
+    /// with clipToPadding off): the list's bottom padding extends the
+    /// scrollable content past the last row, so a row can scroll clear of
+    /// floating buttons. The content size used to stop at the last row.
+    @MainActor
+    func testVirtualListContentIncludesTheListBottomPadding() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 300))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .virtualList, properties: [
+                PamConstants.paddingTop: .decimal(8),
+                PamConstants.paddingBottom: .decimal(158),
+            ])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .view, properties: [:])),
+            .create(NodeSpec(id: 4, parent: 2, index: 1, kind: .view, properties: [:])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 320, height: 300)),
+            .layout(id: 2, frame: Frame(x: 0, y: 0, width: 320, height: 300)),
+            .layout(id: 3, frame: Frame(x: 0, y: 8, width: 320, height: 200)),
+            .layout(id: 4, frame: Frame(x: 0, y: 208, width: 320, height: 200)),
+            .setRoot(1),
+        ]])
+        let list = try XCTUnwrap(host.viewWithTag(2) as? PamVirtualListView)
+        list.layoutIfNeeded()
+        XCTAssertEqual(list.contentSize.height, 408 + 158, accuracy: 0.5, "the bottom padding follows the last row")
+        XCTAssertEqual(list.contentSize.width, 320, accuracy: 0.5, "a vertical list adds no trailing width")
+    }
+
     func testStickyMarginBoxPinsAndIsPushedByTheNextMarginBox() {
         let registry = PamStickyRegistry()
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 300, height: 400))

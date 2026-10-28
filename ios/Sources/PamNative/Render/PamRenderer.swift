@@ -968,11 +968,17 @@ public final class PamRenderer: @unchecked Sendable {
                 )
             )
         }
+        // The trailing padding belongs to the content (React Native
+        // contentContainerStyle, Android RecyclerView with clipToPadding
+        // off): the last row can scroll clear of what floats over the list.
+        let padding = Self.leafContentInsets(nodes[id]?.properties ?? [:])
+        let trailingX = localFrames.isEmpty || !horizontal ? 0 : padding.right
+        let trailingY = localFrames.isEmpty || horizontal ? 0 : padding.bottom
         let contentWidth = localFrames.reduce(list.bounds.width) {
-            max($0, $1.1.maxX)
+            max($0, $1.1.maxX + trailingX)
         }
         let contentHeight = localFrames.reduce(list.bounds.height) {
-            max($0, $1.1.maxY)
+            max($0, $1.1.maxY + trailingY)
         }
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
         if list.contentSize != contentSize {
