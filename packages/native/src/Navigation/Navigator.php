@@ -1576,7 +1576,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $key = $this->entryKey($entry);
         if ($key !== $this->entryKey($this->currentEntry()) || $this->focusedEntryKey === $key) return;
         $this->focusedEntryKey = $key;
-        \Pam\Native\Notifications\PushRendering::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
+        \Pam\Native\Plugin\RuntimeHooks::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
         if ($instance instanceof NavigationLifecycleAware) {
             $instance->navigationFocused($this->contextFor($entry));
         }
