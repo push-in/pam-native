@@ -76,7 +76,8 @@ internal class PamMediaView(
     private val imageLoader: NativeImageLoader,
 ) : FrameLayout(context),
     MediaController.MediaPlayerControl,
-    TextureView.SurfaceTextureListener {
+    TextureView.SurfaceTextureListener,
+    PamSharedContentView {
     private val video = TextureView(context)
     private val poster = PamImageView(context)
     private val main = Handler(Looper.getMainLooper())
@@ -386,6 +387,47 @@ internal class PamMediaView(
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
         syncPlayback()
+    }
+
+    override val sharedFit: Int?
+        get() = when (resizeMode) {
+            1 -> PamSharedFit.COVER
+            2 -> PamSharedFit.CONTAIN
+            3 -> PamSharedFit.FILL
+            else -> null
+        }
+
+    /** A frame is on the surface: the poster went away after the first one. */
+    private val frameShown: Boolean
+        get() = prepared && video.isAvailable && video.visibility == VISIBLE &&
+            poster.visibility != VISIBLE && videoWidthPx > 0 && videoHeightPx > 0
+
+    override val hasSharedContent: Boolean
+        get() = frameShown || (poster.visibility == VISIBLE && poster.hasSharedContent)
+
+    /**
+     * The frame on screen (a bounded copy of the surface, so a closing
+     * viewer keeps its current frame) or else the poster.
+     */
+    override fun sharedContent(): PamSharedContent? {
+        if (frameShown && video.width > 0 && video.height > 0) {
+            val scale = minOf(1f, SHARED_FRAME_MAX_PX / maxOf(video.width, video.height))
+            val frame = runCatching {
+                video.getBitmap(
+                    (video.width * scale).toInt().coerceAtLeast(1),
+                    (video.height * scale).toInt().coerceAtLeast(1),
+                )
+            }.getOrNull()
+            if (frame != null) {
+                return PamSharedContent(
+                    android.graphics.drawable.BitmapDrawable(resources, frame),
+                    videoWidthPx,
+                    videoHeightPx,
+                    owned = frame,
+                )
+            }
+        }
+        return if (poster.visibility == VISIBLE) poster.sharedContent() else null
     }
 
     fun setResizeMode(value: Int) {
@@ -1024,6 +1066,8 @@ internal class PamMediaView(
     }
 
     internal companion object {
+        /** Longest side of the frame copy a shared-element flight draws. */
+        const val SHARED_FRAME_MAX_PX = 1280f
         /** Set by the renderer between Activity stop and resume (main thread). */
         @JvmStatic
         var appInBackground = false

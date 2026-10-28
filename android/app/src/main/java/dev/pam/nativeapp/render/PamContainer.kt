@@ -198,6 +198,10 @@ internal open class PamContainer(context: Context) :
         }
     }
 
+    /** Largest corner radius of the overflow clip, px (0 when nothing clips). */
+    fun overflowCornerRadius(): Float =
+        if (overflowClipEnabled) overflowClipRadii.maxOrNull() ?: 0f else 0f
+
     open fun insert(view: View, index: Int) {
         val safeIndex = index.coerceIn(0, childCount)
         addView(view, safeIndex)

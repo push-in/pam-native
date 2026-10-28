@@ -7,9 +7,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.app.Activity
 import android.content.pm.ActivityInfo
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Rect
 import android.graphics.Outline
 import android.view.Choreographer
 import android.view.View
@@ -21,19 +18,13 @@ import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.SearchView
 import android.widget.Toolbar
 import android.graphics.Color
-import dev.pam.nativeapp.R
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.Lifecycle
 import java.util.IdentityHashMap
-import kotlin.math.cos
-import kotlin.math.exp
-import kotlin.math.sqrt
-import org.json.JSONObject
 
 internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var operation: Int = OPERATION_IDLE
@@ -107,29 +98,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var predictiveBackAwaiting = false
     private var predictiveBackNavigated = false
     private val predictiveBackTimeout = Runnable { resolvePredictiveBack() }
-    private data class SharedElementConfig(
-        val durationMs: Long = 500L,
-        val easing: Int = 2,
-        val resizeMode: Int = 1,
-        val crossFade: Boolean = true,
-        val damping: Float = 0.82f,
-        val stiffness: Float = 220f,
-        val mass: Float = 1f,
-    )
-    private data class SharedElementAnimation(
-        val snapshot: ImageView,
-        val bitmap: Bitmap,
-        val targetSnapshot: ImageView?,
-        val targetBitmap: Bitmap?,
-        val source: View,
-        val destination: View,
-        val deltaX: Float,
-        val deltaY: Float,
-        val scaleX: Float,
-        val scaleY: Float,
-        val config: SharedElementConfig,
-    )
-    private val sharedElements = ArrayList<SharedElementAnimation>(4)
+    private val sharedElements = PamSharedElements(this)
     private val routeControllers = IdentityHashMap<View, PamRouteFragment>()
     private var suppressControllerRemoval = false
     private var nextControllerId = 1L
@@ -860,7 +829,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
         val actualTransition =
             if (transition == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else transition
-        val sharedDuration = sharedElements.maxOfOrNull { it.config.durationMs } ?: 0L
+        val sharedDuration = sharedElements.durationMs
         val actualDuration = if (durationMs <= 0L || animationsDisabled()) {
             0L
         } else {
@@ -942,9 +911,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 else incoming.translationY = -height * (1f - progress)
                 outgoing?.alpha = 1f - (progress * 0.12f)
             }
-            TRANSITION_FADE -> {
+            TRANSITION_FADE -> if (sharedElements.isEmpty) {
                 incoming.alpha = progress
                 outgoing?.alpha = 1f - progress
+            } else if (popping) {
+                // With a shared element only the top route fades: the
+                // screen below stays put while its media flies home.
+                outgoing?.alpha = 1f - progress
+            } else {
+                incoming.alpha = progress
             }
             TRANSITION_FADE_FROM_BOTTOM -> {
                 incoming.alpha = progress
@@ -984,141 +959,25 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun prepareSharedElements(incoming: View, outgoing: View?) {
-        clearSharedElements()
+        sharedElements.clear()
         if (outgoing == null || animationsDisabled() || durationMs <= 0L) return
-        val sources = sharedElementViews(outgoing)
-        val destinations = sharedElementViews(incoming)
-        sources.entries.take(16).forEach { (tag, source) ->
-            val destination = destinations[tag] ?: return@forEach
-            if (source.width <= 0 || source.height <= 0 || destination.width <= 0 || destination.height <= 0) {
-                return@forEach
-            }
-            val bitmap = runCatching {
-                Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also {
-                    source.draw(Canvas(it))
-                }
-            }.getOrNull() ?: return@forEach
-            val config = sharedElementConfig(destination) ?: sharedElementConfig(source)
-                ?: SharedElementConfig(durationMs = durationMs.coerceIn(0L, 2_000L))
-            val start = descendantRect(source)
-            val end = descendantRect(destination)
-            fun snapshot(content: Bitmap): ImageView = ImageView(context).apply {
-                setImageBitmap(content)
-                scaleType = if (config.resizeMode == 2) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_XY
-                pivotX = 0f
-                pivotY = 0f
-                layout(0, 0, source.width, source.height)
-                x = start.left.toFloat()
-                y = start.top.toFloat()
-            }
-            val sourceSnapshot = snapshot(bitmap)
-            val targetBitmap = if (config.crossFade) runCatching {
-                Bitmap.createBitmap(destination.width, destination.height, Bitmap.Config.ARGB_8888).also {
-                    destination.draw(Canvas(it))
-                }
-            }.getOrNull() else null
-            val targetSnapshot = targetBitmap?.let(::snapshot)?.apply { alpha = 0f }
-            source.visibility = View.INVISIBLE
-            destination.visibility = View.INVISIBLE
-            overlay.add(sourceSnapshot)
-            if (targetSnapshot != null) overlay.add(targetSnapshot)
-            val scaleX = if (config.resizeMode == 3) 1f else end.width().toFloat() / source.width
-            val scaleY = if (config.resizeMode == 3) 1f else end.height().toFloat() / source.height
-            sharedElements += SharedElementAnimation(
-                snapshot = sourceSnapshot,
-                bitmap = bitmap,
-                targetSnapshot = targetSnapshot,
-                targetBitmap = targetBitmap,
-                source = source,
-                destination = destination,
-                deltaX = (end.left - start.left).toFloat(),
-                deltaY = (end.top - start.top).toFloat(),
-                scaleX = scaleX,
-                scaleY = scaleY,
-                config = config,
-            )
-        }
-    }
-
-    private fun sharedElementConfig(view: View): SharedElementConfig? {
-        val encoded = view.getTag(R.id.pam_shared_transition_config) as? String ?: return null
-        return runCatching {
-            val json = JSONObject(encoded)
-            SharedElementConfig(
-                durationMs = json.optLong("durationMs", 500L).coerceIn(0L, 2_000L),
-                easing = json.optInt("easing", 2).coerceIn(1, 3),
-                resizeMode = json.optInt("resizeMode", 1).coerceIn(1, 3),
-                crossFade = json.optBoolean("crossFade", true),
-                damping = json.optDouble("damping", 0.82).toFloat().coerceIn(0.01f, 1f),
-                stiffness = json.optDouble("stiffness", 220.0).toFloat().coerceIn(1f, 1_000f),
-                mass = json.optDouble("mass", 1.0).toFloat().coerceIn(0.1f, 10f),
-            )
-        }.getOrNull()
-    }
-
-    private fun sharedElementViews(root: View): Map<String, View> {
-        val result = LinkedHashMap<String, View>()
-        fun visit(view: View) {
-            (view.getTag(R.id.pam_shared_transition_tag) as? String)
-                ?.takeIf { it.isNotEmpty() && !result.containsKey(it) }
-                ?.let { result[it] = view }
-            if (view is android.view.ViewGroup) {
-                for (index in 0 until view.childCount) visit(view.getChildAt(index))
-            }
-        }
-        visit(root)
-        return result
-    }
-
-    private fun descendantRect(view: View): Rect = Rect(0, 0, view.width, view.height).also {
-        offsetDescendantRectToMyCoords(view, it)
+        sharedElements.prepare(incoming, outgoing, durationMs)
     }
 
     private fun applySharedElementProgress(progress: Float) {
-        sharedElements.forEach { item ->
-            val adjusted = sharedElementProgress(progress, item.config)
-            listOfNotNull(item.snapshot, item.targetSnapshot).forEach { snapshot ->
-                snapshot.translationX = item.deltaX * adjusted
-                snapshot.translationY = item.deltaY * adjusted
-                snapshot.scaleX = 1f + (item.scaleX - 1f) * adjusted
-                snapshot.scaleY = 1f + (item.scaleY - 1f) * adjusted
-            }
-            item.targetSnapshot?.let {
-                item.snapshot.alpha = 1f - adjusted
-                it.alpha = adjusted
-            }
-        }
-    }
-
-    private fun sharedElementProgress(progress: Float, config: SharedElementConfig): Float = when (config.easing) {
-        1 -> progress
-        3 -> {
-            val frequency = sqrt(config.stiffness / config.mass) * 0.12f
-            (1f - exp(-config.damping * 7f * progress) * cos(frequency * progress)).coerceIn(0f, 1.08f)
-        }
-        else -> progress * progress * (3f - 2f * progress)
+        sharedElements.apply(progress)
     }
 
     private fun clearSharedElements() {
-        sharedElements.forEach { item ->
-            item.source.visibility = View.VISIBLE
-            item.destination.visibility = View.VISIBLE
-            overlay.remove(item.snapshot)
-            item.snapshot.setImageDrawable(null)
-            if (!item.bitmap.isRecycled) item.bitmap.recycle()
-            item.targetSnapshot?.let {
-                overlay.remove(it)
-                it.setImageDrawable(null)
-            }
-            item.targetBitmap?.takeIf { !it.isRecycled }?.recycle()
-        }
         sharedElements.clear()
     }
+
+    internal fun activeSharedElementCount(): Int = sharedElements.count
 
     private fun finish(incoming: View, outgoing: View?) {
         layeredRoute?.setLayerType(View.LAYER_TYPE_NONE, null)
         layeredRoute = null
-        clearSharedElements()
+        sharedElements.finish()
         running = null
         setActiveRoute(incoming)
         reset(incoming)

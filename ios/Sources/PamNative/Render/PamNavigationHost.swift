@@ -76,6 +76,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private var onGestureEnd: (() -> Void)?
     private var onGestureCancel: (() -> Void)?
     private var interactivePopCommitted = false
+    /// A Fade transition with a shared element only fades the top route.
+    private var sharedFadeOnlyTop = false
     /// Bumped per transition; a finish from an older one only resets its
     /// transforms and never overrides the newer visibility.
     private var transitionGeneration = 0
@@ -84,27 +86,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private weak var containerController: UIViewController?
     private var navigationController: UINavigationController?
     private var presentedNavigationController: UINavigationController?
-    private struct SharedElementConfig: Decodable {
-        var durationMs = 500
-        var easing = 2
-        var resizeMode = 1
-        var crossFade = true
-        var damping = 0.82
-        var stiffness = 220.0
-        var mass = 1.0
-    }
-    private struct SharedElementAnimation {
-        let snapshot: UIView
-        let targetSnapshot: UIView?
-        let source: UIView
-        let destination: UIView
-        let startFrame: CGRect
-        let endFrame: CGRect
-        let startRadius: CGFloat
-        let endRadius: CGFloat
-        let config: SharedElementConfig
-    }
-    private var sharedElements: [SharedElementAnimation] = []
+    private lazy var sharedElements = PamSharedElementFlights(host: self)
     private lazy var edgeGesture = UIPanGestureRecognizer(
         target: self,
         action: #selector(handleEdgePan(_:))
@@ -285,6 +267,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         layoutIfNeeded()
         prepareSharedElements(incoming: incoming, outgoing: outgoing)
         let kind = transition == 1 ? 2 : transition
+        sharedFadeOnlyTop = sharedElements.count > 0
         if PamMotionPolicy.isReduced || duration == 0 || kind == 8 {
             finish(incoming: incoming, outgoing: outgoing)
             return
@@ -297,8 +280,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             outgoing.layer.rasterizationScale = window?.screen.scale ?? UIScreen.main.scale
             outgoing.layer.shouldRasterize = true
         }
-        let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+        let sharedDuration = sharedElements.duration
         let generation = transitionGeneration
+        sharedElements.animate(duration: min(max(max(duration, sharedDuration), 0), 2))
         UIView.animate(
             withDuration: min(max(max(duration, sharedDuration), 0), 2),
             delay: 0,
@@ -355,8 +339,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             }
             outgoing?.alpha = 1 - progress * 0.12
         case 5:
-            incoming.alpha = progress
-            outgoing?.alpha = 1 - progress
+            if !sharedFadeOnlyTop {
+                incoming.alpha = progress
+                outgoing?.alpha = 1 - progress
+            } else if popping {
+                // With a shared element only the top route fades: the
+                // screen below stays put while its media flies home.
+                outgoing?.alpha = 1 - progress
+            } else {
+                incoming.alpha = progress
+            }
         case 6:
             incoming.alpha = progress
             incoming.transform = CGAffineTransform(translationX: 0, y: height * 0.08 * (1 - progress))
@@ -404,156 +396,21 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         default:
             break
         }
-        applySharedElementProgress(progress)
     }
 
-    private func prepareSharedElements(
-        incoming: UIView,
-        outgoing: UIView?,
-        sourceFrames: [String: CGRect] = [:]
-    ) {
-        clearSharedElements()
-        guard !PamMotionPolicy.isReduced, duration > 0,
-              let outgoing else { return }
-        let sources = sharedElementViews(in: outgoing)
-        let destinations = sharedElementViews(in: incoming)
-        for (tag, source) in sources.prefix(16) {
-            guard let destination = destinations[tag],
-                  source.bounds.width > 0, source.bounds.height > 0,
-                  destination.bounds.width > 0, destination.bounds.height > 0,
-                  let snapshot = sharedElementSnapshot(of: source, afterScreenUpdates: false) else { continue }
-            let config = sharedElementConfig(for: destination)
-                ?? sharedElementConfig(for: source)
-                ?? SharedElementConfig(durationMs: Int(duration * 1000))
-            let start = sourceFrames[tag] ?? source.convert(source.bounds, to: self)
-            let end = destination.convert(destination.bounds, to: self)
-            snapshot.frame = start
-            snapshot.layer.masksToBounds = true
-            snapshot.layer.cornerRadius = source.layer.cornerRadius
-            let targetSnapshot = config.crossFade
-                ? sharedElementSnapshot(of: destination, afterScreenUpdates: true)
-                : nil
-            source.isHidden = true
-            destination.isHidden = true
-            addSubview(snapshot)
-            targetSnapshot?.frame = start
-            targetSnapshot?.alpha = 0
-            targetSnapshot?.layer.masksToBounds = true
-            targetSnapshot?.layer.cornerRadius = source.layer.cornerRadius
-            if let targetSnapshot { addSubview(targetSnapshot) }
-            sharedElements.append(SharedElementAnimation(
-                snapshot: snapshot,
-                targetSnapshot: targetSnapshot,
-                source: source,
-                destination: destination,
-                startFrame: start,
-                endFrame: end,
-                startRadius: source.layer.cornerRadius,
-                endRadius: destination.layer.cornerRadius,
-                config: config
-            ))
-        }
-    }
-
-    private func sharedElementConfig(for view: UIView) -> SharedElementConfig? {
-        guard let encoded = view.layer.value(forKey: "pamSharedTransitionConfig") as? String,
-              let data = encoded.data(using: .utf8),
-              var config = try? JSONDecoder().decode(SharedElementConfig.self, from: data) else {
-            return nil
-        }
-        config.durationMs = min(max(config.durationMs, 0), 2_000)
-        config.easing = min(max(config.easing, 1), 3)
-        config.resizeMode = min(max(config.resizeMode, 1), 3)
-        config.damping = min(max(config.damping, 0.01), 1)
-        config.stiffness = min(max(config.stiffness, 1), 1_000)
-        config.mass = min(max(config.mass, 0.1), 10)
-        return config
-    }
-
-    private func sharedElementSnapshot(
-        of view: UIView,
-        afterScreenUpdates: Bool
-    ) -> UIView? {
-        if view.window != nil, !view.isHidden,
-           let snapshot = view.snapshotView(afterScreenUpdates: afterScreenUpdates) {
-            return snapshot
-        }
-        let size = view.bounds.size
-        guard size.width > 0, size.height > 0 else { return nil }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.opaque = view.isOpaque
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
-            view.layer.render(in: context.cgContext)
-        }
-        return UIImageView(image: image)
-    }
-
-    private func sharedElementViews(in root: UIView) -> [String: UIView] {
-        var result: [String: UIView] = [:]
-        func visit(_ view: UIView) {
-            if let tag = view.layer.value(forKey: "pamSharedTransitionTag") as? String,
-               !tag.isEmpty, result[tag] == nil {
-                result[tag] = view
-            }
-            view.subviews.forEach(visit)
-        }
-        visit(root)
-        return result
-    }
-
-    private func sharedElementFrames(in root: UIView?) -> [String: CGRect] {
-        guard let root else { return [:] }
-        return sharedElementViews(in: root).mapValues { $0.convert($0.bounds, to: self) }
+    private func prepareSharedElements(incoming: UIView, outgoing: UIView?) {
+        sharedElements.clear()
+        guard !PamMotionPolicy.isReduced, duration > 0, let outgoing else { return }
+        sharedElements.capture(outgoing: outgoing, defaultDuration: duration)
+        sharedElements.attach(incoming: incoming)
     }
 
     private func applySharedElementProgress(_ progress: CGFloat) {
-        for item in sharedElements {
-            let adjusted = sharedElementProgress(progress, config: item.config)
-            let endFrame = item.config.resizeMode == 3
-                ? CGRect(origin: item.endFrame.origin, size: item.startFrame.size)
-                : item.endFrame
-            let frame = CGRect(
-                x: item.startFrame.minX + (endFrame.minX - item.startFrame.minX) * adjusted,
-                y: item.startFrame.minY + (endFrame.minY - item.startFrame.minY) * adjusted,
-                width: item.startFrame.width + (endFrame.width - item.startFrame.width) * adjusted,
-                height: item.startFrame.height + (endFrame.height - item.startFrame.height) * adjusted
-            )
-            item.snapshot.frame = frame
-            item.targetSnapshot?.frame = frame
-            let radius = item.startRadius + (item.endRadius - item.startRadius) * adjusted
-            item.snapshot.layer.cornerRadius = radius
-            item.targetSnapshot?.layer.cornerRadius = radius
-            if let target = item.targetSnapshot {
-                item.snapshot.alpha = 1 - adjusted
-                target.alpha = adjusted
-            }
-        }
-    }
-
-    private func sharedElementProgress(
-        _ progress: CGFloat,
-        config: SharedElementConfig
-    ) -> CGFloat {
-        switch config.easing {
-        case 1:
-            return progress
-        case 3:
-            let damping = CGFloat(config.damping)
-            let frequency = CGFloat(sqrt(config.stiffness / config.mass) * 0.12)
-            return min(max(1 - exp(-damping * 7 * progress) * cos(frequency * progress), 0), 1.08)
-        default:
-            return progress * progress * (3 - 2 * progress)
-        }
+        sharedElements.apply(progress)
     }
 
     private func clearSharedElements() {
-        for item in sharedElements {
-            item.source.isHidden = false
-            item.destination.isHidden = false
-            item.snapshot.removeFromSuperview()
-            item.targetSnapshot?.removeFromSuperview()
-        }
-        sharedElements.removeAll(keepingCapacity: true)
+        sharedElements.clear()
     }
 
     @objc private func handleEdgePan(_ gesture: UIPanGestureRecognizer) {
@@ -648,7 +505,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             }
             return
         }
-        clearSharedElements()
+        sharedElements.finish()
+        sharedFadeOnlyTop = false
         incoming.alpha = 1
         incoming.transform = .identity
         setRouteHidden(incoming, false)
@@ -759,7 +617,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             : allControllers
         let kind = transition == 1 ? 2 : transition
         let animated = !PamMotionPolicy.isReduced && duration > 0 && kind != 8
-        let sharedSourceFrames = animated ? sharedElementFrames(in: outgoing) : [:]
+        // Sources are measured and copied while still in the window (a video
+        // frame needs it) and hidden before the cross-fade captures them.
+        sharedElements.clear()
+        if animated, let outgoing {
+            sharedElements.capture(outgoing: outgoing, defaultDuration: duration)
+        }
         if animated {
             let animation = CATransition()
             animation.duration = min(max(duration, 0), 2)
@@ -788,23 +651,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         navigation.setViewControllers(finalControllers, animated: false)
         navigation.view.layoutIfNeeded()
         if animated {
-            prepareSharedElements(
-                incoming: incoming,
-                outgoing: outgoing,
-                sourceFrames: sharedSourceFrames
-            )
-            applySharedElementProgress(0)
-            let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
-            UIView.animate(
-                withDuration: min(max(max(duration, sharedDuration), 0), 2),
-                delay: 0,
-                options: [.curveLinear, .beginFromCurrentState]
-            ) { [weak self] in
-                self?.applySharedElementProgress(1)
-            }
+            sharedElements.attach(incoming: incoming)
+            sharedElements.animate(duration: min(max(duration, 0), 2))
         }
         if animated {
-            let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+            let sharedDuration = sharedElements.duration
             let generation = transitionGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + min(max(max(duration, sharedDuration), 0), 2)) { [weak self] in
                 self?.finish(incoming: incoming, outgoing: outgoing, generation: generation)

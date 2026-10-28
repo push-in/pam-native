@@ -897,3 +897,41 @@ func pamBufferedAhead(_ ranges: [CMTimeRange], at position: Double) -> Double {
     }
     return 0
 }
+
+extension PamMediaView: PamSharedContentView {
+    var sharedFit: Int? {
+        switch gravity {
+        case .resizeAspectFill: return PamSharedFit.cover
+        case .resize: return PamSharedFit.fill
+        default: return PamSharedFit.contain
+        }
+    }
+
+    /// A frame is on the surface (the poster went away after the first one).
+    private var frameShown: Bool { player != nil && videoReadyForDisplay && window != nil }
+
+    var hasSharedContent: Bool {
+        frameShown || (!posterView.isHidden && posterView.hasSharedContent)
+    }
+
+    /// The frame on screen (a render-server snapshot, so a closing viewer
+    /// keeps its current frame) cropped to the drawn video rect, or the poster.
+    func sharedContent() -> PamSharedContent? {
+        if frameShown {
+            let rect = controller.map { $0.videoBounds } ?? playerView.playerLayer.videoRect
+            let surface: UIView = controller?.view ?? playerView
+            if rect.width > 0, rect.height > 0,
+               let snapshot = surface.snapshotView(afterScreenUpdates: false) {
+                let frame = UIView(frame: CGRect(origin: .zero, size: rect.size))
+                frame.clipsToBounds = true
+                snapshot.frame = CGRect(
+                    x: -rect.minX, y: -rect.minY,
+                    width: surface.bounds.width, height: surface.bounds.height
+                )
+                frame.addSubview(snapshot)
+                return PamSharedContent(view: frame, size: rect.size)
+            }
+        }
+        return posterView.isHidden ? nil : posterView.sharedContent()
+    }
+}

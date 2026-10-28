@@ -56,7 +56,7 @@ internal data class PamDragSettle(
 /**
  * Text drag contract (`key=value` lines):
  * `axis`, `min`, `max`, `rubber`, `target`, `snaps`, `settle`, `settle.<i>`,
- * `threshold`, `velocity`, `haptic`, `group`, `driveUnbounded` and repeated
+ * `threshold`, `velocity`, `haptic`, `group`, `driveUnbounded`, `hold` and repeated
  * `drive=<ref>|<property>|<inputs>|<outputs>` / `driveRaw=` (same fields).
  */
 internal data class PamDragConfig(
@@ -76,6 +76,8 @@ internal data class PamDragConfig(
     val textDrivers: List<PamDragTextDriver>,
     val touchInset: Double?,
     val snapOnRelease: Boolean,
+    /** Snaps a release keeps in place: reported at once, never animated to. */
+    val holds: Set<Int> = emptySet(),
 ) {
     fun settleFor(index: Int): PamDragSettle = snapSettles[index] ?: settle
 
@@ -136,6 +138,9 @@ internal data class PamDragConfig(
                 textDrivers = textDrivers.take(8),
                 touchInset = values["touch"]?.toDoubleOrNull()?.takeIf(Double::isFinite),
                 snapOnRelease = values["snapOnRelease"] != "0",
+                holds = values["hold"].orEmpty().split(',')
+                    .mapNotNull { it.trim().toIntOrNull()?.takeIf { index -> index in snaps.indices } }
+                    .toSet(),
             )
         }
 
@@ -361,6 +366,16 @@ internal class PamDragController(private val host: ViewGroup) {
             )
         }
         val reached = thresholdReached
+        if (!cancelled && index != origin && index in current.holds) {
+            // Held: the view stays where the finger let go (a navigation
+            // transition takes it from there) and the settle is reported now.
+            runner?.cancel()
+            runner = null
+            restingIndex = index
+            lastPosition = position
+            settled(index, position / density)
+            return PamDragRelease(index, reached)
+        }
         settleTo(index, velocity, animated = true)
         return PamDragRelease(index, reached)
     }

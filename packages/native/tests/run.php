@@ -5686,6 +5686,17 @@ $assert(
         && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::FadeFromBottom,
     'Reusable route presets must compose identically in groups and individual destinations.',
 );
+$namedRouteNavigator->pop();
+$namedRouteNavigator->pop();
+$poppedProductHost = $namedRouteNavigator->render()->toElement();
+$namedRouteNavigator->pop();
+$poppedToHomeHost = $namedRouteNavigator->render()->toElement();
+$assert(
+    $poppedToHomeHost->properties()[PropKey::NavigationTransition->value] === NavigationTransition::Fade->value
+        && $poppedToHomeHost->properties()[PropKey::NavigationDurationMs->value] === 175
+        && $poppedProductHost->properties()[PropKey::NavigationTransition->value] === NavigationTransition::SlideFromBottom->value,
+    'A pop must animate with the transition of the route being removed (React Navigation), not the one below.',
+);
 $sessionOpen = false;
 $chatAllowed = false;
 $threadAllowed = false;

@@ -11,7 +11,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.widget.ImageView
 
-internal class PamImageView(context: Context) : ImageView(context) {
+internal class PamImageView(context: Context) : ImageView(context), PamSharedContentView {
     var onImageSizeChanged: ((Int, Int) -> Unit)? = null
 
     /**
@@ -149,6 +149,22 @@ internal class PamImageView(context: Context) : ImageView(context) {
         if (kotlin.math.abs(sigma - appliedBitmapSigma) < 0.05f) return
         setImageDrawable(bitmapDrawable(bitmap, sourceRepeat))
     }
+
+    override val sharedFit: Int?
+        get() = when (scaleType) {
+            ScaleType.CENTER_CROP -> PamSharedFit.COVER
+            ScaleType.FIT_CENTER -> PamSharedFit.CONTAIN
+            ScaleType.FIT_XY -> PamSharedFit.FILL
+            else -> null
+        }
+
+    override val hasSharedContent: Boolean
+        get() = drawable?.let { it.intrinsicWidth > 0 && it.intrinsicHeight > 0 } == true
+
+    override fun sharedContent(): PamSharedContent? = sharedDrawableCopy(this, drawable)
+
+    /** Largest corner radius of the image's own clip, px. */
+    fun cornerRadius(): Float = cornerRadii.maxOrNull() ?: 0f
 
     fun setCornerRadii(value: FloatArray) {
         require(value.size == 8)

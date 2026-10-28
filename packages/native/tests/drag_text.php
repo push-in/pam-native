@@ -25,3 +25,10 @@ foreach ([
     try { $invalidDragText(); } catch (InvalidArgumentException) { $rejected = true; }
     $assert($rejected, 'Invalid native drag text must be rejected before crossing the bridge.');
 }
+
+$heldDrag = Drag::vertical()->snapPoints('-100%', 0, '100%')->holdAt(2, 0, 2)->bounds(-400, 400);
+$assert(str_contains($heldDrag->encode(), "\nhold=0,2"), 'Drag holdAt must encode its sorted, unique snaps and survive builder cloning.');
+$assert(!str_contains(Drag::vertical()->encode(), 'hold='), 'A drag without holdAt must not encode a hold line.');
+$rejectedHold = false;
+try { Drag::vertical()->holdAt(16); } catch (InvalidArgumentException) { $rejectedHold = true; }
+$assert($rejectedHold, 'Drag holdAt must reject snap indexes outside 0-15.');

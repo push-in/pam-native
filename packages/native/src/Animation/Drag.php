@@ -37,6 +37,7 @@ final readonly class Drag implements Stringable
      * @param list<string> $snaps
      * @param array<int, string> $settles
      * @param list<string> $drivers
+     * @param list<int> $holds
      */
     private function __construct(
         private bool $horizontal,
@@ -56,6 +57,7 @@ final readonly class Drag implements Stringable
         private ?float $touchInset = null,
         private bool $snapOnRelease = true,
         private bool $unbounded = false,
+        private array $holds = [],
     ) {
     }
 
@@ -94,6 +96,7 @@ final readonly class Drag implements Stringable
             $this->touchInset,
             $this->snapOnRelease,
             $this->unbounded,
+            $this->holds,
         );
     }
 
@@ -218,6 +221,26 @@ final readonly class Drag implements Stringable
         return $this->with(touchInset: $inset);
     }
 
+    /**
+     * A release that picks one of these snaps keeps the view where the finger
+     * let go instead of animating there; `on:gestureSettle` reports that snap
+     * at once. Drag-to-dismiss uses it so the navigation transition (e.g. a
+     * shared element flying home) starts from the released frame. Renderers
+     * without this hook animate to the snap as before.
+     */
+    public function holdAt(int ...$indexes): self
+    {
+        foreach ($indexes as $index) {
+            if ($index < 0 || $index > 15) {
+                throw new InvalidArgumentException('Snap index must be between 0 and 15.');
+            }
+        }
+        $holds = array_values(array_unique($indexes));
+        sort($holds);
+
+        return $this->with(holds: $holds);
+    }
+
     /** Keep the released translation instead of animating to a snap point. */
     public function snapOnRelease(bool $enabled = true): self
     {
@@ -260,6 +283,7 @@ final readonly class Drag implements Stringable
         foreach ($settles as $index => $settle) {
             $lines[] = "settle.{$index}={$settle}";
         }
+        if ($this->holds !== []) $lines[] = 'hold='.implode(',', $this->holds);
         if ($this->threshold > 0) $lines[] = 'threshold='.Motion::number($this->threshold);
         if ($this->velocity > 0) $lines[] = 'velocity='.Motion::number($this->velocity);
         if ($this->haptic) $lines[] = 'haptic=1';
@@ -327,6 +351,7 @@ final readonly class Drag implements Stringable
      * @param list<string>|null $snaps
      * @param array<int, string>|null $settles
      * @param list<string>|null $drivers
+     * @param list<int>|null $holds
      */
     private function with(
         ?float $rubber = null,
@@ -343,6 +368,7 @@ final readonly class Drag implements Stringable
         ?float $touchInset = null,
         ?bool $snapOnRelease = null,
         ?bool $unbounded = null,
+        ?array $holds = null,
     ): self {
         return new self(
             $this->horizontal,
@@ -362,6 +388,7 @@ final readonly class Drag implements Stringable
             $touchInset ?? $this->touchInset,
             $snapOnRelease ?? $this->snapOnRelease,
             $unbounded ?? $this->unbounded,
+            $holds ?? $this->holds,
         );
     }
 }

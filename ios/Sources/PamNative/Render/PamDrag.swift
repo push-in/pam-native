@@ -52,7 +52,7 @@ struct PamDragSettle: Equatable {
 
 /// `key=value` lines: `axis`, `min`, `max`, `rubber`, `target`, `snaps`,
 /// `settle`, `settle.<i>`, `threshold`, `velocity`, `haptic`, `group`,
-/// `driveUnbounded` and repeated `drive=<ref>|<property>|<inputs>|<outputs>`
+/// `driveUnbounded`, `hold` and repeated `drive=<ref>|<property>|<inputs>|<outputs>`
 /// / `driveRaw=` (same fields).
 struct PamDragConfig: Equatable {
     let horizontal: Bool
@@ -71,6 +71,8 @@ struct PamDragConfig: Equatable {
     let textDrivers: [PamDragTextDriver]
     let touchInset: Double?
     let snapOnRelease: Bool
+    /// Snaps a release keeps in place: reported at once, never animated to.
+    var holds: Set<Int> = []
 
     func settle(for index: Int) -> PamDragSettle { snapSettles[index] ?? settle }
 
@@ -135,7 +137,10 @@ struct PamDragConfig: Equatable {
             },
             textDrivers: Array(textDrivers.prefix(8)),
             touchInset: finite("touch"),
-            snapOnRelease: values["snapOnRelease"] != "0"
+            snapOnRelease: values["snapOnRelease"] != "0",
+            holds: Set((values["hold"] ?? "").split(separator: ",").compactMap {
+                Int($0.trimmingCharacters(in: .whitespaces)).flatMap { snaps.indices.contains($0) ? $0 : nil }
+            })
         )
     }
 
@@ -366,6 +371,15 @@ final class PamDragController {
             velocityThreshold: current.velocity
         )
         let reached = thresholdReached
+        if !cancelled, index != origin, current.holds.contains(index) {
+            // Held: the view stays where the finger let go (a navigation
+            // transition takes it from there) and the settle is reported now.
+            runner?.cancel()
+            runner = nil
+            restingIndex = index
+            settled(index, position)
+            return PamDragRelease(snapIndex: index, thresholdReached: reached)
+        }
         settle(to: index, velocity: axisVelocity, animated: true)
         return PamDragRelease(snapIndex: index, thresholdReached: reached)
     }

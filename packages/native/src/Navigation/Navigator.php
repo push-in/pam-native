@@ -484,15 +484,21 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
         $activeOptions = $this->currentOptions();
         \Pam\Native\System\Screen::claimForRoute($this->navigationKey, $activeOptions->secure);
+        // React Navigation: a pop animates with the options of the screen
+        // being removed, so a route pushed with Fade (and its shared
+        // elements) also leaves with Fade instead of the screen below's slide.
+        $motionOptions = $this->operation === NavigationOperation::Pop && $this->outgoing !== null
+            ? $this->resolvedOptions($this->outgoing)
+            : $activeOptions;
         return NavigationHost::make(
             $this->operation,
             $this->actionTransition ?? (
-                $activeOptions->animation === NavigationTransition::PlatformDefault
+                $motionOptions->animation === NavigationTransition::PlatformDefault
                     ? $this->transition
-                    : $activeOptions->animation
+                    : $motionOptions->animation
             ),
             $this->actionTransitionDurationMs
-                ?? $activeOptions->animationDurationMs
+                ?? $motionOptions->animationDurationMs
                 ?? $this->transitionDurationMs,
             $this->revision,
             ...$screens,
