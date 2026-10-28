@@ -73,6 +73,8 @@ pub struct RouteManifest {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct RouteEntry {
+    /// Route name, kept for diagnostics of the generated manifest.
+    #[allow(dead_code)]
     pub name: String,
     #[serde(default)]
     pub path: Option<String>,
