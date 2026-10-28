@@ -79,14 +79,40 @@ public struct PamPhpRuntimeConfiguration: Equatable {
         set(PAM_RENDERER_CONTRACT_VARIABLE, pamRendererContractJSON())
     }
 
-    /// The app bundle path changes on every install/update and file cache
-    /// entries are keyed by absolute script path: a new stamp drops the
-    /// whole cache instead of leaving orphaned opcodes in Library/Caches.
+    /// File cache entries are keyed by absolute script path and release
+    /// builds never stat a source (`validate_timestamps=0`), so the stamp
+    /// must change whenever any byte of the PHP bundle does, not only when
+    /// the install path or version moves: an in-place install (Xcode delta
+    /// install, a re-uploaded build number) keeps the path and would run the
+    /// old opcodes against the new native host. The CLI's content digest
+    /// (`PamBundle/manifest.sha256`) is part of the stamp; a bundle without
+    /// one falls back to the executable identity, which every rebuild moves.
     static func buildStamp(bundle: Bundle) -> String {
         let info = bundle.infoDictionary ?? [:]
         let version = info["CFBundleVersion"] as? String ?? ""
         let short = info["CFBundleShortVersionString"] as? String ?? ""
-        return "\(bundle.bundlePath)|\(short)|\(version)"
+        return "\(bundle.bundlePath)|\(short)|\(version)|\(contentIdentity(bundle: bundle))"
+    }
+
+    static func contentIdentity(bundle: Bundle, fileManager: FileManager = .default) -> String {
+        let manifest = bundle.bundleURL.appendingPathComponent("PamBundle/manifest.sha256", isDirectory: false)
+        if let digest = manifestDigest(at: manifest) { return digest }
+        guard let executable = bundle.executableURL,
+              let attributes = try? fileManager.attributesOfItem(atPath: executable.path) else {
+            return ""
+        }
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "exe:\(size):\(Int64(modified * 1_000))"
+    }
+
+    /// First line of a CLI manifest when it is a SHA-256 hex digest.
+    static func manifestDigest(at url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              let line = text.split(whereSeparator: \.isNewline).first else { return nil }
+        let digest = line.trimmingCharacters(in: .whitespaces).lowercased()
+        guard digest.count == 64, digest.allSatisfy({ $0.isHexDigit }) else { return nil }
+        return digest
     }
 
     static func prepareOpcacheDirectory(

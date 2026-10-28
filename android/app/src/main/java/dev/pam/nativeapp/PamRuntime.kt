@@ -350,6 +350,7 @@ class PamRuntime(
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }
+            runCatching { OpcacheStamp.prepare(stateDirectory, OpcacheStamp.stamp(entry)) }
             handle = nativeStart(
                 entry.absolutePath,
                 stateDirectory.absolutePath,

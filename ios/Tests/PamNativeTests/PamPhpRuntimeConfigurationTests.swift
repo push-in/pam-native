@@ -71,6 +71,55 @@ final class PamPhpRuntimeConfigurationTests: XCTestCase {
         XCTAssertTrue(PamPhpRuntimeConfiguration.buildStamp(bundle: .main).hasPrefix(Bundle.main.bundlePath))
     }
 
+    func testBuildStampChangesWithThePhpBundleContentUnderTheSamePath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-stamp-\(UUID().uuidString).app", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pam = root.appendingPathComponent("PamBundle", isDirectory: true)
+        try FileManager.default.createDirectory(at: pam, withIntermediateDirectories: true)
+        let info: [String: Any] = [
+            "CFBundleIdentifier": "dev.pam.stamp-test",
+            "CFBundleShortVersionString": "1.0",
+            "CFBundleVersion": "7",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: root.appendingPathComponent("Info.plist"))
+        let manifest = pam.appendingPathComponent("manifest.sha256")
+        try (String(repeating: "a", count: 64) + "\n").write(to: manifest, atomically: true, encoding: .utf8)
+        let bundle = try XCTUnwrap(Bundle(url: root))
+
+        let first = PamPhpRuntimeConfiguration.buildStamp(bundle: bundle)
+        XCTAssertTrue(first.hasSuffix("|1.0|7|" + String(repeating: "a", count: 64)))
+        XCTAssertEqual(PamPhpRuntimeConfiguration.buildStamp(bundle: bundle), first, "Same bundle keeps the cache")
+
+        // Same path, same version and build, new PHP: an in-place install.
+        try (String(repeating: "b", count: 64) + "\n").write(to: manifest, atomically: true, encoding: .utf8)
+        let second = PamPhpRuntimeConfiguration.buildStamp(bundle: bundle)
+        XCTAssertNotEqual(second, first, "New PHP content must drop the opcodes compiled from the old bundle")
+
+        let cache = root.appendingPathComponent("caches", isDirectory: true)
+        let directory = try XCTUnwrap(PamPhpRuntimeConfiguration.prepareOpcacheDirectory(stamp: first, root: cache))
+        let stale = URL(fileURLWithPath: directory).appendingPathComponent("index.php.bin")
+        try Data([1]).write(to: stale)
+        _ = PamPhpRuntimeConfiguration.prepareOpcacheDirectory(stamp: second, root: cache)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+    }
+
+    func testManifestDigestAcceptsOnlyASha256Line() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pam-manifest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let digest = String(repeating: "0f", count: 32)
+        try "\(digest)\nextra\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(PamPhpRuntimeConfiguration.manifestDigest(at: file), digest)
+        try "not-a-digest\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertNil(PamPhpRuntimeConfiguration.manifestDigest(at: file))
+        XCTAssertNil(PamPhpRuntimeConfiguration.manifestDigest(at: file.appendingPathExtension("missing")))
+    }
+
+    func testBundleWithoutManifestFallsBackToTheExecutableIdentity() {
+        XCTAssertFalse(PamPhpRuntimeConfiguration.contentIdentity(bundle: .main).isEmpty)
+    }
+
     func testProcessClockIsPositive() throws {
         let elapsed = try XCTUnwrap(PamProcessClock.millisecondsSinceProcessStart())
         XCTAssertGreaterThan(elapsed, 0)
