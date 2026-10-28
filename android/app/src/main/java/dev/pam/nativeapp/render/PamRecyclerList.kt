@@ -64,6 +64,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var scrollPhase: ((Int, Float, Float, Float, Float) -> Unit)? = null
     private var pagerSnap: PagerSnapHelper? = null
     private var phaseDragging = false
+
+    /** A finger drag, or the fling it released, is moving the list. */
+    private var userScrolling = false
+
+    /** The latest programmatic scroll that arrived during [userScrolling]. */
+    private var deferredScroll: (() -> Unit)? = null
     private var releaseVelocityX = 0f
     private var releaseVelocityY = 0f
     private var richIds: List<Long> = emptyList()
@@ -83,6 +89,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         updateLayoutManager()
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                when (newState) {
+                    SCROLL_STATE_DRAGGING -> userScrolling = true
+                    SCROLL_STATE_IDLE -> if (userScrolling) {
+                        userScrolling = false
+                        deferredScroll?.let { action ->
+                            deferredScroll = null
+                            post(action)
+                        }
+                    }
+                }
                 val listener = scrollPhase ?: return
                 val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
                 val x = (if (horizontal) logicalScrollOffsetPx() else computeHorizontalScrollOffset()) / density
@@ -263,6 +279,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (appended || prepended) {
             (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp(start = prepended, end = appended)
         }
+        val headAnchor = headInsertAnchorCapture(richIds, ids)
         richIds = ids
         richExtents = pixelExtents
         richSpans = rowSpan?.let { span ->
@@ -287,7 +304,32 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         configureAdapter()
         updateHeaderSpans()
         applyInitialPosition()
+        headAnchor?.let(::restoreHeadInsertAnchor)
         if (sectionSwitch != null && sectionRestore != null) enterSection(sectionSwitch, sectionRestore)
+    }
+
+    /**
+     * Rows prepended right below a leading row on screen (a list header, a
+     * "loading older" row) would push the content down: RecyclerView keeps
+     * its first visible child, the header, in place. The first row after the
+     * inserted run keeps its pixel offset instead, like any prepend above the
+     * viewport. Returns (row id, top px) or null when RecyclerView's own
+     * anchoring already does it.
+     */
+    private fun headInsertAnchorCapture(previous: List<Long>, next: List<Long>): Pair<Long, Int>? {
+        if (!initialPositionApplied || inverted || !isLaidOut || previous.isEmpty()) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val first = manager.findFirstVisibleItemPosition()
+        val id = headInsertAnchor(previous, next, first) ?: return null
+        val view = manager.findViewByPosition(previous.indexOf(id)) ?: return null
+        return id to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
+    }
+
+    private fun restoreHeadInsertAnchor(anchor: Pair<Long, Int>) {
+        val index = richIds.indexOf(anchor.first)
+        if (index < 0) return
+        // Does not stop a running fling: it continues from the anchored layout.
+        (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(index, anchor.second)
     }
 
     /**
@@ -532,6 +574,23 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
             return positions
         }
+    }
+
+    /**
+     * Runs a programmatic scroll now, or once the user's own drag or fling
+     * comes to rest (true when deferred). Positioning stops the scroller, so
+     * a request committed mid-gesture (an anchor, a follow-the-end) would
+     * cut the fling short and jump; the user's motion wins and only the
+     * latest request runs after it.
+     */
+    fun deferWhileUserScrolls(action: () -> Unit): Boolean {
+        if (!userScrolling || scrollState == SCROLL_STATE_IDLE) {
+            userScrolling = false
+            deferredScroll = null
+            return false
+        }
+        deferredScroll = action
+        return true
     }
 
     /**
@@ -1407,6 +1466,30 @@ internal fun rowsAddedBefore(previous: List<Long>, next: List<Long>): Boolean {
     val kept = previous.toHashSet()
     return next.subList(0, index).none(kept::contains)
 }
+
+/**
+ * The row to anchor when [next] inserts rows right after a leading row on
+ * screen: scanning from the first visible row through the list's first
+ * [HEAD_INSERT_LEADING_ROWS] + 1 rows, the first kept row with inserted rows
+ * directly before it. Null when that is the first visible row itself
+ * (RecyclerView keeps it) or nothing was inserted near the head.
+ */
+internal fun headInsertAnchor(previous: List<Long>, next: List<Long>, firstVisible: Int): Long? {
+    if (firstVisible < 0 || firstVisible >= previous.size || firstVisible > HEAD_INSERT_LEADING_ROWS) return null
+    val positions = HashMap<Long, Int>(next.size * 2)
+    next.forEachIndexed { index, id -> positions[id] = index }
+    val kept = previous.toHashSet()
+    val last = minOf(previous.size - 1, HEAD_INSERT_LEADING_ROWS + 1)
+    for (position in firstVisible..last) {
+        val id = previous[position]
+        val index = positions[id] ?: continue
+        if (index > 0 && next[index - 1] !in kept) return if (position == firstVisible) null else id
+    }
+    return null
+}
+
+/** Leading rows (headers, loaders) a head insert may land after. */
+internal const val HEAD_INSERT_LEADING_ROWS = 2
 
 /** True when [next] adds new rows after the last row of [previous] it keeps. */
 internal fun rowsAddedAfter(previous: List<Long>, next: List<Long>): Boolean {

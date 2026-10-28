@@ -7677,6 +7677,7 @@ require __DIR__.'/list_window_size.php';
 require __DIR__.'/component_root_props.php';
 require __DIR__.'/text_scale_policy.php';
 require __DIR__.'/list_window_template.php';
+require __DIR__.'/list_native_scroll.php';
 require __DIR__.'/launch_url.php';
 require __DIR__.'/handler_purity.php';
 require __DIR__.'/protocol_extension.php';

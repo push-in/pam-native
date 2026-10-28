@@ -2319,6 +2319,10 @@ class PamRenderer(
 
     private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
         list.post {
+            // Never cut a user's drag or fling: run (latest wins) once it rests.
+            if (list.deferWhileUserScrolls { if (nodes[state.id] === state) requestVirtualListScroll(list, state) }) {
+                return@post
+            }
             val targetTestId = state.textOrNull(PropKey.SCROLL_TARGET_TEST_ID).orEmpty()
             val targetOffset = if (targetTestId.isNotEmpty()) {
                 val targetId = descendantWithTestId(state.id, targetTestId)

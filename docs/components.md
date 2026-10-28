@@ -817,6 +817,33 @@ instead; virtual lists then snap exactly onto the target once the glide
 settles, unless a finger took over. iOS lists now jump by default too
 (they used to animate every request).
 
+#### Native scrolling guarantees of long lists
+
+Any `VirtualizedList`, `VirtualGrid` or `SectionList` (chat, feed, comments)
+scrolls natively; no app code is needed for these (Android now, iOS next):
+
+- **No PHP during a drag or fling.** Scrolling runs on the platform list. PHP
+  hears only the phases an app binds (`scrollBeginDrag`, `scrollEndDrag`,
+  `momentumScrollEnd`, `endReached`, at most a few per gesture); a phase
+  handler marked `#[PureHandler]` that changes nothing commits no frame. Bind
+  `on:scroll` (per frame, coalesced to one event per frame) only when the
+  position itself is rendered.
+- **Pages are incremental patches.** Rows prepended, appended or slid through
+  a window are one patch frame with only the rows that join and leave; full
+  frames happen only when a screen mounts.
+- **Anchored inserts.** Rows inserted or removed above the viewport (an older
+  page, a sliding window) keep the first visible row at its exact pixel
+  offset. Rows prepended right below a leading row that is on screen (a
+  header, a "loading older" row) go above the viewport too: the first row
+  after them keeps its offset. Windowing code must not "anchor" with a scroll
+  request.
+- **A fling is never cut.** A `scrollRequest` committed while the user's own
+  drag or fling moves the list waits until it rests, then runs once (the
+  latest request). Inserts during a fling do not stop it.
+
+Covered by `packages/native/tests/list_native_scroll.php` and the Android
+`PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest`.
+
 ### Taps while the keyboard is open (`keyboardShouldPersistTaps`)
 
 `keyboardShouldPersistTaps` on `ScrollView`, `FlatList`, `SectionList` and

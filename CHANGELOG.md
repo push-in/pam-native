@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Virtual lists (Android): a `scrollRequest` committed while the
+  user's own drag or fling moves the list waits until it rests (latest request
+  wins) instead of stopping the scroller; anchor-style requests issued while a
+  window shifted cut flings short and jumped the list.
+- Android: rows prepended right below a leading row on screen (a header, a
+  "loading older" row) keep the first row after them at its pixel offset,
+  like any prepend above the viewport (RecyclerView kept the header and
+  pushed the content down). New docs section "Native scrolling guarantees of
+  long lists", PHP test `list_native_scroll.php`, Android
+  `PamListNativeScrollInstrumentedTest` and `PamHeadInsertAnchorTest`.
+- Android: the per-frame "Received a PHP render frame" log is verbose and
+  compiled out of release builds (NDEBUG); debug `PamNativePerf` lines now
+  show each commit's own kind and sizes (`frame=`, `frameIn=`, `frameOut=`)
+  next to the engine totals (`totalFull=`, `totalPatch=`, `totalInBytes=`),
+  which used to read like per-frame values.
+
 ## 1.46.4 - 2026-10-28
 
 One fix on top of 1.46.3, no protocol change.
