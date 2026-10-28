@@ -105,8 +105,10 @@ final class PamCssEffectsTests: XCTestCase {
     }
 
     func testImageBlurRadiusBlursTheBitmapWithOpaqueEdges() throws {
+        // σ is in view points and follows the drawn scale (a 40 pt checker
+        // drawn up to 3× needs σ above 4 pt to blur on a downscaled copy).
         let (_, renderer, view) = PamRenderTestSupport.render([
-            PamConstants.blurRadius: .decimal(4),
+            PamConstants.blurRadius: .decimal(16),
         ], kind: .image)
         defer { renderer.close() }
         let imageView = try XCTUnwrap(view as? PamImageView)

@@ -2,7 +2,24 @@
 
 ## Unreleased
 
-### 1.45.1
+## 1.45.1 - 2026-10-28
+
+Fixes on top of 1.45.0, no protocol change (core and extension identifiers as in 1.45.0).
+
+- Lazy list rows: presses inside a row of a windowed list reach their
+  handlers after the window moves. A row brought back through the compiled
+  fast path no longer resets its owner's active instances (which released
+  every other row on screen), and a row component that leaves the window
+  drops its cached element on unmount, so it renders anew (with live
+  handlers) when it comes back.
+- iOS VirtualizedList: the bottom padding extends the scrollable content
+  past the last row (React Native `contentContainerStyle`, Android
+  `clipToPadding=false`), so a list padded to clear floating buttons no
+  longer ends under them.
+- Image `blurRadius`: σ is authored in view points and now follows the
+  drawn scale (Android multiplied it by the density as well), and an image
+  with a translucent border blurs into transparency instead of clamping, so
+  a glyph used as its own shadow no longer becomes a translucent square.
 
 - Signals: every watcher, computed value and effect of a signal sees every
   change. `Signal::set()` and `ComputedSignal` iterated their live observer
