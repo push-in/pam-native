@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.46.3 - 2026-10-28
+
+Real shared elements on top of 1.46.2, no protocol change (core and extension identifiers as in 1.46.2; the shared tag and style use the existing core keys).
+
 - Shared elements: any element takes a `shared` tag in templates
   (`sharedStyle` for its motion). Media flights reuse the decoded image or
   the current video frame and morph frame, crop (cover to contain) and corner
