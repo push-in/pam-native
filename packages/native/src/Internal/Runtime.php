@@ -70,6 +70,9 @@ final class Runtime
     private static bool $rendering = false;
     private static bool $renderRequested = false;
     private static bool $dispatchingEvent = false;
+
+    /** @var list<Closure(): void> imperative native calls waiting for the next commit */
+    private static array $afterCommit = [];
     private static ?Throwable $renderFailure = null;
     private static WindowMetrics $windowMetrics;
     /** When true the native bridge drains its queue and calls flush() once. */
@@ -208,6 +211,7 @@ final class Runtime
 
         self::$rendering = true;
         $renderStarted = hrtime(true);
+        PortalRegistry::instance()->beginRender();
         try {
             do {
                 self::$renderRequested = false;
@@ -223,6 +227,7 @@ final class Runtime
                 ComponentLifecycle::detectChanges();
                 PamPhpRegistry::beginRender();
                 ComponentLifecycle::beginRender();
+                PortalRegistry::instance()->beginPass();
                 try {
                 $element = Profiler::measure('php.render', static function () use ($root): ?Element {
                     $rendered = $root instanceof Renderable ? $root : $root();
@@ -300,6 +305,9 @@ final class Runtime
                     PamPhpRegistry::finishRender();
                 }
                 ComponentLifecycle::commit();
+                if (PortalRegistry::instance()->endPass()) {
+                    self::$renderRequested = true;
+                }
             } while (self::$renderRequested);
         } catch (Throwable $error) {
             self::$renderFailure = $error;
@@ -307,7 +315,46 @@ final class Runtime
             throw $error;
         } finally {
             self::$rendering = false;
+            self::drainAfterCommit();
             self::collectCycles();
+        }
+    }
+
+    /**
+     * Runs $task once the UI update in progress is committed to the native
+     * host: after the render that follows the current event, module result
+     * or render pass, or at once when PHP is idle. Imperative view calls
+     * (ViewRef focus/selection/measure) use it so they reach the native view
+     * after the props of the same handler, never before.
+     *
+     * @internal
+     * @param Closure(): void $task
+     */
+    public static function afterCommit(Closure $task): void
+    {
+        self::$afterCommit[] = $task;
+        if (self::$root === null) {
+            self::drainAfterCommit();
+        }
+    }
+
+    private static function drainAfterCommit(): void
+    {
+        if (self::$rendering || self::$afterCommit === []) {
+            return;
+        }
+        if (self::$root !== null && self::$deferred && self::$pending) {
+            // The host's flush() renders (and drains) once its queue is empty.
+            return;
+        }
+        $tasks = self::$afterCommit;
+        self::$afterCommit = [];
+        foreach ($tasks as $task) {
+            try {
+                $task();
+            } catch (Throwable $error) {
+                self::reportError($error, RuntimeErrorPhase::Event);
+            }
         }
     }
 
@@ -350,6 +397,12 @@ final class Runtime
         }
         DependencyTracker::invalidateAll();
         self::scheduleRender();
+    }
+
+    /** @internal True while a render pass runs. */
+    public static function isRendering(): bool
+    {
+        return self::$rendering;
     }
 
     /** Requests a render after a tracked change; memoized components stay reused. */
@@ -430,6 +483,16 @@ final class Runtime
     public static function dispatchEvent(int $nodeId, int $eventKind, string $payload): void
     {
         try {
+            self::dispatchEventNow($nodeId, $eventKind, $payload);
+        } finally {
+            // A handler that rendered nothing (pure, unchanged) still flushes its view calls.
+            self::drainAfterCommit();
+        }
+    }
+
+    private static function dispatchEventNow(int $nodeId, int $eventKind, string $payload): void
+    {
+        try {
             if ($eventKind === EventKind::Back->value) {
                 DependencyTracker::invalidateAll();
                 self::$backHandler?->__invoke();
@@ -448,7 +511,7 @@ final class Runtime
                 return;
             }
             if ($eventKind === EventKind::KeyboardVisibility->value) {
-                if (\Pam\Native\System\Keyboard::synchronize($payload === '1')) {
+                if (\Pam\Native\System\Keyboard::synchronizePayload($payload)) {
                     self::afterDispatch();
                 }
 
@@ -647,6 +710,8 @@ final class Runtime
             self::afterDispatch();
         } catch (Throwable $error) {
             self::reportError($error, RuntimeErrorPhase::ModuleResult);
+        } finally {
+            self::drainAfterCommit();
         }
     }
 
@@ -782,6 +847,7 @@ final class Runtime
         self::$root = null;
         self::$eventCallbacks = [];
         self::$moduleCallbacks = [];
+        self::$afterCommit = [];
         self::$lastFrame = null;
         self::$nextRequestId = 1;
         self::$moduleTransport = null;
@@ -802,6 +868,7 @@ final class Runtime
         self::$themed = null;
         Appearance::resetRuntime();
         \Pam\Native\System\Keyboard::resetRuntime();
+        PortalRegistry::reset();
         self::$windowMetrics = self::bootMetrics();
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();

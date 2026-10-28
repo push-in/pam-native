@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Keyboard height (Android and iOS): `Keyboard::height()`, `lastHeight()`,
+  `metrics()` and `onChange(fn (KeyboardMetrics $k))`/`offChange()`, like
+  React Native `Keyboard.metrics()` and the `keyboardWill*` events. Hosts
+  publish one value per settled change (show, hide, a new height such as a
+  suggestion strip or the emoji keyboard), never per animation frame; the
+  `KeyboardVisibility` event payload grows to `<visible>;<height>;<durationMs>`
+  (visibility-only payloads are still accepted). `onVisibilityChange()` is
+  unchanged.
+- `System\ViewRef` (Android and iOS): imperative `focus()`, `blur()`,
+  `clear()`, `setSelection()` and `isFocused()` on inputs and `measure()` /
+  `measureInWindow()` on any view, found by `nativeRef` (React Native refs).
+  Calls are sent after the current handler's UI update is committed, so a
+  caret placed right after changing the value lands in the new text.
+  `Runtime::afterCommit()` (internal) queues them.
+- Portals: `<Portal name host>` / `<PortalHost name>` (and `UI\Portal::make()`,
+  `to()`, `host()`) render content outside the parent tree in the same window,
+  like `@gorhom/portal`. A portal lives while its component renders it and is
+  removed on re-render without it or unmount.
+
 - iOS modals: when the app answers a bottom sheet's close request (a tap on
   the backdrop) with `visible = false` while the native dismissal runs, the
   repeated hide no longer restarts the dismissal, whose earlier completion

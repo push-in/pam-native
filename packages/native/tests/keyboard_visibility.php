@@ -56,3 +56,41 @@ unset($keyboardOwner);
 gc_collect_cycles();
 $assert($ownerReference->get() === null, 'Unsubscribe releases the component callback.');
 Runtime::shutdown();
+
+// Keyboard height (React Native Keyboard.metrics / keyboardWill* events):
+// hosts send "<visible>;<heightDp>;<durationMs>" once per settled change.
+$metricsSeen = [];
+$visibilitySeen = [];
+$metricsSubscription = Keyboard::onChange(static function (\Pam\Native\KeyboardMetrics $metrics) use (&$metricsSeen): void {
+    $metricsSeen[] = [$metrics->visible, $metrics->height, $metrics->durationMs];
+});
+$visibilitySubscription = Keyboard::onVisibilityChange(static function (bool $visible) use (&$visibilitySeen): void {
+    $visibilitySeen[] = $visible;
+});
+$assert(Keyboard::height() === 0.0 && Keyboard::lastHeight() === 0.0, 'Keyboard height starts at zero.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;301.25;250');
+$assert(Keyboard::isVisible() && Keyboard::height() === 301.3 && Keyboard::metrics()->durationMs === 250, 'Visible payload carries the settled height and animation duration.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;301.3;0');
+$assert(count($metricsSeen) === 1, 'An unchanged settled height is not republished.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;345;0');
+$assert($metricsSeen === [[true, 301.3, 250], [true, 345.0, 0]] && $visibilitySeen === [true], 'A height change (suggestion strip) notifies height listeners only.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '0;0;200');
+$assert(!Keyboard::isVisible() && Keyboard::height() === 0.0 && Keyboard::lastHeight() === 345.0, 'Hide clears the height and keeps the last keyboard height for replacement panels.');
+$assert($visibilitySeen === [true, false] && end($metricsSeen) === [false, 0.0, 200], 'Hide notifies both subscriptions once.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1');
+$assert(Keyboard::isVisible() && Keyboard::height() === 0.0, 'A legacy visibility-only host keeps working without a height.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '0;nan;-4');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;99999;99999');
+$assert(Keyboard::height() === 10000.0 && Keyboard::metrics()->durationMs === 5000, 'Untrusted payload values are clamped.');
+Runtime::dispatchEvent(0, EventKind::AppState->value, '3');
+$assert(!Keyboard::isVisible() && Keyboard::height() === 0.0, 'Background clears the keyboard height.');
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;280;0');
+$assert(Keyboard::height() === 0.0, 'Background ignores late keyboard frames.');
+Runtime::dispatchEvent(0, EventKind::AppState->value, '1');
+Keyboard::offChange($metricsSubscription);
+Keyboard::offVisibilityChange($visibilitySubscription);
+$count = count($metricsSeen);
+Runtime::dispatchEvent(0, EventKind::KeyboardVisibility->value, '1;280;0');
+$assert(count($metricsSeen) === $count && Keyboard::height() === 280.0, 'offChange stops notifications; state stays current.');
+Runtime::shutdown();
+$assert(Keyboard::height() === 0.0 && Keyboard::lastHeight() === 0.0, 'Runtime shutdown resets keyboard metrics.');
