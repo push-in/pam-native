@@ -260,6 +260,9 @@ final class Runtime
                 self::$windowChanged = false;
 
                 $encoder = self::$encoder ??= new TreeEncoder();
+                if ($unchanged) {
+                    HandlerPurity::verify(false);
+                }
                 if (!$unchanged) {
                 $encoded = Profiler::measure(
                     'php.encode',
@@ -268,6 +271,8 @@ final class Runtime
                 self::$eventCallbacks = $encoded['callbacks'];
                 $frame = $encoded['frame'];
                 $current = true;
+                // Renders inferred-pure handlers skipped, done anyway in dev.
+                HandlerPurity::verify($frame !== null);
 
                 if ($frame !== null) {
                     $committed = true;

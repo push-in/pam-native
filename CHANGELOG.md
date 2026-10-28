@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Template event handlers are inferred pure, with no opt-in: a handler method
+  whose body (and the same-class methods it calls) reads no static or global
+  state, creates no objects and calls no services, running on a component
+  whose state holds no objects, skips its component's render when the state
+  snapshot did not change (React: no state change, no render). Development
+  builds render anyway and compare; a handler whose skipped render would have
+  changed the tree gets a `PamNativePurity` warning and stays impure for the
+  session. `#[PureHandler]` still forces purity.
+- Lazy list rows built by the encoder after their owner rendered stay mounted
+  in later passes when the owner is nested (its ancestors' cached descendant
+  lists were stale: a pass that rendered nothing unmounted the rows and lost
+  their state).
+- `LazyRows::shown()` (tests and dev tools): a lazy list's rows as sent,
+  built rows and placeholders.
 - Protocol: the core identifier tables are closed (properties `1`–`543`,
   events `1`–`80`), and new identifiers go to an extension table that starts
   at `1001`. Extension IDs use the existing `u16` property field, so frames

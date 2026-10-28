@@ -7071,13 +7071,16 @@ final class TemplateRenderer
                 self::$componentMethods[$scope::class.'::'.$raw] = $method;
             }
 
-            $pure = self::pureMethod($method);
+            $declared = self::pureMethod($method);
+            $pure = $declared || HandlerPurity::inferred($method);
             $handler = static function (mixed $payload = null) use (
                 $method,
                 $scope,
+                $declared,
                 $pure,
             ): void {
-                if ($scope instanceof Component && !$pure) {
+                $skips = $pure && ($declared || !$scope instanceof Component || HandlerPurity::plainState($scope));
+                if ($scope instanceof Component && !$skips) {
                     DependencyTracker::markDirty($scope);
                 }
                 try {
@@ -7087,8 +7090,8 @@ final class TemplateRenderer
                         $method->invoke($scope, $payload);
                     }
                 } finally {
-                    if ($pure) {
-                        self::settlePureHandler($scope);
+                    if ($skips) {
+                        self::settlePureHandler($scope, $declared ? null : $method);
                     }
                 }
             };
@@ -7176,9 +7179,12 @@ final class TemplateRenderer
         if ($cached !== null) {
             return $cached;
         }
-        $pure = self::pureMethod($method);
-        $handler = static function (mixed $payload = '') use ($kind, $method, $scope, $pure): void {
-            if (!$pure) {
+        $declared = self::pureMethod($method);
+        $pure = $declared || HandlerPurity::inferred($method);
+        $handler = static function (mixed $payload = '') use ($kind, $method, $scope, $declared, $pure): void {
+            // Inferred pure (static analysis of the method): only while the
+            // component's state is plain, so the snapshot sees every change.
+            if (!$pure || (!$declared && $scope instanceof Component && !HandlerPurity::plainState($scope))) {
                 if ($scope instanceof Component) {
                     DependencyTracker::markDirty($scope);
                 }
@@ -7189,7 +7195,7 @@ final class TemplateRenderer
             try {
                 self::invokeMethodHandler($kind, $method, $scope, $payload);
             } finally {
-                self::settlePureHandler($scope);
+                self::settlePureHandler($scope, $declared ? null : $method);
             }
         };
         if ($pure) {
@@ -7236,14 +7242,17 @@ final class TemplateRenderer
             ??= $method->getAttributes(\Pam\Native\Attributes\PureHandler::class) !== [];
     }
 
-    /** A pure handler re-renders its component only when its own state really changed. */
-    private static function settlePureHandler(object $scope): void
+    /**
+     * A pure handler re-renders its component only when its own state really
+     * changed. A render an inferred-pure handler ($inferred) skips is still
+     * done in development builds and verified (HandlerPurity::verify()).
+     */
+    private static function settlePureHandler(object $scope, ?ReflectionMethod $inferred = null): void
     {
-        if (
-            $scope instanceof Component
-            && !DependencyTracker::isDirty($scope)
-            && $scope->__pamStateChanged()
-        ) {
+        if (!$scope instanceof Component || DependencyTracker::isDirty($scope)) {
+            return;
+        }
+        if ($scope->__pamStateChanged() || ($inferred !== null && HandlerPurity::skipped($inferred))) {
             DependencyTracker::markDirty($scope);
         }
     }
