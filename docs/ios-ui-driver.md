@@ -45,6 +45,7 @@ Steps:
 | `{"wait": 1.5}` / `{"waitFor": "label", "timeout": 10}` | Delay / wait for an element. |
 | `{"shot": "name"}` | Screenshot `name.png`. |
 | `{"dump": "name"}` | Accessibility tree as `name.txt`. |
+| `{"probe": "label", "name": "x"}` | `x.txt` lists the frame and `isHittable` of every element whose label matches, without tapping (diagnoses a "not hittable" tap). |
 
 Each `tap` asserts that the element exists (10 s), so a missing screen fails
 the run instead of producing misleading screenshots. Stack navigators persist

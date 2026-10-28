@@ -26,6 +26,8 @@ import XCTest
 ///     {"waitFor": "label", "timeout": 10}
 ///     {"shot": "marketplace"}          PNG in PAM_UI_SHOT_DIR + attachment
 ///     {"dump": "tree"}                accessibility tree (.txt) + attachment
+///     {"probe": "label", "name": "x"} frame and hittability of every match
+///                                      (.txt) without tapping
 final class PamUIDriverTests: XCTestCase {
     private var app: XCUIApplication!
     private var shotDirectory: URL?
@@ -204,6 +206,22 @@ final class PamUIDriverTests: XCTestCase {
         }
         if let name = step["shot"] as? String {
             try screenshot(named: name)
+            return
+        }
+        if let label = step["probe"] as? String {
+            let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
+            let matches = app.descendants(matching: .any).matching(predicate).allElementsBoundByIndex
+            let report = matches.map { element in
+                "\(element.isHittable ? "hittable" : "NOT hittable") \(element.frame) \(element.label)"
+            }.joined(separator: "\n")
+            let name = step["name"] as? String ?? "probe-\(index)"
+            let attachment = XCTAttachment(string: report)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            if let directory = shotDirectory {
+                try report.write(to: directory.appendingPathComponent("\(name).txt"), atomically: true, encoding: .utf8)
+            }
             return
         }
         if let name = step["dump"] as? String {
