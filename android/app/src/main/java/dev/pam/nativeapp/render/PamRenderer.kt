@@ -72,6 +72,7 @@ import dev.pam.nativeapp.BuildConfig
 import android.widget.Switch
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import androidx.core.view.OneShotPreDrawListener
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.EventKind
@@ -5655,8 +5656,11 @@ class PamRenderer(
                 },
             ).also { it.start(PamMotionPolicy.isReduced(view.context)) }
         }
-        // Percentages resolve against the laid-out size.
-        if (view.isLaidOut) start() else view.post { start() }
+        // Percentages resolve against the laid-out size. A view not laid out yet
+        // starts right before its first draw (after layout), so the program's
+        // initial values (an entrance's opacity 0) are already applied on that
+        // frame; a posted start ran after the frame and flashed the end state.
+        if (view.isLaidOut) start() else OneShotPreDrawListener.add(view) { start() }
     }
 
     private fun restartAnimations(view: View, state: NodeState) {
