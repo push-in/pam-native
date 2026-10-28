@@ -218,20 +218,37 @@ $feed = useResource(fn (?string $cursor) => Api::client()->get('/feed', ['cursor
 | `data` | The result, or the accumulated list when `paginate` is on. |
 | `loading` | The first load, or a reload while there is no data. |
 | `refreshing` | A reload while data is on screen. |
-| `loadingMore` | `more()` is running. |
+| `loadingMore`, `loadingNewer` | `more()` (older) or `more('newer')` is running. |
 | `error` | The message of the last failure. Data is kept. |
-| `hasMore`, `stale`, `status` (`AsyncStatus`), `value` (`AsyncValue` for `<Suspense>`) | |
+| `hasMore` | An older page exists (next cursor). |
+| `hasNewer` | A newer page exists (previous cursor), e.g. after opening around an item. |
+| `stale`, `status` (`AsyncStatus`), `value` (`AsyncValue` for `<Suspense>`) | |
 
 | Option | Meaning |
 | --- | --- |
-| `paginate` | The loader receives the cursor (`null` for the first page) and returns `['data' => [...], 'next' => ?string]`. `items`, `next_cursor`, `nextCursor` and `meta.next_cursor` are accepted too, and the `items:`/`nextCursor:` closures handle any other shape. Items already in the list are skipped (matched by `key`, default `'id'`). |
+| `paginate` | The loader receives the cursor (`null` for the first page) and returns `['data' => [...], 'next' => ?string, 'prev' => ?string]`. Also accepted: `items`; `next_cursor`, `nextCursor`, `meta.next_cursor`; `previous`, `prev_cursor`, `previous_cursor`, `prevCursor`, `meta.prev_cursor`. The `items:`, `nextCursor:` and `previousCursor:` closures handle any other shape. An item already listed (same identity) is replaced in place by the server's version, never listed twice. |
+| `cache: ['key' => 'feed', 'scope' => $userId, 'persist' => true, 'limit' => 100]` | Persistent, offline-first cache. On a cold start the last result shows at once (`stale`) while the network refreshes it; offline, it stays on screen with `error`. Entries are scoped (another account never sees them) and bounded: per scope 32 entries and 1 MiB on top of the native `Storage`, and a paginated list keeps its first `limit` items (default 100, without a cursor past the cut). It is written when the app goes to the background, or with `Resource::persistCache()`. |
+| `key: fn () => [$auth->userId, $query->value]` | Reactive dependencies. When the value changes, requests in flight are cancelled, the cache entry switches to the new key (its cached result shows at once if there is one) and the resource reloads. The loader reads them as `$page->key`. A string `key:` is the legacy identity field. |
+| `identity` | How items are matched (optimistic helpers and page merges): a field (`'id'`, the default), several fields (`['id', 'client_message_id']`: equal on any of them), or `fn ($a, $b): bool` (`$b` may be a key). |
+| `around: $id` | Opens the first page around an item: the loader reads `$page->around` and returns both cursors. `reload(around: $id)` jumps elsewhere. |
 | `refreshOnFocus` | Reloads each time the screen is focused again. The first focus is covered by the initial load. |
 | `lazy` | Waits until something first reads the resource, instead of loading immediately. |
-| `cache` | Shows the last result for this key immediately (`stale`) and refreshes behind it. The cache is an in-memory LRU of 64 entries and 4 MiB; `Resource::forgetCache()` clears it, for example on logout. |
+| `cache: 'key'` | Shows the last result for this key immediately (`stale`) and refreshes behind it. In-memory LRU of 64 entries and 4 MiB. `Resource::forgetCache()` clears everything, `forgetCache('feed')` one key, `forgetCache(scope: $userId)` one account (memory and disk), for example on logout. |
 
 Methods:
 
-- `reload()` and `more()`. Repeated calls while one is in flight are joined.
+- `reload(?$around)`: a reload with the same parameters in flight is joined;
+  new parameters (`around`, changed `key:`) restart it. A reload cancels any
+  `more()` in flight, so a page of the old list is never appended to the new
+  one. The last request always wins: a superseded result is dropped.
+- `more('older')` (default: appends the next page) and `more('newer')`
+  (prepends the previous page). Both directions can run side by side; a
+  repeated call in the same direction is joined, and nothing runs while the
+  first page loads.
+- The loader receives `(?string $cursor, CancellationToken $token, ResourcePage $page)`
+  when paginated, `(CancellationToken $token, ResourcePage $page)` otherwise;
+  declare only what you use. `ResourcePage` has `direction` (`'initial'`,
+  `'older'`, `'newer'`), `cursor`, `around` and `key`.
 - Optimistic UI: `prepend($item)`, `append($item)`, `replace($tmp, $real)`,
   `markFailed($tmp)` (an array item gets `_failed: true`; `isFailed($item)`),
   `remove($itemOrKey)`, and `update(fn ($data) => ...)` for any other shape.

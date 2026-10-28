@@ -238,24 +238,29 @@ if (!\function_exists('Pam\Native\useTimezone')) {
 if (!\function_exists('Pam\Native\useResource')) {
     /**
      * Data loaded off the event path, with `->data`, `->loading`, `->error`,
-     * `->reload()`, `->more()` and optimistic `->prepend()`, `->append()`,
-     * `->replace($tmp, $real)`, `->markFailed($tmp)`, `->remove($item)`.
+     * `->reload()`, `->more()`/`->more('newer')` and optimistic `->prepend()`,
+     * `->append()`, `->replace($tmp, $real)`, `->markFailed($tmp)`, `->remove($item)`.
      *
-     * @param Closure(mixed...): mixed $loader `fn (?string $cursor)` when paginated, else `fn ()`
+     * @param Closure(mixed...): mixed $loader `fn (?string $cursor, CancellationToken $token, ResourcePage $page)` when paginated, else `fn (CancellationToken $token, ResourcePage $page)`; declare only what you use
      * @param bool $lazy start on first read instead of immediately
-     * @param string|null $cache show the last result for this key at once, refresh behind it
-     * @param string $key item field identifying list items for the optimistic helpers
+     * @param string|array{key: string, scope?: string|int|null, persist?: bool, limit?: int}|null $cache a key (memory) or key/scope/persist (offline-first on disk)
+     * @param string|Closure $key reactive dependencies `fn () => [$auth->userId, $query->value]` (a change cancels, swaps the cache and reloads); a string is the legacy identity field
+     * @param string|list<string>|Closure|null $identity item identity: a field, several fields (`['id', 'client_message_id']`) or `fn ($a, $b) => bool`
+     * @param mixed $around open the first page around this item (the loader reads `$page->around`)
      */
     function useResource(
         Closure $loader,
         bool $paginate = false,
         bool $refreshOnFocus = false,
         bool $lazy = false,
-        ?string $cache = null,
-        string $key = 'id',
+        string|array|null $cache = null,
+        string|Closure $key = 'id',
         ?Closure $nextCursor = null,
         ?Closure $items = null,
+        string|array|Closure|null $identity = null,
+        ?Closure $previousCursor = null,
+        mixed $around = null,
     ): Resource {
-        return new Resource($loader, $paginate, $refreshOnFocus, $lazy, $cache, $key, $nextCursor, $items);
+        return new Resource($loader, $paginate, $refreshOnFocus, $lazy, $cache, $key, $nextCursor, $items, $identity, $previousCursor, $around);
     }
 }
