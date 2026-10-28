@@ -479,40 +479,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         clearSharedElements()
     }
 
-    private var tapDownX = 0f
-    private var tapDownY = 0f
-    private var tapDownAt = 0L
-    private var tapMoved = true
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                sharedElements.touched(event.x, event.y)
-                tapDownX = event.x
-                tapDownY = event.y
-                tapDownAt = event.eventTime
-                tapMoved = false
-            }
-            MotionEvent.ACTION_MOVE -> if (!tapMoved &&
-                (kotlin.math.abs(event.x - tapDownX) > touchSlop || kotlin.math.abs(event.y - tapDownY) > touchSlop)
-            ) {
-                tapMoved = true
-            }
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> tapMoved = true
-            MotionEvent.ACTION_UP -> {
-                sharedElements.touched(event.x, event.y)
-                // A tap on a launch element starts its flight on this frame,
-                // before the app handles the press (no PHP on that path).
-                // Short taps only: a held press may be a long press (menus
-                // open from 180 ms), which must not start a flight.
-                if (!tapMoved && event.eventTime - tapDownAt < LAUNCH_TAP_MAX_MS &&
-                    running == null && !gesturePrepared && !predictiveBackActive && !animationsDisabled()
-                ) {
-                    activeRoute?.let { sharedElements.launchFromTap(it, event.x, event.y) }
-                }
-            }
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
+            sharedElements.touched(event.x, event.y)
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /** [pressed] (a Pressable) was clicked inside this host's active route. */
+    private fun launchFromPress(pressed: View): Boolean {
+        val route = activeRoute ?: return false
+        if (running != null || gesturePrepared || predictiveBackActive || animationsDisabled()) return false
+        return sharedElements.launchFromPress(route, pressed)
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -1254,13 +1232,24 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun keepsPreviousRouteVisible(): Boolean = operation != OPERATION_POP &&
         screenPresentation in PRESENTATION_CONTAINED_MODAL..PRESENTATION_FORM_SHEET
 
-    private companion object {
+    internal companion object Launcher {
+        /** Starts a launch flight in the innermost host around [pressed]. */
+        fun pressed(pressed: View) {
+            var current = pressed.parent
+            while (current != null) {
+                if (current is PamNavigationHost) {
+                    if (current.launchFromPress(pressed)) return
+                }
+                current = current.parent
+            }
+        }
+
         const val OPERATION_IDLE = 1
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
         const val OPERATION_REPLACE = 4
         const val PREDICTIVE_BACK_VERDICT_TIMEOUT_MS = 1_000L
-        const val LAUNCH_TAP_MAX_MS = 170L
+
 
         const val TRANSITION_PLATFORM_DEFAULT = 1
         const val TRANSITION_SLIDE_FROM_RIGHT = 2

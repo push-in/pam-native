@@ -621,6 +621,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         val pointer = clickPointer ?: centerPointer()
         clickPointer = null
         playTapEffect(pointer, PamTapEffect.TRIGGER_TAP)
+        // A shared element inside this press starts flying on this frame,
+        // before the press reaches the app (SharedTransitionStyle::launchOnTap).
+        PamNavigationHost.pressed(this)
         localOnPress?.invoke()
         onPress?.invoke(pointer)
         return platformHandled || localOnPress != null || onPress != null

@@ -228,8 +228,24 @@ final class PamSharedElementFlights {
     private func pick(_ candidates: [UIView], route: UIView, minimumShare: CGFloat) -> UIView? {
         let visible = candidates.filter { onScreen($0, route: route, minimumShare: minimumShare) }
         guard visible.count > 1, let touch else { return visible.first }
-        return visible.first { $0.convert($0.bounds, to: host).contains(touch) } ?? visible.first
+        return visible.filter { visibleRect($0).contains(touch) }
+            .min { area(visibleRect($0)) < area(visibleRect($1)) } ?? visible.first
     }
+
+    /// [view]'s frame in host coordinates clipped by its clipping ancestors.
+    private func visibleRect(_ view: UIView) -> CGRect {
+        var rect = view.convert(view.bounds, to: host)
+        var current = view.superview
+        while let ancestor = current, ancestor !== host {
+            if ancestor.clipsToBounds || ancestor.layer.masksToBounds {
+                rect = rect.intersection(ancestor.convert(ancestor.bounds, to: host))
+            }
+            current = ancestor.superview
+        }
+        return rect.isNull ? .zero : rect
+    }
+
+    private func area(_ rect: CGRect) -> CGFloat { rect.width * rect.height }
 
     /// Phase 1: measures and copies the on-screen sources while the outgoing
     /// route is still in the window (a video frame needs it), then hides them.
@@ -430,12 +446,18 @@ final class PamSharedElementFlights {
     @discardableResult
     func launchFromTap(route: UIView, point: CGPoint) -> Bool {
         guard launched == nil, handing == nil, flights.isEmpty else { return false }
+        // The most specific element under the finger (an album tile, not a
+        // neighbour whose unclipped frame also covers the point).
         var found: (String, UIView)?
+        var foundArea = CGFloat.greatestFiniteMagnitude
         for (tag, views) in taggedViews(in: route) {
             for view in views where Self.config(for: view)?.launch == true
-                && onScreen(view, route: route, minimumShare: 0.5)
-                && view.convert(view.bounds, to: host).contains(point) {
-                found = (tag, view)
+                && onScreen(view, route: route, minimumShare: 0.5) {
+                let rect = visibleRect(view)
+                if rect.contains(point), area(rect) < foundArea {
+                    found = (tag, view)
+                    foundArea = area(rect)
+                }
             }
         }
         guard let (tag, source) = found, let config = Self.config(for: source),

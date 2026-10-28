@@ -216,9 +216,23 @@ internal class PamSharedElements(private val host: ViewGroup) {
     private fun pick(candidates: List<View>?, route: View, minimumShare: Float): View? {
         val visible = candidates?.filter { onScreen(it, route, minimumShare) }.orEmpty()
         if (visible.size <= 1 || touchX.isNaN()) return visible.firstOrNull()
-        return visible.firstOrNull {
-            rectInHost(it, RectF(0f, 0f, it.width.toFloat(), it.height.toFloat())).contains(touchX, touchY)
-        } ?: visible.first()
+        return visible.filter { hits(it, touchX, touchY) }.minByOrNull(::visibleArea) ?: visible.first()
+    }
+
+    /** The point (host coordinates) is on the visible, clipped part of [view]. */
+    private fun hits(view: View, x: Float, y: Float): Boolean {
+        val visible = Rect()
+        if (!view.getGlobalVisibleRect(visible)) return false
+        val origin = IntArray(2)
+        host.getLocationInWindow(origin)
+        val rootOrigin = IntArray(2)
+        host.rootView.getLocationInWindow(rootOrigin)
+        return visible.contains((x + origin[0] - rootOrigin[0]).toInt(), (y + origin[1] - rootOrigin[1]).toInt())
+    }
+
+    private fun visibleArea(view: View): Long {
+        val visible = Rect()
+        return if (view.getGlobalVisibleRect(visible)) visible.width().toLong() * visible.height() else Long.MAX_VALUE
     }
 
     fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long, popping: Boolean = false) {
@@ -287,15 +301,13 @@ internal class PamSharedElements(private val host: ViewGroup) {
      * the flight is handed to the real destination ([prepare]); if no route
      * comes, it flies back home.
      */
-    fun launchFromTap(route: View, x: Float, y: Float): Boolean {
-        if (launch != null || flights.isNotEmpty()) return false
-        val source = taggedViews(route).entries.asSequence()
+    fun launchFromPress(route: View, pressed: View): Boolean {
+        if (launch != null || flights.isNotEmpty() || !isInside(pressed, route)) return false
+        // The launch element inside the pressed view (or the view itself):
+        // the exact thumbnail that was tapped, no geometry guess.
+        val source = taggedViews(pressed).entries.asSequence()
             .flatMap { (tag, views) -> views.asSequence().map { tag to it } }
-            .filter { (_, view) -> config(view)?.launch == true }
-            .filter { (_, view) -> onScreen(view, route, 0.5f) }
-            .lastOrNull { (_, view) ->
-                rectInHost(view, RectF(0f, 0f, view.width.toFloat(), view.height.toFloat())).contains(x, y)
-            } ?: return false
+            .firstOrNull { (_, view) -> config(view)?.launch == true && onScreen(view, route, 0.5f) } ?: return false
         val (tag, view) = source
         val config = config(view) ?: return false
         val media = contentView(view) ?: return false
