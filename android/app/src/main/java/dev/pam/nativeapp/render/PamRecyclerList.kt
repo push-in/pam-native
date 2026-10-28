@@ -78,9 +78,6 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         updateLayoutManager()
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                // Rows bound mid-fling before their content existed are
-                // retried once the list rests (O(visible rows)).
-                if (newState == SCROLL_STATE_IDLE) repairEmptyRichHolders()
                 val listener = scrollPhase ?: return
                 val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
                 val x = (if (horizontal) logicalScrollOffsetPx() else computeHorizontalScrollOffset()) / density
@@ -1623,10 +1620,6 @@ private class RichRecyclerAdapter(
 
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
         if (ids == next && extents == nextExtents) {
-            // The rows' content changed (a windowed list mounted rows a fling
-            // left empty): every empty holder may retry, not only those never
-            // attempted, or a row tried while still empty stays blank.
-            emptyRemountAttempts.clear()
             remountEmptyHolders()
             return
         }
