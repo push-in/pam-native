@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.46.5 - 2026-10-28
+
+Shared element fixes and instant launch on top of 1.46.4, no protocol change.
+
 - Shared elements: a destination whose media is not drawn yet (a video before
   its poster or first frame, an image still decoding) keeps the picture that
   flew in as its placeholder until its own media draws, with no time limit,
@@ -14,6 +18,9 @@
   flight over (it continues from where it is to the real frame, and the route
   fade continues from the backdrop); with no route it flies back home
   (Android, iOS).
+- Android: a scroll view applies its requested initial offset in its first
+  layout, so a pager opened on page N draws (and is measured on) page N before
+  the first frame, instead of page 0 for one frame.
 - Shared elements: when one tag is on screen more than once (an author's
   avatar on several posts), the instance under the finger that opened the
   route flies, and the flight home lands on it (Android, iOS).
