@@ -38,6 +38,7 @@ internal data class RuntimeErrorReport(
         "render" -> "Render error"
         "event" -> "Event handler error"
         "module" -> "Module callback error"
+        "promise" -> "Unhandled promise rejection"
         "hot-reload" -> "Hot reload error"
         "native" -> "Native runtime error"
         else -> "Uncaught error"

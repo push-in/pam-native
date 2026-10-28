@@ -497,6 +497,21 @@ $feed = useResource(fn (?string $cursor) => Api::client()->get('/feed', ['cursor
 native result arrives. Cancelling a derived promise cancels its source, which
 is what a request chain needs.
 
+Errors behave as in JavaScript:
+
+- An exception thrown inside a `then()`, `catch()` or `finally()` callback
+  rejects the derived promise. The following `then()` callbacks are skipped
+  and the error reaches the next `catch()`.
+- A rejection that nobody handles is reported. A promise is handled once
+  `then()`, `catch()` or `finally()` was called on it. When a rejected promise
+  is released without a handler (the end of a chain with no `catch()`, or
+  `Promise::rejected()` dropped), its reason goes to every `App::onError()`
+  listener with the phase `RuntimeErrorPhase::UnhandledRejection` (`'promise'`,
+  never fatal), and to the error overlay in development builds. A `catch()`
+  attached later, while the promise is still referenced, still handles it.
+  Cancelled promises and `TaskCancelledException` reasons are not reported,
+  and unhandled rejections do not count toward the runtime's safe mode.
+
 ## Migration
 
 | Before | Architecture v2 |

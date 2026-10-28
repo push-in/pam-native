@@ -874,7 +874,10 @@ final class Runtime
             self::$renderFailure = null;
         }
         $phase ??= RuntimeErrorPhase::Other;
-        RuntimeSupervisor::failed($error);
+        if ($phase !== RuntimeErrorPhase::UnhandledRejection) {
+            // A forgotten catch() (an offline request) must not push the app into safe mode.
+            RuntimeSupervisor::failed($error);
+        }
         try {
             $report = RuntimeError::from(
                 $error,

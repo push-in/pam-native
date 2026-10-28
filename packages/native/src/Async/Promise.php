@@ -6,12 +6,21 @@ namespace Pam\Native\Async;
 
 use Closure;
 use LogicException;
+use Pam\Native\Diagnostics\RuntimeErrorPhase;
+use Pam\Native\Internal\Runtime;
+use Pam\Native\Scheduling\TaskCancelledException;
 use Throwable;
 
 /**
  * Minimal single-threaded promise. Callbacks run when the promise settles (the
  * native result callback for HTTP) or immediately when it already settled.
  * A callback returning another Thenable is adopted, so chains stay flat.
+ *
+ * As in JavaScript, an exception thrown by a then()/catch() callback rejects
+ * the derived promise and travels down the chain to the next catch(). A
+ * rejection nobody handled (no then()/catch() was attached before the
+ * promise was released) is reported to App::onError() listeners and, in
+ * development, to the error overlay.
  */
 final class Promise implements Thenable
 {
@@ -22,6 +31,8 @@ final class Promise implements Thenable
     private array $listeners = [];
     /** @var list<Closure(): void> */
     private array $cancellers = [];
+    /** True once then()/catch()/finally() observed this promise. */
+    private bool $handled = false;
 
     /** @param (Closure(Closure(mixed): void, Closure(Throwable): void): void)|null $executor */
     public function __construct(?Closure $executor = null)
@@ -117,6 +128,7 @@ final class Promise implements Thenable
 
     public function then(?Closure $onFulfilled = null, ?Closure $onRejected = null): Thenable
     {
+        $this->handled = true;
         $next = new self();
         $next->cancellers[] = $this->cancel(...);
         $this->listen(function () use ($next, $onFulfilled, $onRejected): void {
@@ -196,6 +208,23 @@ final class Promise implements Thenable
             PromiseState::Pending => throw new LogicException('The promise has not settled yet; use then().'),
             PromiseState::Cancelled => throw new LogicException('The promise was cancelled.'),
         };
+    }
+
+    /**
+     * A rejected promise released without a handler is an unhandled
+     * rejection: report it like an uncaught error (never fatal).
+     */
+    public function __destruct()
+    {
+        if ($this->state !== PromiseState::Rejected || $this->handled) return;
+        $reason = $this->reason;
+        if ($reason === null || $reason instanceof TaskCancelledException) return;
+        $this->handled = true;
+        try {
+            Runtime::reportError($reason, RuntimeErrorPhase::UnhandledRejection);
+        } catch (Throwable) {
+            // Reporting must never throw from a destructor.
+        }
     }
 
     private function settle(PromiseState $state, mixed $value, ?Throwable $reason): void

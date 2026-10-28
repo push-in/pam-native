@@ -15,6 +15,8 @@ enum RuntimeErrorPhase: string
     case Event = 'event';
     /** A native module result callback that has no failure handler. */
     case ModuleResult = 'module';
+    /** A rejected promise released without then()/catch() handling it. Never fatal. */
+    case UnhandledRejection = 'promise';
     /** Any other runtime path (observers, schedulers). */
     case Other = 'other';
 

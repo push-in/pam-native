@@ -55,6 +55,7 @@ public struct PamRuntimeErrorReport: Equatable {
         case "render": return "Render error"
         case "event": return "Event handler error"
         case "module": return "Module callback error"
+        case "promise": return "Unhandled promise rejection"
         case "hot-reload": return "Hot reload error"
         case "native": return "Native runtime error"
         default: return "Uncaught error"
