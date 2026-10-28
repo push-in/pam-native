@@ -2444,6 +2444,15 @@ fn intrinsic_extent(
     let horizontal_scroll_height = node.kind == NodeKind::Scroll
         && boolean(node, PropKey::ScrollHorizontal)
         && requested_axis == Axis::Vertical;
+    if node_children.is_empty() && percent_sized_placeholder(node, requested_axis) {
+        // Yoga: a percentage of an indefinite (content-measured) parent
+        // resolves to auto, and an image or empty view has no measure
+        // function, so it contributes nothing to the parent's content size.
+        // The placeholder extent would otherwise become the flex base of a
+        // tile that only fills its parent (e.g. a wrapped grid of cards with
+        // min/max-width), breaking the line after too few items.
+        return Ok(0.0);
+    }
     if node_children.is_empty() || (!content_sized(node) && !horizontal_scroll_height) {
         return finite_non_negative(leaf_intrinsic(
             node,
@@ -2943,6 +2952,25 @@ fn content_sized(node: &Node) -> bool {
         ),
         _ => false,
     }
+}
+
+/// An unmeasured leaf (image or empty container) sized by a percentage on
+/// `axis`. Its placeholder extent applies only when the author gave no size.
+fn percent_sized_placeholder(node: &Node, axis: Axis) -> bool {
+    let percent = match axis {
+        Axis::Vertical => number(node, PropKey::HeightPercent),
+        Axis::Horizontal => number(node, PropKey::WidthPercent),
+    };
+    percent.is_some_and(f32::is_finite)
+        && matches!(
+            node.kind,
+            NodeKind::Image
+                | NodeKind::ImageBackground
+                | NodeKind::View
+                | NodeKind::Column
+                | NodeKind::Row
+                | NodeKind::Pressable
+        )
 }
 
 fn leaf_intrinsic(
@@ -9985,6 +10013,88 @@ mod css_flex_tests {
         .expect("layout");
         assert_eq!(layouts[&3].x, 310.0);
         assert_eq!(layouts[&3].y, 610.0);
+    }
+
+    /// Yoga: a tile `flex-grow:1; min-width:108; max-width:160` whose only
+    /// child is an image at 100% has a content basis of 0 (the percentage of
+    /// an indefinite parent is auto and an image has no measure function), so
+    /// lines break by the min-width clamp: 3 tiles fit in 346 pt and then grow.
+    #[test]
+    fn wrapped_tiles_filled_by_a_percent_image_break_lines_like_yoga() {
+        let mut nodes = BTreeMap::from([(
+            1,
+            Node {
+                id: 1,
+                parent: 0,
+                index: 0,
+                kind: NodeKind::Row,
+                properties: [
+                    (PropKey::FlexWrap, i(2)),
+                    (PropKey::AlignItems, i(1)),
+                    (PropKey::PaddingHorizontal, f(12.0)),
+                    (PropKey::Gap, f(4.0)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )]);
+        for index in 0..4_u64 {
+            let tile = 2 + index * 2;
+            nodes.insert(
+                tile,
+                Node {
+                    id: tile,
+                    parent: 1,
+                    index: index as u32,
+                    kind: NodeKind::Pressable,
+                    properties: [
+                        (PropKey::FlexGrow, f(1.0)),
+                        (PropKey::MinWidth, f(108.0)),
+                        (PropKey::MaxWidth, f(160.0)),
+                        (PropKey::Height, f(122.0)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            );
+            nodes.insert(
+                tile + 1,
+                Node {
+                    id: tile + 1,
+                    parent: tile,
+                    index: 0,
+                    kind: NodeKind::Image,
+                    properties: [
+                        (PropKey::WidthPercent, f(100.0)),
+                        (PropKey::HeightPercent, f(100.0)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            );
+        }
+        let layouts = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 370.0,
+                height: 800.0,
+            },
+        )
+        .expect("layout");
+        let width = (346.0 - 8.0) / 3.0;
+        for tile in [2, 4, 6] {
+            assert!(
+                (layouts[&tile].width - width).abs() < 0.01,
+                "{:?}",
+                layouts[&tile]
+            );
+            assert_eq!(layouts[&tile].y, 0.0);
+            assert!((layouts[&(tile + 1)].width - width).abs() < 0.01);
+        }
+        assert!((layouts[&6].x - (12.0 + 2.0 * (width + 4.0))).abs() < 0.01);
+        // The fourth tile wraps alone and grows only up to its max-width.
+        assert_eq!(layouts[&8].width, 160.0);
+        assert_eq!(layouts[&8].y, 126.0);
     }
 
     #[test]
