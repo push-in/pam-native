@@ -87,6 +87,34 @@ final class ArchV2ChildPanel extends Component
     }
 }
 
+final class ArchV2RetainedScreen extends Component
+{
+    public int $setups = 0;
+    public int $events = 0;
+
+    public function __construct(private readonly \Pam\Native\Events\EventBus $bus)
+    {
+    }
+
+    // Work only: no watchers, composables or hooks.
+    public function setup(): void
+    {
+        $this->setups++;
+        $this->own($this->bus->on('ping', fn () => ++$this->events));
+        $this->timers()->every(1_000, static fn () => null);
+    }
+
+    public function timerCount(): int
+    {
+        return $this->timers()->count();
+    }
+
+    public function render(): Renderable
+    {
+        return Text::make('retained');
+    }
+}
+
 final class ArchV2LegacyScreen extends Component
 {
     public int $mounted = 0;
@@ -197,6 +225,22 @@ try {
 }
 $unmountAll();
 $assert($missing !== null && str_contains($missing, 'requires the route parameter $id'), 'A required setup() parameter without a route value must be a clear error.');
+
+// A retained screen (keepAlive) whose setup() only does work runs setup() on every
+// remount, and its own()/timer subscriptions never pile up.
+$bus = new \Pam\Native\Events\EventBus();
+$retained = new ArchV2RetainedScreen($bus);
+$mount($retained);
+$unmountAll();
+$assert($bus->listeners('ping') === 0 && $retained->timerCount() === 0, 'Unmount must release own() subscriptions and timers created in setup().');
+$mount($retained);
+$bus->emit('ping');
+$assert(
+    $retained->setups === 2 && $bus->listeners('ping') === 1 && $retained->timerCount() === 1 && $retained->events === 1,
+    'A remounted retained screen must run setup() again without accumulating subscriptions.',
+);
+$unmountAll();
+$assert($bus->listeners('ping') === 0 && $retained->timerCount() === 0, 'The second unmount must release them again.');
 
 // Backward compatibility: mount() without setup() keeps working.
 $legacy = new ArchV2LegacyScreen();

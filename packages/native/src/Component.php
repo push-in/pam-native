@@ -958,7 +958,8 @@ abstract class Component implements Renderable
         $failure = null;
         $scope = $this->pamScope;
         if ($scope !== null && !$scope->disposed()) {
-            $this->pamSetupStale = $scope->holdsResources();
+            // setup() runs again on every remount; own() resources and timers are released below.
+            $this->pamSetupStale = true;
             try {
                 $scope->dispose();
             } catch (Throwable $error) {
