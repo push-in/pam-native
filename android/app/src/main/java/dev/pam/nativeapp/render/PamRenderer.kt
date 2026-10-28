@@ -2257,10 +2257,12 @@ class PamRenderer(
             parentId = nodes[parentId]?.parent ?: 0L
         }
         val parent = views[parentId]
-        if (parentId == rootId && state.id != rootId && parent != null) {
-            attach(view, parentId, state.index)
-        } else if (state.id != rootId && parent != null) {
-            attach(view, parentId, state.index)
+        if (state.id != rootId && parent != null) {
+            // The host may be a grandparent reached through flattened
+            // (layout-only) nodes: the logical index inside the direct parent
+            // would put a flattened Row's children before earlier siblings
+            // (text drawn under a later absolute image and scrim).
+            attach(view, parentId, hostedInsertionIndex(state, parentId))
         } else {
             (view.parent as? ViewGroup)?.removeView(view)
             holder.addView(view)
