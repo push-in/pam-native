@@ -6543,15 +6543,33 @@ mod tests {
                 ),
                 (
                     3,
-                    node(3, 2, 0, NodeKind::Column, [(PropKey::FlexGrow, PropValue::Float(1.0))]),
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::FlexGrow, PropValue::Float(1.0))],
+                    ),
                 ),
                 (
                     4,
-                    node(4, 3, 0, NodeKind::Column, [(PropKey::FlexGrow, PropValue::Float(1.0))]),
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::FlexGrow, PropValue::Float(1.0))],
+                    ),
                 ),
                 (
                     5,
-                    node(5, 3, 1, NodeKind::Column, [(PropKey::Height, PropValue::Float(48.0))]),
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::Column,
+                        [(PropKey::Height, PropValue::Float(48.0))],
+                    ),
                 ),
             ]),
         };
@@ -6564,10 +6582,18 @@ mod tests {
         )
         .expect("sheet layout");
         let panel = 874.0 * 0.82;
-        assert!((layout[&3].height - panel).abs() < 0.01, "panel {:?}", layout[&3]);
+        assert!(
+            (layout[&3].height - panel).abs() < 0.01,
+            "panel {:?}",
+            layout[&3]
+        );
         assert!((layout[&3].y + layout[&3].height - 874.0).abs() < 0.01);
         // The composer ends at the panel bottom, inside the visible sheet.
-        assert!((layout[&5].y + layout[&5].height - 874.0).abs() < 0.01, "composer {:?}", layout[&5]);
+        assert!(
+            (layout[&5].y + layout[&5].height - 874.0).abs() < 0.01,
+            "composer {:?}",
+            layout[&5]
+        );
         assert!((layout[&5].y - layout[&3].y - (panel - 48.0)).abs() < 0.01);
     }
 
@@ -8093,7 +8119,13 @@ mod tests {
         );
         nodes.insert(
             5,
-            node(5, 1, 10_000, NodeKind::View, [(PropKey::ListPlaceholder, PropValue::Boolean(true))]),
+            node(
+                5,
+                1,
+                10_000,
+                NodeKind::View,
+                [(PropKey::ListPlaceholder, PropValue::Boolean(true))],
+            ),
         );
         let tree = Tree { root: 1, nodes };
         let layout = calculate(
