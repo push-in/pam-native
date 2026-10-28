@@ -24,13 +24,7 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
     private val device = DeviceModule(context)
     private val permissions =
         (context as? dev.pam.nativeapp.PamActivity)?.let(::PermissionsModule)
-    private val sensors = SensorsModule(context)
-    private val contacts = ContactsModule(context)
-    private val sms = (context as? android.app.Activity)?.let(::SmsModule)
     private val mediaLibrary = MediaLibraryModule(context)
-    private val location = LocationModule(context)
-    private val audioRecorder = AudioRecorderModule(context)
-    private val imageEditor = ImageEditorModule(context)
     private var runtimeResourcesTransferred = false
     private val timers: TimersModule = previous?.timers?.also { previous.runtimeResourcesTransferred = true } ?: TimersModule()
     private val appearance = AppearanceModule(context)
@@ -61,13 +55,7 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
         put("background", background)
         put("device", device)
         permissions?.let { put("permissions", it) }
-        put("sensors", sensors)
-        put("contacts", contacts)
-        sms?.let { put("sms", it) }
         put("media-library", mediaLibrary)
-        put("location", location)
-        put("audio-recorder", audioRecorder)
-        put("image-editor", imageEditor)
         put("timers", timers)
         put("appearance", appearance)
         window?.let { put("window", it) }

@@ -700,31 +700,12 @@ $assert(
     'ScrollView must support on:endReached with a threshold.',
 );
 
-// Contacts form, share/alert failures, permission rationale and failure callbacks.
+// Share/alert failures, permission rationale and failure callbacks.
 $lastTyped = static function (): array {
     $call = TestDiagnostics::$typedCall ?? throw new RuntimeException('No typed native call was recorded.');
 
     return $call + ['values' => $call['payload'] === '' ? [] : Wire::decodeMap($call['payload'])];
 };
-$created = null;
-$contactFailure = null;
-\Pam\Native\System\Contacts::openNewContactForm(static function (bool $value) use (&$created): void { $created = $value; });
-$assert($lastCall()['module'] === 'contacts' && $lastCall()['method'] === 'openNewContactForm', 'Contacts::openNewContactForm must call the contacts module.');
-Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['created' => true]));
-$assert($created === true, 'A saved contact must answer created = true.');
-\Pam\Native\System\Contacts::openNewContactForm(
-    static function (bool $value) use (&$created): void { $created = $value; },
-    static function (string $error) use (&$contactFailure): void { $contactFailure = $error; },
-);
-Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['created' => false]));
-$assert($created === false && $contactFailure === null, 'A cancelled form must answer created = false.');
-\Pam\Native\System\Contacts::openNewContactForm(
-    static fn (bool $_) => null,
-    static function (string $error) use (&$contactFailure): void { $contactFailure = $error; },
-);
-Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'No contacts app can create a contact');
-$assert($contactFailure === 'No contacts app can create a contact', 'Contact form failures must reach $failure without throwing.');
-
 $textOpened = false;
 $textFailure = null;
 Share::text('Oi', 'Enviar', static function () use (&$textOpened): void { $textOpened = true; }, static function (string $error) use (&$textFailure): void { $textFailure = $error; });

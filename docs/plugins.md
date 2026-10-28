@@ -13,6 +13,37 @@ Pam Native plugins are ordinary Composer packages. One package can publish:
 Discovery and autolinking happen at build time. Production apps do not scan
 classpaths, load DEX files, or parse plugin JSON during a frame.
 
+## Core and plugins
+
+The core keeps only the base every app needs: runtime and protocol,
+renderer and layout, primitives, navigation, state and reactivity, basic
+HTTP, gestures, keyboard, accessibility and storage, plus the generic hooks
+plugins build on. A feature that not every app uses ships as a
+`pam-native-*` plugin.
+
+Generic hooks for plugin modules (Android `:plugin-api`, iOS `PamNative`):
+
+- `WatchChannel`: bounded single-reader channel for `watch`/`next`/`stop`
+  observations (location fixes, sensor readings, recorder levels).
+- Android `ActivityResultHost`: the PAM activity implements it; a module
+  created with that activity as its context starts a system screen
+  (`launchForResult`, `launchIntentSenderForResult`) and receives the result.
+
+Moved out of the core in 1.46 (the old class names are deprecated aliases
+for 1.46 only and throw `PluginException` naming the package when it is not
+installed):
+
+| Old core class | Plugin | New class |
+| --- | --- | --- |
+| `System\Location`, `LocationError`, `LocationPosition`, `LocationServicesResult` | `pushinbr/pam-native-location` | `Pam\Native\Location\*` |
+| `System\Contacts`, `Contact`, `System\Sms` | `pushinbr/pam-native-contacts` | `Pam\Native\Contacts\*` |
+| `System\Sensors`, `SensorReading`, `SensorType` | `pushinbr/pam-native-sensors` | `Pam\Native\Sensors\*` |
+| `System\AudioRecorder`, `AudioRecording`, `AudioRecordingProgress` | `pushinbr/pam-native-audio` | `Pam\Native\Audio\*` |
+| `System\ImageEditor`, `ImageCropRatio`, `ImageFilterType`, `ImageTextLayerStyle` | media editor plugin | `Pam\Native\MediaEditor\*` |
+
+The native module names (`location`, `contacts`, `sms`, `sensors`,
+`audio-recorder`, `image-editor`) and their wire payloads did not change.
+
 ## Install and inspect
 
 ```bash

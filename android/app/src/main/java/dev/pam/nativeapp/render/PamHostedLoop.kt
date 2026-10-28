@@ -13,7 +13,7 @@ import android.view.View
  * prewarmed or cached subtree, a hidden route, a recycled list cell. An
  * unconditional `ValueAnimator.start()` then drives Choreographer callbacks
  * at the display rate forever, also with the app in the background (the
- * Zé Chat inbox kept the main thread at ~60 wakeups/s and ~4% CPU). The loop
+ * reference chat inbox kept the main thread at ~60 wakeups/s and ~4% CPU). The loop
  * starts only when requested, visible and shown in a visible window; a
  * tick that finds the host gone suspends it, and the next draw (the host is
  * on screen again) or the host's aggregated visibility resumes it.

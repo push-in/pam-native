@@ -1,6 +1,6 @@
 import UIKit
 
-/// `data:image/*` sources (bundled icon masks such as Zé Chat's AppIcon
+/// `data:image/*` sources (bundled icon masks such as an app's AppIcon
 /// glyphs). They decode synchronously on the main thread, in the frame that
 /// assigns them, like a font glyph (Android decodes small ones on the UI
 /// thread too), and stay in their own cache so photos never evict them.

@@ -820,8 +820,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 // At its boundary the list hands the drag to an outer scroll
                 // container that can still move. Without one it keeps the drag
                 // (overscroll), like a React Native list: a row Pressable must
-                // not turn a swipe past the last page into a tap (the Zé Chat
-                // Loops paused their last loop on every swipe up).
+                // not turn a swipe past the last page into a tap (a vertical
+                // video feed paused its last item on every swipe up).
                 if (abs(delta) > touchSlop && !canScroll && outerCanScroll(direction)) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     return false

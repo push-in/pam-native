@@ -47,7 +47,7 @@ import dev.pam.nativeapp.modules.PamPushNotifications
 import dev.pam.nativeapp.modules.PamIncomingShares
 import dev.pam.nativeapp.modules.PamDeepLinks
 
-class PamActivity : FragmentActivity() {
+class PamActivity : FragmentActivity(), ActivityResultHost {
     internal lateinit var rootHost: PamRootHost
     /** The renderer of this surface: ViewCapture finds `nativeRef` views through it. */
     private var activeRenderer: PamRenderer? = null
@@ -529,8 +529,11 @@ class PamActivity : FragmentActivity() {
         runtime.dispatchBack()
     }
 
+    override val isActivityResultHostActive: Boolean
+        get() = !isFinishing && !isDestroyed
+
     @Suppress("DEPRECATION")
-    internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
+    override fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
         try {
@@ -543,7 +546,7 @@ class PamActivity : FragmentActivity() {
 
     /** Like launchForResult for a PendingIntent's sender (Play Services resolution dialogs). */
     @Suppress("DEPRECATION")
-    internal fun launchIntentSenderForResult(sender: IntentSender, callback: (Int, Intent?) -> Unit) {
+    override fun launchIntentSenderForResult(sender: IntentSender, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
         try {

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\Animation;
 
 /**
- * Ready-made UI-thread motions matching the Zé Chat React Native app.
+ * Ready-made UI-thread motions matching common React Native app motions.
  */
 final class AnimationPreset
 {

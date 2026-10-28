@@ -18,7 +18,6 @@ use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
 use Pam\Native\AsyncResource;
 use Pam\Native\Component;
-use Pam\Native\Contact;
 use Pam\Native\CaptureType;
 use Pam\Native\DrawingMode;
 use Pam\Native\EventKind;
@@ -157,20 +156,12 @@ use Pam\Native\System\Haptics;
 use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Caches;
 use Pam\Native\System\Clipboard;
-use Pam\Native\System\Contacts;
 use Pam\Native\System\DeviceInfo;
-use Pam\Native\System\Sensors;
-use Pam\Native\System\Sms;
-use Pam\Native\System\Location;
 use Pam\Native\System\PushNotifications;
 use Pam\Native\System\Files;
 use Pam\Native\System\MediaLibrary;
-use Pam\Native\LocationPosition;
-use Pam\Native\System\AudioRecorder;
 use Pam\Native\Storage\Storage;
 use Pam\Native\Modules\NativeModuleException;
-use Pam\Native\AudioRecording;
-use Pam\Native\SensorType;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TextDecoration;
@@ -1421,15 +1412,6 @@ $assert(
         NativeOperation::cases(),
     ) === range(1, 19),
     'Native operations must remain sequential and append-only.',
-);
-Sensors::read(SensorType::Gyroscope, static function (): void {
-}, 50_000);
-$sensorPayload = Wire::decodeMap(TestDiagnostics::$typedCall['payload']);
-$assert(
-    TestDiagnostics::$typedCall['operation'] === NativeOperation::SensorRead->value
-        && $sensorPayload['type'] === SensorType::Gyroscope->value
-        && $sensorPayload['timeoutMs'] === 10_000,
-    'Sensor reads must use integer types and bounded native timeouts.',
 );
 
 $tree = Screen::make(
@@ -3422,127 +3404,6 @@ $assert(
     'Media capture failures must reach the optional failure callback.',
 );
 
-$location = null;
-$locationRequest = Location::current(
-    static function (LocationPosition $position) use (&$location): void {
-        $location = $position;
-    },
-    highAccuracy: false,
-    timeoutMs: 4_000,
-    maximumAgeMs: 12_000,
-);
-$locationCall = TestDiagnostics::$moduleCall;
-$locationPayload = $locationCall === null
-    ? []
-    : Wire::decodeMap($locationCall['payload']);
-$assert(
-    $locationCall !== null
-        && $locationCall['requestId'] === $locationRequest
-        && $locationCall['module'] === 'location'
-        && $locationCall['method'] === 'current'
-        && $locationPayload === [
-            'highAccuracy' => false,
-            'maximumAgeMs' => 12_000,
-            'timeoutMs' => 4_000,
-        ],
-    'Location facade did not emit its typed native module call.',
-);
-Runtime::dispatchModuleResult(
-    $locationRequest,
-    ModuleResultStatus::Success->value,
-    Wire::map([
-        'latitude' => -23.55052,
-        'longitude' => -46.633308,
-        'accuracy' => 3.5,
-        'altitude' => 760.0,
-        'speed' => 0.4,
-        'bearing' => 90.0,
-        'timestamp' => 1_785_000_000_000,
-    ]),
-);
-$assert(
-    $location instanceof LocationPosition
-        && $location->latitude === -23.55052
-        && $location->longitude === -46.633308
-        && $location->accuracy === 3.5
-        && $location->timestamp === 1_785_000_000_000,
-    'Location facade did not decode the native position.',
-);
-
-$locationFailure = null;
-$failedLocationRequest = Location::current(
-    static function (LocationPosition $_): void {
-        throw new RuntimeException('A failed location request must not resolve a position.');
-    },
-    failure: static function (string $message) use (&$locationFailure): void {
-        $locationFailure = $message;
-    },
-);
-Runtime::dispatchModuleResult(
-    $failedLocationRequest,
-    ModuleResultStatus::Failure->value,
-    'Location request timed out.',
-);
-$assert(
-    $locationFailure === 'Location request timed out.',
-    'Location failures must reach the optional failure callback.',
-);
-
-$watched = [];
-$watchId = Location::watch(
-    static function (LocationPosition $position) use (&$watched): void {
-        $watched[] = $position->latitude;
-    },
-    highAccuracy: true,
-    distanceFilterMeters: 20.0,
-    intervalMs: 5_000,
-);
-$watchCall = TestDiagnostics::$moduleCall;
-$assert(
-    $watchCall !== null
-        && $watchCall['module'] === 'location'
-        && $watchCall['method'] === 'watch'
-        && Wire::decodeMap($watchCall['payload']) === [
-            'distanceFilterMeters' => 20.0,
-            'highAccuracy' => true,
-            'intervalMs' => 5_000,
-        ],
-    'Location::watch must emit its typed native watch call.',
-);
-Runtime::dispatchModuleResult($watchCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['subscription' => 7]));
-$nextCall = TestDiagnostics::$moduleCall;
-$assert(
-    $nextCall['method'] === 'next' && Wire::decodeMap($nextCall['payload']) === ['subscription' => 7],
-    'Location::watch must read the native subscription channel.',
-);
-Runtime::dispatchModuleResult($nextCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['latitude' => -23.5, 'longitude' => -46.6]));
-$secondNext = TestDiagnostics::$moduleCall;
-$assert($watched === [-23.5] && $secondNext['method'] === 'next' && $secondNext['requestId'] !== $nextCall['requestId'], 'Each watched position must reach the callback and re-arm the next read.');
-Location::clearWatch($watchId);
-$stopCall = TestDiagnostics::$moduleCall;
-$assert(
-    $stopCall['method'] === 'stop' && Wire::decodeMap($stopCall['payload']) === ['subscription' => 7] && !Location::watching($watchId),
-    'Location::clearWatch must stop the native subscription.',
-);
-Runtime::dispatchModuleResult($secondNext['requestId'], ModuleResultStatus::Success->value, Wire::map(['latitude' => 1.0, 'longitude' => 1.0]));
-$assert($watched === [-23.5], 'A cleared watch must ignore late positions.');
-$watchFailure = null;
-Location::watch(
-    static function (LocationPosition $_): void {
-        throw new RuntimeException('A failed watch must not deliver positions.');
-    },
-    failure: static function (string $message) use (&$watchFailure): void {
-        $watchFailure = $message;
-    },
-);
-Runtime::dispatchModuleResult(TestDiagnostics::$moduleCall['requestId'], ModuleResultStatus::Failure->value, 'Location permission is required');
-$assert($watchFailure === 'Location permission is required', 'Location::watch start failures must reach the failure callback.');
-$lateId = Location::watch(static function (LocationPosition $_): void {});
-$lateCall = TestDiagnostics::$moduleCall;
-Location::clearWatch($lateId);
-Runtime::dispatchModuleResult($lateCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['subscription' => 9]));
-$lateStop = TestDiagnostics::$moduleCall;
-$assert($lateStop['method'] === 'stop' && Wire::decodeMap($lateStop['payload']) === ['subscription' => 9], 'A watch cleared before the native answer must stop the late subscription.');
 
 foreach ([true, false] as $notificationGranted) {
     $notificationDecision = null;
@@ -3626,58 +3487,6 @@ $assert(
     'Push unregistration failures must reach the optional failure callback.',
 );
 
-$recording = null;
-$audioRequest = AudioRecorder::stop(
-    static function (AudioRecording $value) use (&$recording): void {
-        $recording = $value;
-    },
-);
-$assert(
-    TestDiagnostics::$moduleCall !== null
-        && TestDiagnostics::$moduleCall['requestId'] === $audioRequest
-        && TestDiagnostics::$moduleCall['module'] === 'audio-recorder'
-        && TestDiagnostics::$moduleCall['method'] === 'stop',
-    'Audio recorder facade did not emit its typed native module call.',
-);
-Runtime::dispatchModuleResult(
-    $audioRequest,
-    ModuleResultStatus::Success->value,
-    Wire::map([
-        'uri' => 'file:///tmp/pam-voice-test.m4a',
-        'relativePath' => 'recordings/pam-voice-test.m4a',
-        'fileName' => 'pam-voice-test.m4a',
-        'mimeType' => 'audio/mp4',
-        'durationMs' => 2_400,
-        'size' => 19_200,
-    ]),
-);
-$assert(
-    $recording instanceof AudioRecording
-        && $recording->durationMs === 2_400
-        && $recording->size === 19_200
-        && $recording->relativePath === 'recordings/pam-voice-test.m4a'
-        && $recording->mimeType === 'audio/mp4',
-    'Audio recorder facade did not decode the native recording.',
-);
-
-$audioFailure = null;
-$audioStartRequest = AudioRecorder::start(
-    static function (): void {
-        throw new RuntimeException('Failed audio start must not invoke success.');
-    },
-    static function (string $message) use (&$audioFailure): void {
-        $audioFailure = $message;
-    },
-);
-Runtime::dispatchModuleResult(
-    $audioStartRequest,
-    ModuleResultStatus::Failure->value,
-    'Microphone is unavailable.',
-);
-$assert(
-    $audioFailure === 'Microphone is unavailable.',
-    'Audio recorder failures must reach the optional failure callback.',
-);
 
 $linkOpenFailure = null;
 $linkOpenRequest = \Pam\Native\System\Linking::open(
@@ -4303,34 +4112,6 @@ Runtime::dispatchModuleResult(
     '',
 );
 
-$contacts = null;
-$contactsRequestId = Contacts::all(static function (array $items) use (&$contacts): void {
-    $contacts = $items;
-});
-$contactsCall = TestDiagnostics::$moduleCall;
-$assert(
-    $contactsCall !== null
-        && $contactsCall['requestId'] === $contactsRequestId
-        && $contactsCall['module'] === 'contacts'
-        && $contactsCall['method'] === 'list'
-        && Wire::decodeMap($contactsCall['payload']) == ['offset' => 0, 'limit' => 250],
-    'Contacts facade did not request the first bounded native page.',
-);
-Runtime::dispatchModuleResult(
-    $contactsRequestId,
-    \Pam\Native\ModuleResultStatus::Success->value,
-    Wire::map([
-        'items' => json_encode([[
-            'id' => '42',
-            'displayName' => 'Ada Lovelace',
-            'givenName' => 'Ada',
-            'familyName' => 'Lovelace',
-            'phoneNumbers' => ['+5511999999999'],
-            'emailAddresses' => ['ada@example.test'],
-        ]], JSON_THROW_ON_ERROR),
-        'hasMore' => false,
-    ]),
-);
 
 $mediaPage = null;
 $mediaRequestId = MediaLibrary::assets(
@@ -4430,70 +4211,6 @@ $assert(
     'MediaLibrary albums must decode typed album metadata.',
 );
 
-$smsAvailable = null;
-$smsAvailabilityRequest = Sms::isAvailable(
-    static function (bool $available) use (&$smsAvailable): void {
-        $smsAvailable = $available;
-    },
-);
-$smsAvailabilityCall = TestDiagnostics::$moduleCall;
-$assert(
-    $smsAvailabilityCall !== null
-        && $smsAvailabilityCall['requestId'] === $smsAvailabilityRequest
-        && $smsAvailabilityCall['module'] === 'sms'
-        && $smsAvailabilityCall['method'] === 'isAvailable',
-    'SMS facade must query platform availability.',
-);
-Runtime::dispatchModuleResult(
-    $smsAvailabilityRequest,
-    ModuleResultStatus::Success->value,
-    Wire::map(['available' => true]),
-);
-$assert($smsAvailable === true, 'SMS facade must decode platform availability.');
-
-$smsOpened = false;
-$smsComposeRequest = Sms::compose(
-    [' +55 11 99999-0000 ', '+55 11 99999-0000'],
-    'Convite do Zé Chat',
-    static function () use (&$smsOpened): void {
-        $smsOpened = true;
-    },
-);
-$smsComposeCall = TestDiagnostics::$moduleCall;
-$assert(
-    $smsComposeCall !== null
-        && $smsComposeCall['requestId'] === $smsComposeRequest
-        && $smsComposeCall['module'] === 'sms'
-        && $smsComposeCall['method'] === 'compose'
-        && Wire::decodeMap($smsComposeCall['payload']) == [
-            'recipients' => '+55 11 99999-0000',
-            'body' => 'Convite do Zé Chat',
-        ],
-    'SMS facade must normalize recipients and encode the draft.',
-);
-Runtime::dispatchModuleResult(
-    $smsComposeRequest,
-    ModuleResultStatus::Success->value,
-    '',
-);
-$assert($smsOpened, 'SMS facade must report a presented composer.');
-$smsFailure = '';
-$smsFailureRequest = Sms::compose(
-    ['+5511999990000'],
-    'Convite',
-    failed: static function (string $message) use (&$smsFailure): void {
-        $smsFailure = $message;
-    },
-);
-Runtime::dispatchModuleResult(
-    $smsFailureRequest,
-    ModuleResultStatus::Failure->value,
-    'SMS unavailable',
-);
-$assert(
-    $smsFailure === 'SMS unavailable',
-    'SMS facade must expose recoverable native failures to applications.',
-);
 
 $incomingShare = null;
 $incomingShareRequestId = IncomingShares::initial(
@@ -4598,14 +4315,6 @@ $assert(
         && $cacheCleared->freedBytes === 4096
         && $cacheCleared->totalBytes === 1024,
     'Caches clear did not decode the reclaimed byte count.',
-);
-$assert(
-    is_array($contacts)
-        && count($contacts) === 1
-        && $contacts[0] instanceof Contact
-        && $contacts[0]->displayName === 'Ada Lovelace'
-        && $contacts[0]->phoneNumbers === ['+5511999999999'],
-    'Contacts facade did not decode native contacts into typed values.',
 );
 
 $httpResponse = null;
@@ -7439,53 +7148,6 @@ rmdir(dirname($runtimeStatePath).'/updates');
 rmdir($runtimeStatePath);
 rmdir(dirname($runtimeStatePath));
 rmdir(dirname(dirname($runtimeStatePath)));
-$imageEditorParameters = (new ReflectionMethod(
-    \Pam\Native\System\ImageEditor::class,
-    'render',
-))->getParameters();
-$assert(
-    array_map(
-        static fn (\Pam\Native\ImageCropRatio $case): int => $case->value,
-        \Pam\Native\ImageCropRatio::cases(),
-    ) === [1, 2, 3, 4, 5]
-        && array_map(
-            static fn (\Pam\Native\ImageFilterType $case): int => $case->value,
-            \Pam\Native\ImageFilterType::cases(),
-        ) === [1, 2, 3, 4, 5]
-        && array_map(
-            static fn (ReflectionParameter $parameter): string => $parameter->getName(),
-            array_slice($imageEditorParameters, -6),
-        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing', 'textLayers', 'imageLayers']
-        && $imageEditorParameters[count($imageEditorParameters) - 4]->getDefaultValue() === 94
-        && $imageEditorParameters[count($imageEditorParameters) - 3]->getDefaultValue() === ''
-        && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === [],
-    'The image editor contract must expose typed transforms, bounded output, drawing and text layers.',
-);
-$textLayersMethod = new ReflectionMethod(\Pam\Native\System\ImageEditor::class, 'textLayers');
-$normalizedTextLayers = json_decode($textLayersMethod->invoke(null, [[
-    'color' => 'invalid',
-    'rotation' => 99,
-    'scale' => 9,
-    'style_type' => 2,
-    'text' => ' Resposta ',
-    'x' => -1,
-    'y' => 2,
-]]), true, 64, JSON_THROW_ON_ERROR);
-$normalizedTextLayer = $normalizedTextLayers[0] ?? [];
-$assert(
-    array_map(
-        static fn (\Pam\Native\ImageTextLayerStyle $case): int => $case->value,
-        \Pam\Native\ImageTextLayerStyle::cases(),
-    ) === [1, 2, 3]
-        && ($normalizedTextLayer['color'] ?? '') === '#FFFFFF'
-        && abs((float) ($normalizedTextLayer['rotation'] ?? 0) - M_PI * 2) < 0.000001
-        && (float) ($normalizedTextLayer['scale'] ?? 0) === 4.0
-        && ($normalizedTextLayer['styleType'] ?? 0) === 2
-        && ($normalizedTextLayer['text'] ?? '') === 'Resposta'
-        && (float) ($normalizedTextLayer['x'] ?? -1) === 0.0
-        && (float) ($normalizedTextLayer['y'] ?? -1) === 1.0,
-    'Image editor text layers must normalize bounds, color and integer presentation style.',
-);
 
 $bottomSheet = BottomSheet::make(
     Text::make('Sheet content'),
@@ -8243,6 +7905,7 @@ require __DIR__.'/hot_reload_state.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/keyboard_visibility.php';
 require __DIR__.'/native_capabilities.php';
+require __DIR__.'/moved_to_plugin.php';
 require __DIR__.'/i18n.php';
 require __DIR__.'/text_whitespace.php';
 require __DIR__.'/typography_parity.php';
@@ -8255,12 +7918,10 @@ require __DIR__.'/expression_codegen.php';
 require __DIR__.'/prebuilt_components.php';
 require __DIR__.'/prebuilt_recovery.php';
 require __DIR__.'/gesture_scope.php';
-require __DIR__.'/location.php';
 require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
-require __DIR__.'/image_layers.php';
 require __DIR__.'/view_capture.php';
 require __DIR__.'/view_ref.php';
 require __DIR__.'/portal.php';
