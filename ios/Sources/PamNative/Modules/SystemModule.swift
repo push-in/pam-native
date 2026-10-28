@@ -150,6 +150,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                         "powerSaveMode": .flag(ProcessInfo.processInfo.isLowPowerModeEnabled),
                         "appVersion": .text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""),
                         "buildNumber": .text(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""),
+                        "locale": .text(Locale.preferredLanguages.first ?? Locale.current.identifier),
                     ])
                     completion(.success, payload)
                 } catch {

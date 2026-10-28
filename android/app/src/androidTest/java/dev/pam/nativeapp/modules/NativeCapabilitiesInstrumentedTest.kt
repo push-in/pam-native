@@ -213,6 +213,7 @@ class NativeCapabilitiesInstrumentedTest {
         val installed = context.packageManager.getPackageInfo(context.packageName, 0)
         assertEquals(installed.versionName.orEmpty(), (values["appVersion"] as WireValue.Text).value)
         assertTrue((values["buildNumber"] as WireValue.Text).value.isNotEmpty())
+        assertEquals(java.util.Locale.getDefault().toLanguageTag(), (values["locale"] as WireValue.Text).value)
         system.close()
     }
 

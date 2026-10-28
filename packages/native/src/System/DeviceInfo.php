@@ -33,6 +33,8 @@ final readonly class DeviceInfo
         public string $appVersion = '',
         /** Installed build number (Android versionCode, iOS CFBundleVersion); '' when unknown. */
         public string $buildNumber = '',
+        /** System language as a BCP 47 tag ("pt-BR"); '' when unknown. See I18n::resolve(). */
+        public string $locale = '',
     ) {
     }
 
@@ -72,6 +74,7 @@ final readonly class DeviceInfo
                     powerSaveMode: (bool) ($values['powerSaveMode'] ?? false),
                     appVersion: trim((string) ($values['appVersion'] ?? '')),
                     buildNumber: trim((string) ($values['buildNumber'] ?? '')),
+                    locale: trim((string) ($values['locale'] ?? '')),
                 ));
             },
         );

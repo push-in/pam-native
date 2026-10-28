@@ -17,5 +17,6 @@ final class DeviceInfoAppVersionTests: XCTestCase {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         XCTAssertEqual(values["appVersion"], .text(version))
         XCTAssertEqual(values["buildNumber"], .text(build))
+        XCTAssertEqual(values["locale"], .text(Locale.preferredLanguages.first ?? Locale.current.identifier))
     }
 }

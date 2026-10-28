@@ -319,9 +319,9 @@ DeviceInfo::get(static function (DeviceInfo $info) use (&$device): void { $devic
 Runtime::dispatchModuleResult(
     TestDiagnostics::$typedCall['requestId'],
     ModuleResultStatus::Success->value,
-    Wire::map(['width' => 360.0, 'height' => 800.0, 'density' => 3.0, 'appearance' => 1, 'appState' => 1, 'appVersion' => ' 1.0.121 ', 'buildNumber' => '121']),
+    Wire::map(['width' => 360.0, 'height' => 800.0, 'density' => 3.0, 'appearance' => 1, 'appState' => 1, 'appVersion' => ' 1.0.121 ', 'buildNumber' => '121', 'locale' => 'pt-BR']),
 );
-$assert($device instanceof DeviceInfo && $device->appVersion === '1.0.121' && $device->buildNumber === '121', 'DeviceInfo must expose the installed app version and build number.');
+$assert($device instanceof DeviceInfo && $device->appVersion === '1.0.121' && $device->buildNumber === '121' && $device->locale === 'pt-BR', 'DeviceInfo must expose the installed app version, build number and system locale.');
 $assert((new DeviceStatusValue(1.0, false, NetworkType::Wifi, false, true))->powerSaveMode(), 'DeviceStatus must expose power-save mode.');
 
 // 7. Image prefetch.

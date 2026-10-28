@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Pam\Native\I18n\I18n`: message catalogs per locale (lazy loaders), a
+  source-locale fallback, `{name}` interpolation with locale number grouping,
+  `_zero`/`_one`/`_other` plurals (French `n < 2`, pluggable rules) and
+  locale resolution by language subtag. Templates get a `t()` built-in.
+  `DeviceInfo::$locale` carries the system language (BCP 47). See `docs/i18n.md`.
 - `DeviceInfo` exposes the installed `appVersion` (Android `versionName`, iOS
   `CFBundleShortVersionString`) and `buildNumber` (Android `versionCode`, iOS
   `CFBundleVersion`), so an app can enforce a minimum supported version
