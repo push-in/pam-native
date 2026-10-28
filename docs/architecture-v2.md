@@ -188,8 +188,8 @@ example in `index.php` for `App::globals()`, lives as long as the app.
 | `useKeyboard()` | `visible`, `height`, `durationMs`, `dismiss()` | `Keyboard::onChange` |
 | `useAppState()` | `value` (`AppState`), `active`, `background` | `App::onStateChange` |
 | `useNetwork()` | `online` (also `value`), `known`, `type` (`NetworkType`), `expensive` | `System\DeviceStatus::watch` (host pushes changes) |
-| `useLocale()` | `value` (BCP 47 tag, `'pt-BR'`), `language` (catalog, `'pt'`), `region`, `device`, `known`, `overridden`, `set(?string)` | `System\DeviceInfo` locale + `I18n::use()` override |
-| `useTimezone()` | `value` (IANA, `'America/Sao_Paulo'`), `device`, `known`, `overridden`, `zone()`, `now()`, `set(?string)` | `System\DeviceInfo` time zone + `I18n::useTimezone()` override |
+| `useLocale()` | `value` (BCP 47 tag, `'pt-BR'`), `language` (subtag, `'pt'`), `region`, `device`, `known` | `System\DeviceInfo` locale do sistema |
+| `useTimezone()` | `value` (IANA, `'America/Sao_Paulo'`), `device`, `known`, `zone()`, `now()` | `System\DeviceInfo` fuso do sistema |
 
 - Properties are read-only. They also work in templates (`$insets.bottom`) and
   convert to an array with `toArray()`.
@@ -199,12 +199,10 @@ example in `index.php` for `App::globals()`, lives as long as the app.
   lazy: subscribing asks nothing; the first read of a value asks the host,
   and after that it is asked again each time the app returns to the
   foreground (the user may have changed the system language or zone). Until
-  the host answers, `known` is `false`, the locale is the I18n source locale
-  and the zone is PHP's default. `I18n::use('en-US')` (or `->set()`) and
-  `I18n::useTimezone('Europe/Lisbon')` override the device, reactively;
-  `null` follows the device again. `t()` keeps using `I18n::locale()`, so an
-  app that wants the device language calls `I18n::use($locale->value)` or
-  reads `$locale->language`.
+  the host answers, `known` is `false`, the locale is `en` and the zone is PHP's default.
+  App preferences, catalog resolution and formatting belong to `pushinbr/pam-native-i18n`.
+  Use `Pam\Native\I18n\useLocale()` / `useTimezone()` for `overridden` and `set()`;
+  the core's system metadata never changes when a plugin preference changes.
 - `Runtime::shutdown()` (hot reload, test teardown) stops every shared
   source, including the app-lifetime ones from `index.php`. The next
   composable call starts a fresh subscription.
@@ -637,7 +635,7 @@ Testing\routes()->open('/chat/2');    // routes and aliases survive reset()
 | `Testing\routes($routesFile\|require result\|RouteCollection\|null, ?array $middleware = null)` | Builds and activates the `RouteNavigator`, so `navigate()`, `back()` and `Route::current()` work, and mounts it. Given a path, the routes are registered from scratch. Middleware aliases: `$middleware`, then `config/middleware.php` next to the routes file (or in the project root). Returns a `Testing\RouteTester`. |
 | `RouteTester` | `open($uri)` (path or deep link, middleware included), `navigate($route, $params)`, `back()`, `current()`, `path()`, `screen()` (the focused screen component), `text()` (of the focused screen), `render()`, `unmount()`, `navigator`. |
 | `Testing\environment(scheme, insets, keyboard, window, locale, timezone)` | Sends what the host would: `scheme` (`'light'`/`'dark'`) becomes the system scheme with the `System` preference; `insets` and `window` (`width`, `height`, `scale`, `fontScale`) a window-metrics event; `keyboard` the settled keyboard (a height; `0` or `false` hides it, `true` is 300 pt); `locale` and `timezone` the `DeviceInfo` that `useLocale()`/`useTimezone()` read. Omitted arguments keep their value. Mounted components re-render. |
-| `Testing\reset(bool $flushRoutes = false)` | Unmounts every root, calls `Runtime::shutdown()`, and clears composable sources and I18n overrides. Registered routes and middleware aliases are kept, so `Testing\routes()` (no argument) mounts them again; `flushRoutes: true` clears them too. |
+| `Testing\reset(bool $flushRoutes = false)` | Unmounts every root, calls `Runtime::shutdown()`, and clears composable sources (plugin preferences are reset explicitly by the plugin). Registered routes and middleware aliases are kept, so `Testing\routes()` (no argument) mounts them again; `flushRoutes: true` clears them too. |
 | `Testing\unmount($handle\|$routeTester\|$component)` | Unmounts; a component that was never mounted, or was already unmounted or reset, is a no-op (so is `->unmount()` twice). |
 
 `Testing\mount()` needs the runtime for itself: in a test that already called
@@ -663,3 +661,32 @@ and dropped.
 | App-specific singletons reached through statics | `App::globals()` |
 | `__pamSetup()` / `__pamMounted()` / `__pamDisposeResources()` in tests | `Testing\mount()` and `->unmount()`; `Testing\routes()` for screens behind routes |
 | Replacing the `$scheme` global to fake light/dark in tests | `Testing\environment(scheme: 'dark')` |
+
+## i18n como plugin opcional (u3)
+
+`composer require pushinbr/pam-native-i18n:^0.1` instala catálogos, tradução,
+pluralização, interpolação e formatação. O core mantém `Pam\Native\useLocale()`
+e `useTimezone()` como metadados reativos do sistema: nenhuma preferência ou catálogo
+é carregado para um app que não usa o plugin.
+
+```php
+use Pam\Native\I18n\Translator;
+use function Pam\Native\I18n\{t, useLocale};
+
+Translator::source('en');
+Translator::catalog('en', ['common' => ['hello' => 'Hello {name}']]);
+Translator::use('en-US');
+$locale = useLocale(); // preferência do app; ->set(null) volta ao sistema
+$text = t('common.hello', ['name' => 'Ana']);
+```
+
+`Pam\Native\I18n\I18n` aponta para `Translator` via `MovedToPlugin`.
+`Pam\Native\Support\{Format, DateStyle, RelativeTimeStyle}` também têm shims
+para as classes equivalentes em `Pam\Native\I18n`. Sem o plugin, os shims
+indicam `composer require pushinbr/pam-native-i18n`.
+
+O plugin registra `t()` nos templates em seu autoload. O gancho genérico
+`Internal\TemplateExpression::registerFunction(string, Closure)` aceita helpers
+síncronos de plugins, registrados no boot; `forgetFunction(string)` os remove.
+Métodos do componente têm precedência. Os avaliadores gerado e de referência
+usam o registro no momento da chamada, mesmo para expressões em cache.

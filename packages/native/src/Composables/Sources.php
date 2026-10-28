@@ -9,7 +9,6 @@ use Pam\Native\Appearance;
 use Pam\Native\AppearanceMode;
 use Pam\Native\AppState;
 use Pam\Native\DeviceStatus;
-use Pam\Native\I18n\I18n;
 use Pam\Native\System\DeviceInfo;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\Runtime;
@@ -169,24 +168,6 @@ final class Sources
     {
         self::$lastDevice = $info;
         self::device()->signal->set($info);
-    }
-
-    /**
-     * Locale and time zone overrides (I18n::use(), I18n::useTimezone()).
-     *
-     * @return SharedSource<array{0: ?string, 1: ?string}>
-     */
-    public static function i18n(): SharedSource
-    {
-        return SharedSource::named(
-            'i18n',
-            static fn (): array => [I18n::preferredLocale(), I18n::timezone()],
-            static function (\Closure $push): \Closure {
-                $id = I18n::onChange(static fn () => $push([I18n::preferredLocale(), I18n::timezone()]));
-
-                return static fn () => I18n::offChange($id);
-            },
-        );
     }
 
     /** @internal */

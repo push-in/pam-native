@@ -175,7 +175,7 @@ if (!\function_exists('Pam\Native\Testing\environment')) {
 if (!\function_exists('Pam\Native\Testing\reset')) {
     /**
      * Teardown: unmounts every Testing root (releasing their scopes), shuts
-     * the runtime down and clears composable sources and I18n overrides.
+     * the runtime down and clears composable sources.
      * Registered routes and middleware aliases are kept, so
      * `Testing\routes()` can mount them again; `flushRoutes: true` clears
      * them too.

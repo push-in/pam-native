@@ -10,7 +10,6 @@ use Pam\Native\App;
 use Pam\Native\Component;
 use Pam\Native\Composables\Sources;
 use Pam\Native\Element;
-use Pam\Native\I18n\I18n;
 use Pam\Native\Internal\DependencyTracker;
 use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
@@ -117,8 +116,6 @@ final class Harness
             MiddlewareRegistry::reset();
         }
         Sources::reset();
-        I18n::use(null);
-        I18n::useTimezone(null);
     }
 
     /**

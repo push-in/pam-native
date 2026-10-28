@@ -505,3 +505,10 @@ PAM Native is open source under Apache-2.0. You may build and sell
 proprietary or open applications with it without a revenue limit or runtime
 royalty. See [LICENSING.md](LICENSING.md) for the plain-language grant and the
 full [LICENSE](LICENSE) for controlling terms.
+
+### Tradução opcional
+
+Catálogos, `t()` e formatação vivem em [pam-native-i18n](https://github.com/push-in/pam-native-i18n).
+O core fornece `Pam\Native\useLocale()` para o locale do sistema.
+Preferências do app usam `Pam\Native\I18n\useLocale()` do plugin.
+Consulte a [migração na arquitetura v2](docs/architecture-v2.md#i18n-como-plugin-opcional-u3).
