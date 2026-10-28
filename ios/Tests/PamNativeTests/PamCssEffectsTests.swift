@@ -128,6 +128,31 @@ final class PamCssEffectsTests: XCTestCase {
         XCTAssertLessThan(output.width, try XCTUnwrap(checker.cgImage).width)
     }
 
+    func testIconBlurFadesInsteadOfFillingItsBox() throws {
+        // A glyph on a transparent canvas (a heart used as its own shadow).
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let glyph = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48), format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 18, y: 18, width: 12, height: 12))
+        }
+        let output = try XCTUnwrap(PamImageFilter(blurSigma: 4).apply(to: glyph, displayScale: 2).cgImage)
+        XCTAssertEqual(PamRenderTestSupport.pixel(output, 0, 0) >> 24, 0, "corners stay transparent")
+        XCTAssertGreaterThan(PamRenderTestSupport.pixel(output, output.width / 2, output.height / 2) >> 24, 100)
+    }
+
+    func testBlurSigmaFollowsTheDrawnScale() {
+        let icon = CGSize(width: 96, height: 96)
+        let box = CGSize(width: 92, height: 92)
+        XCTAssertEqual(PamImageFilter.drawScale(image: icon, bounds: box, contentMode: .scaleAspectFit), 92.0 / 96.0, accuracy: 0.001)
+        XCTAssertEqual(
+            PamImageFilter.drawScale(image: CGSize(width: 100, height: 100), bounds: CGSize(width: 200, height: 100), contentMode: .scaleAspectFill),
+            2,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(PamImageFilter.drawScale(image: icon, bounds: .zero, contentMode: .scaleAspectFit), 1)
+    }
+
     func testShimmerSweepsAHighlightOverTheBackground() throws {
         let (_, renderer, view) = PamRenderTestSupport.render([
             PamConstants.backgroundColor: .integer(0xFFE0_E0E0),

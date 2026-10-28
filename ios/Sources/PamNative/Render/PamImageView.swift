@@ -25,7 +25,10 @@ struct PamImageFilter: Equatable {
     /// blur.
     private static let context = CIContext(options: [.cacheIntermediates: false])
 
-    func apply(to image: UIImage, displayScale: CGFloat) -> UIImage {
+    /// `drawScale`: view points per image point at the view's content mode
+    /// (σ is authored in view points; a 96 px icon drawn at 92 pt must not be
+    /// blurred as if it were 92 px).
+    func apply(to image: UIImage, displayScale: CGFloat, drawScale: CGFloat = 1) -> UIImage {
         guard !isIdentity else { return image }
         var output = image
         if let matrix {
@@ -33,9 +36,23 @@ struct PamImageFilter: Equatable {
         }
         if blurSigma > 0 {
             // σ is authored in points; the bitmap is in pixels of its own scale.
-            output = PamBitmapBlur.blur(output, sigma: blurSigma * max(1, output.scale)) ?? output
+            let drawn = drawScale > 0 ? drawScale : 1
+            output = PamBitmapBlur.blur(output, sigma: blurSigma * max(1, output.scale) / drawn) ?? output
         }
         return output
+    }
+
+    /// View points per image point for a content mode (1 when not laid out).
+    static func drawScale(image: CGSize, bounds: CGSize, contentMode: UIView.ContentMode) -> CGFloat {
+        guard image.width > 0, image.height > 0, bounds.width > 0, bounds.height > 0 else { return 1 }
+        let sx = bounds.width / image.width
+        let sy = bounds.height / image.height
+        switch contentMode {
+        case .scaleAspectFill: return max(sx, sy)
+        case .scaleToFill: return (sx * sy).squareRoot()
+        case .scaleAspectFit: return min(sx, sy)
+        default: return 1
+        }
     }
 
     private static func applyMatrix(_ matrix: [CGFloat], to image: UIImage) -> UIImage {
@@ -58,11 +75,22 @@ struct PamImageFilter: Equatable {
 }
 
 /// React Native `blurRadius` for images, like Android's `PamBitmapBlur`: three
-/// box passes (≈ Gaussian, σ in pixels) with clamped edges on a copy
+/// box passes (≈ Gaussian, σ in pixels) on a copy
 /// downscaled so σ stays near 4 px, on the CPU with vImage. No Core Image
 /// context, GPU textures or kernel compilation per process, and the blurred
 /// bitmap is a fraction of the source size (it is displayed scaled up).
+/// Opaque images keep clamped edges (opaque to their bounds); an image with a
+/// transparent border (an icon or a glyph used as a shadow) fades into
+/// transparency, so its blur never fills the whole box.
 enum PamBitmapBlur {
+    /// True when any border pixel of a BGRA (alpha last) buffer is translucent.
+    static func hasTranslucentBorder(_ pixels: UnsafeRawPointer, width: Int, height: Int, rowBytes: Int) -> Bool {
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { pixels.load(fromByteOffset: y * rowBytes + x * 4 + 3, as: UInt8.self) }
+        for x in 0..<width where alpha(x, 0) < 255 || alpha(x, height - 1) < 255 { return true }
+        for y in 0..<height where alpha(0, y) < 255 || alpha(width - 1, y) < 255 { return true }
+        return false
+    }
+
     static func blur(_ image: UIImage, sigma: CGFloat) -> UIImage? {
         guard sigma > 0, let source = image.cgImage ?? rasterized(image) else { return nil }
         let scale = min(1, max(1.0 / 64.0, 4 / sigma))
@@ -100,12 +128,14 @@ enum PamBitmapBlur {
             width: buffer.width,
             rowBytes: canvas.bytesPerRow
         )
-        let flags = vImage_Flags(kvImageEdgeExtend)
+        let transparentEdges = hasTranslucentBorder(pixels, width: width, height: height, rowBytes: canvas.bytesPerRow)
+        let flags = vImage_Flags(transparentEdges ? kvImageBackgroundColorFill : kvImageEdgeExtend)
+        let clear: [UInt8] = [0, 0, 0, 0]
         // buffer -> scratch -> buffer -> scratch, then back into the canvas.
         for pass in 0..<3 {
             let status = pass % 2 == 0
-                ? vImageBoxConvolve_ARGB8888(&buffer, &scratch, nil, 0, 0, kernel, kernel, nil, flags)
-                : vImageBoxConvolve_ARGB8888(&scratch, &buffer, nil, 0, 0, kernel, kernel, nil, flags)
+                ? vImageBoxConvolve_ARGB8888(&buffer, &scratch, nil, 0, 0, kernel, kernel, clear, flags)
+                : vImageBoxConvolve_ARGB8888(&scratch, &buffer, nil, 0, 0, kernel, kernel, clear, flags)
             guard status == kvImageNoError else { return nil }
         }
         memcpy(pixels, scratchData, canvas.bytesPerRow * height)
@@ -218,7 +248,7 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
     private func displayed(_ image: UIImage) -> UIImage {
         let filtered = pamFilter.isIdentity
             ? image
-            : pamFilter.apply(to: image, displayScale: window?.screen.scale ?? 2)
+            : pamFilter.apply(to: image, displayScale: window?.screen.scale ?? 2, drawScale: blurDrawScale(for: image))
         guard let pamTintColor else { return filtered }
         tintColor = pamTintColor
         return filtered.withRenderingMode(.alwaysTemplate)
@@ -227,5 +257,23 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
     private func refilter() {
         guard let original else { return }
         super.image = displayed(original)
+    }
+
+    /// Draw scale the current blur was computed at (0 = no blur yet).
+    private var appliedBlurDrawScale: CGFloat = 0
+
+    private func blurDrawScale(for image: UIImage) -> CGFloat {
+        guard pamFilter.blurSigma > 0 else { return 1 }
+        let scale = PamImageFilter.drawScale(image: image.size, bounds: bounds.size, contentMode: contentMode)
+        appliedBlurDrawScale = scale
+        return scale
+    }
+
+    /// A blurred image laid out after it arrived (or resized) re-blurs at its drawn scale.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard pamFilter.blurSigma > 0, let original, bounds.width > 0, bounds.height > 0 else { return }
+        let scale = PamImageFilter.drawScale(image: original.size, bounds: bounds.size, contentMode: contentMode)
+        if abs(scale - appliedBlurDrawScale) > 0.01 { refilter() }
     }
 }

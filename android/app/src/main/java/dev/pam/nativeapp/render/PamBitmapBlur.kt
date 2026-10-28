@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import android.graphics.Bitmap
+import android.widget.ImageView
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -9,9 +10,11 @@ import kotlin.math.sqrt
 
 /**
  * React Native style `blurRadius` for images: a three-pass box blur
- * (≈ Gaussian, σ in px) on a downscaled copy, with clamped edges so the
- * blurred image stays opaque to its bounds. Works on every API level and
- * costs nothing per frame once the image is displayed.
+ * (≈ Gaussian, σ in px) on a downscaled copy. Opaque images keep clamped
+ * edges so they stay opaque to their bounds; an image with a transparent
+ * border (an icon, a glyph used as a shadow) fades into transparency
+ * instead, so its blur never becomes a filled rectangle. Works on every API
+ * level and costs nothing per frame once the image is displayed.
  */
 internal object PamBitmapBlur {
     fun blur(source: Bitmap, sigma: Float): Bitmap {
@@ -27,36 +30,80 @@ internal object PamBitmapBlur {
         val small = Bitmap.createScaledBitmap(readable, width, height, true)
         val pixels = IntArray(width * height)
         small.getPixels(pixels, 0, width, 0, 0, width, height)
-        val scaledSigma = sigma * scale
-        // Three box passes of width w approximate a Gaussian of σ² = 3(w² - 1)/12.
-        val boxWidth = sqrt(4f * scaledSigma * scaledSigma + 1f)
-        val radius = max(1, ceil((boxWidth - 1f) / 2f).toInt())
-        val scratch = IntArray(pixels.size)
-        repeat(3) {
-            horizontal(pixels, scratch, width, height, radius)
-            vertical(scratch, pixels, width, height, radius)
-        }
+        blurPixels(pixels, width, height, sigma * scale)
         val output = if (small !== readable && small.isMutable) small else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         output.setPixels(pixels, 0, width, 0, 0, width, height)
         return output
     }
 
-    private fun horizontal(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int) {
+    /**
+     * σ authored in view pixels → σ in the bitmap's own pixels, through the
+     * scale the image is drawn at. A 96 px icon shown at 92 dp on a 3× screen
+     * is drawn ~2.9× larger, so blurring its bitmap by the screen σ blurred it
+     * ~2.9× too much (a glyph shadow turned into a uniform translucent square).
+     */
+    fun bitmapSigma(
+        viewSigma: Float,
+        viewWidth: Int,
+        viewHeight: Int,
+        bitmapWidth: Int,
+        bitmapHeight: Int,
+        scaleType: ImageView.ScaleType?,
+    ): Float {
+        if (viewSigma <= 0f || viewWidth <= 0 || viewHeight <= 0 || bitmapWidth <= 0 || bitmapHeight <= 0) return viewSigma
+        val sx = viewWidth.toFloat() / bitmapWidth
+        val sy = viewHeight.toFloat() / bitmapHeight
+        val drawScale = when (scaleType) {
+            ImageView.ScaleType.CENTER_CROP -> max(sx, sy)
+            ImageView.ScaleType.FIT_XY -> sqrt(sx * sy)
+            ImageView.ScaleType.CENTER, ImageView.ScaleType.MATRIX -> 1f
+            ImageView.ScaleType.CENTER_INSIDE -> min(1f, min(sx, sy))
+            else -> min(sx, sy)
+        }
+        return if (drawScale > 0f) viewSigma / drawScale else viewSigma
+    }
+
+    /** In-place blur of ARGB pixels with σ in those pixels. */
+    fun blurPixels(pixels: IntArray, width: Int, height: Int, sigma: Float) {
+        if (sigma <= 0f || width <= 0 || height <= 0) return
+        // Three box passes of width w approximate a Gaussian of σ² = 3(w² - 1)/12.
+        val boxWidth = sqrt(4f * sigma * sigma + 1f)
+        val radius = max(1, ceil((boxWidth - 1f) / 2f).toInt())
+        val transparentEdges = hasTranslucentBorder(pixels, width, height)
+        val scratch = IntArray(pixels.size)
+        repeat(3) {
+            horizontal(pixels, scratch, width, height, radius, transparentEdges)
+            vertical(scratch, pixels, width, height, radius, transparentEdges)
+        }
+    }
+
+    private fun hasTranslucentBorder(pixels: IntArray, width: Int, height: Int): Boolean {
+        for (x in 0 until width) {
+            if (pixels[x] ushr 24 < 255 || pixels[(height - 1) * width + x] ushr 24 < 255) return true
+        }
+        for (y in 0 until height) {
+            if (pixels[y * width] ushr 24 < 255 || pixels[y * width + width - 1] ushr 24 < 255) return true
+        }
+        return false
+    }
+
+    private fun horizontal(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int, transparentEdges: Boolean) {
         val window = radius * 2 + 1
         for (y in 0 until height) {
             val row = y * width
+            fun at(x: Int): Int = if (transparentEdges && (x < 0 || x >= width)) 0 else input[row + x.coerceIn(0, width - 1)]
             var a = 0
             var r = 0
             var g = 0
             var b = 0
             for (offset in -radius..radius) {
-                val pixel = input[row + offset.coerceIn(0, width - 1)]
+                val pixel = at(offset)
                 a += pixel ushr 24; r += pixel shr 16 and 0xFF; g += pixel shr 8 and 0xFF; b += pixel and 0xFF
             }
             for (x in 0 until width) {
                 output[row + x] = (a / window shl 24) or (r / window shl 16) or (g / window shl 8) or (b / window)
-                val outgoing = input[row + (x - radius).coerceIn(0, width - 1)]
-                val incoming = input[row + (x + radius + 1).coerceIn(0, width - 1)]
+                val outgoing = at(x - radius)
+                val incoming = at(x + radius + 1)
                 a += (incoming ushr 24) - (outgoing ushr 24)
                 r += (incoming shr 16 and 0xFF) - (outgoing shr 16 and 0xFF)
                 g += (incoming shr 8 and 0xFF) - (outgoing shr 8 and 0xFF)
@@ -65,21 +112,22 @@ internal object PamBitmapBlur {
         }
     }
 
-    private fun vertical(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int) {
+    private fun vertical(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int, transparentEdges: Boolean) {
         val window = radius * 2 + 1
         for (x in 0 until width) {
+            fun at(y: Int): Int = if (transparentEdges && (y < 0 || y >= height)) 0 else input[y.coerceIn(0, height - 1) * width + x]
             var a = 0
             var r = 0
             var g = 0
             var b = 0
             for (offset in -radius..radius) {
-                val pixel = input[offset.coerceIn(0, height - 1) * width + x]
+                val pixel = at(offset)
                 a += pixel ushr 24; r += pixel shr 16 and 0xFF; g += pixel shr 8 and 0xFF; b += pixel and 0xFF
             }
             for (y in 0 until height) {
                 output[y * width + x] = (a / window shl 24) or (r / window shl 16) or (g / window shl 8) or (b / window)
-                val outgoing = input[(y - radius).coerceIn(0, height - 1) * width + x]
-                val incoming = input[(y + radius + 1).coerceIn(0, height - 1) * width + x]
+                val outgoing = at(y - radius)
+                val incoming = at(y + radius + 1)
                 a += (incoming ushr 24) - (outgoing ushr 24)
                 r += (incoming shr 16 and 0xFF) - (outgoing shr 16 and 0xFF)
                 g += (incoming shr 8 and 0xFF) - (outgoing shr 8 and 0xFF)

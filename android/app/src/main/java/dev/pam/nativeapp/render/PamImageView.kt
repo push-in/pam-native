@@ -35,6 +35,8 @@ internal class PamImageView(context: Context) : ImageView(context) {
     private var sourceBitmap: Bitmap? = null
     private var sourceRepeat = false
     private var blurSigma = 0f
+    /** σ in bitmap pixels the current drawable was blurred with (0 = none). */
+    private var appliedBitmapSigma = 0f
 
     /** RN `blurRadius` / CSS `filter: blur()` on an image, σ in px. */
     fun setBlur(sigma: Float) {
@@ -48,12 +50,18 @@ internal class PamImageView(context: Context) : ImageView(context) {
     fun bitmapDrawable(bitmap: Bitmap, repeat: Boolean): Drawable {
         sourceBitmap = bitmap
         sourceRepeat = repeat
-        if (blurSigma <= 0f) {
+        // Not laid out yet: the drawn scale is unknown, so onSizeChanged blurs
+        // it once (nothing draws before layout).
+        if (blurSigma <= 0f || width <= 0 || height <= 0) {
+            appliedBitmapSigma = 0f
             return BitmapDrawable(resources, bitmap).apply {
                 if (repeat) setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
             }
         }
-        val blurred = PamBitmapBlur.blur(bitmap, blurSigma)
+        // σ is authored in view pixels; the bitmap is blurred in its own pixels.
+        val bitmapSigma = PamBitmapBlur.bitmapSigma(blurSigma, width, height, bitmap.width, bitmap.height, scaleType)
+        appliedBitmapSigma = bitmapSigma
+        val blurred = PamBitmapBlur.blur(bitmap, bitmapSigma)
         val width = bitmap.width
         val height = bitmap.height
         // Keep the source's intrinsic size so scale types lay out identically.
@@ -127,9 +135,19 @@ internal class PamImageView(context: Context) : ImageView(context) {
     ) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         rebuildClipPath()
+        reblurForSize(width, height)
         if (width > 0 && height > 0) {
             onImageSizeChanged?.invoke(width, height)
         }
+    }
+
+    /** A blurred image laid out after decoding (or resized) re-blurs at its drawn scale. */
+    private fun reblurForSize(width: Int, height: Int) {
+        if (blurSigma <= 0f || width <= 0 || height <= 0) return
+        val bitmap = sourceBitmap ?: return
+        val sigma = PamBitmapBlur.bitmapSigma(blurSigma, width, height, bitmap.width, bitmap.height, scaleType)
+        if (kotlin.math.abs(sigma - appliedBitmapSigma) < 0.05f) return
+        setImageDrawable(bitmapDrawable(bitmap, sourceRepeat))
     }
 
     fun setCornerRadii(value: FloatArray) {
