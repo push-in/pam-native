@@ -120,3 +120,40 @@ Build Android x86_64 e **336/336 testes JVM verdes**, repetidos após rebase no 
 Worktrees indicados inexistiam e foram criados como `codex-shared-test-fw` e `codex-shared-test` (consumidor só para validação). Builds, .cxx, engine temporário, vendor e .pam-native próprios já removidos. O disco começou perto de 21 GB e caiu abaixo de 20 GB por consumo concorrente, mesmo após limpar todos os builds próprios; nenhum artefato de outra sessão foi removido.
 
 Integração com validadores verdes conforme a diretiva desta rodada, sem tag. A execução das sete classes PamNavigationHost/PamModal* (36 métodos) está aguardando o lock do emulador; a tarefa continua para concluir essa etapa. APKs e XMLs JVM preservados em `~/.local/share/pam-codex/shots/z1/`; logs e resultados PHP em `/tmp/codex-z1-validation/`. Ainda não se afirma sucesso instrumentado, paridade visual ou métricas de CPU/PSS/FPS.
+
+## Rodada z2 — métricas de texto e elevação Android (28/10/2026)
+
+Worktree `codex-composer-fw`, branch `codex/composer-fw`, criado a partir de
+`origin/integrate/port3-20261027` porque o diretório indicado não existia.
+
+`PamLineHeightSpan` agora distribui o leading a partir de ascent/descent,
+preservando top/bottom nas linhas internas e ajustando apenas as bordas do
+parágrafo. O algoritmo anterior podia manter avanço de 54 px quando o estilo
+solicitava 56 px e deslocar a primeira baseline. Referência de semântica:
+[CustomLineHeightSpan do RN 0.85](https://github.com/facebook/react-native/blob/v0.85.0/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/views/text/internal/span/CustomLineHeightSpan.kt).
+Medição do engine e desenho continuam usando o mesmo pipeline.
+
+O renderer evita que `setZ` aplicado por z-index reduza uma elevation já
+convertida de dp para pixels. A correção cobre aplicação inicial, atualizações,
+remoção, estilos de estado e restauração após pan do teclado. O empilhamento
+legado por Z permanece; o Z efetivo passa a respeitar a elevation como piso.
+Não foi introduzida API opcional nem dependência.
+
+Verificação local: 336/336 testes JVM e compilação dos testes Android aprovados;
+181/181 testes Rust (167 engine + 14 protocolo) aprovados. Gradle/cargo sob
+`/tmp/pam-gradle.lock.d`, quatro workers e JVM com -Xmx3g; daemon encerrado.
+O compilador Kotlin usou fallback em processo porque seu diretório de daemon
+fora dos roots graváveis era somente leitura. APK/instrumentação e comparação
+visual ainda serão registrados abaixo após a sessão Android.
+
+Disco começou com cerca de 21 GB e caiu abaixo de 20 GB por uso concorrente.
+A limpeza se restringe aos artefatos deste worktree. Nenhum diretório alheio,
+Mac, dispositivo físico ou workflow foi utilizado; nenhuma tag foi criada.
+
+Resultado da suíte do app que acompanha esta rodada: **498/498 aprovados**,
+execução única sequencial contra o SDK 1.46.5 do lock. Todos os diretórios
+.pam-native foram removidos após cada validador. APKs de instrumentação do
+framework gerados com sucesso; 336 testes JVM e 181 Rust aprovados.
+A integração inicial é feita com QA visual pendente, conforme autorização
+expressa desta rodada; a evidência Android será acrescentada após o lock.
+
