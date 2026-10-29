@@ -507,7 +507,9 @@ const Ranges* window_for(Encoder& encoder, zend_object* list, const std::string&
             ? zend_hash_index_find(Z_ARRVAL_P(properties), static_cast<zend_ulong>(encoder.window.initial_index))
             : nullptr;
         if (initial != nullptr && Z_TYPE_P(initial) == IS_LONG && Z_LVAL_P(initial) > 0) {
-            const zend_long index = Z_LVAL_P(initial);
+            // A past-the-end index (a "start at the end" request) means the
+            // last row, as the native list clamps it.
+            const zend_long index = std::min<zend_long>(Z_LVAL_P(initial), static_cast<zend_long>(rows) - 1);
             ranges = add_range(
                 ranges,
                 std::max<zend_long>(0, index - static_cast<zend_long>(encoder.window.margin_rows)),

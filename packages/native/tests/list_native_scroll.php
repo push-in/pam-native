@@ -62,6 +62,28 @@ final class ScrollFeed extends Component
     </VirtualizedList>
 </template>
 PAM);
+file_put_contents($scrollDirectory.'/ScrollTail.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\NativeScroll;
+
+use Pam\Native\Component;
+
+final class ScrollTail extends Component
+{
+    /** @var list<string> */
+    public array $items = [];
+}
+?>
+
+<template>
+    <VirtualizedList estimatedRowHeight="64" initialScrollIndex="1000000">
+        <View p-for="$item in $items" :key="$item"><Text>{{ $item }}</Text></View>
+    </VirtualizedList>
+</template>
+PAM);
 App::components($scrollDirectory, $scrollDirectory.'/.cache');
 $scrollFeed = App::make('Pam\\Native\\Tests\\NativeScroll\\ScrollFeed');
 $scrollFeed->items = array_map(static fn (int $i): string => "msg-{$i}", range(100, 159));
@@ -135,6 +157,28 @@ $assert(
         && count($created) === 16 && count($removed) === 16,
     'A window slide is one patch with only the rows that join and leave (created '
         .count($created).', removed '.count($removed).').',
+);
+Runtime::shutdown();
+$GLOBALS['pamIdentityFrames'] = [];
+
+// A long list opened at its end ("initialScrollIndex" past the last row, the
+// way a conversation opens) materializes its newest rows, not its first ones.
+$scrollTail = App::make('Pam\\Native\\Tests\\NativeScroll\\ScrollTail');
+$scrollTail->items = array_map(static fn (int $i): string => "tail-{$i}", range(0, 299));
+App::run($scrollTail);
+$syncNative();
+$tailTexts = [];
+foreach ($nativeTree->nodes as $node) {
+    foreach ($node['props'] as $value) {
+        if (is_string($value) && str_contains($value, 'tail-')) {
+            $tailTexts[] = $value;
+        }
+    }
+}
+$assert(
+    (bool) array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-299'))
+        && !array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-100')),
+    'A list opened past its end must materialize its last rows (got '.count($tailTexts).' texts).',
 );
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];

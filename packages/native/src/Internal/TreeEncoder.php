@@ -412,6 +412,8 @@ final class TreeEncoder
             $ranges = [[0, self::WINDOW_INITIAL_ROWS]];
             $initial = $list->properties[PropKey::ListInitialScrollIndex->value] ?? null;
             if (is_int($initial) && $initial > 0) {
+                // A past-the-end index ("start at the end") means the last row.
+                $initial = min($initial, ($list->lazyRows?->count() ?? count($list->children)) - 1);
                 $ranges = self::addRange(
                     $ranges,
                     max(0, $initial - self::WINDOW_MARGIN_ROWS),

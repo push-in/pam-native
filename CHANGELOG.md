@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windowed virtual lists opened with `initialScrollIndex` past the last row
+  (a conversation opening at its newest message) materialize their last rows
+  instead of the first 48 (PHP and the Android/iOS native encoder).
+
 - Android: a virtual list row re-measured while the list rests keeps the
   first fully visible row at its pixel offset (a partly hidden top row that
   grew used to push every row on screen).
