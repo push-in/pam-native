@@ -385,6 +385,8 @@ final class TemplateRenderer
         'playbackRate' => PropKey::MediaPlaybackRate,
         'keepAliveWhenCovered' => PropKey::MediaKeepAliveWhenCovered,
         'idleSurface' => PropKey::MediaIdleSurface,
+        'autoPlayVisible' => PropKey::MediaAutoPlayVisible,
+        'autoPlayGroup' => PropKey::MediaAutoPlayGroup,
         'startBufferMs' => PropKey::MediaStartBufferMs,
         'mediaClock' => PropKey::MediaClock,
         'mediaClockFormat' => PropKey::MediaClockFormat,
@@ -4952,6 +4954,14 @@ final class TemplateRenderer
                     ? null
                     : self::named($value, ['cube' => ScrollPageTransform::Cube->value])),
             PropKey::MediaStartBufferMs => max(0, min(30_000, self::intValue($value, 'startBufferMs'))),
+            // `autoPlayVisible="true"` is half the player; false/0 sends nothing (renderer default: off).
+            PropKey::MediaAutoPlayVisible => match (true) {
+                $value === null, $value === false, $value === 'false', $value === '' => null,
+                $value === true, $value === 'true' => 0.5,
+                default => ($fraction = min(1.0, self::floatValue($value, 'autoPlayVisible'))) > 0.0 ? $fraction : null,
+            },
+            PropKey::MediaAutoPlayGroup => $value === null || $value === false || $value === ''
+                ? null : self::stringValue($value, 'autoPlayGroup'),
             PropKey::ScrollOffsetAnimationMs => max(0, min(2_000, self::intValue($value, 'contentOffsetAnimationMs'))),
             PropKey::ScrollOverScrollMode => self::named($value, [
                 'auto' => ScrollOverScrollMode::Auto->value,

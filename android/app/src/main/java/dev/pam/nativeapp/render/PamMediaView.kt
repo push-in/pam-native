@@ -140,6 +140,19 @@ internal class PamMediaView(
      */
     private var idleSurface = false
 
+    /**
+     * `autoPlayVisible` (0 = off): [PamVisibleAutoplay] grants playback
+     * while this share of the view shows and its list is at rest. Without the
+     * grant the player is not created; a withdrawn grant pauses at once and
+     * releases the decoder after [AUTOPLAY_RELEASE_MS], keeping the position.
+     */
+    private var autoplayFraction = 0f
+    private var autoplayGroup = ""
+    private var autoplayGrant = false
+    private var autoplayObservers: PamVisibleAutoplay.Observers? = null
+    private var thumbnailRequest: NativeImageRequest? = null
+    private val autoplayRelease = Runnable { if (!autoplayGrant) releaseForAutoplay() }
+
     /** Views bound to a player `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer. */
     var boundViews: (() -> List<View>)? = null
 
@@ -179,6 +192,8 @@ internal class PamMediaView(
         override fun run() {
             // A covered, suspended, hidden or idle player has nothing to report; restoring restarts the loop.
             if (covered || suspended || hiddenRelease || idleSurface) return
+            // Visible autoplay without its grant has no player: the grant restarts the loop.
+            if (autoplayFraction > 0f && !autoplayGrant) return
             val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
@@ -254,6 +269,10 @@ internal class PamMediaView(
             // a suspended app when it is active again.
             releasePlayer()
             if (suspended && value.isNotEmpty()) pendingRestore = true
+        } else if (autoplayFraction > 0f && !autoplayGrant) {
+            // Visible autoplay: prepared once the policy grants playback.
+            stopScreenWatcher()
+            releasePlayer()
         } else if (awaitScreen()) {
             // Bound ahead of the viewport (a list prefetching its next rows):
             // the player is created and prepared when the view first shows on
@@ -305,6 +324,16 @@ internal class PamMediaView(
     }
 
     fun setThumbnail(request: NativeImageRequest?) {
+        thumbnailRequest = request
+        if (autoplayFraction > 0f && !autoplayGrant) {
+            // Visible autoplay: the poster is decoded when playback is granted
+            // (it shapes the first frames); until then whatever the
+            // application draws under the player shows through.
+            imageLoader.cancel(poster)
+            poster.setImageDrawable(null)
+            poster.visibility = GONE
+            return
+        }
         if (request == null || request.source.isBlank()) {
             imageLoader.cancel(poster)
             poster.visibility = GONE
@@ -348,6 +377,125 @@ internal class PamMediaView(
         playback.autoPlay(value)
         if (value) restoreOnDemand()
         syncPlayback()
+    }
+
+    fun setAutoPlayVisible(fraction: Float) {
+        val value = if (fraction.isFinite()) fraction.coerceIn(0f, 1f) else 0f
+        if (value == autoplayFraction) return
+        val enabling = autoplayFraction == 0f
+        autoplayFraction = value
+        if (value > 0f) {
+            if (enabling) {
+                autoplayGrant = false
+                playback.visibleGate(false)
+                // A player prepared before the policy took over waits for its grant.
+                if (preparedPlayer != null || exo != null || creatingPlayer) releaseForAutoplay()
+                // No TextureView (nor its SurfaceTexture) for a card that never plays.
+                if (video.parent === this) removeViewInLayout(video)
+                setThumbnail(thumbnailRequest)
+            }
+            if (isAttachedToWindow) PamVisibleAutoplay.join(this)
+        } else {
+            PamVisibleAutoplay.leave(this)
+            removeCallbacks(autoplayRelease)
+            autoplayGrant = false
+            playback.visibleGate(true)
+            setThumbnail(thumbnailRequest)
+            if (isAttachedToWindow && !covered && !suspended) ensureVideoAttached()
+            prepareIfIdle()
+        }
+        syncPlayback()
+    }
+
+    fun setAutoPlayGroup(value: String) {
+        if (autoplayGroup == value) return
+        autoplayGroup = value
+        PamVisibleAutoplay.schedule()
+    }
+
+    internal val autoplayThreshold: Float get() = autoplayFraction
+    internal val autoplayGroupName: String get() = autoplayGroup
+
+    /** True while a player exists or is being created (tests, diagnostics). */
+    internal val holdsPlayer: Boolean get() = preparedPlayer != null || exo != null || creatingPlayer
+
+    /** True while the visible-autoplay policy lets this player play (tests, diagnostics). */
+    internal val autoplayGranted: Boolean get() = autoplayGrant
+
+    /** Share of the view inside the window (clipped by its scrolling ancestors); [rect] gets the visible part. */
+    internal fun visibleFraction(rect: android.graphics.Rect): Float {
+        if (!isAttachedToWindow || !isShown || windowVisibility != VISIBLE || width <= 0 || height <= 0 ||
+            covered || suspended || hiddenRelease || idleSurface || source.isEmpty()
+        ) {
+            return 0f
+        }
+        if (!getGlobalVisibleRect(rect)) return 0f
+        return (rect.width().toFloat() * rect.height()) / (width.toFloat() * height)
+    }
+
+    /** The policy's decision: playback granted (prepare and play) or withdrawn (pause, release later). */
+    internal fun grantAutoplay(granted: Boolean) {
+        if (autoplayFraction == 0f || granted == autoplayGrant) return
+        autoplayGrant = granted
+        playback.visibleGate(granted)
+        removeCallbacks(autoplayRelease)
+        if (granted) {
+            setThumbnail(thumbnailRequest)
+            main.removeCallbacks(progress)
+            main.post(progress)
+            prepareIfIdle()
+        } else {
+            postDelayed(autoplayRelease, AUTOPLAY_RELEASE_MS)
+        }
+        syncPlayback()
+    }
+
+    internal fun installAutoplayObservers() {
+        val observers = autoplayObservers ?: PamVisibleAutoplay.Observers().also { autoplayObservers = it }
+        removeAutoplayObservers()
+        val tree = viewTreeObserver
+        tree.addOnScrollChangedListener(observers)
+        tree.addOnGlobalLayoutListener(observers)
+        observers.observer = tree
+    }
+
+    internal fun removeAutoplayObservers() {
+        val observers = autoplayObservers ?: return
+        val tree = observers.observer?.takeIf { it.isAlive } ?: viewTreeObserver.takeIf { it.isAlive }
+        tree?.removeOnScrollChangedListener(observers)
+        tree?.removeOnGlobalLayoutListener(observers)
+        observers.observer = null
+    }
+
+    /** Prepares the source when nothing holds it back and no player exists yet. */
+    private fun prepareIfIdle() {
+        if (!isAttachedToWindow || source.isEmpty() || preparedPlayer != null || exo != null || creatingPlayer ||
+            covered || suspended || hiddenRelease || idleSurface
+        ) {
+            return
+        }
+        ensureVideoAttached()
+        main.removeCallbacks(progress)
+        main.post(progress)
+        val current = source
+        source = ""
+        setSource(current)
+    }
+
+    /** Frees a player whose grant was withdrawn; its position resumes the next grant. */
+    private fun releaseForAutoplay() {
+        if (preparedPlayer == null && exo == null && !creatingPlayer) return
+        rememberAutoplayPosition()
+        releaseDecoder()
+        setThumbnail(thumbnailRequest)
+    }
+
+    private fun rememberAutoplayPosition() {
+        if (autoplayFraction == 0f || !prepared || source.isEmpty()) return
+        val total = duration
+        val position = currentPosition
+        // Stopped at its end: the next grant starts over.
+        autoplayPositions.put(source, if (total > 0 && position >= total - 250) 0.0 else position / 1_000.0)
     }
 
     fun setKeepAliveWhenCovered(value: Boolean) {
@@ -611,6 +759,8 @@ internal class PamMediaView(
     }
 
     private fun ensureVideoAttached() {
+        // Visible autoplay: the video surface exists only while playback is granted.
+        if (autoplayFraction > 0f && !autoplayGrant) return
         if (video.parent == null) {
             addView(
                 video,
@@ -625,8 +775,12 @@ internal class PamMediaView(
     /** True while the covered-route policy holds this player released (tests, diagnostics). */
     internal val releasedForCover: Boolean get() = covered
 
-    private fun startPositionSeconds(): Double =
-        if (resumeSource.isNotEmpty() && resumeSource == source) resumeAtSeconds else currentTime
+    private fun startPositionSeconds(): Double = when {
+        resumeSource.isNotEmpty() && resumeSource == source -> resumeAtSeconds
+        // A recycled view playing a source again resumes where it stopped (React Native feed rule).
+        autoplayFraction > 0f -> autoplayPositions.get(source) ?: currentTime
+        else -> currentTime
+    }
 
     private fun bindingTargets(): List<View> {
         val ref = getTag(dev.pam.nativeapp.R.id.pam_native_ref) as? String ?: return emptyList()
@@ -940,6 +1094,11 @@ internal class PamMediaView(
             poster.drawable?.intrinsicHeight ?: 0,
         )
         val (scaleX, scaleY) = resolveVideoScale(resizeMode, width, height, shapeWidth, shapeHeight)
+        // Visible autoplay: no frame shows before its shape is known (the
+        // application's own poster under the player stays in view).
+        val shaped = autoplayFraction == 0f || (shapeWidth > 0 && shapeHeight > 0)
+        val alpha = if (shaped) 1f else 0f
+        if (video.alpha != alpha) video.alpha = alpha
         video.pivotX = video.width / 2f
         video.pivotY = video.height / 2f
         video.scaleX = scaleX
@@ -1008,6 +1167,7 @@ internal class PamMediaView(
     }
 
     private fun showPoster() {
+        if (autoplayFraction > 0f && !autoplayGrant) return
         if (poster.drawable != null || poster.onImageSizeChanged != null) {
             poster.visibility = VISIBLE
         }
@@ -1081,6 +1241,7 @@ internal class PamMediaView(
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
+        if (autoplayFraction > 0f) PamVisibleAutoplay.join(this)
         if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !suspended && !hiddenRelease && !idleSurface) {
             val current = source
             source = ""
@@ -1091,11 +1252,13 @@ internal class PamMediaView(
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         syncVisibility()
+        if (autoplayFraction > 0f) PamVisibleAutoplay.schedule()
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
         syncVisibility()
+        if (autoplayFraction > 0f) PamVisibleAutoplay.schedule()
     }
 
     private val screenRect = android.graphics.Rect()
@@ -1171,6 +1334,14 @@ internal class PamMediaView(
 
     override fun onDetachedFromWindow() {
         stopScreenWatcher()
+        if (autoplayFraction > 0f) {
+            rememberAutoplayPosition()
+            PamVisibleAutoplay.leave(this)
+            removeCallbacks(autoplayRelease)
+            autoplayGrant = false
+            playback.visibleGate(false)
+            setThumbnail(thumbnailRequest)
+        }
         playback.visibility(false, false)
         covered = false
         hiddenRelease = false
@@ -1202,6 +1373,14 @@ internal class PamMediaView(
         /** Set by the renderer between Activity stop and resume (main thread). */
         @JvmStatic
         var appInBackground = false
+
+        /** A withdrawn autoplay grant keeps the paused player this long (scrolling back resumes at once). */
+        const val AUTOPLAY_RELEASE_MS = 1_500L
+
+        /** Last positions of visible-autoplay sources (bounded; main thread). */
+        val autoplayPositions = object : LinkedHashMap<String, Double>(32, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Double>?): Boolean = size > 64
+        }
     }
 }
 

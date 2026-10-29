@@ -34,13 +34,14 @@ $assert(
 $assert(
     PropKey::ListFollowEndOnResize->value === 1001 && PropKey::ScrollPageTransform->value === 1002
         && PropKey::MediaStartBufferMs->value === 1003 && PropKey::MediaIdleSurface->value === 1004
-        && PropKey::ScrollOffsetAnimationMs->value === 1005,
-    'The extension table starts with the port reservations 1001-1005.',
+        && PropKey::ScrollOffsetAnimationMs->value === 1005 && PropKey::MediaAutoPlayVisible->value === 1006
+        && PropKey::MediaAutoPlayGroup->value === 1007,
+    'The extension table starts with the port reservations 1001-1007.',
 );
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === 1005
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === 1007
         && $local->eventCeiling === max(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()))
         && $local->extensionEventCeiling === 1000,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',

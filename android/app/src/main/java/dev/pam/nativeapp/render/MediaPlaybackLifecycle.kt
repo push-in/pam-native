@@ -8,6 +8,8 @@ internal class MediaPlaybackLifecycle {
     private var ownerActive = true
     private var attached = false
     private var visible = false
+    /** Visible autoplay: the native policy's decision (always true without it). */
+    private var visibleGate = true
 
     /** Play intent (autoPlay or a native play request), independent of host and visibility. */
     val wantsPlay: Boolean get() = requested
@@ -34,10 +36,12 @@ internal class MediaPlaybackLifecycle {
         update()
     }
 
+    fun visibleGate(value: Boolean) { visibleGate = value; update() }
+
     fun completed(looping: Boolean) {
         if (!looping) requested = false
         update()
     }
 
-    private fun update() { mayPlay = requested && hostActive && ownerActive && attached && visible }
+    private fun update() { mayPlay = requested && hostActive && ownerActive && attached && visible && visibleGate }
 }

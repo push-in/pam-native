@@ -7644,6 +7644,7 @@ require __DIR__.'/handler_purity.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
 require __DIR__.'/media_idle_surface.php';
+require __DIR__.'/media_autoplay_visible.php';
 require __DIR__.'/arch_v2_signals.php';
 require __DIR__.'/arch_v2_signal_fanout.php';
 require __DIR__.'/arch_v2_signal_rendering.php';

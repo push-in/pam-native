@@ -98,7 +98,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                         userScrolling = true
                         userScrollStartedAt = android.os.SystemClock.uptimeMillis()
                     }
-                    SCROLL_STATE_IDLE -> userScrolling = false
+                    SCROLL_STATE_IDLE -> {
+                        userScrolling = false
+                        PamVisibleAutoplay.listSettled()
+                    }
                 }
                 val listener = scrollPhase ?: return
                 val density = resources.displayMetrics.density.coerceAtLeast(0.01f)

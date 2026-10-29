@@ -3849,6 +3849,9 @@ class PamRenderer(
                 configureMediaCache(it, state)
                 // An idle view never starts preparing its source (key order applies the source first).
                 it.setIdleSurface(state.flag(PropKey.MEDIA_IDLE_SURFACE, false))
+                // Visible autoplay holds the source back until the policy grants it.
+                it.setAutoPlayGroup(state.textOrNull(PropKey.MEDIA_AUTO_PLAY_GROUP) ?: "")
+                it.setAutoPlayVisible(state.number(PropKey.MEDIA_AUTO_PLAY_VISIBLE, 0.0).toFloat())
                 it.setSource(value.text(key))
             }
             PropKey.MEDIA_TYPE -> Unit
@@ -3902,6 +3905,9 @@ class PamRenderer(
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED ->
                 (view as? PamMediaView)?.setKeepAliveWhenCovered(value.flag())
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(value.flag())
+            PropKey.MEDIA_AUTO_PLAY_VISIBLE ->
+                (view as? PamMediaView)?.setAutoPlayVisible(value.decimal().toFloat())
+            PropKey.MEDIA_AUTO_PLAY_GROUP -> (view as? PamMediaView)?.setAutoPlayGroup(value.text(key))
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> {
@@ -4897,6 +4903,8 @@ class PamRenderer(
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED -> (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(false)
+            PropKey.MEDIA_AUTO_PLAY_VISIBLE -> (view as? PamMediaView)?.setAutoPlayVisible(0f)
+            PropKey.MEDIA_AUTO_PLAY_GROUP -> (view as? PamMediaView)?.setAutoPlayGroup("")
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             -> if (

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- MediaPlayer `autoPlayVisible` / `autoPlayGroup` (extension properties 1006
+  and 1007, `MediaPlayer::autoPlayWhenVisible()`): Android plays a video while
+  at least that share of it shows and its list is at rest, one per group and
+  list, pausing below `fraction - 0.2` and releasing the decoder 1.5 s later;
+  positions resume per source. No PHP round-trip for autoplay changes.
+  PamAutoplayPolicyTest (JVM), PamVisibleAutoplayInstrumentedTest.
+
 ## 1.46.6 - 2026-10-29
 
 RN layout/text parity and Android list/media fixes on top of 1.46.5, no protocol change.

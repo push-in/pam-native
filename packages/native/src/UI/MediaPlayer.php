@@ -101,6 +101,33 @@ final class MediaPlayer extends Element
         return $this->withProperty(PropKey::MediaIdleSurface, $idle);
     }
 
+    /**
+     * Visible autoplay, decided natively with no round-trip: the player
+     * prepares and plays while at least `$fraction` of it shows on screen and
+     * its scrolling list is at rest (not dragged, not flinging); it pauses
+     * when it falls below `$fraction - 0.2` (or another player of its group
+     * takes over) and releases its decoder shortly after, keeping its
+     * position for when it plays again. `autoPlay` stays the play intent:
+     * false keeps the player paused whatever its visibility.
+     *
+     * `$group`: players sharing a group inside the same list play one at a
+     * time (the one already playing while it stays visible, else the topmost
+     * eligible). An empty group lets each player decide alone.
+     *
+     * Android renderer; others declare the properties and ignore them, so
+     * keep a visibility gate of your own there. Requires a renderer declaring
+     * properties 1006 (fraction) and 1007 (group).
+     */
+    public function autoPlayWhenVisible(float $fraction = 0.5, string $group = ''): self
+    {
+        if (!is_finite($fraction) || $fraction <= 0.0 || $fraction > 1.0) {
+            throw new InvalidArgumentException('Visible autoplay fraction must be in (0, 1].');
+        }
+        $player = $this->withProperty(PropKey::MediaAutoPlayVisible, $fraction);
+
+        return $group === '' ? $player : $player->withProperty(PropKey::MediaAutoPlayGroup, $group);
+    }
+
     public function fit(ImageFit $fit): self
     {
         return $this->withProperty(PropKey::ImageFit, $fit->value);

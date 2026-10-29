@@ -557,4 +557,6 @@ enum PropKey: int
     case MediaStartBufferMs = 1003;
     case MediaIdleSurface = 1004;
     case ScrollOffsetAnimationMs = 1005;
+    case MediaAutoPlayVisible = 1006;
+    case MediaAutoPlayGroup = 1007;
 }

@@ -1229,6 +1229,45 @@ Provider and local sources keep their context-aware handling through
 changing it to `false` pauses playback without resetting the current position.
 This makes a bound boolean suitable for custom play/pause controls.
 
+### Visible autoplay
+
+A feed of videos can autoplay with no PHP round-trip: the renderer decides
+which player plays from what shows on screen.
+
+```xml
+<MediaPlayer
+    :source="$post['video']"
+    :thumbnail="$post['poster']"
+    autoPlay="true"
+    autoPlayVisible="0.5"
+    autoPlayGroup="feed"
+    loop="true"
+    :muted="$muted"
+/>
+```
+
+```php
+MediaPlayer::make($url)->autoPlay()->autoPlayWhenVisible(0.5, group: 'feed');
+```
+
+- `autoPlayVisible` (`0 < fraction <= 1`, `true` = `0.5`): the player is
+  created, prepared and played only while at least that share of it is on
+  screen and every scrolling list holding it is at rest (not dragged, not
+  flinging). A playing one keeps playing while the list moves, until it
+  falls below `fraction - 0.2`; then it pauses at once and releases its
+  decoder 1.5 s later (scrolling back within that time resumes instantly).
+- `autoPlayGroup`: players sharing a group inside the same list play one at
+  a time — the one already playing while it still meets its fraction, else
+  the topmost that does. Without a group each player decides alone.
+- Position: a source that plays again (the same view, or a recycled cell)
+  resumes where it stopped. `muted`, `loop` and the rest stay ordinary props;
+  `autoPlay` stays the play intent, so `autoPlay="false"` keeps a player
+  paused whatever its visibility (data saver, an open sheet).
+- Covered routes, inactive tabs and the app in background never play.
+- Renderer support: Android (extension properties 1006 and 1007). Other
+  renderers declare and ignore them, so keep a visibility gate of your own
+  there (for example `p-intersect`).
+
 Set `thumbnail` to avoid an empty surface while a video prepares. The Android
 renderer keeps the poster in front of the video surface until the first frame
 is actually rendered:
