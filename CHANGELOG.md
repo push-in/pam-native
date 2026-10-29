@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.46.7 - 2026-10-29
+
+Keyboard follow, native visible autoplay (extension props 1006/1007) and list seam fix on top of 1.46.6.
+
 - Android keyboard: the root follows every frame of the IME show/hide
   animation (engine viewport and layout), so content above the keyboard
   moves with it in one motion instead of jumping to the end state; keyboard
