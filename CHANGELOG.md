@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Android `Input` font sizes are whole (ceiled) pixels like React Native's
+  TextInput (15sp at 2.625 draws at 40 px, not 39.375).
 - Android text: `numberOfLines="1"` lays the text out as one unwrapped line
   (horizontally scrolling TextView, no input or marquee change), so the tail
   ellipsis cuts mid-word like React Native ("hoje à…") instead of breaking
