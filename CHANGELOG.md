@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Android: a virtual list row re-measured while the list rests keeps the
+  first fully visible row at its pixel offset (a partly hidden top row that
+  grew used to push every row on screen).
+
 - Android debug builds: `adb shell setprop log.tag.PamListTrace DEBUG` logs
   each drawn frame's visual row motion of virtual lists (`dy`, rows in common,
   scroll state), a recording-free way to prove there are no jumps or snaps.

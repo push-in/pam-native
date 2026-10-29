@@ -118,6 +118,50 @@ class PamListNativeScrollInstrumentedTest {
         )
     }
 
+    @Test
+    fun aRowResizedAtRestNeverMovesTheRowsOnScreen() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var list: PamRecyclerList
+        val ids = (1L..200L).toList()
+        try {
+            onMain(instrumentation) {
+                list = PamRecyclerList(activity)
+                activity.host.addView(
+                    list,
+                    FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+                )
+                list.setRichItems(ids, extents(ids), ::bindRow, { _, holder -> holder.removeAllViews() })
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                (list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager).scrollToPositionWithOffset(40, -30)
+            }
+            awaitFrames(instrumentation, 3)
+            var fullId = 0L
+            var fullTop = 0
+            onMain(instrumentation) {
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                val partial = manager.findFirstVisibleItemPosition()
+                val full = manager.findFirstCompletelyVisibleItemPosition()
+                assertTrue("the top row is partly hidden", partial < full)
+                fullId = ids[full]
+                fullTop = requireNotNull(manager.findViewByPosition(full)).top
+                // The partly hidden top row grows (an image or a preview arrived).
+                val grown = extents(ids).toMutableMap().also { it[ids[partial]] = it.getValue(ids[partial]) + 140f }
+                list.setRichItems(ids, grown, ::bindRow, { _, holder -> holder.removeAllViews() })
+            }
+            awaitFrames(instrumentation, 4)
+            onMain(instrumentation) {
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                val view = requireNotNull(manager.findViewByPosition(ids.indexOf(fullId)))
+                assertEquals("the first fully visible row keeps its pixel offset", fullTop, view.top)
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
     private fun anchored(
         initial: List<Long>,
         scrollTo: Pair<Int, Int>,

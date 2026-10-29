@@ -835,8 +835,12 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   page, a sliding window) keep the first visible row at its exact pixel
   offset. Rows prepended right below a leading row that is on screen (a
   header, a "loading older" row) go above the viewport too: the first row
-  after them keeps its offset. Windowing code must not "anchor" with a scroll
-  request.
+  after them keeps its offset. A row re-measured at rest (an image, a link
+  preview or reactions arriving) keeps the first fully visible row at its
+  offset, even when the partly hidden top row grew (RecyclerView kept that
+  row's top and pushed every row on screen); a list resting at its end with
+  `followEndOnResize` keeps following the end. Windowing code must not
+  "anchor" with a scroll request.
 - **The user's gesture wins.** A `scrollRequest` committed while the user's
   own drag or fling moves the list is dropped, so it neither cuts the fling
   nor snaps the list once it settles. The exception is a request the user

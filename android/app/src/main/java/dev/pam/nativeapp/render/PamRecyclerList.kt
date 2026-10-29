@@ -280,6 +280,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp(start = prepended, end = appended)
         }
         val headAnchor = headInsertAnchorCapture(richIds, ids)
+        // Rows re-measured at rest (media, a preview or reactions arriving):
+        // RecyclerView keeps the partly hidden top row's top, so a height
+        // change there pushed every visible row. The first fully visible row
+        // keeps its pixel offset instead; a list resting at its end keeps
+        // following the end.
+        val resizeAnchor = if (headAnchor == null && !keepEnd && ids == richIds && pixelExtents != richExtents) {
+            firstFullyVisibleAnchor()
+        } else {
+            null
+        }
         richIds = ids
         richExtents = pixelExtents
         richSpans = rowSpan?.let { span ->
@@ -305,6 +315,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         updateHeaderSpans()
         applyInitialPosition()
         headAnchor?.let(::restoreHeadInsertAnchor)
+        resizeAnchor?.let(::restoreHeadInsertAnchor)
         if (sectionSwitch != null && sectionRestore != null) enterSection(sectionSwitch, sectionRestore)
     }
 
@@ -323,6 +334,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         val id = headInsertAnchor(previous, next, first) ?: return null
         val view = manager.findViewByPosition(previous.indexOf(id)) ?: return null
         return id to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
+    }
+
+    /** (row id, top px) of the first row fully on screen, when the list is laid out and idle. */
+    private fun firstFullyVisibleAnchor(): Pair<Long, Int>? {
+        if (!initialPositionApplied || inverted || !isLaidOut || scrollState != SCROLL_STATE_IDLE) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val position = manager.findFirstCompletelyVisibleItemPosition()
+        if (position == NO_POSITION || position >= richIds.size) return null
+        val view = manager.findViewByPosition(position) ?: return null
+        return richIds[position] to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
     }
 
     private fun restoreHeadInsertAnchor(anchor: Pair<Long, Int>) {
