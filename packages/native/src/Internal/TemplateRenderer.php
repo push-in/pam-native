@@ -2082,15 +2082,7 @@ final class TemplateRenderer
             // The press feedback of the builder classes (TouchableOpacity::make()...).
             'TouchableOpacity', 'TouchableHighlight', 'TouchableWithoutFeedback' => Pressable::make(...$children)
                 ->pressedOpacity(self::TOUCHABLE_OPACITY[$tag]),
-            'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
-                $values['animating'] ?? $values['visible'] ?? true,
-                'ActivityIndicator animating',
-            ))
-                ->hidesWhenStopped(self::boolValue(
-                    $values['hidesWhenStopped'] ?? true,
-                    'ActivityIndicator hidesWhenStopped',
-                ))
-                ->size(self::activityIndicatorSize($values['size'] ?? 'small')),
+            'ActivityIndicator' => self::activityIndicator($values),
             'Switch' => Toggle::make(self::boolValue($values['checked'] ?? false, 'Switch checked')),
             'Modal' => Modal::make(
                 self::singleChild($children, $tag),
@@ -5270,6 +5262,25 @@ final class TemplateRenderer
         }
 
         return $parts;
+    }
+
+    /** @param array<string, mixed> $values */
+    private static function activityIndicator(array $values): ActivityIndicator
+    {
+        $indicator = ActivityIndicator::make(self::boolValue(
+            $values['animating'] ?? $values['visible'] ?? true,
+            'ActivityIndicator animating',
+        ))
+            ->hidesWhenStopped(self::boolValue(
+                $values['hidesWhenStopped'] ?? true,
+                'ActivityIndicator hidesWhenStopped',
+            ))
+            ->size(self::activityIndicatorSize($values['size'] ?? 'small'));
+
+        // React Native spelling: `color` tints the spinner unless `progressColor` is authored too.
+        return isset($values['color']) && !isset($values['progressColor'])
+            ? $indicator->color(self::colorValue($values['color'], 'ActivityIndicator color'))
+            : $indicator;
     }
 
     private static function colorValue(mixed $value, string $context): int
