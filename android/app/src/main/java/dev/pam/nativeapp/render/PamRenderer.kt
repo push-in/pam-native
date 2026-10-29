@@ -2354,10 +2354,8 @@ class PamRenderer(
 
     private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
         list.post {
-            // Never cut a user's drag or fling: run (latest wins) once it rests.
-            if (list.deferWhileUserScrolls { if (nodes[state.id] === state) requestVirtualListScroll(list, state) }) {
-                return@post
-            }
+            // The user's drag or fling wins over requests they did not ask for.
+            if (!list.acceptsProgrammaticScroll(lastUserActionAt)) return@post
             val targetTestId = state.textOrNull(PropKey.SCROLL_TARGET_TEST_ID).orEmpty()
             val targetOffset = if (targetTestId.isNotEmpty()) {
                 val targetId = descendantWithTestId(state.id, targetTestId)
@@ -6884,7 +6882,13 @@ class PamRenderer(
         dispatchBytes(id, kind, bytes)
     }
 
+    /** Uptime of the last press, long press or submit the user made (ms). */
+    private var lastUserActionAt = 0L
+
     private fun dispatchBytes(id: Long, kind: Int, payload: ByteArray) {
+        if (kind == EVENT_PRESS || kind == EVENT_LONG_PRESS || kind == EVENT_SUBMIT) {
+            lastUserActionAt = SystemClock.uptimeMillis()
+        }
         if (payload.size <= MAX_EVENT_BYTES) dispatchEvent(id, kind, payload)
     }
 

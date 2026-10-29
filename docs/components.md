@@ -837,9 +837,12 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   header, a "loading older" row) go above the viewport too: the first row
   after them keeps its offset. Windowing code must not "anchor" with a scroll
   request.
-- **A fling is never cut.** A `scrollRequest` committed while the user's own
-  drag or fling moves the list waits until it rests, then runs once (the
-  latest request). Inserts during a fling do not stop it.
+- **The user's gesture wins.** A `scrollRequest` committed while the user's
+  own drag or fling moves the list is dropped, so it neither cuts the fling
+  nor snaps the list once it settles. The exception is a request the user
+  asked for: one committed after a press, long press or submit made since the
+  gesture began (a send button, a "jump to latest" button) runs at once.
+  Inserts during a fling do not stop it.
 
 Covered by `packages/native/tests/list_native_scroll.php` and the Android
 `PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest`.

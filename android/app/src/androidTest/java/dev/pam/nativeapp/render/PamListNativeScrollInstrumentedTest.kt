@@ -19,15 +19,15 @@ import org.junit.runner.RunWith
 
 /**
  * Native scrolling guarantees of virtual lists, for any app: a programmatic
- * scroll committed during the user's own fling waits until the list rests
- * (the fling is never cut short), and rows inserted or removed above the
+ * scroll the user did not ask for never moves their drag or fling (neither
+ * during it nor after it settles), and rows inserted or removed above the
  * viewport (prepended pages, sliding windows, rows prepended right below a
  * header) keep the first visible row at its exact pixel offset.
  */
 @RunWith(AndroidJUnit4::class)
 class PamListNativeScrollInstrumentedTest {
     @Test
-    fun scrollRequestDuringUserFlingWaitsUntilRest() {
+    fun aRequestTheUserDidNotAskForNeverMovesTheirFling() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
         lateinit var list: PamRecyclerList
@@ -42,19 +42,21 @@ class PamListNativeScrollInstrumentedTest {
                 list.setRichItems(ids, ids.associateWith { 64f }, ::bindRow, { _, holder -> holder.removeAllViews() })
             }
             instrumentation.waitForIdleSync()
+            val beforeFling = SystemClock.uptimeMillis()
             fling(instrumentation, list)
-            var deferredRan = false
             onMain(instrumentation) {
                 assertEquals(RecyclerView.SCROLL_STATE_SETTLING, list.scrollState)
-                assertTrue(list.deferWhileUserScrolls { deferredRan = true })
+                // An anchor or follow-the-end committed mid-fling: dropped.
+                assertFalse(list.acceptsProgrammaticScroll(beforeFling))
                 // Rows joining above the viewport mid-fling: no positioning.
                 val ids = (-15L..400L).filter { it != 0L }
                 list.setRichItems(ids, ids.associateWith { 64f }, ::bindRow, { _, holder -> holder.removeAllViews() })
+                // A press the user made after the fling began (send, jump): runs.
+                assertTrue(list.acceptsProgrammaticScroll(SystemClock.uptimeMillis()))
             }
             awaitFrames(instrumentation, 4)
             onMain(instrumentation) {
                 assertEquals("the fling keeps running", RecyclerView.SCROLL_STATE_SETTLING, list.scrollState)
-                assertFalse(deferredRan)
             }
             val deadline = SystemClock.uptimeMillis() + 10_000
             while (SystemClock.uptimeMillis() < deadline) {
@@ -64,17 +66,24 @@ class PamListNativeScrollInstrumentedTest {
                 SystemClock.sleep(50)
             }
             instrumentation.waitForIdleSync()
+            var restingTop = 0
+            var restingFirst = 0
             onMain(instrumentation) {
-                assertTrue("the request runs once the fling rests", deferredRan)
-                var immediate = false
-                assertFalse(list.deferWhileUserScrolls { immediate = true })
-                assertFalse(immediate)
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                restingFirst = manager.findFirstVisibleItemPosition()
+                restingTop = requireNotNull(manager.findViewByPosition(restingFirst)).top
+            }
+            awaitFrames(instrumentation, 10)
+            onMain(instrumentation) {
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                assertEquals("nothing moves the list after the fling settles", restingFirst, manager.findFirstVisibleItemPosition())
+                assertEquals(restingTop, requireNotNull(manager.findViewByPosition(restingFirst)).top)
+                assertTrue("requests run normally at rest", list.acceptsProgrammaticScroll(0L))
             }
         } finally {
             onMain(instrumentation) { activity.finish() }
         }
     }
-
 
     @Test
     fun prependAboveTheViewportKeepsTheFirstVisibleRowPixelOffset() {

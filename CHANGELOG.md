@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- Virtual lists (Android): a `scrollRequest` committed while the
-  user's own drag or fling moves the list waits until it rests (latest request
-  wins) instead of stopping the scroller; anchor-style requests issued while a
-  window shifted cut flings short and jumped the list.
+- Virtual lists (Android): a `scrollRequest` committed while the user's own
+  drag or fling moves the list is dropped unless the user asked for it (a
+  press, long press or submit since the gesture began, e.g. send or "jump to
+  latest"). Anchor-style requests issued while a window shifted cut flings
+  short and jumped the list; run after the fling they snapped it at rest.
 - Android: rows prepended right below a leading row on screen (a header, a
   "loading older" row) keep the first row after them at its pixel offset,
   like any prepend above the viewport (RecyclerView kept the header and

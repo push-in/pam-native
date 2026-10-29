@@ -68,8 +68,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     /** A finger drag, or the fling it released, is moving the list. */
     private var userScrolling = false
 
-    /** The latest programmatic scroll that arrived during [userScrolling]. */
-    private var deferredScroll: (() -> Unit)? = null
+    /** When the user's current drag began (uptime ms). */
+    private var userScrollStartedAt = 0L
     private var releaseVelocityX = 0f
     private var releaseVelocityY = 0f
     private var richIds: List<Long> = emptyList()
@@ -90,14 +90,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 when (newState) {
-                    SCROLL_STATE_DRAGGING -> userScrolling = true
-                    SCROLL_STATE_IDLE -> if (userScrolling) {
-                        userScrolling = false
-                        deferredScroll?.let { action ->
-                            deferredScroll = null
-                            post(action)
-                        }
+                    SCROLL_STATE_DRAGGING -> if (!userScrolling) {
+                        userScrolling = true
+                        userScrollStartedAt = android.os.SystemClock.uptimeMillis()
                     }
+                    SCROLL_STATE_IDLE -> userScrolling = false
                 }
                 val listener = scrollPhase ?: return
                 val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
@@ -577,20 +574,19 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     /**
-     * Runs a programmatic scroll now, or once the user's own drag or fling
-     * comes to rest (true when deferred). Positioning stops the scroller, so
-     * a request committed mid-gesture (an anchor, a follow-the-end) would
-     * cut the fling short and jump; the user's motion wins and only the
-     * latest request runs after it.
+     * Whether a programmatic scroll may move the list now. While the user's
+     * own drag or fling moves it, only a request the user asked for (a press
+     * or submit elsewhere after the gesture began, [userActionAt] in uptime
+     * ms: a send, a jump button) takes over. Any other request (an anchor, a
+     * follow-the-end, a window shift) is dropped: run then it cut the fling
+     * short, and run after it settled it snapped the resting list.
      */
-    fun deferWhileUserScrolls(action: () -> Unit): Boolean {
+    fun acceptsProgrammaticScroll(userActionAt: Long): Boolean {
         if (!userScrolling || scrollState == SCROLL_STATE_IDLE) {
             userScrolling = false
-            deferredScroll = null
-            return false
+            return true
         }
-        deferredScroll = action
-        return true
+        return userActionAt >= userScrollStartedAt
     }
 
     /**
