@@ -35,6 +35,10 @@ final readonly class DeviceInfo
         public string $buildNumber = '',
         /** System language as a BCP 47 tag ("pt-BR"); '' when unknown. See I18n::resolve(). */
         public string $locale = '',
+        /** Android Build.MANUFACTURER; empty when the host does not provide it. */
+        public string $manufacturer = '',
+        /** Android Build.MODEL; empty when the host does not provide it. */
+        public string $model = '',
     ) {
     }
 
@@ -83,6 +87,8 @@ final readonly class DeviceInfo
                     appVersion: trim((string) ($values['appVersion'] ?? '')),
                     buildNumber: trim((string) ($values['buildNumber'] ?? '')),
                     locale: trim((string) ($values['locale'] ?? '')),
+                    manufacturer: trim((string) ($values['manufacturer'] ?? '')),
+                    model: trim((string) ($values['model'] ?? '')),
                 ));
             },
         );

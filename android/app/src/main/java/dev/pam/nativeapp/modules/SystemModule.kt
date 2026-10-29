@@ -309,6 +309,8 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                         "appVersion" to WireValue.Text(installedAppVersion()),
                         "buildNumber" to WireValue.Text(installedBuildNumber()),
                         "locale" to WireValue.Text(java.util.Locale.getDefault().toLanguageTag()),
+                        "manufacturer" to WireValue.Text(Build.MANUFACTURER),
+                        "model" to WireValue.Text(Build.MODEL),
                         "safeAreaTop" to WireValue.Decimal(
                             safeTop / density.toDouble(),
                         ),

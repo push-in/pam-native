@@ -4367,6 +4367,24 @@ $legacyDeviceInfo = new DeviceInfo(
     appState: AppState::Active,
 );
 $assert(
+    $legacyDeviceInfo->manufacturer === '' && $legacyDeviceInfo->model === '',
+    'Older hosts must keep empty device identity fields.',
+);
+$decodedDeviceInfo = null;
+App::run(Text::make('Device identity'));
+$deviceInfoRequest = DeviceInfo::get(static function (DeviceInfo $info) use (&$decodedDeviceInfo): void {
+    $decodedDeviceInfo = $info;
+});
+Runtime::dispatchModuleResult($deviceInfoRequest, ModuleResultStatus::Success->value, Wire::map([
+    'manufacturer' => ' Motorola ',
+    'model' => ' moto g54 5G ',
+]));
+$assert(
+    $decodedDeviceInfo?->manufacturer === 'Motorola' && $decodedDeviceInfo?->model === 'moto g54 5G',
+    'Device info must decode and trim native manufacturer and model.',
+);
+Runtime::shutdown();
+$assert(
     $legacyDeviceInfo->safeAreaTop === 0.0
         && $legacyDeviceInfo->safeAreaRight === 0.0
         && $legacyDeviceInfo->safeAreaBottom === 0.0
@@ -4510,6 +4528,13 @@ $assert(
 );
 foreach (ThemeMode::cases() as $themeMode) {
     App::theme(Theme::adaptive($themeMode));
+    $indicatorTheme = Theme::adaptive($themeMode);
+    $accent = $indicatorTheme->classes['accent'][PropKey::BackgroundColor->value];
+    $assert(
+        $indicatorTheme->applyTo(\Pam\Native\UI\ActivityIndicator::make())->properties()[PropKey::ProgressColor->value] === $accent
+            && $indicatorTheme->applyTo(\Pam\Native\UI\ActivityIndicator::make()->color(0xFFFF00FF))->properties()[PropKey::ProgressColor->value] === 0xFFFF00FF,
+        "ActivityIndicator {$themeMode->name} must inherit accent and preserve explicit colors.",
+    );
     $buttonTokens = TemplateRegistry::classProperties('button-primary');
     $surfaceTokens = TemplateRegistry::classProperties('surface');
     $surfaceMutedTokens = TemplateRegistry::classProperties('surface-muted');

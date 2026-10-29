@@ -140,6 +140,9 @@ final readonly class Theme
                 PropKey::BorderWidth->value => 3.0,
             ],
         ], [
+            NodeKind::ActivityIndicator->value => [
+                PropKey::ProgressColor->value => $palette['accent'],
+            ],
             NodeKind::Screen->value => [
                 PropKey::FlexGrow->value => 1.0,
                 PropKey::BackgroundColor->value => $palette['surface'],

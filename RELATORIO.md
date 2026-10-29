@@ -1,3 +1,22 @@
+# q2 — identidade, acento e descarte de mídia Android (29/10/2026)
+
+Registro final que supera a validação parcial de z5 abaixo. Worktree `codex-misc-polish-fw`, rebaseado na integração; commits pequenos com `[skip ci]`, sem tag.
+
+- `DeviceInfo` expõe fabricante/modelo opcionais, com strings vazias para hosts antigos. Android fornece os campos de `Build`; o decoder PHP remove espaços externos. O teste de resposta nativa agora inicializa e encerra o runtime antes do dispatch.
+- `Theme::adaptive` fornece o acento como cor padrão de ActivityIndicator; o spinner Android usa `colorAccent` como fallback e mantém prioridade de cores explícitas.
+- `PamExoPlayback` possui o player num looper próprio. Comandos, mute/pausa e release permanecem ordenados nessa thread; callbacks retornam à UI, clocks usam snapshots imutáveis e a thread termina após o descarte. Isso retira a espera de liberação do codec do commit da UI e impede áudio antigo durante o teardown.
+- `PamMediaView` mantém dimensões do vídeo enquanto conserva uma superfície ociosa, preservando o contain/cover atrás de sheets. Nenhuma mudança de protocolo ou API pública de playback. A atribuição Android `media` do último remoto foi preservada ao resolver o conflito.
+
+Suíte completa PHP do SDK verde com TMPDIR isolado e **338/338 testes JVM** verdes após o último rebase. Consumidor com **502/502 validadores cobertos**, executados um por vez, limpando staging após cada um; última rodada completa 500/502, duas correções/reexecuções aprovadas e mais sete gates relacionados. Os testes usam cópia privada deste framework no vendor.
+
+QA em um único emulador Android API 36 com GPU host, sob lock e sessões inferiores a 20 minutos. Os maiores commits dos três primeiros deslizes após reinícios caíram de **352,13 / 24,40 / 50,38 ms** para **8,86 / 7,85 / 11,60 ms**; sem erro de thread ou crash nos logs verificados. Após sair da mídia, nenhuma thread proprietária/Playback permaneceu ativa e a CPU em repouso foi 0,0%. PSS após seis retornos: **243,7 → 247,3 → 240,1 MiB**.
+
+Limite preservado no relatório: `gfxinfo` global ainda apresentou p90 16–21 ms e p99 150–250 ms no consumidor; a resolução do pico de commit não homologa o orçamento global de frames. Evidências e APKs em `~/.local/share/pam-codex/shots/q2/`; validações em `/tmp/q2-validation/`. O último rebase agregou atribuição/profiler/janelas concorrentes e foi recompilado/revalidado; as capturas antecedem esse pull.
+
+Gradle/cargo somente sob lock, heap 3 GB e quatro workers; daemon parado ao final. Sem Mac, Swift, aparelhos físicos reservados ou tags. Limpeza restrita a staging/build/vendor próprios; disco entre aproximadamente 11 e 2 GB, sem recuperação suficiente para 20 GB apagando apenas artefatos próprios. Empacotamento fica com o coordenador.
+
+---
+
 # Relatório — integração 1.46.0 (codex-integrate146)
 
 ## O que foi feito
@@ -214,3 +233,12 @@ executados sequencialmente contra o código PHP deste framework, mais
 Sem revisão da versão publicada ou criação de tag. Integração por avanço
 rápido em `integrate/port3-20261027`, com pull/rebase antes do push.
 Artefatos próprios de validação removidos ao encerrar.
+
+## z5 — identidade Android e acento de carregamento (parcial)
+
+- Worktree próprio `codex-misc-polish-fw`, branch `codex/misc-polish-fw`, criado da integração após fetch; rebase confirmado.
+- `DeviceInfo`: campos opcionais `manufacturer` e `model` adicionados ao fim do construtor, mantendo compatibilidade com hosts antigos; Android fornece `Build.MANUFACTURER`/`Build.MODEL`, PHP decodifica e remove espaços externos.
+- `Theme::adaptive`: ActivityIndicator sem cor explícita recebe o acento de cada modo. Spinner nativo passa a consultar `android.R.attr.colorAccent` como fallback. Cores explícitas continuam prioritárias.
+- Regressões adicionadas em `packages/native/tests/run.php`: metadados antigos vazios, decodificação wire, acento claro/escuro/alto contraste e prioridade da cor explícita.
+- Verificação isolada de contratos passou; lint PHP e `git diff --check` passaram. A suíte completa do framework, compilação Kotlin e QA visual Android continuam pendentes.
+- Ambiente com apenas ~3–5 GB livres; mínimo exigido de 20 GB inviável por limpeza própria (checkout sem vendor/build/.pam-native). Não foram apagados artefatos alheios nem usados locks de outra tarefa. Sem build/emulador, merge, push ou tag; commit local apenas. Não liberado para integração.
