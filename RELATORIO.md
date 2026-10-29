@@ -182,3 +182,33 @@ edição deste arquivo pela tarefa z2. Vendor, .pam-native, builds, .cxx e targe
 próprios foram removidos. O disco permaneceu abaixo de 20 GB por uso
 concorrente; nenhum artefato alheio foi apagado. Não houve Mac, Swift, aparelho
 físico, nova tag ou workflow disparado manualmente.
+
+## z4 — foco depois de setup/onMounted (2026-10-28)
+
+Reaplicado `accc118b` em `codex-focus-setup-fw` sobre
+`origin/integrate/port3-20261027`, com resolução apenas do conflito de
+CHANGELOG (preservadas as entradas atuais). O foco de navegação aguarda
+`setup()` e `onMounted()`; sair antes do mount cancela a entrega. A mudança
+não adiciona funcionalidade opcional ao núcleo nem altera renderizadores,
+listas, shared elements ou código de plataforma.
+
+Validação: `packages/native/tests/arch_v2_focus_order.php` e suíte completa
+`packages/native/tests/run.php` verdes com o PHP embarcado 2.2.7. A suíte
+completa usou `TMPDIR=/tmp/z4-fw-tests`, isolado desta tarefa: a primeira
+execução encontrou classe duplicada em cache temporário compartilhado;
+nenhum temporário alheio foi removido. Log: `/tmp/z4-framework-tests.log`.
+O teste cobre abertura inicial, push, back, keep-alive, modal e tabs.
+
+Sem build Android, Gradle, cargo ou emulador nesta tarefa: mudança apenas
+PHP; QA visual não executado. O disco já iniciou abaixo de 20 GB livres,
+sem artefatos próprios preexistentes que permitissem recuperar o mínimo.
+Mantidas apenas verificações leves e limpeza dos artefatos desta tarefa.
+Nenhuma tag foi criada. A integração depende dos validadores completos do
+consumidor, executados contra uma cópia deste framework no vendor local.
+
+Gate do consumidor concluído: **501/501** validadores próprios verdes,
+executados sequencialmente contra o código PHP deste framework, mais
+**32/32** cenários de perfil/sessão reexecutados após o ajuste final.
+Sem revisão da versão publicada ou criação de tag. Integração por avanço
+rápido em `integrate/port3-20261027`, com pull/rebase antes do push.
+Artefatos próprios de validação removidos ao encerrar.
