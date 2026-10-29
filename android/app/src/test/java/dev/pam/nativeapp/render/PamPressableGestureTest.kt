@@ -68,4 +68,27 @@ class PamPressableGestureTest {
         assertEquals(0f, left, 0.0001f)
         assertEquals(-360f, boundedTranslation(-1_000f, 360f, 360f, 0f, 2f), 0.0001f)
     }
+
+    @Test
+    fun nestedPressableWithoutLongPressLendsItToTheNearestHandler() {
+        val plain = NestedLongPressNode(hasLongPress = false, enabled = true, boundary = false)
+        val bubble = NestedLongPressNode(hasLongPress = true, enabled = true, boundary = false)
+        val list = NestedLongPressNode(hasLongPress = false, enabled = false, boundary = true)
+        // Play button inside the bubble: the bubble's long press opens the menu.
+        assertEquals(0, nestedLongPressTarget(listOf(bubble, list)))
+        // Through plain wrappers, nearest handler wins.
+        assertEquals(1, nestedLongPressTarget(listOf(plain, bubble, bubble)))
+        // A disabled handler swallows it (RN: a disabled responder does not forward).
+        assertEquals(-1, nestedLongPressTarget(listOf(bubble.copy(enabled = false), bubble)))
+        // Never across a list/scroll boundary, and nothing to lend to.
+        assertEquals(-1, nestedLongPressTarget(listOf(plain, list, bubble)))
+        assertEquals(-1, nestedLongPressTarget(emptyList()))
+    }
+
+    @Test
+    fun lentLongPressUsesTheReceiversDelay() {
+        assertEquals(300L, nestedLongPressDelay(own = 500L, hasOwnLongPress = false, ancestorDelay = 300L))
+        assertEquals(500L, nestedLongPressDelay(own = 500L, hasOwnLongPress = true, ancestorDelay = 300L))
+        assertEquals(500L, nestedLongPressDelay(own = 500L, hasOwnLongPress = false, ancestorDelay = null))
+    }
 }

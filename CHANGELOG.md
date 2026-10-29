@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Android Pressable: a nested Pressable without `onLongPress` lends the long
+  press to the nearest enclosing Pressable that has one (never across a
+  scroll view or list), like React Native, using that receiver's
+  `delayLongPress`. The nested press is cancelled, so its `onPress` does not
+  fire on release. Before, the inner Pressable kept the gesture and the long
+  press was lost (e.g. a play button inside a long-pressable card).
 - Android virtual lists snap rows like Yoga: a row spans round(start) ..
   round(start + extent) of the running offset instead of rounding each
   height alone (rows drifted 1-2 px and left a 1 px hairline between
