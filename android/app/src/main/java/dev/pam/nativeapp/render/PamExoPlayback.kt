@@ -2,6 +2,10 @@ package dev.pam.nativeapp.render
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
+import android.os.SystemClock
 import android.view.Surface
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -11,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Buffer targets of a `MediaPlayer` with `preloadSeconds` (the forward
@@ -69,11 +74,11 @@ private const val EXO_BUFFER_FOR_PLAYBACK_MS = 2_500
 private const val EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 5_000
 
 /**
- * Media3 ExoPlayer behind a [PamMediaView] that declares a forward buffer
- * (`preloadSeconds` > 0). Android's MediaPlayer exposes no buffer control,
- * so only those players use ExoPlayer; every other one keeps MediaPlayer.
- * ExoPlayer is driven from the main thread (its application looper) and
- * reports back through [Listener] on that thread.
+ * Media3 player owned entirely by a short-lived media looper. In particular,
+ * ExoPlayer.release() waits for its playback thread/codec: doing that inside a
+ * recycled cell's UI commit can block a first page change for hundreds of ms.
+ * Commands and release stay ordered on the owner; callbacks return to the UI.
+ * Immutable snapshots let the UI read clocks without waiting for that looper.
  */
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 internal class PamExoPlayback(
@@ -90,111 +95,185 @@ internal class PamExoPlayback(
         fun onError(message: String)
     }
 
-    private val player: ExoPlayer = ExoPlayer.Builder(mediaContext(context))
-        .setLoadControl(
-            DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    buffer.minBufferMs,
-                    buffer.maxBufferMs,
-                    buffer.bufferForPlaybackMs,
-                    buffer.bufferForPlaybackAfterRebufferMs,
-                )
-                .setPrioritizeTimeOverSizeThresholds(true)
-                .build(),
-        )
-        .build()
+    private data class Snapshot(
+        val position: Long = 0,
+        val duration: Long = 0,
+        val buffered: Int = 0,
+        val audioSession: Int = 0,
+        val playing: Boolean = false,
+        val speed: Float = 1f,
+        val sampledAt: Long = 0,
+    )
+
+    private val main = Handler(Looper.getMainLooper())
+    private val ownerThread = HandlerThread("PamMediaOwner").apply { start() }
+    private val owner = Handler(ownerThread.looper)
+    private val released = AtomicBoolean(false)
+    @Volatile private var snapshot = Snapshot()
+    // Accessed only on ownerThread.
+    private var player: ExoPlayer? = null
     private var prepared = false
     private var buffering = false
-    private var released = false
+    private val clock = object : Runnable {
+        override fun run() {
+            if (released.get()) return
+            val current = player ?: return
+            sample(current)
+            if (current.isPlaying) owner.postDelayed(this, 250)
+        }
+    }
 
     init {
-        player.addListener(
-            object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (released) return
-                    when (playbackState) {
-                        Player.STATE_READY -> {
-                            setBuffering(false)
-                            if (!prepared) {
-                                prepared = true
-                                val size = player.videoSize
-                                listener.onPrepared(size.width, size.height, durationMs)
+        val appContext = mediaContext(context)
+        owner.post {
+            if (released.get()) return@post
+            runCatching {
+                val current = ExoPlayer.Builder(appContext)
+                    .setLooper(owner.looper)
+                    .setLoadControl(
+                        DefaultLoadControl.Builder()
+                            .setBufferDurationsMs(
+                                buffer.minBufferMs,
+                                buffer.maxBufferMs,
+                                buffer.bufferForPlaybackMs,
+                                buffer.bufferForPlaybackAfterRebufferMs,
+                            )
+                            .setPrioritizeTimeOverSizeThresholds(true)
+                            .build(),
+                    )
+                    .build()
+                player = current
+                current.addListener(object : Player.Listener {
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        if (released.get()) return
+                        sample(current)
+                        owner.removeCallbacks(clock)
+                        if (current.isPlaying) owner.postDelayed(clock, 250)
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (released.get()) return
+                        sample(current)
+                        when (playbackState) {
+                            Player.STATE_READY -> {
+                                setBuffering(false)
+                                if (!prepared) {
+                                    prepared = true
+                                    val size = current.videoSize
+                                    val duration = snapshot.duration
+                                    dispatch { listener.onPrepared(size.width, size.height, duration) }
+                                }
+                            }
+                            Player.STATE_BUFFERING -> if (prepared) setBuffering(true)
+                            Player.STATE_ENDED -> {
+                                setBuffering(false)
+                                dispatch { listener.onCompletion() }
                             }
                         }
-                        Player.STATE_BUFFERING -> if (prepared) setBuffering(true)
-                        Player.STATE_ENDED -> {
-                            setBuffering(false)
-                            listener.onCompletion()
+                    }
+
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (videoSize.width > 0 && videoSize.height > 0) {
+                            dispatch { listener.onVideoSize(videoSize.width, videoSize.height) }
                         }
-                        else -> Unit
                     }
-                }
 
-                override fun onVideoSizeChanged(videoSize: VideoSize) {
-                    if (!released && videoSize.width > 0 && videoSize.height > 0) {
-                        listener.onVideoSize(videoSize.width, videoSize.height)
+                    override fun onPlayerError(error: PlaybackException) {
+                        dispatch { listener.onError("Media playback failed (${error.errorCodeName})") }
                     }
-                }
+                })
+                current.setMediaItem(MediaItem.fromUri(uri))
+                current.prepare()
+            }.onFailure { error ->
+                runCatching { player?.release() }
+                player = null
+                snapshot = snapshot.copy(playing = false)
+                dispatch { listener.onError(error.message ?: "Media source could not be prepared.") }
+                ownerThread.quitSafely()
+            }
+        }
+    }
 
-                override fun onPlayerError(error: PlaybackException) {
-                    if (!released) listener.onError("Media playback failed (${error.errorCodeName})")
-                }
-            },
+    private fun dispatch(callback: () -> Unit) {
+        main.post { if (!released.get()) callback() }
+    }
+
+    private fun command(operation: (ExoPlayer) -> Unit) {
+        if (released.get()) return
+        owner.post {
+            if (released.get()) return@post
+            val current = player ?: return@post
+            runCatching {
+                operation(current)
+                sample(current)
+            }.onFailure { error ->
+                dispatch { listener.onError(error.message ?: "Media command failed.") }
+            }
+        }
+    }
+
+    private fun sample(current: ExoPlayer) {
+        snapshot = Snapshot(
+            position = current.currentPosition.coerceAtLeast(0),
+            duration = current.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+            buffered = current.bufferedPercentage.coerceIn(0, 100),
+            audioSession = current.audioSessionId,
+            playing = current.isPlaying,
+            speed = current.playbackParameters.speed,
+            sampledAt = SystemClock.elapsedRealtime(),
         )
-        player.setMediaItem(MediaItem.fromUri(uri))
-        player.prepare()
     }
 
     private fun setBuffering(value: Boolean) {
         if (buffering == value) return
         buffering = value
-        listener.onBuffering(value)
+        dispatch { listener.onBuffering(value) }
     }
 
-    val isPlaying: Boolean get() = !released && player.isPlaying
+    val isPlaying: Boolean get() = !released.get() && snapshot.playing
+    val durationMs: Long get() = snapshot.duration
+    val positionMs: Long
+        get() {
+            val current = snapshot
+            val elapsed = if (!released.get() && current.playing) {
+                ((SystemClock.elapsedRealtime() - current.sampledAt).coerceAtLeast(0) * current.speed).toLong()
+            } else 0L
+            return (current.position + elapsed).coerceIn(0, current.duration.takeIf { it > 0 } ?: Long.MAX_VALUE)
+        }
+    val bufferedPercentage: Int get() = snapshot.buffered
+    val audioSessionId: Int get() = snapshot.audioSession
 
-    val durationMs: Long
-        get() = player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0
-
-    val positionMs: Long get() = player.currentPosition.coerceAtLeast(0)
-
-    val bufferedPercentage: Int get() = player.bufferedPercentage.coerceIn(0, 100)
-
-    val audioSessionId: Int get() = player.audioSessionId
-
-    fun setSurface(surface: Surface?) {
-        if (released) return
-        if (surface == null) player.clearVideoSurface() else player.setVideoSurface(surface)
+    fun setSurface(surface: Surface?) = command { current ->
+        if (surface == null) current.clearVideoSurface() else current.setVideoSurface(surface)
     }
 
-    fun setLooping(value: Boolean) {
-        player.repeatMode = if (value) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    fun setLooping(value: Boolean) = command {
+        it.repeatMode = if (value) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    fun setVolume(value: Float) {
-        player.volume = value.coerceIn(0f, 1f)
+    fun setVolume(value: Float) = command { it.volume = value.coerceIn(0f, 1f) }
+    fun seekTo(positionMs: Long) = command { it.seekTo(positionMs.coerceAtLeast(0)) }
+
+    fun play(rate: Float) = command {
+        if (it.playbackParameters.speed != rate) it.playbackParameters = PlaybackParameters(rate)
+        if (it.playbackState == Player.STATE_ENDED) it.seekTo(0)
+        it.playWhenReady = true
     }
 
-    fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs.coerceAtLeast(0))
-    }
-
-    fun play(rate: Float) {
-        if (released) return
-        if (player.playbackParameters.speed != rate) player.playbackParameters = PlaybackParameters(rate)
-        // MediaPlayer.start() after completion plays again from the start.
-        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-        player.playWhenReady = true
-    }
-
-    fun pause() {
-        if (!released) player.playWhenReady = false
-    }
+    fun pause() = command { it.playWhenReady = false }
 
     fun release() {
-        if (released) return
-        released = true
-        player.release()
+        if (!released.compareAndSet(false, true)) return
+        owner.removeCallbacksAndMessages(null)
+        owner.post {
+            try {
+                runCatching { player?.release() }
+                player = null
+                snapshot = snapshot.copy(playing = false)
+            } finally {
+                ownerThread.quitSafely()
+            }
+        }
     }
 }
 
