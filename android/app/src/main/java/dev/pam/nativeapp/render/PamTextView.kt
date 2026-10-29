@@ -32,7 +32,7 @@ internal class PamTextView(context: Context) : TextView(context) {
     /** The full text set by the renderer; [getText] may hold its tail-truncated copy. */
     private var sourceText: CharSequence? = null
     private var settingTruncated = false
-    private var truncatedFor: Triple<CharSequence?, Int, Int>? = null
+    private var truncatedFor: List<Any?>? = null
 
     override fun setText(text: CharSequence?, type: BufferType?) {
         if (!settingTruncated) {
@@ -58,9 +58,14 @@ internal class PamTextView(context: Context) : TextView(context) {
             restoreSource()
             return
         }
-        val key = Triple(source, contentWidth, lines)
+        // The paint is part of the key: font size, family, weight and letter
+        // spacing often land after the first measure (batched text props).
+        val key = listOf(source, contentWidth, lines, paint.textSize, paint.typeface, paint.letterSpacing, paint.textScaleX, paint.isFakeBoldText)
         if (truncatedFor == key) return
         truncatedFor = key
+        // The truncated copy is laid out as wrapped lines that already fit;
+        // an unwrapped (horizontally scrolling) line would clip instead.
+        if (lines == 1) setHorizontallyScrolling(false)
         val full = StaticLayout.Builder.obtain(source, 0, source.length, paint, contentWidth)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setIncludePad(includeFontPadding)
@@ -107,6 +112,15 @@ internal class PamTextView(context: Context) : TextView(context) {
         val width = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
         if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) truncateTail(width)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // A layout pass that skipped measure at this width still truncates
+        // against the real content width.
+        val before = text
+        truncateTail(w - compoundPaddingLeft - compoundPaddingRight)
+        if (text !== before) post { requestLayout() }
     }
 
     internal fun blockOffset(): Float {
