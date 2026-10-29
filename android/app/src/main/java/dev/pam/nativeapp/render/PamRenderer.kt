@@ -7677,7 +7677,9 @@ class PamRenderer(
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
         val effectiveScale = resolvedFontScale(allowScaling, deviceScale, maximumMultiplier)
-        val maximumPx = if (isRichTextView(view, state)) {
+        // React Native sizes Text and TextInput fonts in whole (ceiled)
+        // pixels (TextAttributes.getEffectiveFontSize): 15sp at 2.625 is 40 px.
+        val maximumPx = if (isRichTextView(view, state) || view is EditText) {
             PamTextLayout.fontSizePx(baseSize, effectiveScale, metrics.density)
         } else {
             max(1f, PamTextLayout.scaledPx(baseSize, effectiveScale, metrics.density))
