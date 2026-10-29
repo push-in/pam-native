@@ -267,6 +267,10 @@ internal class PamExoPlayback(
         owner.removeCallbacksAndMessages(null)
         owner.post {
             try {
+                // Silence/pause precede codec teardown, which may wait for
+                // mediaserver while the next visible player starts elsewhere.
+                runCatching { player?.volume = 0f }
+                runCatching { player?.playWhenReady = false }
                 runCatching { player?.release() }
                 player = null
                 snapshot = snapshot.copy(playing = false)
