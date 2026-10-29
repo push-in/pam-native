@@ -109,30 +109,43 @@ class AssetInstallerTest {
                 }.toByteArray()
             }
             val open = { path: String -> assets.resolve(path).toFile().inputStream() }
-            installPackedBundle(pack(packed).inputStream(), destination.toFile(), 3, open)
+            installPackedBundle(pack(packed).inputStream(), destination.toFile(), 3, openAsset = open)
             (packed + plain).forEach { (path, text) ->
                 assertEquals(text, destination.resolve(path).toFile().readText())
             }
 
+            destination.toFile().deleteRecursively()
+            var deferred = emptyList<PackedBundleFile>()
+            installPackedBundle(pack(packed).inputStream(), destination.toFile(), 2,
+                deferAssets = { deferred = it }, openAsset = { path ->
+                    check(!path.startsWith("assets/")) { "Assets must not block PHP readiness" }
+                    open(path)
+                })
+            assertEquals(listOf("assets/logo.svg"), deferred.map { it.path })
+            assertTrue(destination.resolve("index.php").toFile().isFile)
+            assertTrue(destination.resolve("manifest.sha256").toFile().isFile)
+            assertTrue(!destination.resolve("assets/logo.svg").toFile().exists())
+
             val tampered = pack(packed, packed.values.joinToString("").replace("echo 1", "echo 2"))
             assertTrue(
                 "Packed contents that differ from the index must fail",
-                runCatching { installPackedBundle(tampered.inputStream(), destination.toFile(), 2, open) }.isFailure,
+                runCatching { installPackedBundle(tampered.inputStream(), destination.toFile(), 2, openAsset = open) }.isFailure,
             )
             val truncated = pack(packed).let { it.copyOf(it.size - 3) }
             assertTrue(
                 "A truncated pack must fail",
-                runCatching { installPackedBundle(truncated.inputStream(), destination.toFile(), 2, open) }.isFailure,
+                runCatching { installPackedBundle(truncated.inputStream(), destination.toFile(), 2, openAsset = open) }.isFailure,
             )
             val trailing = pack(packed, trailing = byteArrayOf(1))
             assertTrue(
                 "Trailing bytes must fail",
-                runCatching { installPackedBundle(trailing.inputStream(), destination.toFile(), 2, open) }.isFailure,
+                runCatching { installPackedBundle(trailing.inputStream(), destination.toFile(), 2, openAsset = open) }.isFailure,
             )
+            destination.resolve("assets/logo.svg").toFile().delete()
             assets.resolve("assets/logo.svg").writeText("<svg>changed</svg>")
             assertTrue(
                 "A plain asset that differs from the index must fail",
-                runCatching { installPackedBundle(pack(packed).inputStream(), destination.toFile(), 2, open) }.isFailure,
+                runCatching { installPackedBundle(pack(packed).inputStream(), destination.toFile(), 2, openAsset = open) }.isFailure,
             )
             val sha = "a".repeat(64)
             listOf(

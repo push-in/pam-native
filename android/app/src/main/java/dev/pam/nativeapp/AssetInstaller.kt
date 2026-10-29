@@ -17,6 +17,7 @@ internal class AssetInstaller(private val context: Context) {
         val release = File(context.filesDir, "pam/releases/$version")
         val entry = File(release, "index.php")
         if (entry.isFile) {
+            prepareDeferredAssets(release)
             scheduleReleaseCleanup(release)
             return entry
         }
@@ -27,6 +28,7 @@ internal class AssetInstaller(private val context: Context) {
         val staging = installationStagingDirectory(context.filesDir, version)
         staging.deleteRecursively()
         check(staging.mkdirs()) { "Cannot create Pam Native staging directory" }
+        var deferred = emptyList<PackedBundleFile>()
         val pack = runCatching {
             context.assets.open(BUNDLE_PACK, AssetManager.ACCESS_STREAMING)
         }.getOrNull()
@@ -34,7 +36,7 @@ internal class AssetInstaller(private val context: Context) {
             // One packed asset: a single sequential stream (no per-file
             // AssetManager open/lock), files written and verified in parallel.
             pack.use { input ->
-                installPackedBundle(input, staging, installThreads()) { path ->
+                installPackedBundle(input, staging, installThreads(), deferAssets = { deferred = it }) { path ->
                     context.assets.open("$ASSET_ROOT/$path")
                 }
             }
@@ -61,8 +63,27 @@ internal class AssetInstaller(private val context: Context) {
         }
         check(staging.renameTo(release)) { "Cannot activate Pam Native application bundle" }
         require(entry.isFile) { "Pam Native bundle does not contain index.php" }
+        if (deferred.isNotEmpty()) enqueueDeferredAssets(release, deferred)
         scheduleReleaseCleanup(release)
         return entry
+    }
+
+    private fun prepareDeferredAssets(release: File) {
+        if (File(release, ".assets-ready").isFile) return
+        val pack = runCatching { context.assets.open(BUNDLE_PACK) }.getOrNull() ?: return
+        val files = pack.use { readPackedBundleIndex(java.io.DataInputStream(it)).plain }
+            .filter { isDeferredBundleAsset(it.path) }
+        if (files.isNotEmpty()) enqueueDeferredAssets(release, files)
+    }
+
+    private fun enqueueDeferredAssets(release: File, files: List<PackedBundleFile>) {
+        DeferredBundleAssets.enqueue {
+            files.forEach { file ->
+                if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                installPlainBundleFile(release, file) { context.assets.open("$ASSET_ROOT/$it") }
+            }
+            File(release, ".assets-ready").writeText("1")
+        }
     }
 
     /**
@@ -417,14 +438,12 @@ internal fun installPackedBundle(
     pack: InputStream,
     destination: File,
     threads: Int,
+    deferAssets: ((List<PackedBundleFile>) -> Unit)? = null,
     openAsset: (String) -> InputStream,
 ) {
     val input = java.io.DataInputStream(java.io.BufferedInputStream(pack, 64 * 1024))
-    val magic = ByteArray(4).also(input::readFully)
-    require(String(magic, Charsets.US_ASCII) == PACK_MAGIC) { "Invalid Pam Native bundle pack" }
-    val indexLength = Integer.reverseBytes(input.readInt())
-    require(indexLength in 1..MAX_PACK_INDEX_BYTES) { "Invalid Pam Native bundle index" }
-    val index = parsePackedBundleIndex(String(ByteArray(indexLength).also(input::readFully), Charsets.UTF_8))
+    val index = readPackedBundleIndex(input)
+    val deferred = if (deferAssets != null) index.plain.filter { isDeferredBundleAsset(it.path) } else emptyList()
     val pool = Executors.newFixedThreadPool(threads.coerceAtLeast(1)) { runnable ->
         Thread({
             // On the first launch's critical path: ahead of default-priority work.
@@ -435,10 +454,9 @@ internal fun installPackedBundle(
     val budget = java.util.concurrent.Semaphore(MAX_PACK_BYTES_IN_FLIGHT)
     val tasks = ArrayList<Future<*>>(index.chunks.size + 1)
     val plainTask = java.util.concurrent.FutureTask {
-        index.plain.forEach { file ->
+        index.plain.filterNot { deferAssets != null && isDeferredBundleAsset(it.path) }.forEach { file ->
             check(!Thread.currentThread().isInterrupted) { "Pam Native bundle install was cancelled" }
-            val bytes = openAsset(file.path).use { it.readBytes() }
-            writeVerifiedBundleFile(destination, file, bytes, 0)
+            installPlainBundleFile(destination, file, openAsset)
         }
     }
     try {
@@ -473,9 +491,69 @@ internal fun installPackedBundle(
                 throw error.cause ?: error
             }
         }
+        deferAssets?.invoke(deferred)
     } finally {
         plainTask.cancel(true)
         pool.shutdownNow()
+    }
+}
+
+internal fun readPackedBundleIndex(input: java.io.DataInputStream): PackedBundleIndex {
+    val magic = ByteArray(4).also(input::readFully)
+    require(String(magic, Charsets.US_ASCII) == PACK_MAGIC) { "Invalid Pam Native bundle pack" }
+    val indexLength = Integer.reverseBytes(input.readInt())
+    require(indexLength in 1..MAX_PACK_INDEX_BYTES) { "Invalid Pam Native bundle index" }
+    return parsePackedBundleIndex(String(ByteArray(indexLength).also(input::readFully), Charsets.UTF_8))
+}
+
+// Native asset://, fonts and Files.copyAsset read these directly from the APK.
+// Runtime metadata outside assets/ stays synchronous, including Composer JSON.
+internal fun isDeferredBundleAsset(path: String): Boolean = path.startsWith("assets/")
+
+/** Stream, verify, then publish atomically; retries never expose a partial file. */
+internal fun installPlainBundleFile(destination: File, file: PackedBundleFile, open: (String) -> InputStream) {
+    val target = File(destination, file.path)
+    fun matches(candidate: File): Boolean = candidate.isFile && candidate.length() == file.size.toLong() &&
+        candidate.inputStream().use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+            MessageDigest.isEqual(digest.digest(), file.sha256)
+        }
+    if (matches(target)) return
+    val temporary = File(target.parentFile, "${target.name}.installing")
+    try {
+        // Reuse unchanged assets from the previous release by digest, without
+        // reopening/decompressing their APK entries on an application update.
+        val previous = destination.parentFile?.listFiles().orEmpty().asSequence()
+            .filter { it != destination && it.name.matches(Regex("[a-f0-9]{64}")) }
+            .map { File(it, file.path) }.firstOrNull(::matches)
+        val digest = MessageDigest.getInstance("SHA-256")
+        var copied = 0L
+        (previous?.inputStream() ?: open(file.path)).use { input ->
+            openBundleOutput(temporary).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    copied += count
+                    require(copied <= file.size) { "Pam Native asset exceeds its indexed size" }
+                    digest.update(buffer, 0, count)
+                    output.write(buffer, 0, count)
+                }
+            }
+        }
+        require(copied == file.size.toLong() && MessageDigest.isEqual(digest.digest(), file.sha256)) {
+            "Pam Native application bundle failed integrity verification"
+        }
+        check(temporary.renameTo(target)) { "Cannot activate Pam Native asset" }
+    } finally {
+        temporary.delete()
     }
 }
 
