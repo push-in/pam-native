@@ -79,4 +79,20 @@ class PamMediaFileTest {
         assertEquals(720f / 1080f, scale.first, 0.0001f)
         assertEquals(720f / 2280f, scale.second, 0.0001f)
     }
+
+    @Test
+    fun earlyFramesTakeThePosterShapeUntilTheVideoSizeArrives() {
+        // A contained 720x1280 video in a 1080x1350 box: the poster's shape
+        // letterboxes the first frames like the video's own size will.
+        val early = videoShape(0, 0, 360, 640)
+        val final = videoShape(720, 1280, 360, 640)
+        assertEquals(360 to 640, early)
+        assertEquals(720 to 1280, final)
+        val earlyScale = resolveVideoScale(2, 1080, 1350, early.first, early.second)
+        val finalScale = resolveVideoScale(2, 1080, 1350, final.first, final.second)
+        assertEquals(finalScale.first, earlyScale.first, 0.001f)
+        assertEquals(finalScale.second, earlyScale.second, 0.001f)
+        // Neither known: the box itself (no transform).
+        assertEquals(0 to 0, videoShape(0, 0, 0, 0))
+    }
 }

@@ -45,6 +45,17 @@ internal fun resolvePamMediaFile(root: File, source: String): File {
 internal fun shouldUseResolvedMediaUri(cachedIsEmpty: Boolean, cachedScheme: String?): Boolean =
     cachedIsEmpty || cachedScheme.equals("pam-file", ignoreCase = true)
 
+/**
+ * The frame shape a video view scales by: the decoded video size once the
+ * player reports it, else its poster's (a frame of the same video), else
+ * unknown (0, 0: the box itself).
+ */
+internal fun videoShape(videoWidth: Int, videoHeight: Int, posterWidth: Int, posterHeight: Int): Pair<Int, Int> = when {
+    videoWidth > 0 && videoHeight > 0 -> videoWidth to videoHeight
+    posterWidth > 0 && posterHeight > 0 -> posterWidth to posterHeight
+    else -> 0 to 0
+}
+
 internal fun resolveVideoScale(
     resizeMode: Int,
     containerWidth: Int,
@@ -917,13 +928,18 @@ internal class PamMediaView(
     }
 
     private fun applyVideoTransform() {
-        val (scaleX, scaleY) = resolveVideoScale(
-            resizeMode,
-            width,
-            height,
+        // Until the player reports the video size, the poster (a frame of the
+        // same video) gives its shape: the first frames, often drawn before
+        // the size arrives, were stretched over the whole box for a frame or
+        // two, covering what shows around a contained video (a blurred
+        // backdrop blinked at every autoplay).
+        val (shapeWidth, shapeHeight) = videoShape(
             videoWidthPx,
             videoHeightPx,
+            poster.drawable?.intrinsicWidth ?: 0,
+            poster.drawable?.intrinsicHeight ?: 0,
         )
+        val (scaleX, scaleY) = resolveVideoScale(resizeMode, width, height, shapeWidth, shapeHeight)
         video.pivotX = video.width / 2f
         video.pivotY = video.height / 2f
         video.scaleX = scaleX
@@ -985,6 +1001,7 @@ internal class PamMediaView(
     }
 
     override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+        if (videoWidthPx <= 0 || videoHeightPx <= 0) applyVideoTransform()
         if (prepared && poster.visibility != GONE) {
             poster.visibility = GONE
         }
