@@ -91,3 +91,14 @@ Validação: `cargo test --workspace --offline`, quatro workers e lock `/tmp/pam
 QA visual e medição CPU/PSS/FPS em Android não executadas nesta rodada. Conforme a diretiva desta tarefa, entrega ao integrate após os validadores PHP verdes, sem aguardar emulador. Nenhuma tag do núcleo criada. Worktree próprio: `codex-input-height-fw` (não existia e foi criado a partir do integrate remoto).
 
 Gate do consumidor antes da integração y2: cobertura final **497/497** validadores PHP, executados um por vez com limpeza por script. Rodada inicial 493/496; integridade passou após preparar o bundle, e duas expectativas antigas foram corrigidas e repetidas com sucesso. Os dois testes adicionais que usam a fixture ajustada também passaram. O rebase final trouxe um novo validador e mudanças concorrentes; 50/50 validadores relacionados passaram novamente, incluindo o novo teste, e a integridade do bundle final foi repetida com sucesso. A distribuição publicada não foi alterada; o coordenador empacotará o novo engine. Artefatos Cargo próprios removidos.
+
+
+## y3 — Inicialização Android após instalação (28/10/2026)
+
+A ativação do release PNB1 agora aguarda somente PHP/templates e metadados do runtime. Assets em `assets/` são entregues ao worker depois da ativação; os consumidores nativos continuam lendo-os diretamente do APK. A cópia começa após um frame PHP comprometido, usa um worker e buffer de 64 KB, e para quando a Activity deixa o foreground. No próximo foreground/start, arquivos já válidos são ignorados por SHA-256/tamanho; assets idênticos do release anterior são reaproveitados sem reabrir a entrada do APK. Cada arquivo é verificado antes de publicação atômica. Um marcador de conclusão evita refazer a instalação de assets em starts seguintes; se o processo morrer, a lista do pack permite retomar.
+
+O splash configurado para esperar PHP não tem mais o timeout de quatro segundos que expunha uma janela vazia. Ele é liberado pelo frame comprometido ou pela apresentação de erro. O modo `firstFrame: window` permanece disponível para consumidores que o escolham explicitamente. As cores continuam sendo geradas pela configuração de aparência de cada consumidor.
+
+Testes: **336/336 JVM verdes**, incluindo inicialização sem abrir assets adiados, metadados síncronos, integridade/tamanho, substituição atômica, reaproveitamento por digest, espera pelo primeiro frame e interrupção ao ocultar. A suíte do consumidor passou **496/496 validadores PHP**, um por vez e com limpeza entre execuções. Dois APKs benchmark x86_64 compilaram com o mesmo engine construído das fontes desta integração. Não houve alteração de dependências nem criação de tag.
+
+Integração com gates verdes antes do QA visual, conforme autorização desta rodada. A comparação no emulador aguarda a liberação do lock compartilhado; ainda não há número medido antes/depois. Evidências: `~/.local/share/pam-codex/shots/y3/`. Este relatório será complementado após a sessão exclusiva.
