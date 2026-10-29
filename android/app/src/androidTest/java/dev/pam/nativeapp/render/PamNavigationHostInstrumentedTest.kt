@@ -734,7 +734,7 @@ class PamNavigationHostInstrumentedTest {
 
     /**
      * A rounded cover thumbnail flies into a contained full-screen image and
-     * back. Frames are sampled on every Choreographer frame: the crop grows
+     * back. Frames are sampled after every animator update: the crop grows
      * from the bubble to the letterboxed photo (and shrinks back), the radius
      * goes 14 dp -> 0 -> 14 dp, both views stay hidden only by alpha while
      * the flight draws, and nothing is left in the overlay afterwards.
@@ -755,7 +755,6 @@ class PamNavigationHostInstrumentedTest {
         var phase = 0
         val pushFrames = java.util.Collections.synchronizedList(mutableListOf<FloatArray>())
         val popFrames = java.util.Collections.synchronizedList(mutableListOf<FloatArray>())
-        var sampling: MutableList<FloatArray>? = null
         try {
             lateinit var navigation: PamNavigationHost
             lateinit var thumbnail: PamImageView
@@ -804,12 +803,29 @@ class PamNavigationHostInstrumentedTest {
                 navigation.navigate(1)
             }
             instrumentation.waitForIdleSync()
-            val sampler = object : android.view.Choreographer.FrameCallback {
-                override fun doFrame(frameTimeNanos: Long) {
-                    val target = sampling ?: return
-                    navigation.activeSharedElementFrames().firstOrNull()?.let { target += it.copyOf() }
-                    android.view.Choreographer.getInstance().postFrameCallback(this)
+            fun sampleFlight(target: MutableList<FloatArray>) {
+                // navigate() registered its pre-draw listener first. Observe the
+                // animator after it has started, and after the host's update
+                // listener has applied the geometry, including fraction 1.
+                // Choreographer sampling misses that terminal update: finish()
+                // removes the flight in the same animator callback. With the
+                // short cubic return, the previous frame can still be far away.
+                val observer = navigation.viewTreeObserver
+                lateinit var listener: android.view.ViewTreeObserver.OnPreDrawListener
+                listener = android.view.ViewTreeObserver.OnPreDrawListener {
+                    observer.removeOnPreDrawListener(listener)
+                    val field = PamNavigationHost::class.java.getDeclaredField("running").apply { isAccessible = true }
+                    val animator = field.get(navigation) as android.animation.ValueAnimator
+                    fun capture() {
+                        navigation.activeSharedElementFrames().single().let { target += it.copyOf() }
+                        assertEquals(0f, thumbnail.alpha, 0f)
+                        assertEquals(0f, viewer.alpha, 0f)
+                    }
+                    capture()
+                    animator.addUpdateListener { capture() }
+                    true
                 }
+                observer.addOnPreDrawListener(listener)
             }
             onMain(instrumentation) {
                 navigation.transition = TRANSITION_FADE
@@ -817,21 +833,19 @@ class PamNavigationHostInstrumentedTest {
                 phase = 1
                 navigation.insert(viewerRoute, 1)
                 navigation.navigate(2)
-                sampling = pushFrames
-                android.view.Choreographer.getInstance().postFrameCallback(sampler)
+                sampleFlight(pushFrames)
             }
             assertTrue(pushed.await(3, TimeUnit.SECONDS))
             onMain(instrumentation) {
                 assertEquals(0, navigation.activeSharedElementCount())
                 assertEquals(1f, thumbnail.alpha, 0f)
                 assertEquals(1f, viewer.alpha, 0f)
-                sampling = popFrames
                 phase = 2
                 navigation.operation = OPERATION_POP
                 navigation.navigate(3)
+                sampleFlight(popFrames)
             }
             assertTrue(popped.await(3, TimeUnit.SECONDS))
-            onMain(instrumentation) { sampling = null }
             assertTrue("push sampled ${pushFrames.size} frames", pushFrames.size >= 8)
             assertTrue("pop sampled ${popFrames.size} frames", popFrames.size >= 4)
             val first = pushFrames.first()
@@ -840,9 +854,9 @@ class PamNavigationHostInstrumentedTest {
             assertTrue("opens with the bubble radius", first[4] > 8f * density)
             val last = pushFrames.last()
             // Contained 4:3 photo in 1080x1920: 1080x810 centered vertically.
-            assertEquals(0f, last[0], 60f)
-            assertEquals(555f, last[1], 80f)
-            assertEquals(1_365f, last[3], 80f)
+            assertEquals(0f, last[0], 0.01f)
+            assertEquals(555f, last[1], 0.01f)
+            assertEquals(1_365f, last[3], 0.01f)
             assertTrue("lands square", last[4] < 4f * density)
             for (index in 1 until pushFrames.size) {
                 val widthBefore = pushFrames[index - 1][2] - pushFrames[index - 1][0]
@@ -850,15 +864,14 @@ class PamNavigationHostInstrumentedTest {
                 assertTrue("the crop grows without a jump back (frame $index)", width >= widthBefore - 2f)
             }
             val home = popFrames.last()
-            assertEquals(100f, home[0], 60f)
-            assertEquals(300f, home[2], 60f)
+            assertEquals(100f, home[0], 0.01f)
+            assertEquals(300f, home[2], 0.01f)
             assertTrue("returns into the rounded bubble", home[4] > 6f * density)
             onMain(instrumentation) {
                 assertEquals(0, navigation.activeSharedElementCount())
                 assertEquals(1f, thumbnail.alpha, 0f)
             }
         } finally {
-            sampling = null
             activity.finish()
         }
     }

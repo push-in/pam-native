@@ -108,28 +108,14 @@ internal class PamLineHeightSpan(height: Float) : LineHeightSpan {
         lineHeight: Int,
         fm: Paint.FontMetricsInt,
     ) {
-        if (fm.descent > height) {
-            fm.descent = min(height, fm.descent)
-            fm.bottom = fm.descent
-            fm.ascent = 0
-            fm.top = 0
-        } else if (-fm.ascent + fm.descent > height) {
-            fm.bottom = fm.descent
-            fm.ascent = -height + fm.descent
-            fm.top = fm.ascent
-        } else if (-fm.ascent + fm.bottom > height) {
-            fm.top = fm.ascent
-            fm.descent = fm.ascent + height
-            fm.bottom = fm.descent
-        } else if (-fm.top + fm.bottom > height) {
-            fm.top = fm.bottom - height
-        } else {
-            val additional = height - (-fm.top + fm.bottom)
-            fm.top -= ceil(additional / 2.0).toInt()
-            fm.bottom += floor(additional / 2.0).toInt()
-            fm.ascent = fm.top
-            fm.descent = fm.bottom
-        }
+        // RN 0.85: half-leading is based on ascent/descent, rather than
+        // top/bottom. Interior lines keep their glyph extents so tight line
+        // boxes can overlap without moving the paragraph's first baseline.
+        val leading = height - (fm.descent - fm.ascent)
+        fm.ascent -= ceil(leading / 2.0).toInt()
+        fm.descent += floor(leading / 2.0).toInt()
+        if (start == 0) fm.top = fm.ascent
+        if (end == text.length) fm.bottom = fm.descent
     }
 }
 

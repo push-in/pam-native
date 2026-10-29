@@ -62,6 +62,25 @@ class PamZIndexHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun stackingNeverCancelsElevationRegardlessOfPropertyOrder() = withScene(20.0) { _, renderer ->
+        instrumentation.runOnMainSync {
+            val view = renderer.viewForNode(2)!!
+            val density = view.resources.displayMetrics.density
+            val elevation = (20f * density).roundToInt().toFloat()
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.ELEVATION, PropValue.Decimal(20.0)))))
+            assertEquals(elevation, view.elevation, 0.01f)
+            assertEquals(maxOf(20f, elevation), view.z, 0.01f)
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.Z_INDEX, PropValue.Decimal(1.0)))))
+            assertEquals(elevation, view.z, 0.01f)
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.Z_INDEX, null))))
+            assertEquals(elevation, view.z, 0.01f)
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.ELEVATION, null))))
+            assertEquals(0f, view.elevation, 0.01f)
+            assertEquals(0f, view.z, 0.01f)
+        }
+    }
+
     private fun withScene(zIndex: Double, check: (PamTestActivity, PamRenderer) -> Unit) {
         val activity = instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
