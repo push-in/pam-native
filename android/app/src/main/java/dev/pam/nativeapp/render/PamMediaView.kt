@@ -878,8 +878,13 @@ internal class PamMediaView(
     private fun releasePlayer() {
         showPoster()
         prepared = false
-        videoWidthPx = 0
-        videoHeightPx = 0
+        // An idle surface keeps its last texture. Keep its contain/cover
+        // geometry too, otherwise the next layout stretches that texture
+        // behind the poster while a sheet covers the player.
+        if (!idleSurface) {
+            videoWidthPx = 0
+            videoHeightPx = 0
+        }
         creatingPlayer = false
         playerGeneration++
         bufferedPercentage = 0
