@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Android text with `numberOfLines` and the tail ellipsis truncates like
+  React Native's StaticLayout.calculateEllipsis: the last visible line takes
+  the rest of the text unwrapped and keeps every grapheme that fits with the
+  ellipsis, spaces included ("hoje à…", "🔥🖤 …"), instead of TextView's
+  single-line ellipsis that trims the space before it. Frames and ink x are
+  unchanged; head/middle single lines keep the unwrapped TextView line.
 - Android text: `numberOfLines="1"` lays the text out as one unwrapped line
   (horizontally scrolling TextView, no input or marquee change), so the tail
   ellipsis cuts mid-word like React Native ("hoje à…") instead of breaking

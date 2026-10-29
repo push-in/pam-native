@@ -5710,7 +5710,10 @@ class PamRenderer(
      */
     private fun applySingleLineTruncation(text: TextView) {
         if (text is EditText || text.ellipsize == TextUtils.TruncateAt.MARQUEE) return
-        text.setHorizontallyScrolling(text.maxLines == 1)
+        // Text nodes truncate at the tail themselves (PamTextView, React
+        // Native's calculateEllipsis); head/middle single lines keep the
+        // unwrapped TextView line.
+        text.setHorizontallyScrolling(text.maxLines == 1 && !(text is PamTextView && text.ellipsize != TextUtils.TruncateAt.START && text.ellipsize != TextUtils.TruncateAt.MIDDLE))
     }
 
     /**

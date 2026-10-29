@@ -90,3 +90,25 @@ class PamTextPixelSnappingTest {
         org.junit.Assert.assertTrue("fixture must cover the lossy rounding case", lostPixel)
     }
 }
+
+class PamTailEllipsisCutTest {
+    @Test
+    fun keepsTheLastGraphemeThatFitsWithTheEllipsisAndItsSpaces() {
+        // "hoje à 10" at 10 px per grapheme: offsets 0..9, x = 10 * i.
+        val boundaries = IntArray(10) { it }
+        val advances = FloatArray(10) { it * 10f }
+        // 72 available, ellipsis 12: x + 12 <= 72 keeps up to x = 60 -> "hoje à".
+        assertEquals(6, tailEllipsisCut(boundaries, advances, 72f, 12f))
+        // 62 available keeps "hoje " with its space (TextUtils trims it).
+        assertEquals(5, tailEllipsisCut(boundaries, advances, 62f, 12f))
+    }
+
+    @Test
+    fun cutsOnlyAtGraphemeBoundaries() {
+        // "🔥🖤 x": two surrogate pairs (2 chars each), a space, then x.
+        val boundaries = intArrayOf(0, 2, 4, 5, 6)
+        val advances = floatArrayOf(0f, 20f, 40f, 45f, 55f)
+        assertEquals(5, tailEllipsisCut(boundaries, advances, 58f, 12f))
+        assertEquals(2, tailEllipsisCut(boundaries, advances, 40f, 12f))
+    }
+}
