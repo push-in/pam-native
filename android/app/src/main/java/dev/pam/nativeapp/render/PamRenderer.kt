@@ -995,6 +995,7 @@ class PamRenderer(
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
         if (localModalIds.isNotEmpty()) prepareModalSharedRemovals(batches)
+        cellsToMaterialize = LinkedHashSet()
         deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
             try {
@@ -1094,9 +1095,15 @@ class PamRenderer(
         // A stable row ID/extent does not trigger a RecyclerView rebind when
         // conditional descendants are inserted. Materialize only affected,
         // already-mounted cells after all nodes and frames have arrived.
-        createdNodes.mapNotNull(::virtualCellRoot).toSet().forEach { cellRoot ->
-            val holder = virtualCellHolder(cellRoot)
-            if (holder != null) materializeCell(cellRoot, holder)
+        // Cells bound off screen (ahead of a fling, in the view cache) build
+        // their views within the list's per-frame budget instead of here: a
+        // window slide materializing a few rows ahead built hundreds of views
+        // in this one commit. Cells on screen are built now.
+        val remounted = cellsToMaterialize.orEmpty()
+        cellsToMaterialize = null
+        (createdNodes.mapNotNullTo(LinkedHashSet(remounted), ::virtualCellRoot)).forEach { cellRoot ->
+            val holder = virtualCellHolder(cellRoot) ?: return@forEach
+            if (!deferOffscreenCell(cellRoot)) materializeCell(cellRoot, holder)
         }
         pamTraceSection("PamCommit.layout") {
             layoutInvalidatedAncestors = HashSet()
@@ -2007,7 +2014,10 @@ class PamRenderer(
                 VirtualCellHostingRepair.REMOUNT_CELL -> {
                     state.virtual = shouldBeVirtual
                     dematerializeSubtree(cellRoot)
-                    if (holder != null) materializeCell(cellRoot, holder)
+                    if (holder != null) {
+                        val pending = cellsToMaterialize
+                        if (pending != null) pending += cellRoot else materializeCell(cellRoot, holder)
+                    }
                 }
             }
             return
@@ -3373,6 +3383,17 @@ class PamRenderer(
             check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual cell hierarchy is too deep" }
         }
         return null
+    }
+
+    /** Cells whose views a running commit rebuilds once its mutations are applied. */
+    private var cellsToMaterialize: LinkedHashSet<Long>? = null
+
+    /** Hands an off-screen bound cell's view build to its list's mount budget. */
+    private fun deferOffscreenCell(cellRoot: Long): Boolean {
+        val list = nodes[cellRoot]?.parent?.let { views[it] } as? PamRecyclerList ?: return false
+        return list.deferCellRepair(cellRoot) {
+            if (nodes[cellRoot] != null) virtualCellHolder(cellRoot)?.let { materializeCell(cellRoot, it) }
+        }
     }
 
     private fun virtualCellHolder(rootId: Long): FrameLayout? {
@@ -6884,12 +6905,18 @@ class PamRenderer(
         if (total <= 0) return
         val first = firstVisible.coerceIn(0, total - 1)
         val last = (first + max(visibleCount, 1) - 1).coerceIn(first, total - 1)
+        // A released fling asks once for every row it sweeps and the screen
+        // it lands on (the platform spline): PHP builds them in one frame
+        // instead of one frame per screen the fling crosses.
+        val path = list.flingPathRows()
         // A fling reaches rows several screens ahead before PHP can build
         // them: it asks three screens ahead instead of one.
         val screens = if (list.scrollState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_SETTLING) 3 else 1
         val margin = max(LIST_WINDOW_MARGIN_ROWS, (last - first + 1) * screens)
+        val nearFrom = min(first, path?.get(2) ?: first) - margin
+        val nearTo = max(last, path?.get(3) ?: last) + margin
         var placeholderNear = false
-        for (position in (first - margin).coerceAtLeast(0)..(last + margin).coerceAtMost(total - 1)) {
+        for (position in nearFrom.coerceAtLeast(0)..nearTo.coerceAtMost(total - 1)) {
             val id = list.richIdAt(position) ?: continue
             if (nodes[id]?.properties?.get(PropKey.LIST_PLACEHOLDER) != null) {
                 placeholderNear = true
@@ -6903,11 +6930,16 @@ class PamRenderer(
         // With the row count it saw: a report made before rows joined (an
         // older page) is recognized and ignored instead of moving the window
         // onto other rows.
-        val request = "@${rows[0]},${rows[1]},${list.rowCount()}"
+        val request = if (path != null) {
+            "@${rows[0]},${rows[1]},${list.rowCount()},${path[0]},${path[1]}"
+        } else {
+            "@${rows[0]},${rows[1]},${list.rowCount()}"
+        }
         val now = SystemClock.uptimeMillis()
         if (request == state.listWindowRequest && now - state.listWindowRequestedAt < LIST_WINDOW_RETRY_MS) return
         state.listWindowRequest = request
         state.listWindowRequestedAt = now
+        if (Log.isLoggable(LIST_WINDOW_TAG, Log.DEBUG)) Log.d(LIST_WINDOW_TAG, "list=${state.id} request=$request state=${list.scrollState}")
         dispatch(state.id, EVENT_LIST_WINDOW, request)
     }
 
@@ -8024,7 +8056,8 @@ class PamRenderer(
             view.paintFlags or android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
                 android.graphics.Paint.LINEAR_TEXT_FLAG
         }
-        view.typeface = typefaces.resolve(family, weight, italic)
+        val face = typefaces.resolve(family, weight, italic)
+        if (view.typeface !== face) view.typeface = face
     }
 
     private fun applySafeAreaBottom(view: View, state: NodeState, enabled: Boolean) {
@@ -10754,6 +10787,9 @@ class PamRenderer(
 
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
+
+        /** Debug: `setprop log.tag.PamListWindow DEBUG` logs each window request. */
+        const val LIST_WINDOW_TAG = "PamListWindow"
         const val MAX_REPORTED_PROPERTY_ERRORS = 64
         /** One prewarm slice; PHP's first batch waits at most this long behind it. */
         const val PREWARM_SLICE_NANOS = 2_000_000L

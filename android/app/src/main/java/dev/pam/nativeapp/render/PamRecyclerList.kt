@@ -24,6 +24,7 @@ import java.util.Collections
 import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /** Debug-only per-frame motion trace of virtual lists (see PamRecyclerList.traceMotion). */
 private const val MOTION_TRACE_TAG = "PamListTrace"
@@ -131,6 +132,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
 
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                scrolledTotal += if (horizontal) dx else dy
                 if ((if (horizontal) dx else dy) != 0) {
                     scrollMoved = true
                     scrolledToEnd = restingAtEnd() && canScrollTowardStart()
@@ -237,6 +239,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         applyInitialPosition()
     }
 
+    /**
+     * Defers the view repair of cell [id] to the per-frame mount budget when
+     * it is bound off screen; false when the caller must repair it now.
+     */
+    fun deferCellRepair(id: Long, repair: () -> Unit): Boolean =
+        (adapter as? RichRecyclerAdapter)?.deferRepair(id, repair) == true
+
     /** Holder container bound to virtual cell [id], or null when it is off screen. */
     fun boundContainer(id: Long): FrameLayout? =
         (adapter as? RichRecyclerAdapter)?.boundContainer(id)
@@ -315,7 +324,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             // A full rebind keeps adapter positions, so rows joining above
             // (an older page) moved the content under the reader: the first
             // visible row that is still there keeps its pixel offset.
-            if (current.reboundAll) idAnchor?.let(::restoreHeadInsertAnchor)
+            if (current.reboundAll) {
+                idAnchor?.let(::restoreHeadInsertAnchor)
+            } else if (scrollState != SCROLL_STATE_IDLE) {
+                // Keyed inserts keep the rows on screen through RecyclerView's
+                // own anchor; while the list moves, that is checked before
+                // the next draw (a row joining mid-fling must not jump it).
+                idAnchor?.let(::verifyAnchorBeforeDraw)
+            }
         }
         configureAdapter()
         updateHeaderSpans()
@@ -374,6 +390,47 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (index < 0) return
         // Does not stop a running fling: it continues from the anchored layout.
         (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(index, anchor.second)
+        if (scrollState != SCROLL_STATE_IDLE) verifyAnchorBeforeDraw(anchor)
+    }
+
+    /** Px the list scrolled since it was created (scroll steps only, not layouts). */
+    private var scrolledTotal = 0L
+
+    /** (row id, top px, [scrolledTotal]) an anchored commit must show before the next draw. */
+    private var anchorCheck: Triple<Long, Int, Long>? = null
+
+    private val anchorCheckListener = android.view.ViewTreeObserver.OnPreDrawListener {
+        verifyAnchor()
+        true
+    }
+
+    /**
+     * A moving list re-anchored by a commit (an older page landing mid-fling)
+     * applied the row's top captured at the commit; the fling may step before
+     * that layout lands, so the row could show one step back or, with a full
+     * rebind, re-measured rows, several. Before the next draw the row is put
+     * where the anchor plus the fling's travel since the commit says.
+     */
+    private fun verifyAnchorBeforeDraw(anchor: Pair<Long, Int>) {
+        if (anchorCheck == null) viewTreeObserver.addOnPreDrawListener(anchorCheckListener)
+        anchorCheck = Triple(anchor.first, anchor.second, scrolledTotal)
+    }
+
+    private fun verifyAnchor() {
+        val check = anchorCheck ?: return
+        if (isLayoutRequested) return
+        anchorCheck = null
+        viewTreeObserver.removeOnPreDrawListener(anchorCheckListener)
+        val manager = layoutManager as? LinearLayoutManager ?: return
+        val view = manager.findViewByPosition(richIds.indexOf(check.first).takeIf { it >= 0 } ?: return) ?: return
+        val expected = check.second - (scrolledTotal - check.third).toInt()
+        val actual = if (horizontal) view.left - paddingLeft else view.top - paddingTop
+        val delta = actual - expected
+        if (motionTrace != null && delta != 0) {
+            android.util.Log.d(MOTION_TRACE_TAG, "anchor id=${check.first} corrected=$delta state=$scrollState")
+        }
+        if (delta == 0 || abs(delta) >= (if (horizontal) width else height)) return
+        if (horizontal) scrollBy(delta, 0) else scrollBy(0, delta)
     }
 
     /**
@@ -828,7 +885,64 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         } else {
             0f
         }
+        flingForward = velocity > 0f
+        flingStartScrolled = scrolledTotal
+        flingPathPx = if (flingStarted(flinging) && velocity != 0f) {
+            splineFlingDistancePx(abs(velocity), resources.displayMetrics.density)
+        } else {
+            0f
+        }
         return flinging
+    }
+
+    /** Projected travel (px) of the running fling in either direction. */
+    private var flingPathPx = 0f
+
+    /** [scrolledTotal] when the fling was released (its exact travel since). */
+    private var flingStartScrolled = 0L
+    private var flingForward = true
+
+    /**
+     * Rows a running fling sweeps and lands on, from the rows on screen to
+     * the screen it projects to rest at (the platform spline): row indexes
+     * [first, last] and adapter positions [first, last], or null at rest or
+     * when the list has no row spans. One window request can then cover the
+     * whole path instead of chasing the fling screen by screen.
+     */
+    fun flingPathRows(): IntArray? {
+        if (flingPathPx <= 0f || scrollState != SCROLL_STATE_SETTLING || rowSpan == null || horizontal || inverted) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val remaining = flingPathPx.toInt() - abs(scrolledTotal - flingStartScrolled).toInt()
+        if (remaining <= 0) return null
+        val visible = visibleRows() ?: return null
+        val edgePosition = if (flingForward) manager.findLastVisibleItemPosition() else manager.findFirstVisibleItemPosition()
+        val edgeView = manager.findViewByPosition(edgePosition) ?: return null
+        val firstPosition = manager.findFirstVisibleItemPosition()
+        val lastPosition = manager.findLastVisibleItemPosition()
+        val step = if (flingForward) 1 else -1
+        var position = edgePosition
+        // Px still hidden past the viewport edge inside the edge item.
+        val hidden = if (flingForward) edgeView.bottom - (height - paddingBottom) else paddingTop - edgeView.top
+        var left = remaining - hidden.coerceAtLeast(0)
+        while (left > 0 && position + step in richIds.indices) {
+            position += step
+            left -= richExtents[richIds[position]] ?: dp(rowHeight)
+        }
+        val id = richIds.getOrNull(position) ?: return null
+        val span = richSpans[id] ?: return null
+        val rows = span[1].coerceAtLeast(1)
+        val extent = (richExtents[id] ?: dp(rowHeight)).coerceAtLeast(1)
+        // Where the leading viewport edge rests inside that item (px from
+        // the item's edge it entered by).
+        val into = (extent + left.coerceAtMost(0)).coerceIn(0, extent)
+        val rowInto = (into.toLong() * rows / extent).toInt().coerceIn(0, rows - 1)
+        val landing = if (flingForward) span[0] + rowInto else span[0] + rows - 1 - rowInto
+        // The landing row is the leading edge of the screen it rests on.
+        return if (flingForward) {
+            intArrayOf(visible[0], max(visible[1], landing), min(firstPosition, position), max(lastPosition, position))
+        } else {
+            intArrayOf(min(visible[0], landing), visible[1], min(firstPosition, position), max(lastPosition, position))
+        }
     }
 
     private fun flingStarted(started: Boolean) = started && scrollState == SCROLL_STATE_SETTLING
@@ -862,6 +976,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             // The row at each edge counts as shown: it is the next to enter.
             first == NO_POSITION || position in (first - 1)..(last + 1)
         }
+        adapter.moving = { scrollState != SCROLL_STATE_IDLE }
         adapter.offscreenWhileMoving = { position ->
             scrollState != SCROLL_STATE_IDLE && !adapter.shown(position)
         }
@@ -1063,13 +1178,19 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     private var motionTrace: HashMap<Long, Int>? = null
 
+    /** Rows the adapter held at the last traced frame (a page landing logs its frame). */
+    private var motionTraceCount = -1
+
     private fun traceMotion() {
         val previous = motionTrace ?: return
         val current = HashMap<Long, Int>(childCount * 2)
         val deltas = ArrayList<Int>(childCount)
+        var above = Int.MAX_VALUE
         for (index in 0 until childCount) {
             val child = getChildAt(index)
             if (child.bottom <= 0 || child.top >= height) continue
+            val position = getChildAdapterPosition(child)
+            if (position != NO_POSITION && position < above) above = position
             val id = getChildItemId(child)
             if (id == NO_ID) continue
             val top = if (horizontal) child.left else child.top
@@ -1079,13 +1200,15 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (current.isEmpty()) return
         deltas.sort()
         val moved = if (deltas.isEmpty()) null else deltas[deltas.size / 2]
-        if (moved != 0 || previous.keys != current.keys) {
+        val count = adapter?.itemCount ?: 0
+        if (moved != 0 || previous.keys != current.keys || count != motionTraceCount) {
             android.util.Log.d(
                 MOTION_TRACE_TAG,
                 "t=${android.os.SystemClock.uptimeMillis()} dy=${moved ?: "swap"} common=${deltas.size} " +
-                    "shown=${current.size} state=$scrollState",
+                    "shown=${current.size} state=$scrollState above=${if (above == Int.MAX_VALUE) -1 else above} count=$count",
             )
         }
+        motionTraceCount = count
         motionTrace = current
     }
 
@@ -1757,11 +1880,56 @@ internal class RichRecyclerAdapter(
      */
     var offscreenWhileMoving: (Int) -> Boolean = { false }
 
+    /** Whether the list is moving (set by the list). */
+    var moving: () -> Boolean = { false }
+
     /** Whether the row at a position is on screen (set by the list). */
     var shown: (Int) -> Boolean = { true }
 
+    /**
+     * Cells bound off screen whose content changed in a commit (a window
+     * slide turning a placeholder into its row, rows gaining descendants):
+     * their views are built within the per-frame budget instead of inside
+     * the commit, and always before the row is drawn on screen.
+     */
+    private val pendingRepairs = LinkedHashMap<Long, Pair<RichHolder, () -> Unit>>()
+
+    /**
+     * Defers [repair] of cell [id] when it is bound off screen. Returns false
+     * (the caller repairs now) when it is on screen or not bound.
+     */
+    fun deferRepair(id: Long, repair: () -> Unit): Boolean {
+        val holder = boundHolders.firstOrNull { it.boundId == id } ?: return false
+        val position = holder.bindingAdapterPosition
+        if (position == RecyclerView.NO_POSITION || shown(position)) return false
+        pendingRepairs[id] = holder to repair
+        scheduleDrain()
+        return true
+    }
+
+    /** Pending off-screen repairs (tests). */
+    internal fun pendingRepairCount(): Int = pendingRepairs.size
+
+    private fun repairShown() {
+        if (pendingRepairs.isEmpty()) return
+        val iterator = pendingRepairs.entries.iterator()
+        while (iterator.hasNext()) {
+            val (id, entry) = iterator.next()
+            val (holder, repair) = entry
+            if (holder.boundId != id) {
+                iterator.remove()
+                continue
+            }
+            val position = holder.bindingAdapterPosition
+            if (position == RecyclerView.NO_POSITION || !shown(position)) continue
+            iterator.remove()
+            repair()
+        }
+    }
+
     /** Mounts, now, every pending row that is on screen: never drawn empty. */
     fun mountShown() {
+        repairShown()
         if (pendingMounts.isEmpty()) return
         val iterator = pendingMounts.entries.iterator()
         while (iterator.hasNext()) {
@@ -1818,7 +1986,21 @@ internal class RichRecyclerAdapter(
                 mount(id, holder.container)
                 mountWindowUsed += System.nanoTime() - started
             }
-            if (pendingMounts.isNotEmpty()) scheduleDrain()
+            // Off-screen repairs: within the smaller budget, at most one
+            // cell per frame while the list moves (they are ahead of it).
+            val repairs = pendingRepairs.entries.iterator()
+            var repaired = 0
+            while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS) {
+                if (repaired > 0 && moving()) break
+                val (id, entry) = repairs.next()
+                repairs.remove()
+                if (entry.first.boundId != id) continue
+                val started = System.nanoTime()
+                entry.second()
+                repaired++
+                mountWindowUsed += System.nanoTime() - started
+            }
+            if (pendingMounts.isNotEmpty() || pendingRepairs.isNotEmpty()) scheduleDrain()
         }
     }
 
@@ -2071,6 +2253,7 @@ internal class RichRecyclerAdapter(
 
     override fun onViewRecycled(holder: RichHolder) {
         pendingMounts.remove(holder)
+        pendingRepairs.entries.removeAll { it.value.first === holder }
         boundHolders.remove(holder)
         emptyRemountAttempts.remove(holder)
         holder.boundId.takeIf { it != RecyclerView.NO_ID && ownsCell(holder, it) }?.let {

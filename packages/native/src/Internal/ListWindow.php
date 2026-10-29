@@ -233,10 +233,25 @@ final class ListWindow
     }
 
     /**
+     * Rows a fling path may build, in screens: a longer path keeps the side
+     * it lands on. Counted in screens, not windows: a wide window (a chat's
+     * windowSize 11) already covers most flings.
+     */
+    private const PATH_SCREENS = 10;
+
+    /**
      * The host shows rows $first..$last: keeps `(windowSize - 1) / 2` of
      * those screens materialized on each side. True when the window moved.
+     *
+     * A released fling also names $path, the rows it sweeps and the screen
+     * it lands on: they are materialized at once, in one frame, and nothing
+     * is released while it moves (a fling crossing ten screens moved the
+     * window, building and releasing rows, a frame per screen). Rows behind
+     * are released with the next move that has to build rows.
+     *
+     * @param array{0: int, 1: int}|null $path
      */
-    public function extend(int $first, int $last, ?int $rows = null): bool
+    public function extend(int $first, int $last, ?int $rows = null, ?array $path = null): bool
     {
         if ($first < 0 || $last < 0) {
             return false;
@@ -251,6 +266,8 @@ final class ListWindow
         if ($last < $first) {
             [$first, $last] = [$last, $first];
         }
+        // The first report replaces the planned window (sized on a guess).
+        $planned = !$this->reported;
         $this->reported = true;
         $margin = (int) ceil(($this->size - 1) / 2 * ($last - $first + 1));
         $start = max(0, $first - $margin);
@@ -258,12 +275,50 @@ final class ListWindow
         // Half a margin of slack each way: rows are built and released in
         // batches, not on every row the host scrolls past.
         $slack = intdiv($margin, 2);
-        if ($this->ranges !== null && count($this->ranges) === 1) {
-            [$from, $to] = $this->ranges[0];
-            if (
-                $from <= max(0, $first - $slack) && $to >= $last + $slack + 1
-                && $from >= $start - $slack && $to <= $end + $slack
-            ) {
+        $needFrom = max(0, $first - $slack);
+        $needTo = $last + $slack + 1;
+        $window = $end - $start;
+        $span = self::PATH_SCREENS * ($last - $first + 1);
+        if ($path !== null) {
+            [$pathFirst, $pathLast] = $path[0] <= $path[1] ? $path : [$path[1], $path[0]];
+            $next = [[$start, $end]];
+            if ($pathLast - $pathFirst + 1 > $span) {
+                // Too long to build whole: the rows on screen and the side
+                // it lands on (the end it moves to); the middle stays
+                // placeholders the fling passes over.
+                if ($pathLast > $last) {
+                    $pathFirst = $pathLast - $span + 1;
+                } else {
+                    $pathLast = $pathFirst + $span - 1;
+                }
+            }
+            $next = self::addRange($next, max(0, $pathFirst - $margin), $pathLast + $margin + 1);
+            // Built once per fling: a long path's middle stays placeholders
+            // instead of being chased screen by screen.
+            // The path was built with a margin past its landing: a landing
+            // projected a little farther as the fling runs is still covered.
+            $covered = $this->ranges !== null
+                && self::covered($this->ranges, $pathFirst, $pathLast + 1);
+            if ($covered && self::rowsIn($this->ranges) <= $span + $window + 2 * $margin) {
+                // A fling over built rows releases nothing while it moves
+                // (bounded: a window grown past its path span shrinks).
+                return false;
+            }
+            $this->ranges = $next;
+
+            return true;
+        }
+        if (!$planned && $this->ranges !== null && self::covered($this->ranges, $needFrom, $needTo)) {
+            if (count($this->ranges) === 1) {
+                [$from, $to] = $this->ranges[0];
+                if ($from >= $start - $slack && $to <= $end + $slack) {
+                    return false;
+                }
+            }
+            // Rows a fling path left built stay until a move has to build
+            // rows (one frame then builds and releases), up to the path span:
+            // releasing them alone cost a frame at the start of each gesture.
+            if (self::rowsIn($this->ranges) <= $span + $window + 2 * $margin) {
                 return false;
             }
         }
@@ -429,6 +484,29 @@ final class ListWindow
         }
 
         return [$start ?? 0, max($end, ($start ?? 0) + 1)];
+    }
+
+    /** @param list<array{0: int, 1: int}> $ranges */
+    private static function covered(array $ranges, int $start, int $end): bool
+    {
+        foreach ($ranges as [$from, $to]) {
+            if ($from <= $start && $to >= $end) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param list<array{0: int, 1: int}> $ranges */
+    private static function rowsIn(array $ranges): int
+    {
+        $rows = 0;
+        foreach ($ranges as [$from, $to]) {
+            $rows += $to - $from;
+        }
+
+        return $rows;
     }
 
     /**

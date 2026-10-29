@@ -604,7 +604,9 @@ final class Runtime
                 // placeholder run have no node), with the row count the host
                 // had, so a report made before rows joined is recognized.
                 $rows = str_starts_with($payload, '@');
-                $ids = explode(',', $rows ? substr($payload, 1) : $payload, 3);
+                // "@first,last,rows,pathFirst,pathLast": a released fling
+                // also names the rows it sweeps and lands on.
+                $ids = explode(',', $rows ? substr($payload, 1) : $payload, 5);
                 if (
                     count($ids) >= 2
                     && (
@@ -614,6 +616,7 @@ final class Runtime
                                 (int) $ids[0],
                                 (int) $ids[1],
                                 isset($ids[2]) ? (int) $ids[2] : null,
+                                isset($ids[4]) ? [(int) $ids[3], (int) $ids[4]] : null,
                             )
                             : self::$encoder?->extendWindow($nodeId, (int) $ids[0], (int) $ids[1])
                     ) === true

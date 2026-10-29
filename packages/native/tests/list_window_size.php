@@ -402,4 +402,26 @@ $fresh = WindowList::make(...array_map(
 ));
 $freshShown = $fresh->lazyRows === null ? $fresh->children() : $fresh->lazyRows->shown();
 $assert(count($freshShown) === 200, 'An eager long list keeps its children.');
-echo "LIST_WINDOW_SIZE_OK rows=50 window=3 heights=measured encoder=pruned builder=1\n";
+// A released fling names the rows it sweeps and lands on: one move builds
+// them all, nothing is released while it moves, and the next move that must
+// build rows releases what is behind in the same frame.
+$fling = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'fling');
+$fling->configure(5);
+$assert($fling->extend(10, 13), 'The first report plans the window.');
+$assert($fling->state()[0] === [[2, 22]], 'Two screens each side (got '.json_encode($fling->state()[0]).').');
+$assert($fling->extend(10, 13, null, [10, 40]), 'A fling path moves the window once.');
+$assert($fling->state()[0] === [[2, 49]], 'The path and its landing screen are built at once (got '.json_encode($fling->state()[0]).').');
+$moved = 0;
+for ($row = 11; $row <= 36; $row++) {
+    $moved += $fling->extend($row, $row + 3, null, [$row, 40]) ? 1 : 0;
+}
+$assert($moved === 0 && $fling->state()[0] === [[2, 49]], 'The fling crosses built rows without moving the window.');
+$assert(!$fling->extend(38, 41), 'A drag over the rows a fling built releases nothing (no frame).');
+$assert($fling->extend(45, 48, null, [45, 80]), 'The next fling past the window moves it.');
+$assert($fling->state()[0] === [[37, 89]], 'Rows behind are released in the move that builds the next path (got '.json_encode($fling->state()[0]).').');
+$assert($fling->extend(84, 87), 'A drag past the path moves the window to its screens.');
+$assert($fling->state()[0] === [[76, 96]], 'Back to two screens each side (got '.json_encode($fling->state()[0]).').');
+$assert($fling->extend(84, 87, null, [84, 400]), 'A path longer than ten screens is clipped.');
+$assert($fling->state()[0] === [[76, 96], [353, 409]], 'A long path keeps the rows on screen and the side it lands on (got '.json_encode($fling->state()[0]).').');
+$assert(!$fling->extend(100, 103, null, [100, 400]), 'The same fling over its placeholders asks nothing more.');
+echo "LIST_WINDOW_SIZE_OK rows=50 window=3 heights=measured encoder=pruned builder=1 fling=path\n";

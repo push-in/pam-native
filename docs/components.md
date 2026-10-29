@@ -852,20 +852,30 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   rows a running fling still projects to travel (the platform spline), so a
   fling toward the end asks for the next page early instead of resting at a
   temporary end (Android).
+- **One window move per fling.** A `windowSize` list asks for the rows a
+  released fling sweeps and the screen it lands on (the platform spline) in
+  one request, built in one frame; nothing is released while it moves, and
+  rows behind go with the next move that builds rows. Rows a commit changes
+  while bound off screen build their views within the per-frame mount budget,
+  always before they are drawn; an insert that lands mid-fling is checked
+  before the next draw so the rows on screen never jump (Android).
 - **Visibility settles with the fling.** A `p-intersect` inside the list
   (an autoplay sensor, an impression) does not report the edges a fling
   sweeps past: it reports once the list rests, with the visibility it rests
   at (Android). Under a finger, edges stay live; detaching reports `false`.
 
-Covered by `packages/native/tests/list_native_scroll.php` and the Android
-`PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest` /
+Covered by `packages/native/tests/list_native_scroll.php`,
+`packages/native/tests/list_window_size.php` and the Android
+`PamListNativeScrollInstrumentedTest` / `PamListFlingWindowInstrumentedTest` / `PamHeadInsertAnchorTest` /
 `PamIntersectionObserverInstrumentedTest`.
 
 To measure a list on a device (debug builds), enable the motion trace with
 `adb shell setprop log.tag.PamListTrace DEBUG` and reopen the screen: every
 drawn frame logs `dy` (how far the rows on screen moved, median over rows
-present in both frames by stable id), `common`, `shown` and the scroll
-`state`. A jump, a snap at the end of a fling or a content swap (`dy=swap`)
+present in both frames by stable id), `common`, `shown`, the scroll
+`state`, the first row on screen (`above`, rows above the viewport) and the
+row `count`; a frame where rows join or leave logs even when nothing moved,
+so the arrival of a page and how much is loaded ahead show too. A jump, a snap at the end of a fling or a content swap (`dy=swap`)
 shows exactly, without a screen recording; inserts that stay anchored log
 `dy=0`.
 

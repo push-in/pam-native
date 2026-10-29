@@ -275,7 +275,8 @@ final class TreeEncoder
      * as hosts report rows inside a placeholder run). True when the next
      * encode materializes new rows.
      */
-    public function extendWindowRows(int $listId, int $first, int $last, ?int $rows = null): bool
+    /** @param array{0: int, 1: int}|null $path rows a released fling sweeps and lands on */
+    public function extendWindowRows(int $listId, int $first, int $last, ?int $rows = null, ?array $path = null): bool
     {
         $sized = ListWindow::forList($listId);
         if (
@@ -285,7 +286,7 @@ final class TreeEncoder
                 : ($this->windowLists[$listId][2] ?? false))
         ) {
             // A `windowSize` list: its window moves in screens.
-            if (!$sized->extend($first, $last, $rows)) {
+            if (!$sized->extend($first, $last, $rows, $path)) {
                 return false;
             }
             if ($this->native !== null) {
