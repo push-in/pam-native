@@ -1323,7 +1323,12 @@ fn layout_node(
         let explicit_cross = child_cross(child, axis, available_cross, main)?;
         let cross = explicit_cross.unwrap_or_else(|| {
             if alignment == CrossAlignment::Stretch {
-                (available_cross - cross_before - cross_after).max(0.0)
+                stretched_cross(
+                    child,
+                    axis,
+                    (available_cross - cross_before - cross_after).max(0.0),
+                    available_cross,
+                )
             } else {
                 intrinsic_cross(
                     context.children,
@@ -1802,7 +1807,14 @@ fn layout_wrapped_children(
             });
             let cross = explicit_cross.unwrap_or_else(|| {
                 if alignment == CrossAlignment::Stretch {
-                    (line_cross - cross_before - cross_after).max(0.0)
+                    // Yoga bounds a stretched item by its min/max cross size
+                    // (a maxWidth 300 column child wraps its text at 300).
+                    stretched_cross(
+                        child,
+                        axis,
+                        (line_cross - cross_before - cross_after).max(0.0),
+                        available_cross,
+                    )
                 } else {
                     intrinsic_cross.min((line_cross - cross_before - cross_after).max(0.0))
                 }
@@ -4502,6 +4514,49 @@ fn dimension(node: &Node, points: PropKey, percent: PropKey, available: f32) -> 
             .filter(|value| value.is_finite())
             .map(|value| available * value.clamp(0.0, 100.0) / 100.0)
     })
+}
+
+/// A stretched flex item's cross size clamped by its own min/max cross
+/// dimension (Yoga `boundAxis` on the stretched size).
+fn stretched_cross(child: &Node, axis: Axis, stretched: f32, available_cross: f32) -> f32 {
+    let (minimum, maximum) = match axis {
+        Axis::Vertical => (
+            dimension(
+                child,
+                PropKey::MinWidth,
+                PropKey::MinWidthPercent,
+                available_cross,
+            ),
+            dimension(
+                child,
+                PropKey::MaxWidth,
+                PropKey::MaxWidthPercent,
+                available_cross,
+            ),
+        ),
+        Axis::Horizontal => (
+            dimension(
+                child,
+                PropKey::MinHeight,
+                PropKey::MinHeightPercent,
+                available_cross,
+            ),
+            dimension(
+                child,
+                PropKey::MaxHeight,
+                PropKey::MaxHeightPercent,
+                available_cross,
+            ),
+        ),
+    };
+    let mut cross = stretched;
+    if let Some(maximum) = maximum.filter(|value| value.is_finite() && *value >= 0.0) {
+        cross = cross.min(maximum);
+    }
+    if let Some(minimum) = minimum.filter(|value| value.is_finite() && *value >= 0.0) {
+        cross = cross.max(minimum);
+    }
+    cross
 }
 
 fn constrained(value: f32, minimum: Option<f32>, maximum: Option<f32>) -> Result<f32, LayoutError> {
@@ -8128,6 +8183,145 @@ mod tests {
         assert_eq!(layout[&4].height, 180.0);
         assert_eq!(layout[&5].y, 540.0);
         assert_eq!(layout[&5].height, 60.0);
+    }
+
+    #[test]
+    fn max_width_text_in_a_padded_card_wraps_at_its_max_width() {
+        // Contatos sync hero: Column > Column(card, margin 16, padding 18) >
+        // Text(maxWidth 300, marginTop 6).
+        let long = "Veja quem já está aqui e convide o resto com um toque. Ninguém é avisado sem você mandar.";
+        let mut nodes = BTreeMap::new();
+        nodes.insert(1, node(1, 0, 0, NodeKind::Column, []));
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [
+                    (PropKey::Margin, PropValue::Float(16.0)),
+                    (PropKey::Padding, PropValue::Float(18.0)),
+                ],
+            ),
+        );
+        let mut start_aligned = nodes.clone();
+        start_aligned.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [
+                    (PropKey::Margin, PropValue::Float(16.0)),
+                    (PropKey::Padding, PropValue::Float(18.0)),
+                    (PropKey::AlignItems, PropValue::Integer(1)),
+                ],
+            ),
+        );
+        nodes.insert(
+            3,
+            node(
+                3,
+                2,
+                0,
+                NodeKind::Text,
+                [
+                    (PropKey::Text, PropValue::String(long.to_owned())),
+                    (PropKey::FontSize, PropValue::Float(13.5)),
+                    (PropKey::LineHeight, PropValue::Float(19.0)),
+                    (PropKey::MaxWidth, PropValue::Float(300.0)),
+                    (PropKey::MarginTop, PropValue::Float(6.0)),
+                ],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 800.0,
+            },
+        )
+        .expect("hero");
+        assert_eq!(layout[&3].width, 300.0, "text frame {:?}", layout[&3]);
+        // Same text, start-aligned card (not stretched): its intrinsic width
+        // is bounded by max-width too.
+        start_aligned.insert(3, tree.nodes[&3].clone());
+        let tree = Tree {
+            root: 1,
+            nodes: start_aligned,
+        };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 800.0,
+            },
+        )
+        .expect("hero start");
+        assert_eq!(
+            layout[&3].width, 300.0,
+            "start-aligned text frame {:?}",
+            layout[&3]
+        );
+    }
+
+    #[test]
+    fn stretched_column_child_wraps_text_inside_its_max_width() {
+        // RN ContactsScreen syncHeroBody: a stretched (default alignItems)
+        // child of a column with maxWidth 300 wraps its text at 300.
+        let mut nodes = BTreeMap::new();
+        nodes.insert(1, node(1, 0, 0, NodeKind::Column, []));
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::View,
+                [(PropKey::MaxWidth, PropValue::Float(200.0))],
+            ),
+        );
+        nodes.insert(
+            3,
+            node(
+                3,
+                2,
+                0,
+                NodeKind::Text,
+                [
+                    (
+                        PropKey::Text,
+                        PropValue::String(
+                            "Painel de gerenciamento com um texto longo que precisa quebrar"
+                                .to_owned(),
+                        ),
+                    ),
+                    (PropKey::FontSize, PropValue::Float(16.0)),
+                    (PropKey::LineHeight, PropValue::Float(21.0)),
+                ],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 700.0,
+            },
+        )
+        .expect("stretched max-width");
+
+        assert_eq!(layout[&2].width, 200.0);
+        assert!(layout[&3].width <= 200.0, "text width {}", layout[&3].width);
+        assert!(
+            layout[&3].height > 21.0 * 2.0,
+            "text height {}",
+            layout[&3].height
+        );
+        assert_eq!(layout[&2].height, layout[&3].height);
     }
 
     #[test]

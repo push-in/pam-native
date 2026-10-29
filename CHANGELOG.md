@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Layout: a stretched flex item is bounded by its own min/max cross size
+  like Yoga, so a `max-width` child of a column (View or Text) wraps its
+  text at that width instead of the column's.
 - Android `Input` font sizes are whole (ceiled) pixels like React Native's
   TextInput (15sp at 2.625 draws at 40 px, not 39.375).
 - Android text: `numberOfLines="1"` lays the text out as one unwrapped line
