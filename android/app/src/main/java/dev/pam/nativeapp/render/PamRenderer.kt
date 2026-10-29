@@ -3673,7 +3673,10 @@ class PamRenderer(
             PropKey.IMAGE_REQUEST_HEADERS,
             -> loadImage(view, state)
             PropKey.IMAGE_OVERLAY_COLOR -> updateBackground(view, state)
-            PropKey.ELEVATION -> view.elevation = dp(value.decimal().toFloat()).toFloat()
+            PropKey.ELEVATION -> {
+                view.elevation = dp(value.decimal().toFloat()).toFloat()
+                applyStackingZ(view, state)
+            }
             PropKey.VISIBLE -> {
                 val visible = value.flag()
                 when (view) {
@@ -4105,7 +4108,7 @@ class PamRenderer(
             PropKey.RETURN_KEY_TYPE -> (view as? PamEditText)?.let {
                 applyInputConfiguration(it, state)
             }
-            PropKey.Z_INDEX -> view.z = value.decimal().toFloat()
+            PropKey.Z_INDEX -> applyStackingZ(view, state)
             PropKey.OVERFLOW -> applyOverflowClip(view, state)
             PropKey.HOST_PROPERTIES -> {
                 val properties = (value as? PropValue.Properties)?.value
@@ -4916,6 +4919,11 @@ class PamRenderer(
                 state.pressScale = 1f
                 configurePressable(view, state)
             }
+            PropKey.ELEVATION -> {
+                view.elevation = 0f
+                applyStackingZ(view, state)
+            }
+            PropKey.Z_INDEX -> applyStackingZ(view, state)
             PropKey.HOST_PROPERTIES -> Unit
             PropKey.ON_INPUT_END_EDITING,
             PropKey.ON_INPUT_SELECTION_CHANGE,
@@ -5914,6 +5922,7 @@ class PamRenderer(
             view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat() * resourcesDensity()
             view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat() * resourcesDensity()
             view.elevation = dp(state.number(PropKey.ELEVATION, 0.0).toFloat()).toFloat()
+            applyStackingZ(view, state)
             updateBackground(view, state)
             state.properties[PropKey.TEXT_COLOR]?.let { color ->
                 (view as? TextView)?.let { applySemanticTextColor(it, color.integer().toInt()) }
@@ -5942,7 +5951,10 @@ class PamRenderer(
                 PropKey.TEXT_COLOR -> (view as? TextView)?.let {
                     applySemanticTextColor(it, styles.optLong(rawKey).toInt())
                 }
-                PropKey.ELEVATION -> view.elevation = dp(styles.optDouble(rawKey).toFloat()).toFloat()
+                PropKey.ELEVATION -> {
+                    view.elevation = dp(styles.optDouble(rawKey).toFloat()).toFloat()
+                    applyStackingZ(view, state)
+                }
                 else -> Unit
             }
         }
@@ -8713,6 +8725,13 @@ class PamRenderer(
         }
     }
 
+    private fun applyStackingZ(view: View, state: NodeState) {
+        // setZ changes translationZ too. A later z-index must never cancel an
+        // authored elevation (which Android uses for the native shadow).
+        val stacking = state.number(PropKey.Z_INDEX, 0.0).toFloat()
+        view.z = if (view.elevation > 0f) max(view.elevation, stacking) else stacking
+    }
+
     /**
      * A translated container is drawn where its later siblings are not, so it
      * must not stay underneath an earlier sibling with a higher z-index (a chat
@@ -8724,7 +8743,7 @@ class PamRenderer(
             state.properties[PropKey.Z_INDEX]?.decimal()?.toFloat()
         }.getOrNull() ?: 0f
         val parent = view.parent as? ViewGroup
-        var target = authored
+        var target = if (view.elevation > 0f) max(view.elevation, authored) else authored
         if (translated && parent != null) {
             for (index in 0 until parent.childCount) {
                 val sibling = parent.getChildAt(index)
