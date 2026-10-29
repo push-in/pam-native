@@ -153,7 +153,7 @@ final class FlatList extends Element
     public function onEndReached(Closure $handler, float $threshold = 0.5): self
     {
         return $this
-            ->withProperty(PropKey::EndReachedThreshold, min(1.0, max(0.0, $threshold)))
+            ->withProperty(PropKey::EndReachedThreshold, min(10.0, max(0.0, $threshold)))
             ->withEvent(EventKind::EndReached, $handler);
     }
 }

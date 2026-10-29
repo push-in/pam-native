@@ -847,6 +847,11 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   asked for: one committed after a press, long press or submit made since the
   gesture began (a send button, a "jump to latest" button) runs at once.
   Inserts during a fling do not stop it.
+- **Pages arrive ahead of a fling.** `endReached` fires when the rows left
+  are within `endReachedThreshold` screens (RN semantics, up to 10) plus the
+  rows a running fling still projects to travel (the platform spline), so a
+  fling toward the end asks for the next page early instead of resting at a
+  temporary end (Android).
 - **Visibility settles with the fling.** A `p-intersect` inside the list
   (an autoplay sensor, an impression) does not report the edges a fling
   sweeps past: it reports once the list rests, with the visibility it rests

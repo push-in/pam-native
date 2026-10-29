@@ -136,6 +136,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                     scrolledToEnd = restingAtEnd() && canScrollTowardStart()
                 }
                 updateAdaptivePrefetch(if (horizontal) dx else dy)
+                (adapter as? RichRecyclerAdapter)?.mountShown()
                 updateAccessibilityVisibility()
                 dispatchViewport()
             }
@@ -307,7 +308,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 mount,
                 unmount,
                 deferMounts = { !isShown },
-            )
+            ).also(::installOffscreenMounts)
         } else {
             current.submit(ids, pixelExtents)
         }
@@ -791,7 +792,52 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     override fun fling(velocityX: Int, velocityY: Int): Boolean {
         releaseVelocityX = velocityX.toFloat()
         releaseVelocityY = velocityY.toFloat()
-        return super.fling(velocityX, velocityY)
+        val flinging = super.fling(velocityX, velocityY)
+        // A fling toward the end (adapter order) projects where it rests.
+        val velocity = (if (horizontal) velocityX else velocityY).toFloat() * (if (inverted) -1f else 1f)
+        flingStartPx = axisOffsetPx()
+        flingProjectedPx = if (flingStarted(flinging) && velocity > 0f) {
+            splineFlingDistancePx(velocity, resources.displayMetrics.density)
+        } else {
+            0f
+        }
+        return flinging
+    }
+
+    private fun flingStarted(started: Boolean) = started && scrollState == SCROLL_STATE_SETTLING
+
+    private var flingStartPx = 0
+    private var flingProjectedPx = 0f
+
+    private fun axisOffsetPx(): Int = if (horizontal) computeHorizontalScrollOffset() else computeVerticalScrollOffset()
+
+    /** Px a running fling toward the list's end still projects to travel (0 at rest). */
+    fun flingRemainingPx(): Float {
+        if (flingProjectedPx <= 0f || scrollState != SCROLL_STATE_SETTLING) return 0f
+        val travelled = abs(axisOffsetPx() - flingStartPx).toFloat()
+        return (flingProjectedPx - travelled).coerceAtLeast(0f)
+    }
+
+    /** Average px of the rows on screen along the axis (0 when none). */
+    fun visibleRowPx(visibleRows: Int): Float =
+        if (visibleRows <= 0) 0f else (if (horizontal) width else height).toFloat() / visibleRows
+
+    /**
+     * Rows bound off screen while the list moves (a fling laying out ahead, a
+     * window slide rebinding rows) mount a few per frame; rows on screen
+     * always mount before they draw.
+     */
+    private fun installOffscreenMounts(adapter: RichRecyclerAdapter) {
+        adapter.shown = { position ->
+            val manager = layoutManager as? LinearLayoutManager
+            val first = manager?.findFirstVisibleItemPosition() ?: NO_POSITION
+            val last = manager?.findLastVisibleItemPosition() ?: NO_POSITION
+            // The row at each edge counts as shown: it is the next to enter.
+            first == NO_POSITION || position in (first - 1)..(last + 1)
+        }
+        adapter.offscreenWhileMoving = { position ->
+            scrollState != SCROLL_STATE_IDLE && !adapter.shown(position)
+        }
     }
 
     fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {
@@ -1641,7 +1687,7 @@ internal fun lastAtOrBefore(positions: IntArray, position: Int): Int {
     return low - 1
 }
 
-private class RichRecyclerAdapter(
+internal class RichRecyclerAdapter(
     private val context: Context,
     ids: List<Long>,
     extents: Map<Long, Int>,
@@ -1661,8 +1707,35 @@ private class RichRecyclerAdapter(
     private var mountWindowUsed = 0L
     private var drainScheduled = false
 
-    private fun mountWithinBudget(holder: RichHolder, id: Long): Boolean {
-        if (!deferMounts()) return mountNow(holder, id)
+    /**
+     * Set by the list: whether the row at a position is off screen while the
+     * list moves. Such a row (bound ahead by a fling's layout or rebound by a
+     * window slide) mounts within the per-frame budget instead of all at once
+     * in one frame; it always mounts before it is drawn on screen
+     * ([mountShown]).
+     */
+    var offscreenWhileMoving: (Int) -> Boolean = { false }
+
+    /** Whether the row at a position is on screen (set by the list). */
+    var shown: (Int) -> Boolean = { true }
+
+    /** Mounts, now, every pending row that is on screen: never drawn empty. */
+    fun mountShown() {
+        if (pendingMounts.isEmpty()) return
+        val iterator = pendingMounts.entries.iterator()
+        while (iterator.hasNext()) {
+            val (holder, id) = iterator.next()
+            val position = holder.bindingAdapterPosition
+            if (position == RecyclerView.NO_POSITION || !shown(position)) continue
+            iterator.remove()
+            if (holder.boundId == id && holder.container.childCount == 0) mount(id, holder.container)
+        }
+    }
+
+    private fun mountWithinBudget(holder: RichHolder, id: Long, position: Int = RecyclerView.NO_POSITION): Boolean {
+        if (!deferMounts() && (position == RecyclerView.NO_POSITION || !offscreenWhileMoving(position))) {
+            return mountNow(holder, id)
+        }
         // One budget per frame: the animation clock is the frame's vsync time.
         val frame = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
         if (frame != mountWindowStart) {
@@ -1691,6 +1764,7 @@ private class RichRecyclerAdapter(
         drainScheduled = true
         android.view.Choreographer.getInstance().postFrameCallback {
             drainScheduled = false
+            mountShown()
             mountWindowStart = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
             mountWindowUsed = 0L
             val budget = if (deferMounts()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
@@ -1781,7 +1855,20 @@ private class RichRecyclerAdapter(
                     i++
                     count++
                 }
-                notifyItemRangeRemoved(position, count)
+                // Rows replaced in place (a window slide swapping placeholders
+                // and rows, a re-keyed row): a removed run right before an
+                // inserted run rebinds the overlap in place instead of a
+                // remove + insert, which forces a full relayout of every
+                // attached row mid-fling and rebinds off-screen ones.
+                var inserted = 0
+                while (j + inserted < replacement.size && replacement[j + inserted] !in previousIds) inserted++
+                val replaced = minOf(count, inserted)
+                if (replaced > 0) {
+                    notifyItemRangeChanged(position, replaced)
+                    position += replaced
+                    j += replaced
+                }
+                if (count > replaced) notifyItemRangeRemoved(position, count - replaced)
             } else if (j < replacement.size && replacement[j] !in previousIds) {
                 var count = 0
                 while (j < replacement.size && replacement[j] !in previousIds) {
@@ -1915,7 +2002,7 @@ private class RichRecyclerAdapter(
         })
 
     override fun onBindViewHolder(holder: RichHolder, position: Int) {
-        bind(holder, ids[position])
+        bind(holder, ids[position], position)
     }
 
     override fun onBindViewHolder(
@@ -1931,7 +2018,7 @@ private class RichRecyclerAdapter(
         ) {
             applyLayout(holder.container, id)
         } else {
-            bind(holder, id)
+            bind(holder, id, position)
         }
     }
 
@@ -1947,7 +2034,7 @@ private class RichRecyclerAdapter(
         super.onViewRecycled(holder)
     }
 
-    private fun bind(holder: RichHolder, id: Long) {
+    private fun bind(holder: RichHolder, id: Long, position: Int = RecyclerView.NO_POSITION) {
         val previous = holder.boundId
         pendingMounts.remove(holder)
         if (previous != RecyclerView.NO_ID && previous != id) {
@@ -1957,7 +2044,7 @@ private class RichRecyclerAdapter(
         }
         applyLayout(holder.container, id)
         holder.boundId = id
-        mountWithinBudget(holder, id)
+        mountWithinBudget(holder, id, position)
         boundHolders += holder
         if (holder.container.childCount > 0) {
             emptyRemountAttempts.remove(holder)

@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.graphics.Bitmap
 import android.widget.ImageView
 import kotlin.math.ceil
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -17,8 +18,28 @@ import kotlin.math.sqrt
  * level and costs nothing per frame once the image is displayed.
  */
 internal object PamBitmapBlur {
+    /**
+     * The last blur of each live source bitmap. Images draw from the shared
+     * memory cache, so a list cell rebinding (a feed backdrop, a glyph shadow
+     * repeated in every row) gets the same source bitmap back: reusing its
+     * blur keeps a GPU readback and a box blur off the UI thread on every
+     * bind while scrolling. Entries go with their source (weak keys); the
+     * blurred copies are small (downscaled to σ ≈ 4).
+     */
+    private val blurred = java.util.WeakHashMap<Bitmap, Pair<Float, Bitmap>>()
+
     fun blur(source: Bitmap, sigma: Float): Bitmap {
         if (sigma <= 0f || source.width <= 0 || source.height <= 0) return source
+        synchronized(blurred) {
+            blurred[source]?.takeIf { (applied, bitmap) -> abs(applied - sigma) < 0.05f && !bitmap.isRecycled }
+                ?.let { return it.second }
+        }
+        val output = blurUncached(source, sigma)
+        if (output !== source) synchronized(blurred) { blurred[source] = sigma to output }
+        return output
+    }
+
+    private fun blurUncached(source: Bitmap, sigma: Float): Bitmap {
         val readable = if (source.config == Bitmap.Config.HARDWARE) {
             source.copy(Bitmap.Config.ARGB_8888, false) ?: return source
         } else {

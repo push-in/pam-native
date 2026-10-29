@@ -6618,7 +6618,7 @@ class PamRenderer(
         scroll.setOnViewportChanged { scrollX, scrollY ->
             if (pageChange) dispatchPageChange(state, scroll.pageIndex())
             if (endReached) {
-                val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, 1.0)
+                val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, MAX_END_REACHED_THRESHOLD)
                 val trigger = scroll.primaryViewportPixels() * threshold
                 val remaining = scroll.remainingPrimaryPixels()
                 if (remaining <= trigger && !state.endReachedSent) {
@@ -6758,9 +6758,16 @@ class PamRenderer(
                 }
             }
             if (endReached && totalItemCount > 0 && !state.endReachedSent) {
-                val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, 1.0)
+                val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, MAX_END_REACHED_THRESHOLD)
                 val remaining = totalItemCount - firstVisibleItem - visibleItemCount
-                val trigger = max(1, (visibleItemCount * threshold).toInt())
+                // A fling asks for the next page as soon as it projects past
+                // the threshold, so it never rests at a temporary end.
+                val trigger = endReachedTriggerRows(
+                    visibleItemCount,
+                    threshold,
+                    list.flingRemainingPx(),
+                    list.visibleRowPx(visibleItemCount),
+                )
                 if (remaining <= trigger) {
                     state.endReachedSent = true
                     dispatch(state.id, EVENT_END_REACHED)
@@ -10674,6 +10681,8 @@ class PamRenderer(
         const val EVENT_LIST_WINDOW = 80
         /** Rows around the visible ones checked for placeholders (at least a screen). */
         const val LIST_WINDOW_MARGIN_ROWS = 12
+        /** RN `onEndReachedThreshold` is in visible lengths and may exceed 1 (e.g. 2 screens ahead). */
+        const val MAX_END_REACHED_THRESHOLD = 10.0
         const val LIST_WINDOW_RETRY_MS = 250L
         const val EVENT_DRAWER_OPEN = 13
         const val EVENT_DRAWER_CLOSE = 14

@@ -2436,6 +2436,13 @@ $assert(
         && isset($listElement->events()[EventKind::EndReached->value]),
     'List helpers must preserve recycling, prefetch, layout and scroll event properties.',
 );
+$assert(
+    VirtualizedList::make([])->onEndReached(static function (): void {
+    }, 2.0)->properties()[PropKey::EndReachedThreshold->value] === 2.0
+        && VirtualizedList::make([])->onEndReached(static function (): void {
+        }, 99.0)->properties()[PropKey::EndReachedThreshold->value] === 10.0,
+    'onEndReachedThreshold is in visible lengths like React Native: it may ask pages screens ahead (bounded at 10).',
+);
 
 $richListElement = VirtualizedList::make(
     Column::make(
