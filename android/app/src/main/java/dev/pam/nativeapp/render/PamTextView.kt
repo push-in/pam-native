@@ -40,6 +40,11 @@ internal class PamTextView(context: Context) : TextView(context) {
             truncatedFor = null
         }
         super.setText(text, type)
+        // A new text at an already laid-out width gets no measure pass when
+        // its size does not change: truncate it here against that width.
+        if (!settingTruncated && width > 0) {
+            truncateTail(width - compoundPaddingLeft - compoundPaddingRight)
+        }
     }
 
     /**
@@ -112,6 +117,13 @@ internal class PamTextView(context: Context) : TextView(context) {
         val width = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
         if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) truncateTail(width)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        // Paint changes (font, size, spacing) at an unchanged size reach here
+        // without onMeasure re-running the truncation for the new metrics.
+        truncateTail(right - left - compoundPaddingLeft - compoundPaddingRight)
+        super.onLayout(changed, left, top, right, bottom)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
