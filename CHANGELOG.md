@@ -34,6 +34,11 @@ RN layout/text parity and Android list/media fixes on top of 1.46.5, no protocol
   text at that width instead of the column's.
 - Android `Input` font sizes are whole (ceiled) pixels like React Native's
   TextInput (15sp at 2.625 draws at 40 px, not 39.375).
+- Android text with `numberOfLines` and the tail ellipsis is cut exactly
+  where React Native 0.85.3's TextLayoutManager lays it out (StaticLayout,
+  maxLines, TruncateAt.END at the floor of the available width) and shown as
+  that copy, re-cut when the text or its paint changes at an unchanged size
+  ("Visto por último hoje à…"). Frames and ink x are unchanged.
 - Android text: `numberOfLines="1"` lays the text out as one unwrapped line
   (horizontally scrolling TextView, no input or marquee change), so the tail
   ellipsis cuts mid-word like React Native ("hoje à…") instead of breaking

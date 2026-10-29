@@ -90,3 +90,15 @@ class PamTextPixelSnappingTest {
         org.junit.Assert.assertTrue("fixture must cover the lossy rounding case", lostPixel)
     }
 }
+
+class PamRnStyledTextTest {
+    @Test
+    fun styledTextUsesSubpixelAdvancesLikeRnCustomStyleSpan() {
+        org.junit.Assert.assertTrue(PamTextLayout.rnStyledText("Roboto", 600, false, null))
+        org.junit.Assert.assertTrue(PamTextLayout.rnStyledText(null, 600, false, null))
+        org.junit.Assert.assertTrue(PamTextLayout.rnStyledText(null, 400, true, null))
+        org.junit.Assert.assertTrue(PamTextLayout.rnStyledText(null, 400, false, "tnum"))
+        assertFalse(PamTextLayout.rnStyledText(null, 400, false, null))
+        assertFalse(PamTextLayout.rnStyledText("", 400, false, ""))
+    }
+}

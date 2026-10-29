@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
+import android.text.BoringLayout
 import android.text.Layout
 import android.text.NoCopySpan
 import android.text.SpannableStringBuilder
@@ -213,6 +214,16 @@ internal object PamTextLayout {
             else -> Layout.HYPHENATION_FREQUENCY_NONE
         }
 
+    /**
+     * React Native wraps a text with a family, weight, italic style or font
+     * features in CustomStyleSpan, which turns on subpixel text (fractional
+     * glyph advances); a plain text keeps hinted integer advances. With
+     * integer advances a 22-glyph line ran a few px wider and its ellipsis
+     * dropped a glyph RN keeps ("hoje …" vs "hoje à…").
+     */
+    fun rnStyledText(family: String?, weight: Int, italic: Boolean, features: String?): Boolean =
+        !family.isNullOrEmpty() || weight != 400 || italic || !features.isNullOrEmpty()
+
     fun configurePaint(
         paint: TextPaint,
         style: PamTextStyle,
@@ -220,6 +231,7 @@ internal object PamTextLayout {
         typefaces: NativeTypefaceLoader,
     ) {
         paint.typeface = typefaces.resolve(style.fontFamily, style.fontWeight, style.italic)
+        paint.isSubpixelText = rnStyledText(style.fontFamily, style.fontWeight, style.italic, style.fontFeatures)
         paint.textSize = fontSizePx(style.fontSize, style.fontScale, density)
         paint.letterSpacing = letterSpacingEm(style, density)
         paint.fontFeatureSettings = style.fontFeatures?.takeIf(String::isNotEmpty)
@@ -353,6 +365,64 @@ internal object PamTextLayout {
         output[2] = layout.getLineBaseline(0) / density
         output[3] = lines.toFloat()
     }
+
+    /**
+     * React Native 0.85.3 TextLayoutManager.createLayout/buildLayout for a
+     * text with `numberOfLines` and the tail ellipsis, at the floor of the
+     * available width: a boring text that fits is a BoringLayout (no cut);
+     * otherwise a StaticLayout with the same alignment, spacing, padding,
+     * break strategy, hyphenation, `setEllipsize(END)` and `setMaxLines`.
+     * Returns the text cut where that layout ellipsizes its last line plus
+     * the ellipsis, or null when it is not truncated.
+     */
+    fun rnTailTruncate(
+        text: CharSequence,
+        paint: TextPaint,
+        availableWidth: Float,
+        maxLines: Int,
+        includeFontPadding: Boolean,
+        breakStrategy: Int,
+        hyphenationFrequency: Int,
+    ): CharSequence? {
+        if (text.isEmpty() || maxLines <= 0 || !availableWidth.isFinite() || availableWidth <= 0f) return null
+        val width = floor(availableWidth.toDouble()).toInt()
+        // RN updateTextPaint: the layout paint carries the text's own base
+        // size/typeface/spacing, so StaticLayout measures the ellipsis in the
+        // text's font. Here those live in spans over the whole text; a view
+        // paint in another face measured a wider "…" and cut a glyph early.
+        val basePaint = TextPaint(paint)
+        val whole = (text as? Spanned)
+            ?.getSpans(0, text.length, MetricAffectingSpan::class.java)
+            ?.filter { text.getSpanStart(it) <= 0 && text.getSpanEnd(it) >= text.length }
+            .orEmpty()
+        whole.forEach { it.updateMeasureState(basePaint) }
+        val boring = BoringLayout.isBoring(text, basePaint)
+        if (boring != null && boring.width <= width) return null
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, basePaint, width)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(includeFontPadding)
+            .setBreakStrategy(breakStrategy)
+            .setHyphenationFrequency(hyphenationFrequency)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setMaxLines(maxLines)
+            .build()
+        val last = layout.lineCount - 1
+        if (last < 0 || layout.getEllipsisCount(last) <= 0) return null
+        val cut = (layout.getLineStart(last) + layout.getEllipsisStart(last)).coerceIn(0, text.length)
+        val truncated = SpannableStringBuilder(text, 0, cut).append(ELLIPSIS)
+        // The ellipsis is drawn in the text's own style, like RN's layout.
+        if (text is Spanned) {
+            for (span in text.getSpans(0, text.length, Any::class.java)) {
+                if (text.getSpanStart(span) <= 0 && text.getSpanEnd(span) >= text.length && truncated.getSpanStart(span) >= 0) {
+                    truncated.setSpan(span, 0, truncated.length, text.getSpanFlags(span))
+                }
+            }
+        }
+        return truncated
+    }
+
+    private const val ELLIPSIS = "\u2026"
 
     fun build(text: CharSequence, paint: TextPaint, width: Int, style: PamTextStyle): StaticLayout {
         val builder = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
