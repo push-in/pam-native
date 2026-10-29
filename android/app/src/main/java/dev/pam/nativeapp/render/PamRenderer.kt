@@ -8065,11 +8065,19 @@ class PamRenderer(
         val weight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt()
         val italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L
         val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
-        // Text nodes are measured by PamTextLayout with React Native's default
-        // paint (hinted advances); other controls keep linear metrics.
+        // Text nodes follow React Native's paint: a styled text (family,
+        // weight, italic or font features -> CustomStyleSpan) draws with
+        // subpixel (fractional) advances, an unstyled one with hinted
+        // integer advances; other controls keep linear metrics.
+        val features = (state.properties[PropKey.FONT_FEATURE_SETTINGS] as? PropValue.Text)?.value
         view.paintFlags = if (isRichTextView(view, state)) {
-            view.paintFlags and (android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
+            val base = view.paintFlags and (android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
                 android.graphics.Paint.LINEAR_TEXT_FLAG).inv()
+            if (PamTextLayout.rnStyledText(family, weight, italic, features)) {
+                base or android.graphics.Paint.SUBPIXEL_TEXT_FLAG
+            } else {
+                base
+            }
         } else {
             view.paintFlags or android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
                 android.graphics.Paint.LINEAR_TEXT_FLAG

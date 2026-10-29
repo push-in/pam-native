@@ -214,6 +214,16 @@ internal object PamTextLayout {
             else -> Layout.HYPHENATION_FREQUENCY_NONE
         }
 
+    /**
+     * React Native wraps a text with a family, weight, italic style or font
+     * features in CustomStyleSpan, which turns on subpixel text (fractional
+     * glyph advances); a plain text keeps hinted integer advances. With
+     * integer advances a 22-glyph line ran a few px wider and its ellipsis
+     * dropped a glyph RN keeps ("hoje …" vs "hoje à…").
+     */
+    fun rnStyledText(family: String?, weight: Int, italic: Boolean, features: String?): Boolean =
+        !family.isNullOrEmpty() || weight != 400 || italic || !features.isNullOrEmpty()
+
     fun configurePaint(
         paint: TextPaint,
         style: PamTextStyle,
@@ -221,6 +231,7 @@ internal object PamTextLayout {
         typefaces: NativeTypefaceLoader,
     ) {
         paint.typeface = typefaces.resolve(style.fontFamily, style.fontWeight, style.italic)
+        paint.isSubpixelText = rnStyledText(style.fontFamily, style.fontWeight, style.italic, style.fontFeatures)
         paint.textSize = fontSizePx(style.fontSize, style.fontScale, density)
         paint.letterSpacing = letterSpacingEm(style, density)
         paint.fontFeatureSettings = style.fontFeatures?.takeIf(String::isNotEmpty)
