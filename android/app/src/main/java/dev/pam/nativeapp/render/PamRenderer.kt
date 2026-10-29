@@ -571,8 +571,27 @@ internal fun snappedPixelSpan(
     preserveContentExtent: Boolean = false,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
-    val absoluteStart = (start * safeDensity).roundToInt()
-    val absoluteEnd = ((start + extent.coerceAtLeast(0f)) * safeDensity).roundToInt()
+    val safeExtent = extent.coerceAtLeast(0f)
+    val absoluteStart: Int
+    val absoluteEnd: Int
+    if (preserveContentExtent) {
+        // Yoga's text rounding (YGRoundToPixelGrid, textRounding): the
+        // leading edge floors and the trailing edge ceils when the extent has
+        // a fractional pixel (floors when it is whole). Rounding both edges
+        // to nearest made a truncated line ~1 px narrower than React Native's,
+        // so its tail ellipsis dropped the last glyph that fits ("hoje à…"
+        // drawn as "hoje…").
+        val fractionalExtent = !pixelFractionIsWhole(safeExtent * safeDensity)
+        absoluteStart = yogaPixelEdge(start * safeDensity, forceCeil = false, forceFloor = true)
+        absoluteEnd = yogaPixelEdge(
+            (start + safeExtent) * safeDensity,
+            forceCeil = fractionalExtent,
+            forceFloor = !fractionalExtent,
+        )
+    } else {
+        absoluteStart = (start * safeDensity).roundToInt()
+        absoluteEnd = ((start + safeExtent) * safeDensity).roundToInt()
+    }
     val absoluteParentStart = (parentStart * safeDensity).roundToInt()
     var snappedExtent = (absoluteEnd - absoluteStart).coerceAtLeast(0)
     if (preserveContentExtent) {
@@ -587,6 +606,33 @@ internal fun snappedPixelSpan(
         offset = absoluteStart - absoluteParentStart,
         extent = snappedExtent,
     )
+}
+
+/** Yoga's inexactEquals epsilon for pixel-grid fractions. */
+private const val PIXEL_GRID_EPSILON = 0.0001f
+
+private fun pixelFraction(px: Float): Float {
+    val fraction = px - kotlin.math.floor(px)
+    return if (fraction < 0f) fraction + 1f else fraction
+}
+
+internal fun pixelFractionIsWhole(px: Float): Boolean {
+    val fraction = pixelFraction(px)
+    return fraction < PIXEL_GRID_EPSILON || fraction > 1f - PIXEL_GRID_EPSILON
+}
+
+/** YGRoundValueToPixelGrid on an absolute pixel coordinate. */
+internal fun yogaPixelEdge(px: Float, forceCeil: Boolean, forceFloor: Boolean): Int {
+    val fraction = pixelFraction(px)
+    val base = kotlin.math.floor(px)
+    val snapped = when {
+        fraction < PIXEL_GRID_EPSILON -> base
+        fraction > 1f - PIXEL_GRID_EPSILON -> base + 1f
+        forceCeil -> base + 1f
+        forceFloor -> base
+        else -> if (fraction >= 0.5f) base + 1f else base
+    }
+    return snapped.toInt()
 }
 
 internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =
@@ -7677,7 +7723,9 @@ class PamRenderer(
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
         val effectiveScale = resolvedFontScale(allowScaling, deviceScale, maximumMultiplier)
-        val maximumPx = if (isRichTextView(view, state)) {
+        // React Native sizes Text and TextInput fonts in whole (ceiled)
+        // pixels (TextAttributes.getEffectiveFontSize): 15sp at 2.625 is 40 px.
+        val maximumPx = if (isRichTextView(view, state) || view is EditText) {
             PamTextLayout.fontSizePx(baseSize, effectiveScale, metrics.density)
         } else {
             max(1f, PamTextLayout.scaledPx(baseSize, effectiveScale, metrics.density))

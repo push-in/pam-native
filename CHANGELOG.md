@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Android text frames snap to pixels with Yoga's text rounding (leading
+  edge floors, trailing edge ceils a fractional extent) instead of rounding
+  both edges to nearest, so a truncated line is as wide as React Native's
+  and its ellipsis keeps the same characters ("hoje à…", not "hoje…").
+- Android `Input` font sizes are whole (ceiled) pixels like React Native's
+  TextInput (15sp at 2.625 draws at 40 px, not 39.375).
 - Android text: `numberOfLines="1"` lays the text out as one unwrapped line
   (horizontally scrolling TextView, no input or marquee change), so the tail
   ellipsis cuts mid-word like React Native ("hoje à…") instead of breaking
