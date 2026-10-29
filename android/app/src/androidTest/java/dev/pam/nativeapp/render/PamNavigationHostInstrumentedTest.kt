@@ -804,18 +804,19 @@ class PamNavigationHostInstrumentedTest {
             }
             instrumentation.waitForIdleSync()
             fun sampleFlight(target: MutableList<FloatArray>) {
-                // navigate() registered its pre-draw listener first. Observe the
-                // animator after it has started, and after the host's update
+                // A newly mounted route can defer its transition for layout.
+                // Wait for the animator, then observe after the host's update
                 // listener has applied the geometry, including fraction 1.
                 // Choreographer sampling misses that terminal update: finish()
                 // removes the flight in the same animator callback. With the
                 // short cubic return, the previous frame can still be far away.
                 val observer = navigation.viewTreeObserver
+                val field = PamNavigationHost::class.java.getDeclaredField("running").apply { isAccessible = true }
                 lateinit var listener: android.view.ViewTreeObserver.OnPreDrawListener
                 listener = android.view.ViewTreeObserver.OnPreDrawListener {
+                    val animator = field.get(navigation) as? android.animation.ValueAnimator
+                        ?: return@OnPreDrawListener true
                     observer.removeOnPreDrawListener(listener)
-                    val field = PamNavigationHost::class.java.getDeclaredField("running").apply { isAccessible = true }
-                    val animator = field.get(navigation) as android.animation.ValueAnimator
                     fun capture() {
                         navigation.activeSharedElementFrames().single().let { target += it.copyOf() }
                         assertEquals(0f, thumbnail.alpha, 0f)
