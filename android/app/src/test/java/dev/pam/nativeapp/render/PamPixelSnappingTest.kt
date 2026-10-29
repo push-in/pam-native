@@ -78,15 +78,38 @@ class PamTextPixelSnappingTest {
         // "QA" measured as 48 px -> 18.285715 dp. Some fractional positions
         // round the two edges apart by only 47 px.
         val width = 48f / density
-        var lostPixel = false
         for (step in 0 until 20_000) {
             val start = step * 0.0137f
             val plain = snappedPixelSpan(start, width, 0f, density)
-            if (plain.extent < 48) lostPixel = true
+            // Plain views round both edges like Yoga (independently).
+            org.junit.Assert.assertTrue("start=$start", plain.extent in 47..49)
             val text = snappedPixelSpan(start, width, 0f, density, preserveContentExtent = true)
             org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent >= 48)
             org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent <= 49)
         }
-        org.junit.Assert.assertTrue("fixture must cover the lossy rounding case", lostPixel)
+    }
+}
+
+class PamYogaPixelRoundingTest {
+    @Test
+    fun halfPixelsWithFloatNoiseRoundUpLikeYoga() {
+        val density = 2.625f
+        // 28 dp = 73.5 px; as an f32 sum it can land a hair below .5.
+        assertEquals(74, yogaRoundToPixel(73.49998f / density, density))
+        assertEquals(74, yogaRoundToPixel(73.5f / density, density))
+        assertEquals(73, yogaRoundToPixel(73.4f / density, density))
+        assertEquals(189, yogaRoundToPixel(188.99997f / density, density))
+        assertEquals(-3, yogaRoundToPixel(-3.2f / density, density))
+    }
+
+    @Test
+    fun aTileWhoseEdgesSitOnHalfPixelsKeepsItsPixel() {
+        val density = 2.625f
+        // Second row of tiles: top 72 + 10 dp gap, height 72 dp (189 px).
+        val top = 82f
+        val height = 72f
+        val span = snappedPixelSpan(top, height, 0f, density)
+        assertEquals(189, span.extent)
+        assertEquals(215, span.offset) // 82 dp = 215.25 px
     }
 }
