@@ -128,4 +128,14 @@ class NativeImageDecodePlanTest {
         assertEquals(360 * 450 * 4, nativeImageCacheWeight(360 * 450 * 4, 360L * 450))
         assertEquals(Int.MAX_VALUE, nativeImageCacheWeight(Int.MAX_VALUE, LARGE_IMAGE_PIXELS))
     }
+
+    @Test
+    fun containDecodesToTheFittedSize() {
+        // A 1600x2000 portrait photo contained in a 1080x1466 box shows at
+        // 1080x1350: cover kept 1173x1466 (18% more pixels).
+        val cover = nativeImageDecodePlan(1600, 2000, 1080, 1466, IMAGE_RESIZE_AUTO, 1f)
+        val contain = nativeImageDecodePlan(1600, 2000, 1080, 1466, IMAGE_RESIZE_AUTO, 1f, contain = true)
+        assertEquals(1173 to 1466, cover.width to cover.height)
+        assertEquals(1080 to 1350, contain.width to contain.height)
+    }
 }

@@ -45,6 +45,8 @@ internal data class NativeImageRequest(
     val mediaCacheMaxBytes: Long = 0,
     val mediaCacheChecksum: String? = null,
     val repeat: Boolean = false,
+    /** `contain`: the whole image fits the view, so it decodes to the fitted size. */
+    val contain: Boolean = false,
     /**
      * Drop the decoded bitmap while the view is hidden even when the memory
      * cache is not used (a media poster under its painted video); it is
@@ -533,6 +535,7 @@ internal class NativeImageLoader(
                     pending.request.resizeMultiplier,
                     repeat = pending.request.repeat,
                     inline = true,
+                    contain = pending.request.contain,
                 )
             }.getOrElse { error ->
                 finishError(view, pending, safeError(error))
@@ -607,6 +610,7 @@ internal class NativeImageLoader(
                                         pending.request.resizeMultiplier,
                                         repeat = pending.request.repeat,
                                         inline = isInline(source),
+                                        contain = pending.request.contain,
                                     )
                                 }.getOrNull()?.bitmap ?: return@partial
                                 main.post {
@@ -622,6 +626,7 @@ internal class NativeImageLoader(
                             pending.request.resizeMultiplier,
                             repeat = pending.request.repeat,
                             inline = isInline(source),
+                            contain = pending.request.contain,
                         )
                         if (
                             !closed.get() &&
@@ -1282,6 +1287,7 @@ internal class NativeImageLoader(
         resizeMultiplier: Float,
         repeat: Boolean = false,
         inline: Boolean = false,
+        contain: Boolean = false,
     ): DecodedBitmap {
         val bounds = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
@@ -1308,6 +1314,7 @@ internal class NativeImageLoader(
             resizeMethod = resizeMethod,
             resizeMultiplier = resizeMultiplier,
             exactScale = !repeat,
+            contain = contain,
             maxEdge = MAX_DECODE_EDGE,
             maxPixels = MAX_DECODE_PIXELS,
         )
@@ -1586,6 +1593,7 @@ internal class NativeImageLoader(
             request.resizeMethod,
             request.resizeMultiplier,
             request.repeat,
+            request.contain,
         ).joinToString("\u0000")
     }
 

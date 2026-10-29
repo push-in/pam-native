@@ -35,6 +35,7 @@ internal fun nativeImageDecodePlan(
     resizeMethod: Int,
     resizeMultiplier: Float,
     exactScale: Boolean = true,
+    contain: Boolean = false,
     maxEdge: Int = 4096,
     maxPixels: Long = 33_554_432L,
 ): NativeImageDecodePlan {
@@ -43,10 +44,14 @@ internal fun nativeImageDecodePlan(
     val desiredWidth = max(1, (targetWidth.coerceAtMost(maxEdge) * multiplier).toInt())
     val desiredHeight = max(1, (targetHeight.coerceAtMost(maxEdge) * multiplier).toInt())
     // Cover: the larger of the two ratios keeps both edges >= the view.
-    val cover = max(
-        desiredWidth.toDouble() / sourceWidth,
-        desiredHeight.toDouble() / sourceHeight,
-    )
+    // Contain draws the whole image inside the view: the smaller ratio is
+    // the size it shows at (a portrait photo in a square box kept its full
+    // width at the box's height, ~1.4x the pixels drawn).
+    val cover = if (contain) {
+        min(desiredWidth.toDouble() / sourceWidth, desiredHeight.toDouble() / sourceHeight)
+    } else {
+        max(desiredWidth.toDouble() / sourceWidth, desiredHeight.toDouble() / sourceHeight)
+    }
     val resize = when (resizeMethod) {
         IMAGE_RESIZE_RESIZE -> cover < 1.0
         IMAGE_RESIZE_SCALE, IMAGE_RESIZE_NONE -> false

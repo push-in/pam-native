@@ -9614,6 +9614,7 @@ class PamRenderer(
             mediaCacheMaxBytes = state.integer(PropKey.MEDIA_CACHE_MAX_BYTES, 0),
             mediaCacheChecksum = state.textOrNull(PropKey.MEDIA_CACHE_CHECKSUM),
             repeat = state.integer(PropKey.IMAGE_FIT, 1L) == 5L,
+            contain = state.integer(PropKey.IMAGE_FIT, 1L) == 2L,
         )
         imageLoader.load(
             request,
