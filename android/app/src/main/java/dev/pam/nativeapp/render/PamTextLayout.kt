@@ -408,6 +408,23 @@ internal object PamTextLayout {
             .setMaxLines(maxLines)
             .build()
         val last = layout.lineCount - 1
+        run {
+            val src = text.toString()
+            val i = src.indexOf("hoje")
+            if (i >= 0) {
+                val prefixes = listOf("hoje ", "hoje \u00e0", "hoje \u00e0s").map { p ->
+                    val end = src.indexOf(p) + p.length
+                    "$p=${StaticLayout.Builder.obtain(text, 0, end.coerceAtMost(text.length), basePaint, Int.MAX_VALUE / 4).build().getLineWidth(0)}"
+                }
+                android.util.Log.d(
+                    "PAMPROBE2",
+                    "width=$width avail=$availableWidth size=${basePaint.textSize} flags=0x${Integer.toHexString(basePaint.flags)} " +
+                        "subpixel=${basePaint.isSubpixelText} linear=${basePaint.isLinearText} face=${basePaint.typeface} " +
+                        "dots=${basePaint.measureText(ELLIPSIS)} $prefixes ellipsisStart=${if (last >= 0) layout.getEllipsisStart(last) else -1} " +
+                        "ellipsisCount=${if (last >= 0) layout.getEllipsisCount(last) else -1} text=[$src]",
+                )
+            }
+        }
         if (last < 0 || layout.getEllipsisCount(last) <= 0) return null
         val cut = (layout.getLineStart(last) + layout.getEllipsisStart(last)).coerceIn(0, text.length)
         val truncated = SpannableStringBuilder(text, 0, cut).append(ELLIPSIS)
