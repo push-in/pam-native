@@ -61,6 +61,23 @@ class PamTailTruncateInstrumentedTest {
     }
 
     @Test
+    fun theEllipsisIsMeasuredInTheTextsOwnSpanStyle() {
+        // Size/face live in spans over the whole text; the view paint is
+        // larger. RN's layout paint carries the text's own size.
+        val text = "Visto por último hoje às 13:40"
+        val spanned = android.text.SpannableString(text).apply {
+            setSpan(android.text.style.AbsoluteSizeSpan(32), 0, text.length, android.text.Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+        }
+        val result = PamTextLayout.rnTailTruncate(
+            spanned, paint(48f), 345f, 1, true,
+            Layout.BREAK_STRATEGY_HIGH_QUALITY, Layout.HYPHENATION_FREQUENCY_NONE,
+        )
+        assertEquals(reactNative(text, paint(32f), 345f, 1), result?.toString() ?: text)
+        val styled = result as android.text.Spanned
+        assertEquals(1, styled.getSpans(styled.length - 1, styled.length, android.text.style.AbsoluteSizeSpan::class.java).size)
+    }
+
+    @Test
     fun twoLineCaptionKeepsRnCut() {
         val text = "Noite boa demais com a galera toda reunida 🔥🖤 depois do show ainda teve mais"
         val paint = paint(36f)

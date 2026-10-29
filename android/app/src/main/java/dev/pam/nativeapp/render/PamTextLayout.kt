@@ -375,9 +375,19 @@ internal object PamTextLayout {
     ): CharSequence? {
         if (text.isEmpty() || maxLines <= 0 || !availableWidth.isFinite() || availableWidth <= 0f) return null
         val width = floor(availableWidth.toDouble()).toInt()
-        val boring = BoringLayout.isBoring(text, paint)
+        // RN updateTextPaint: the layout paint carries the text's own base
+        // size/typeface/spacing, so StaticLayout measures the ellipsis in the
+        // text's font. Here those live in spans over the whole text; a view
+        // paint in another face measured a wider "…" and cut a glyph early.
+        val basePaint = TextPaint(paint)
+        val whole = (text as? Spanned)
+            ?.getSpans(0, text.length, MetricAffectingSpan::class.java)
+            ?.filter { text.getSpanStart(it) <= 0 && text.getSpanEnd(it) >= text.length }
+            .orEmpty()
+        whole.forEach { it.updateMeasureState(basePaint) }
+        val boring = BoringLayout.isBoring(text, basePaint)
         if (boring != null && boring.width <= width) return null
-        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, basePaint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setLineSpacing(0f, 1f)
             .setIncludePad(includeFontPadding)
@@ -388,8 +398,17 @@ internal object PamTextLayout {
             .build()
         val last = layout.lineCount - 1
         if (last < 0 || layout.getEllipsisCount(last) <= 0) return null
-        val cut = layout.getLineStart(last) + layout.getEllipsisStart(last)
-        return android.text.SpannableStringBuilder(text, 0, cut.coerceIn(0, text.length)).append(ELLIPSIS)
+        val cut = (layout.getLineStart(last) + layout.getEllipsisStart(last)).coerceIn(0, text.length)
+        val truncated = SpannableStringBuilder(text, 0, cut).append(ELLIPSIS)
+        // The ellipsis is drawn in the text's own style, like RN's layout.
+        if (text is Spanned) {
+            for (span in text.getSpans(0, text.length, Any::class.java)) {
+                if (text.getSpanStart(span) <= 0 && text.getSpanEnd(span) >= text.length && truncated.getSpanStart(span) >= 0) {
+                    truncated.setSpan(span, 0, truncated.length, text.getSpanFlags(span))
+                }
+            }
+        }
+        return truncated
     }
 
     private const val ELLIPSIS = "\u2026"
