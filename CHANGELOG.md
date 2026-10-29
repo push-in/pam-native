@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.46.6 - 2026-10-29
+
+RN layout/text parity and Android list/media fixes on top of 1.46.5, no protocol change.
+
 - Layout: a stretched flex item is bounded by its own min/max cross size
   like Yoga, so a `max-width` child of a column (View or Text) wraps its
   text at that width instead of the column's.
