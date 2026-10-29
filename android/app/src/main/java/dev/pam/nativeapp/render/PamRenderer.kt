@@ -563,6 +563,10 @@ internal fun windowSizedModalChildPlacement(
     }
 }
 
+/** A list cell root spanning its whole slot on one axis (no margins there). */
+internal fun cellRootFillsSlot(start: Float, extent: Float, slotStart: Float, slotExtent: Float): Boolean =
+    kotlin.math.abs(start - slotStart) < 0.01f && kotlin.math.abs(extent - slotExtent) < 0.01f
+
 internal fun snappedPixelSpan(
     start: Float,
     extent: Float,
@@ -2687,7 +2691,14 @@ class PamRenderer(
         } else {
             null
         }
-        view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
+        // A root that fills its slot takes the holder's snapped extent (rows
+        // are snapped cumulatively; rounding the root alone left a 1 px seam).
+        val fillWidth = id == rootId && cellRootFillsSlot(frame.x, frame.width, rootFrame.x, rootFrame.width)
+        val fillHeight = id == rootId && cellRootFillsSlot(frame.y, frame.height, rootFrame.y, rootFrame.height)
+        view.layoutParams = FrameLayout.LayoutParams(
+            if (fillWidth) ViewGroup.LayoutParams.MATCH_PARENT else horizontal.extent,
+            if (fillHeight) ViewGroup.LayoutParams.MATCH_PARENT else vertical.extent,
+        ).apply {
             // Cell frames are physical engine coordinates too; START would
             // mirror them a second time inside an RTL holder.
             gravity = PAM_PHYSICAL_FRAME_GRAVITY

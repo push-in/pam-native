@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Android virtual lists snap rows like Yoga: a row spans round(start) ..
+  round(start + extent) of the running offset instead of rounding each
+  height alone (rows drifted 1-2 px and left a 1 px hairline between
+  cells). Kept rows keep their sub-pixel phase, so rows joining above or
+  below never resize the rows shown; a cell root without margins fills its
+  snapped slot. PamListPixelSnapTest.
+
 - MediaPlayer `autoPlayVisible` / `autoPlayGroup` (extension properties 1006
   and 1007, `MediaPlayer::autoPlayWhenVisible()`): Android plays a video while
   at least that share of it shows and its list is at rest, one per group and
