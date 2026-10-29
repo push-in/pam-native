@@ -2343,6 +2343,24 @@ PAM),
     null,
     [],
 );
+$indicatorColorTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(<<<'PAM'
+<Screen>
+    <ActivityIndicator color="#ff2d55" />
+    <ActivityIndicator color="#ff2d55" progressColor="#2563eb" />
+    <ActivityIndicator />
+</Screen>
+PAM),
+    null,
+    [],
+);
+[$colorIndicator, $bothIndicator, $plainIndicator] = $indicatorColorTemplate->children();
+$assert(
+    $colorIndicator->properties()[PropKey::ProgressColor->value] === 0xFFFF2D55
+        && $bothIndicator->properties()[PropKey::ProgressColor->value] === 0xFF2563EB
+        && !isset($plainIndicator->properties()[PropKey::ProgressColor->value]),
+    'ActivityIndicator color must tint the spinner like React Native; progressColor wins when both are authored.',
+);
 $templateScroll = $nativeControlTemplate->children()[0];
 $templateIndicator = $nativeControlTemplate->children()[1];
 $templateSwitch = $nativeControlTemplate->children()[2];
