@@ -239,6 +239,9 @@ final class ListWindow
      */
     private const PATH_SCREENS = 10;
 
+    /** Windows at least this wide keep the rows already built when a fling path builds more. */
+    private const KEEP_BUILT_MIN_SIZE = 9;
+
     /**
      * The host shows rows $first..$last: keeps `(windowSize - 1) / 2` of
      * those screens materialized on each side. True when the window moved.
@@ -308,7 +311,19 @@ final class ListWindow
                 // (bounded: a window grown past its path span shrinks).
                 return false;
             }
-            $this->ranges = $next;
+            // Rows already built stay while the window is within its bound:
+            // releasing them in the frame that builds the path doubled that
+            // frame (a chat flung back toward its newest rows released a
+            // page of rows and rebuilt their placeholders at once).
+            $kept = $next;
+            foreach ($this->ranges ?? [] as [$from, $to]) {
+                $kept = self::addRange($kept, $from, $to);
+            }
+            // Wide windows only (a chat's windowSize 11): a narrow window
+            // (a feed's 5) kept more heavy rows built than it saved.
+            $this->ranges = $this->size >= self::KEEP_BUILT_MIN_SIZE && self::rowsIn($kept) <= $span + $window + 2 * $margin
+                ? $kept
+                : $next;
 
             return true;
         }

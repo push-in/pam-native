@@ -424,4 +424,13 @@ $assert($fling->state()[0] === [[76, 96]], 'Back to two screens each side (got '
 $assert($fling->extend(84, 87, null, [84, 400]), 'A path longer than ten screens is clipped.');
 $assert($fling->state()[0] === [[76, 96], [353, 409]], 'A long path keeps the rows on screen and the side it lands on (got '.json_encode($fling->state()[0]).').');
 $assert(!$fling->extend(100, 103, null, [100, 400]), 'The same fling over its placeholders asks nothing more.');
+$kept = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'fling-kept');
+$kept->configure(11);
+$kept->extend(30, 33);
+[[$keptFrom]] = $kept->state()[0];
+$assert($kept->extend(34, 37, null, [34, 70]) && $kept->state()[0][0][0] === $keptFrom, 'A wide window keeps the rows already built when a path builds more (got '.json_encode($kept->state()[0]).').');
+$narrow = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'fling-narrow');
+$narrow->configure(5);
+$narrow->extend(10, 13);
+$assert($narrow->extend(14, 17, null, [14, 30]) && $narrow->state()[0] === [[6, 39]], 'A narrow window releases what is behind the path in the same frame (got '.json_encode($narrow->state()[0]).').');
 echo "LIST_WINDOW_SIZE_OK rows=50 window=3 heights=measured encoder=pruned builder=1 fling=path\n";
