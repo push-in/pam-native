@@ -214,3 +214,12 @@ executados sequencialmente contra o código PHP deste framework, mais
 Sem revisão da versão publicada ou criação de tag. Integração por avanço
 rápido em `integrate/port3-20261027`, com pull/rebase antes do push.
 Artefatos próprios de validação removidos ao encerrar.
+
+## z5 — identidade Android e acento de carregamento (parcial)
+
+- Worktree próprio `codex-misc-polish-fw`, branch `codex/misc-polish-fw`, criado da integração após fetch; rebase confirmado.
+- `DeviceInfo`: campos opcionais `manufacturer` e `model` adicionados ao fim do construtor, mantendo compatibilidade com hosts antigos; Android fornece `Build.MANUFACTURER`/`Build.MODEL`, PHP decodifica e remove espaços externos.
+- `Theme::adaptive`: ActivityIndicator sem cor explícita recebe o acento de cada modo. Spinner nativo passa a consultar `android.R.attr.colorAccent` como fallback. Cores explícitas continuam prioritárias.
+- Regressões adicionadas em `packages/native/tests/run.php`: metadados antigos vazios, decodificação wire, acento claro/escuro/alto contraste e prioridade da cor explícita.
+- Verificação isolada de contratos passou; lint PHP e `git diff --check` passaram. A suíte completa do framework, compilação Kotlin e QA visual Android continuam pendentes.
+- Ambiente com apenas ~3–5 GB livres; mínimo exigido de 20 GB inviável por limpeza própria (checkout sem vendor/build/.pam-native). Não foram apagados artefatos alheios nem usados locks de outra tarefa. Sem build/emulador, merge, push ou tag; commit local apenas. Não liberado para integração.
