@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android frames snap to pixels with Yoga's YGRoundValueToPixelGrid
+  (double precision, 0.0001 epsilon, half rounds up): f32 frame edges that
+  land a hair below a half pixel (28 dp at 2.625 = 73.49998 px) no longer
+  lose the pixel React Native keeps, so grids of tiles stop drifting 1 px
+  per row.
 - Layout: a stretched flex item is bounded by its own min/max cross size
   like Yoga, so a `max-width` child of a column (View or Text) wraps its
   text at that width instead of the column's.

@@ -563,6 +563,28 @@ internal fun windowSizedModalChildPlacement(
     }
 }
 
+/**
+ * Yoga's YGRoundValueToPixelGrid (no forced direction), computed in double:
+ * a fraction within 0.0001 of a whole pixel snaps to it and one within
+ * 0.0001 of a half rounds up. Engine frames are f32 points, so 28 dp at
+ * 2.625 arrives as 73.49998 px; rounding that to nearest lost the pixel
+ * React Native keeps (each tile of a grid 1 px shorter, drifting per row).
+ */
+internal fun yogaRoundToPixel(points: Float, density: Float): Int {
+    val scaled = points.toDouble() * density.toDouble()
+    var fraction = scaled % 1.0
+    if (fraction < 0.0) fraction += 1.0
+    val epsilon = 0.0001
+    val base = scaled - fraction
+    val snapped = when {
+        fraction < epsilon -> base
+        fraction > 1.0 - epsilon -> base + 1.0
+        fraction > 0.5 || kotlin.math.abs(fraction - 0.5) < epsilon -> base + 1.0
+        else -> base
+    }
+    return kotlin.math.round(snapped).toInt()
+}
+
 internal fun snappedPixelSpan(
     start: Float,
     extent: Float,
@@ -571,9 +593,9 @@ internal fun snappedPixelSpan(
     preserveContentExtent: Boolean = false,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
-    val absoluteStart = (start * safeDensity).roundToInt()
-    val absoluteEnd = ((start + extent.coerceAtLeast(0f)) * safeDensity).roundToInt()
-    val absoluteParentStart = (parentStart * safeDensity).roundToInt()
+    val absoluteStart = yogaRoundToPixel(start, safeDensity)
+    val absoluteEnd = yogaRoundToPixel(start + extent.coerceAtLeast(0f), safeDensity)
+    val absoluteParentStart = yogaRoundToPixel(parentStart, safeDensity)
     var snappedExtent = (absoluteEnd - absoluteStart).coerceAtLeast(0)
     if (preserveContentExtent) {
         // Text widths are measured as whole (ceiled) pixels. Rounding both
