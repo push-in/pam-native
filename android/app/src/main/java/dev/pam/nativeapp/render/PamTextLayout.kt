@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
+import android.text.BoringLayout
 import android.text.Layout
 import android.text.NoCopySpan
 import android.text.SpannableStringBuilder
@@ -353,6 +354,45 @@ internal object PamTextLayout {
         output[2] = layout.getLineBaseline(0) / density
         output[3] = lines.toFloat()
     }
+
+    /**
+     * React Native 0.85.3 TextLayoutManager.createLayout/buildLayout for a
+     * text with `numberOfLines` and the tail ellipsis, at the floor of the
+     * available width: a boring text that fits is a BoringLayout (no cut);
+     * otherwise a StaticLayout with the same alignment, spacing, padding,
+     * break strategy, hyphenation, `setEllipsize(END)` and `setMaxLines`.
+     * Returns the text cut where that layout ellipsizes its last line plus
+     * the ellipsis, or null when it is not truncated.
+     */
+    fun rnTailTruncate(
+        text: CharSequence,
+        paint: TextPaint,
+        availableWidth: Float,
+        maxLines: Int,
+        includeFontPadding: Boolean,
+        breakStrategy: Int,
+        hyphenationFrequency: Int,
+    ): CharSequence? {
+        if (text.isEmpty() || maxLines <= 0 || !availableWidth.isFinite() || availableWidth <= 0f) return null
+        val width = floor(availableWidth.toDouble()).toInt()
+        val boring = BoringLayout.isBoring(text, paint)
+        if (boring != null && boring.width <= width) return null
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(includeFontPadding)
+            .setBreakStrategy(breakStrategy)
+            .setHyphenationFrequency(hyphenationFrequency)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setMaxLines(maxLines)
+            .build()
+        val last = layout.lineCount - 1
+        if (last < 0 || layout.getEllipsisCount(last) <= 0) return null
+        val cut = layout.getLineStart(last) + layout.getEllipsisStart(last)
+        return android.text.SpannableStringBuilder(text, 0, cut.coerceIn(0, text.length)).append(ELLIPSIS)
+    }
+
+    private const val ELLIPSIS = "\u2026"
 
     fun build(text: CharSequence, paint: TextPaint, width: Int, style: PamTextStyle): StaticLayout {
         val builder = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
