@@ -2503,6 +2503,11 @@ class PamRenderer(
         }
     }
 
+    /** The node whose initial properties are being applied (deferred image load / press configuration). */
+    private var initialPropertiesState: NodeState? = null
+    private var initialImageLoadPending = false
+    private var initialPressablePending = false
+
     private val cellProfile: CellProfile? =
         if (BuildConfig.DEBUG && Log.isLoggable(CELL_PROFILE_TAG, Log.DEBUG)) CellProfile() else null
 
@@ -3412,6 +3417,9 @@ class PamRenderer(
         state.initialBackgroundUpdate = backgroundUpdate
         state.applyingInitialProperties = true
         state.pressableConfiguredDuringInitialization = false
+        initialPropertiesState = state
+        initialImageLoadPending = false
+        initialPressablePending = false
         try {
             val keyProfile = cellKeyProfile
             if (keyProfile == null) {
@@ -3430,7 +3438,12 @@ class PamRenderer(
             state.initialBackgroundUpdate = null
             state.applyingInitialProperties = false
             state.pressableConfiguredDuringInitialization = false
+            initialPropertiesState = null
         }
+        // Each image and press property used to start a load or reconfigure
+        // the pressable: done once, with every property in place.
+        if (initialPressablePending) configurePressable(view, state)
+        if (initialImageLoadPending) loadImage(view, state)
         if (text != null && textUpdates != null) {
             if (textUpdates.typeface) applyTypeface(text, state)
             if (textUpdates.size) applyTextSizing(text, state)
@@ -6299,9 +6312,9 @@ class PamRenderer(
 
     private fun configurePressable(view: View, state: NodeState) {
         val pressable = view as? PamPressable ?: return
-        if (state.applyingInitialProperties) {
-            if (state.pressableConfiguredDuringInitialization) return
-            state.pressableConfiguredDuringInitialization = true
+        if (state.applyingInitialProperties && state === initialPropertiesState) {
+            initialPressablePending = true
+            return
         }
         pressable.onPressedStateChanged = if (state.properties[PropKey.NATIVE_STATE_STYLES] != null) {
             { pressed -> applyNativeStyleState(pressable, state, NativeStyleState.PRESSED, pressed) }
@@ -9515,6 +9528,10 @@ class PamRenderer(
     }
 
     private fun loadImage(view: View, state: NodeState) {
+        if (state.applyingInitialProperties && state === initialPropertiesState) {
+            initialImageLoadPending = true
+            return
+        }
         val image = pamImageView(view) ?: return
         val source = (state.properties[PropKey.SOURCE] as? PropValue.Text)
             ?.value
