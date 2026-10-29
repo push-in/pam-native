@@ -55,7 +55,7 @@ internal class PamVuetifySpinner(context: Context) : View(context) {
     override fun getAccessibilityClassName(): CharSequence = ProgressBar::class.java.name
 }
 
-private val PROGRESS_TINT_ATTRS = intArrayOf(android.R.attr.colorControlActivated)
+private val PROGRESS_TINT_ATTRS = intArrayOf(android.R.attr.colorAccent)
 
 private fun themeProgressTint(context: Context): ColorStateList? {
     val values = context.obtainStyledAttributes(PROGRESS_TINT_ATTRS)
