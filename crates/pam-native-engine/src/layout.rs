@@ -8186,6 +8186,89 @@ mod tests {
     }
 
     #[test]
+    fn max_width_text_in_a_padded_card_wraps_at_its_max_width() {
+        // Contatos sync hero: Column > Column(card, margin 16, padding 18) >
+        // Text(maxWidth 300, marginTop 6).
+        let long = "Veja quem já está aqui e convide o resto com um toque. Ninguém é avisado sem você mandar.";
+        let mut nodes = BTreeMap::new();
+        nodes.insert(1, node(1, 0, 0, NodeKind::Column, []));
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [
+                    (PropKey::Margin, PropValue::Float(16.0)),
+                    (PropKey::Padding, PropValue::Float(18.0)),
+                ],
+            ),
+        );
+        let mut start_aligned = nodes.clone();
+        start_aligned.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [
+                    (PropKey::Margin, PropValue::Float(16.0)),
+                    (PropKey::Padding, PropValue::Float(18.0)),
+                    (PropKey::AlignItems, PropValue::Integer(1)),
+                ],
+            ),
+        );
+        nodes.insert(
+            3,
+            node(
+                3,
+                2,
+                0,
+                NodeKind::Text,
+                [
+                    (PropKey::Text, PropValue::String(long.to_owned())),
+                    (PropKey::FontSize, PropValue::Float(13.5)),
+                    (PropKey::LineHeight, PropValue::Float(19.0)),
+                    (PropKey::MaxWidth, PropValue::Float(300.0)),
+                    (PropKey::MarginTop, PropValue::Float(6.0)),
+                ],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 800.0,
+            },
+        )
+        .expect("hero");
+        assert_eq!(layout[&3].width, 300.0, "text frame {:?}", layout[&3]);
+        // Same text, start-aligned card (not stretched): its intrinsic width
+        // is bounded by max-width too.
+        start_aligned.insert(3, tree.nodes[&3].clone());
+        let tree = Tree {
+            root: 1,
+            nodes: start_aligned,
+        };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 800.0,
+            },
+        )
+        .expect("hero start");
+        assert_eq!(
+            layout[&3].width, 300.0,
+            "start-aligned text frame {:?}",
+            layout[&3]
+        );
+    }
+
+    #[test]
     fn stretched_column_child_wraps_text_inside_its_max_width() {
         // RN ContactsScreen syncHeroBody: a stretched (default alignItems)
         // child of a column with maxWidth 300 wraps its text at 300.
