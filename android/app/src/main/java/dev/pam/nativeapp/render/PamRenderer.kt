@@ -3697,6 +3697,7 @@ class PamRenderer(
             }
             PropKey.NUMBER_OF_LINES -> (view as? TextView)?.let { text ->
                 text.maxLines = value.integer().toInt().takeIf { it > 0 } ?: Int.MAX_VALUE
+                applySingleLineTruncation(text)
                 // React Native: numberOfLines implies ellipsizeMode="tail".
                 if (isRichTextView(text, state) && state.properties[PropKey.TEXT_ELLIPSIZE_MODE] == null) {
                     text.ellipsize = if (value.integer() > 0) TextUtils.TruncateAt.END else null
@@ -4526,7 +4527,10 @@ class PamRenderer(
             PropKey.LINE_HEIGHT -> (view as? TextView)?.let {
                 applyLineHeight(it, state)
             }
-            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = Int.MAX_VALUE
+            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.let { text ->
+                text.maxLines = Int.MAX_VALUE
+                applySingleLineTruncation(text)
+            }
             PropKey.SELECTION_COLOR -> (view as? TextView)?.highlightColor =
                 state.defaultHighlightColor
             PropKey.TEXT_SELECTABLE -> (view as? TextView)?.let { text ->
@@ -5693,9 +5697,20 @@ class PamRenderer(
         }
         if (text.ellipsize == TextUtils.TruncateAt.MARQUEE) {
             text.isSelected = false
-            text.setHorizontallyScrolling(false)
         }
         text.ellipsize = textEllipsize(mode)
+        applySingleLineTruncation(text)
+    }
+
+    /**
+     * React Native (Android) lays numberOfLines={1} out as a single unwrapped
+     * line, so the tail ellipsis cuts mid-word ("hoje à…"). A wrapped
+     * maxLines=1 layout breaks at the last word first and ellipsizes that
+     * ("hoje …"), dropping text that fits. Head/middle modes also need it.
+     */
+    private fun applySingleLineTruncation(text: TextView) {
+        if (text is EditText || text.ellipsize == TextUtils.TruncateAt.MARQUEE) return
+        text.setHorizontallyScrolling(text.maxLines == 1)
     }
 
     /**
