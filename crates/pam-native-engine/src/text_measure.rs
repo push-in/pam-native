@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 
-use pam_native_protocol::{Node, PropKey, PropValue};
+use pam_native_protocol::{Node, NodeKind, PropKey, PropValue};
 
 /// One text box measurement request. All pointers stay valid only for the
 /// duration of the callback. Lengths are in bytes; strings are UTF-8.
@@ -320,9 +320,17 @@ pub(crate) fn measure(
             .unwrap_or(0)
             .clamp(0, 255) as u8,
         reserved: 0,
-        max_lines: integer(node, PropKey::NumberOfLines)
-            .filter(|lines| *lines > 0)
-            .map_or(0, |lines| lines.min(i64::from(u32::MAX)) as u32),
+        max_lines: if node.kind == NodeKind::Input
+            && !matches!(
+                node.properties.get(&PropKey::Multiline),
+                Some(PropValue::Boolean(true))
+            ) {
+            1
+        } else {
+            integer(node, PropKey::NumberOfLines)
+                .filter(|lines| *lines > 0)
+                .map_or(0, |lines| lines.min(i64::from(u32::MAX)) as u32)
+        },
     };
     let key = cache_key(&request, text, spans, family, features);
     if let Some(hit) = measurer.cache.borrow().get(&key) {
@@ -460,6 +468,25 @@ pub(crate) mod tests {
             .properties
             .insert(PropKey::IncludeFontPadding, PropValue::Boolean(false));
         assert_eq!(measure(&unpadded, 100.0, 1.0).unwrap().height, 20.0);
+    }
+
+    #[test]
+    fn input_host_measurement_caps_single_line_but_wraps_multiline() {
+        let mut input = text_node("abcdefghij");
+        input.kind = NodeKind::Input;
+        input
+            .properties
+            .insert(PropKey::LineHeight, PropValue::Float(22.0));
+        input
+            .properties
+            .insert(PropKey::IncludeFontPadding, PropValue::Boolean(false));
+        let measurer = HostTextMeasurer::new(fake, std::ptr::null_mut());
+        let _scope = ActiveScope::enter(Some(&measurer));
+        assert_eq!(measure(&input, 40.0, 1.0).unwrap().height, 22.0);
+        input
+            .properties
+            .insert(PropKey::Multiline, PropValue::Boolean(true));
+        assert_eq!(measure(&input, 40.0, 1.0).unwrap().height, 66.0);
     }
 
     #[test]

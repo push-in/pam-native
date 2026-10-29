@@ -2399,7 +2399,12 @@ fn intrinsic_extent(
         return finite_non_negative(explicit);
     }
 
-    if node.kind == NodeKind::Text {
+    // Inputs contribute their text line box plus authored insets, just like
+    // Text. Single-line clipping and multiline wrapping are measured below;
+    // explicit dimensions were resolved above and min/max apply at the caller.
+    if node.kind == NodeKind::Text
+        || (node.kind == NodeKind::Input && requested_axis == Axis::Vertical)
+    {
         let padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
         let padding_horizontal =
             finite_non_negative(number(node, PropKey::PaddingHorizontal).unwrap_or(padding))?;
@@ -2989,10 +2994,9 @@ fn leaf_intrinsic(
         (Axis::Horizontal, NodeKind::Spacer) => 8.0,
         (Axis::Horizontal, NodeKind::StatusBar) => 0.0,
         (Axis::Horizontal, _) => 100.0,
-        (
-            Axis::Vertical,
-            NodeKind::Button | NodeKind::Input | NodeKind::Pressable | NodeKind::ActivityIndicator,
-        ) => DEFAULT_CONTROL_HEIGHT,
+        (Axis::Vertical, NodeKind::Button | NodeKind::Pressable | NodeKind::ActivityIndicator) => {
+            DEFAULT_CONTROL_HEIGHT
+        }
         (Axis::Vertical, NodeKind::Switch) => DEFAULT_SWITCH_HEIGHT,
         (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (
@@ -3051,18 +3055,27 @@ fn text_extent(
         source_text,
         integer(node, PropKey::TextTransform).unwrap_or(1),
     );
+    let single_line_input = node.kind == NodeKind::Input && !boolean(node, PropKey::Multiline);
     let lines = wrapped_text_lines_with_metrics(
         &text,
         font_size,
         letter_spacing,
-        available_width,
+        if single_line_input {
+            f32::INFINITY
+        } else {
+            available_width
+        },
         glyph_advances,
     );
     match axis {
         Axis::Vertical => {
-            let maximum_lines = integer(node, PropKey::NumberOfLines)
-                .filter(|value| *value > 0)
-                .map_or(lines.len(), |value| value as usize);
+            let maximum_lines = if single_line_input {
+                1
+            } else {
+                integer(node, PropKey::NumberOfLines)
+                    .filter(|value| *value > 0)
+                    .map_or(lines.len(), |value| value as usize)
+            };
             line_height * lines.len().min(maximum_lines).max(1) as f32
         }
         Axis::Horizontal => lines
@@ -6641,9 +6654,10 @@ mod tests {
         )
         .expect("layout");
 
-        assert_eq!(layouts[&3].height, 80.0);
-        assert_eq!(layouts[&4].height, 48.0);
-        assert_eq!(layouts[&5].height, 48.0);
+        // The row is driven by its 24pt icon; the empty input is one text line.
+        assert_eq!(layouts[&3].height, 56.0);
+        assert_eq!(layouts[&4].height, 24.0);
+        assert_eq!(layouts[&5].height, 24.0);
         assert!(layouts.values().all(|frame| frame.height <= 640.0));
     }
 
@@ -7069,8 +7083,9 @@ mod tests {
         )
         .expect("compound custom view layout");
 
-        assert_eq!(layouts[&2].height, 100.0);
-        assert_eq!(layouts[&6].y, 100.0);
+        // 4pt padding + 8pt gaps + two 20pt labels + 19.6pt input.
+        assert_eq!(layouts[&2].height, 71.6);
+        assert_eq!(layouts[&6].y, 71.6);
         assert!(layouts[&5].y >= layouts[&4].y + layouts[&4].height);
     }
 
@@ -7271,6 +7286,87 @@ mod tests {
 
         assert_eq!(layouts[&2].height, 108.0);
         assert_eq!(layouts[&5].y, 108.0);
+    }
+
+    fn input_height(properties: impl IntoIterator<Item = (PropKey, PropValue)>) -> f32 {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (2, node(2, 1, 0, NodeKind::Input, properties)),
+            ]),
+        };
+        calculate(
+            &tree,
+            Size {
+                width: 100.0,
+                height: 640.0,
+            },
+        )
+        .expect("input layout")[&2]
+            .height
+    }
+
+    #[test]
+    fn input_intrinsic_height_is_one_line_plus_authored_padding_and_border() {
+        assert!((input_height([]) - 19.6).abs() < 0.001);
+        assert_eq!(
+            input_height([
+                (PropKey::LineHeight, PropValue::Float(22.0)),
+                (PropKey::Padding, PropValue::Float(12.0)),
+                (PropKey::PaddingVertical, PropValue::Float(7.0)),
+                (PropKey::PaddingBottom, PropValue::Float(3.0)),
+                (PropKey::BorderWidth, PropValue::Float(1.0)),
+                (
+                    PropKey::Text,
+                    PropValue::String("long input text that wraps\nand has a newline".into())
+                ),
+            ]),
+            34.0
+        );
+    }
+
+    #[test]
+    fn input_respects_explicit_height_and_minimum_height() {
+        assert_eq!(
+            input_height([
+                (PropKey::LineHeight, PropValue::Float(22.0)),
+                (PropKey::PaddingVertical, PropValue::Float(10.0)),
+                (PropKey::Height, PropValue::Float(30.0)),
+            ]),
+            30.0
+        );
+        assert_eq!(
+            input_height([
+                (PropKey::LineHeight, PropValue::Float(22.0)),
+                (PropKey::MinHeight, PropValue::Float(42.0)),
+            ]),
+            42.0
+        );
+    }
+
+    #[test]
+    fn multiline_input_grows_with_content_and_caps_at_maximum_height() {
+        let mut properties = vec![
+            (PropKey::Multiline, PropValue::Boolean(true)),
+            (PropKey::LineHeight, PropValue::Float(20.0)),
+            (PropKey::PaddingVertical, PropValue::Float(5.0)),
+            (PropKey::Text, PropValue::String("one\ntwo\nthree".into())),
+        ];
+        assert_eq!(input_height(properties.clone()), 70.0);
+        properties.push((PropKey::MaxHeight, PropValue::Float(50.0)));
+        assert_eq!(input_height(properties), 50.0);
+        assert!(
+            input_height([
+                (PropKey::Multiline, PropValue::Boolean(true)),
+                (PropKey::LineHeight, PropValue::Float(20.0)),
+                (PropKey::PaddingHorizontal, PropValue::Float(30.0)),
+                (
+                    PropKey::Text,
+                    PropValue::String("one two three four five six".into())
+                ),
+            ]) > 20.0
+        );
     }
 
     #[test]

@@ -80,3 +80,14 @@ Aplicativo consumidor validado: 6/6 checks PHP pertinentes com o SDK integrado
 e 6/6 com o SDK estável do lock; dependência Toast 0.1.0 e lockfile definitivos.
 Disco caiu abaixo de 20 GB por consumo concorrente; builds e vendor próprios
 removidos. Sem QA visual, conforme autorizado nesta rodada.
+
+
+## y2 — altura intrínseca do Input (2026-10-28)
+
+O Input deixa de usar o controle fixo de 48: a altura automática vem da caixa de texto, com padding e bordas autorados. `height` continua definitivo; `minHeight` e `maxHeight` limitam o resultado. Single-line mede uma linha inclusive com texto longo ou quebras; multiline cresce por quebra explícita ou pela largura útil disponível. A medição nativa também recebe o limite de uma linha quando aplicável, com cache existente preservado.
+
+Validação: `cargo test --workspace --offline`, quatro workers e lock `/tmp/pam-gradle.lock.d`: **279/279** (98 CLI, 167 engine, 14 protocolo), sem falhas. Quatro regressões novas cobrem padding/borda, altura explícita/mínima, multiline/maxHeight e callback nativo; dois testes existentes foram ajustados à nova altura intrínseca. Nenhuma dependência adicionada. Não foram alterados componentes de lista, balões, perfil ou shared elements.
+
+QA visual e medição CPU/PSS/FPS em Android não executadas nesta rodada. Conforme a diretiva desta tarefa, entrega ao integrate após os validadores PHP verdes, sem aguardar emulador. Nenhuma tag do núcleo criada. Worktree próprio: `codex-input-height-fw` (não existia e foi criado a partir do integrate remoto).
+
+Gate do consumidor antes da integração y2: cobertura final **497/497** validadores PHP, executados um por vez com limpeza por script. Rodada inicial 493/496; integridade passou após preparar o bundle, e duas expectativas antigas foram corrigidas e repetidas com sucesso. Os dois testes adicionais que usam a fixture ajustada também passaram. O rebase final trouxe um novo validador e mudanças concorrentes; 50/50 validadores relacionados passaram novamente, incluindo o novo teste, e a integridade do bundle final foi repetida com sucesso. A distribuição publicada não foi alterada; o coordenador empacotará o novo engine. Artefatos Cargo próprios removidos.
