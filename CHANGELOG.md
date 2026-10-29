@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Android debug builds: `adb shell setprop log.tag.PamListTrace DEBUG` logs
+  each drawn frame's visual row motion of virtual lists (`dy`, rows in common,
+  scroll state), a recording-free way to prove there are no jumps or snaps.
+
 - Virtual lists (Android): a `scrollRequest` committed while the user's own
   drag or fling moves the list is dropped unless the user asked for it (a
   press, long press or submit since the gesture began, e.g. send or "jump to

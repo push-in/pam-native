@@ -25,6 +25,9 @@ import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.max
 
+/** Debug-only per-frame motion trace of virtual lists (see PamRecyclerList.traceMotion). */
+private const val MOTION_TRACE_TAG = "PamListTrace"
+
 internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var rowHeight = 48f
     private var keyboardTaps: KeyboardTapTracker? = null
@@ -948,7 +951,48 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        motionTrace = if (dev.pam.nativeapp.BuildConfig.DEBUG &&
+            android.util.Log.isLoggable(MOTION_TRACE_TAG, android.util.Log.DEBUG)
+        ) {
+            HashMap()
+        } else {
+            null
+        }
         repairEmptyRichHolders()
+    }
+
+    /**
+     * Debug builds with `adb shell setprop log.tag.PamListTrace DEBUG`: each
+     * drawn frame logs how far the rows on screen moved (median over rows
+     * present in both frames, by stable id), so a jump, a snap or a content
+     * swap shows exactly, without a screen recording. Off otherwise.
+     */
+    private var motionTrace: HashMap<Long, Int>? = null
+
+    private fun traceMotion() {
+        val previous = motionTrace ?: return
+        val current = HashMap<Long, Int>(childCount * 2)
+        val deltas = ArrayList<Int>(childCount)
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            if (child.bottom <= 0 || child.top >= height) continue
+            val id = getChildItemId(child)
+            if (id == NO_ID) continue
+            val top = if (horizontal) child.left else child.top
+            current[id] = top
+            previous[id]?.let { deltas += top - it }
+        }
+        if (current.isEmpty()) return
+        deltas.sort()
+        val moved = if (deltas.isEmpty()) null else deltas[deltas.size / 2]
+        if (moved != 0 || previous.keys != current.keys) {
+            android.util.Log.d(
+                MOTION_TRACE_TAG,
+                "t=${android.os.SystemClock.uptimeMillis()} dy=${moved ?: "swap"} common=${deltas.size} " +
+                    "shown=${current.size} state=$scrollState",
+            )
+        }
+        motionTrace = current
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
@@ -966,6 +1010,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         super.draw(canvas)
         canvas.restoreToCount(checkpoint)
+        if (motionTrace != null) traceMotion()
     }
 
     private fun updateLayoutManager() {

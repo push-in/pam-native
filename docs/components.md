@@ -847,6 +847,14 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
 Covered by `packages/native/tests/list_native_scroll.php` and the Android
 `PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest`.
 
+To measure a list on a device (debug builds), enable the motion trace with
+`adb shell setprop log.tag.PamListTrace DEBUG` and reopen the screen: every
+drawn frame logs `dy` (how far the rows on screen moved, median over rows
+present in both frames by stable id), `common`, `shown` and the scroll
+`state`. A jump, a snap at the end of a fling or a content swap (`dy=swap`)
+shows exactly, without a screen recording; inserts that stay anchored log
+`dy=0`.
+
 ### Taps while the keyboard is open (`keyboardShouldPersistTaps`)
 
 `keyboardShouldPersistTaps` on `ScrollView`, `FlatList`, `SectionList` and
