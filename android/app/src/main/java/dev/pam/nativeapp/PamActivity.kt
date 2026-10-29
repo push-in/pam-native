@@ -122,12 +122,6 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         resources.getBoolean(R.bool.pam_first_frame_waits_for_php)
     }
     private var splashHoldRoot: View? = null
-    private val releaseSplashAfterTimeout = Runnable {
-        if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
-            Log.w(PERFORMANCE_TAG, "splash hold timed out after ${SPLASH_HOLD_TIMEOUT_MS}ms")
-        }
-        releaseSplash()
-    }
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase)
@@ -185,6 +179,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             }
             // Same Choreographer frame: the traversal that follows draws it.
             releaseSplash()
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) DeferredBundleAssets.resume()
         }
         // Embedded PHP lives as long as the process. When the previous
         // Activity finished (Back at the root, system recreation) while the
@@ -371,16 +366,14 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         splashHold = hold
         splashHoldRoot = root
         observer.addOnPreDrawListener(hold)
-        root.postDelayed(releaseSplashAfterTimeout, SPLASH_HOLD_TIMEOUT_MS)
     }
 
-    /** Lets the window draw: first PHP frame committed, an error, or the timeout. */
+    /** Lets the window draw: first PHP frame committed or an error. */
     private fun releaseSplash() {
         val hold = splashHold ?: return
         splashHold = null
         val root = splashHoldRoot
         splashHoldRoot = null
-        root?.removeCallbacks(releaseSplashAfterTimeout)
         root?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(hold)
         root?.invalidate()
     }
@@ -435,6 +428,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
 
     override fun onResume() {
         super.onResume()
+        if (firstFrameUptimeMillis > 0L) DeferredBundleAssets.resume()
         HostEvents.foreground(true)
         if (runtimeStarted) {
             runtime.onHostResume()
@@ -450,6 +444,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onPause() {
+        DeferredBundleAssets.pause()
         HostEvents.foreground(false)
         if (runtimeStarted) {
             runtime.onHostPause()
@@ -1167,12 +1162,6 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         const val ERROR_TAG = "PamNativeErrors"
         const val BACK_SUPPRESSION_WINDOW_MS = 1_000L
         const val PERFORMANCE_TAG = "PamNativePerf"
-
-        /**
-         * Safety net for the splash hold: a first launch that extracts the
-         * bundle or a stalled boot still reaches the window (and its error UI).
-         */
-        const val SPLASH_HOLD_TIMEOUT_MS = 4_000L
 
         fun processStartUptimeMillis(): Long = Process.getStartUptimeMillis()
     }

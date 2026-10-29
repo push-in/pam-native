@@ -80,3 +80,27 @@ Aplicativo consumidor validado: 6/6 checks PHP pertinentes com o SDK integrado
 e 6/6 com o SDK estável do lock; dependência Toast 0.1.0 e lockfile definitivos.
 Disco caiu abaixo de 20 GB por consumo concorrente; builds e vendor próprios
 removidos. Sem QA visual, conforme autorizado nesta rodada.
+
+
+## y2 — altura intrínseca do Input (2026-10-28)
+
+O Input deixa de usar o controle fixo de 48: a altura automática vem da caixa de texto, com padding e bordas autorados. `height` continua definitivo; `minHeight` e `maxHeight` limitam o resultado. Single-line mede uma linha inclusive com texto longo ou quebras; multiline cresce por quebra explícita ou pela largura útil disponível. A medição nativa também recebe o limite de uma linha quando aplicável, com cache existente preservado.
+
+Validação: `cargo test --workspace --offline`, quatro workers e lock `/tmp/pam-gradle.lock.d`: **279/279** (98 CLI, 167 engine, 14 protocolo), sem falhas. Quatro regressões novas cobrem padding/borda, altura explícita/mínima, multiline/maxHeight e callback nativo; dois testes existentes foram ajustados à nova altura intrínseca. Nenhuma dependência adicionada. Não foram alterados componentes de lista, balões, perfil ou shared elements.
+
+QA visual e medição CPU/PSS/FPS em Android não executadas nesta rodada. Conforme a diretiva desta tarefa, entrega ao integrate após os validadores PHP verdes, sem aguardar emulador. Nenhuma tag do núcleo criada. Worktree próprio: `codex-input-height-fw` (não existia e foi criado a partir do integrate remoto).
+
+Gate do consumidor antes da integração y2: cobertura final **497/497** validadores PHP, executados um por vez com limpeza por script. Rodada inicial 493/496; integridade passou após preparar o bundle, e duas expectativas antigas foram corrigidas e repetidas com sucesso. Os dois testes adicionais que usam a fixture ajustada também passaram. O rebase final trouxe um novo validador e mudanças concorrentes; 50/50 validadores relacionados passaram novamente, incluindo o novo teste, e a integridade do bundle final foi repetida com sucesso. A distribuição publicada não foi alterada; o coordenador empacotará o novo engine. Artefatos Cargo próprios removidos.
+
+
+## y3 — Inicialização Android após instalação (28/10/2026)
+
+A ativação do release PNB1 agora aguarda somente PHP/templates e metadados do runtime. Assets em `assets/` são entregues ao worker depois da ativação; os consumidores nativos continuam lendo-os diretamente do APK. A cópia começa após um frame PHP comprometido, usa um worker e buffer de 64 KB, e para quando a Activity deixa o foreground. No próximo foreground/start, arquivos já válidos são ignorados por SHA-256/tamanho; assets idênticos do release anterior são reaproveitados sem reabrir a entrada do APK. Cada arquivo é verificado antes de publicação atômica. Um marcador de conclusão evita refazer a instalação de assets em starts seguintes; se o processo morrer, a lista do pack permite retomar.
+
+O splash configurado para esperar PHP não tem mais o timeout de quatro segundos que expunha uma janela vazia. Ele é liberado pelo frame comprometido ou pela apresentação de erro. O modo `firstFrame: window` permanece disponível para consumidores que o escolham explicitamente. As cores continuam sendo geradas pela configuração de aparência de cada consumidor.
+
+Testes: **336/336 JVM verdes**, incluindo inicialização sem abrir assets adiados, metadados síncronos, integridade/tamanho, substituição atômica, reaproveitamento por digest, espera pelo primeiro frame e interrupção ao ocultar. A suíte do consumidor passou **497/497 validadores PHP**, um por vez e com limpeza entre execuções. Dois APKs benchmark x86_64 compilaram com o mesmo engine construído das fontes desta integração. Não houve alteração de dependências nem criação de tag.
+
+Integração com gates verdes antes do QA visual, conforme autorização desta rodada. A comparação no emulador aguarda a liberação do lock compartilhado; ainda não há número medido antes/depois. Evidências: `~/.local/share/pam-codex/shots/y3/`. Este relatório será complementado após a sessão exclusiva.
+
+Rebase final preservou o ajuste concorrente de altura intrínseca do input e o relatório anterior. A suíte JVM foi revalidada sobre o HEAD integrado: BUILD SUCCESSFUL.
