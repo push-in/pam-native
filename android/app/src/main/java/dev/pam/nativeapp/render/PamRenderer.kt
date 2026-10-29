@@ -2682,6 +2682,7 @@ class PamRenderer(
             density,
             preserveContentExtent = state.kind == NodeKind.TEXT,
         )
+        PamProbe.frame("cell", id, state.kind, state.properties, frame, parentFrame, horizontal, vertical, resourcesDensity())
         val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
             views[hostedParent] as? FrameLayout
         } else {
@@ -2939,6 +2940,7 @@ class PamRenderer(
             density,
             preserveContentExtent = state.kind == NodeKind.TEXT,
         )
+        PamProbe.frame("view", id, state.kind, state.properties, frame, parentFrame, horizontal, vertical, resourcesDensity())
         val hostedParentState = nodes[effectiveParent(state.parent)]
         val safeAreaParentState = when {
             parentState?.kind == NodeKind.SAFE_AREA_VIEW -> parentState

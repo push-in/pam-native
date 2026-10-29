@@ -75,6 +75,7 @@ internal class PamTextView(context: Context) : TextView(context) {
             breakStrategy,
             hyphenationFrequency,
         )
+        PamProbe.ellipsis(this, source, contentWidth, truncated)
         if (truncated == null) {
             restoreSource()
             return
