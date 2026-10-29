@@ -99,6 +99,8 @@ A ativação do release PNB1 agora aguarda somente PHP/templates e metadados do 
 
 O splash configurado para esperar PHP não tem mais o timeout de quatro segundos que expunha uma janela vazia. Ele é liberado pelo frame comprometido ou pela apresentação de erro. O modo `firstFrame: window` permanece disponível para consumidores que o escolham explicitamente. As cores continuam sendo geradas pela configuração de aparência de cada consumidor.
 
-Testes: **336/336 JVM verdes**, incluindo inicialização sem abrir assets adiados, metadados síncronos, integridade/tamanho, substituição atômica, reaproveitamento por digest, espera pelo primeiro frame e interrupção ao ocultar. A suíte do consumidor passou **496/496 validadores PHP**, um por vez e com limpeza entre execuções. Dois APKs benchmark x86_64 compilaram com o mesmo engine construído das fontes desta integração. Não houve alteração de dependências nem criação de tag.
+Testes: **336/336 JVM verdes**, incluindo inicialização sem abrir assets adiados, metadados síncronos, integridade/tamanho, substituição atômica, reaproveitamento por digest, espera pelo primeiro frame e interrupção ao ocultar. A suíte do consumidor passou **497/497 validadores PHP**, um por vez e com limpeza entre execuções. Dois APKs benchmark x86_64 compilaram com o mesmo engine construído das fontes desta integração. Não houve alteração de dependências nem criação de tag.
 
 Integração com gates verdes antes do QA visual, conforme autorização desta rodada. A comparação no emulador aguarda a liberação do lock compartilhado; ainda não há número medido antes/depois. Evidências: `~/.local/share/pam-codex/shots/y3/`. Este relatório será complementado após a sessão exclusiva.
+
+Rebase final preservou o ajuste concorrente de altura intrínseca do input e o relatório anterior. A suíte JVM foi revalidada sobre o HEAD integrado: BUILD SUCCESSFUL.
