@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Android Pressable: a nested Pressable without `onLongPress` lends the long
+  press to the nearest enclosing Pressable that has one (never across a
+  scroll view or list), like React Native, using that receiver's
+  `delayLongPress`. The nested press is cancelled, so its `onPress` does not
+  fire on release. Before, the inner Pressable kept the gesture and the long
+  press was lost (e.g. a play button inside a long-pressable card).
 - Android text with `numberOfLines` and the tail ellipsis is cut exactly
   where React Native 0.85.3's TextLayoutManager lays it out (StaticLayout,
   maxLines, TruncateAt.END at the floor of the available width) and shown as
@@ -26,6 +32,12 @@ Keyboard follow, native visible autoplay (extension props 1006/1007) and list se
   seam showed between rows); the cumulative row snap of f9437e1b is
   reverted (it moved chat rows 1-2 px against React Native).
   PamListPixelSnapTest.
+- Android virtual lists snap rows like Yoga: a row spans round(start) ..
+  round(start + extent) of the running offset instead of rounding each
+  height alone (rows drifted 1-2 px and left a 1 px hairline between
+  cells). Kept rows keep their sub-pixel phase, so rows joining above or
+  below never resize the rows shown; a cell root without margins fills its
+  snapped slot. PamListPixelSnapTest.
 
 - MediaPlayer `autoPlayVisible` / `autoPlayGroup` (extension properties 1006
   and 1007, `MediaPlayer::autoPlayWhenVisible()`): Android plays a video while

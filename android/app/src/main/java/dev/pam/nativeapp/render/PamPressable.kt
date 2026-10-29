@@ -115,6 +115,17 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
     private val longPressRunnable = Runnable {
         if (!gestureActive || !eligibleForPress || longPressDispatched) return@Runnable
+        if (onLongPress == null) {
+            // React Native: a nested Pressable without onLongPress lets the
+            // long press reach the enclosing one (the bubble's gesture), and
+            // its own press is cancelled instead of firing on release.
+            val ancestor = longPressAncestor()
+            if (ancestor != null && ancestor.performNestedLongPress(lastPointer)) {
+                // Ends this gesture (no press on release, pressed style out).
+                cancelGesture(emitOut = true)
+                return@Runnable
+            }
+        }
         emitPressIn(lastPointer)
         longPressDispatched = performLongClick()
     }
@@ -757,7 +768,58 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         } else {
             postDelayed(pressInRunnable, delayPressInMs)
         }
-        postDelayed(longPressRunnable, delayPressInMs + delayLongPressMs)
+        postDelayed(longPressRunnable, delayPressInMs + effectiveLongPressDelayMs())
+    }
+
+    /** Own delay, or the ancestor's when this Pressable lends it the long press. */
+    private fun effectiveLongPressDelayMs(): Long =
+        nestedLongPressDelay(
+            own = delayLongPressMs,
+            hasOwnLongPress = onLongPress != null,
+            ancestorDelay = if (onLongPress == null) longPressAncestor()?.delayLongPressMs else null,
+        )
+
+    /**
+     * The nearest enclosing Pressable that handles long presses, without
+     * crossing a scroll container or list (the same boundary RN responders
+     * stop at for a row inside a list).
+     */
+    private fun longPressAncestor(): PamPressable? {
+        val chain = ArrayList<NestedLongPressNode>()
+        val views = ArrayList<PamPressable?>()
+        var ancestor = parent
+        while (ancestor is View) {
+            when (ancestor) {
+                is PamScrollContainer, is PamRecyclerList -> {
+                    chain += NestedLongPressNode(hasLongPress = false, enabled = false, boundary = true)
+                    views += null
+                }
+                is PamPressable -> {
+                    chain += NestedLongPressNode(
+                        hasLongPress = ancestor.onLongPress != null,
+                        enabled = ancestor.isEnabled,
+                        boundary = false,
+                    )
+                    views += ancestor
+                }
+            }
+            if (chain.lastOrNull()?.boundary == true) break
+            ancestor = ancestor.parent
+        }
+        val index = nestedLongPressTarget(chain)
+        return if (index >= 0) views[index] else null
+    }
+
+    /** Long press lent by a nested Pressable: [pointer] is in that child's space. */
+    internal fun performNestedLongPress(pointer: PamPressPointer): Boolean {
+        val callback = onLongPress ?: return false
+        if (!isEnabled) return false
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        val local = pointer.copy(x = pointer.pageX - location[0], y = pointer.pageY - location[1])
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        callback(local)
+        return true
     }
 
     private fun hasIndependentTouchTargetAt(
@@ -808,7 +870,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         } else if (!wasEligible && eligibleForPress) {
             emitPressIn(lastPointer)
             if (!longPressDispatched) {
-                postDelayed(longPressRunnable, delayLongPressMs)
+                postDelayed(longPressRunnable, effectiveLongPressDelayMs())
             }
         }
     }
@@ -1011,6 +1073,30 @@ internal data class PamTapEffect(
         }
     }
 }
+
+/** One ancestor seen by a nested Pressable looking for a long-press handler. */
+internal data class NestedLongPressNode(
+    val hasLongPress: Boolean,
+    val enabled: Boolean,
+    val boundary: Boolean,
+)
+
+/**
+ * Index in [chain] (nearest ancestor first) of the Pressable that receives a
+ * long press its nested child does not handle, or -1. A scroll/list boundary
+ * stops the search.
+ */
+internal fun nestedLongPressTarget(chain: List<NestedLongPressNode>): Int {
+    for ((index, node) in chain.withIndex()) {
+        if (node.boundary) return -1
+        if (node.hasLongPress) return if (node.enabled) index else -1
+    }
+    return -1
+}
+
+/** The child's own delay when it handles long presses, else the receiver's. */
+internal fun nestedLongPressDelay(own: Long, hasOwnLongPress: Boolean, ancestorDelay: Long?): Long =
+    if (hasOwnLongPress || ancestorDelay == null) own else ancestorDelay
 
 internal fun gestureRequiresParentInterception(
     actionMasked: Int,
