@@ -42,4 +42,6 @@
     <string name="pam_accessibility_role_tablist">Tab list</string>
     <string name="pam_accessibility_role_timer">Timer</string>
     <string name="pam_accessibility_role_toolbar">Toolbar</string>
+    <!-- Attribution of media playback (AppOps): players run under this tag. -->
+    <string name="pam_media_attribution">Media playback</string>
 </resources>

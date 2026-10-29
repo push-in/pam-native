@@ -270,6 +270,17 @@ $assert(
     isset($nativeTree->nodes[$rowFive]) && !isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
     'A row built again reuses its native node.',
 );
+// Rows prepended before the window (an older page): the window follows
+// its rows by key, so the rows on screen stay built (were released and
+// replaced by the rows now at their old indexes).
+$scrollKinds->items = [...array_map(static fn (int $i): string => "older-{$i}", range(0, 49)), ...$scrollKinds->items];
+Runtime::requestRender();
+Runtime::render();
+$syncNative();
+$assert(
+    isset($nativeTree->nodes[$rowFive]) && !isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
+    'A page prepended before the window keeps the rows on screen built.',
+);
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];
 

@@ -47,6 +47,12 @@
         </intent>
     </queries>
 
+    <!-- Players use this attribution tag (an untagged audio track logged an
+         AppOps "attributionTag not declared" error on every playback). -->
+    <attribution
+        android:tag="media"
+        android:label="@string/pam_media_attribution" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

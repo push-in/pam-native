@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `windowSize` lists follow their rows by key when rows join or leave
+  before the window (an older page above a conversation): the rows on screen
+  stay built instead of being released and replaced (a visible swap/jump).
+- Android: media players run under a manifest-declared `media` attribution
+  tag (Samsung logged an AppOps "attributionTag not declared" error per
+  playback). Debug builds: `setprop log.tag.PamCellPerf DEBUG` profiles each
+  list cell bind (create, attach, properties per key, events, layout).
+
 - `windowSize` lists: a row released by the window keeps its native node
   (its placeholder takes the row's root kind), so the list keeps its anchor
   and pixel position; a list opened with `initialScrollIndex` past its end

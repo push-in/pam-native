@@ -128,6 +128,7 @@ private fun TextView.useHighQualityLineBreaks() {
 
 private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
 private const val MAX_POOLED_CELL_VIEWS_PER_SHAPE = 24
+private const val CELL_PROFILE_TAG = "PamCellPerf"
 private val PROP_KEY_WORDS = (PropKey.entries.size + 63) / 64
 
 /** Kind plus property-key bit set of a pooled cell view. */
@@ -2465,7 +2466,55 @@ class PamRenderer(
     private fun materializeCell(id: Long, holder: FrameLayout) {
         val slotFrame = cellSlotFrame(id) ?: return
         if (parkedCells.remove(id)) unparkCell(id, holder)
+        val profile = cellProfile
+        if (profile == null) {
+            materializeCellNode(id, id, slotFrame, holder)
+            return
+        }
+        profile.reset()
+        val started = System.nanoTime()
         materializeCellNode(id, id, slotFrame, holder)
+        Log.d(
+            CELL_PROFILE_TAG,
+            "cell=$id totalUs=${(System.nanoTime() - started) / 1000} nodes=${profile.nodes} pooled=${profile.pooled} " +
+                "createUs=${profile.createNs / 1000} attachUs=${profile.attachNs / 1000} " +
+                "propsUs=${profile.propsNs / 1000} eventsUs=${profile.eventsNs / 1000} layoutUs=${profile.layoutNs / 1000}",
+        )
+        if (++cellsProfiled % 50 == 0) logCellKeyProfile()
+    }
+
+    /**
+     * Debug builds with `setprop log.tag.PamCellPerf DEBUG` (set before the
+     * app starts): where each list cell bind spends its time (view creation,
+     * attach, properties, events, layout) and, every 50 cells, the costliest
+     * property keys so far.
+     */
+    private class CellProfile {
+        var nodes = 0
+        var pooled = 0
+        var createNs = 0L
+        var attachNs = 0L
+        var propsNs = 0L
+        var eventsNs = 0L
+        var layoutNs = 0L
+
+        fun reset() {
+            nodes = 0; pooled = 0; createNs = 0; attachNs = 0; propsNs = 0; eventsNs = 0; layoutNs = 0
+        }
+    }
+
+    private val cellProfile: CellProfile? =
+        if (BuildConfig.DEBUG && Log.isLoggable(CELL_PROFILE_TAG, Log.DEBUG)) CellProfile() else null
+
+    private val cellKeyProfile: LongArray? =
+        if (cellProfile != null) LongArray(PropKey.entries.size) else null
+
+    private var cellsProfiled = 0
+
+    private fun logCellKeyProfile() {
+        val keyProfile = cellKeyProfile ?: return
+        val top = PropKey.entries.sortedByDescending { keyProfile[it.ordinal] }.take(15)
+        Log.d(CELL_PROFILE_TAG, "keys " + top.joinToString(" ") { "${it.name}=${keyProfile[it.ordinal] / 1000}us" })
     }
 
     /** Keeps the views of a cell whose section was switched away. */
@@ -2527,13 +2576,33 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val created = !state.virtual && views[id] == null
         if (created) {
-            val view = takePooledCellView(state) ?: createView(state.kind, state)
-            if (view is TextView) state.defaultHighlightColor = view.highlightColor
-            putView(id, view)
-            attachCellView(view, state, rootId, holder)
-            applyInitialProperties(view, state)
-            installEvents(view, state)
-            applyCellLayout(id, rootId, rootFrame)
+            val profile = cellProfile
+            if (profile == null) {
+                val view = takePooledCellView(state) ?: createView(state.kind, state)
+                if (view is TextView) state.defaultHighlightColor = view.highlightColor
+                putView(id, view)
+                attachCellView(view, state, rootId, holder)
+                applyInitialProperties(view, state)
+                installEvents(view, state)
+                applyCellLayout(id, rootId, rootFrame)
+            } else {
+                var mark = System.nanoTime()
+                val pooledView = takePooledCellView(state)
+                val view = pooledView ?: createView(state.kind, state)
+                profile.nodes++
+                if (pooledView != null) profile.pooled++
+                if (view is TextView) state.defaultHighlightColor = view.highlightColor
+                putView(id, view)
+                var now = System.nanoTime(); profile.createNs += now - mark; mark = now
+                attachCellView(view, state, rootId, holder)
+                now = System.nanoTime(); profile.attachNs += now - mark; mark = now
+                applyInitialProperties(view, state)
+                now = System.nanoTime(); profile.propsNs += now - mark; mark = now
+                installEvents(view, state)
+                now = System.nanoTime(); profile.eventsNs += now - mark; mark = now
+                applyCellLayout(id, rootId, rootFrame)
+                profile.layoutNs += System.nanoTime() - mark
+            }
         }
         if (state.kind == NodeKind.VIRTUAL_LIST) {
             // This list owns its descendants through its own adapter, even
@@ -3344,8 +3413,17 @@ class PamRenderer(
         state.applyingInitialProperties = true
         state.pressableConfiguredDuringInitialization = false
         try {
-            state.properties.forEach { (key, value) ->
-                guardProperty(state, key) { applyProperty(view, state, key, value) }
+            val keyProfile = cellKeyProfile
+            if (keyProfile == null) {
+                state.properties.forEach { (key, value) ->
+                    guardProperty(state, key) { applyProperty(view, state, key, value) }
+                }
+            } else {
+                state.properties.forEach { (key, value) ->
+                    val mark = System.nanoTime()
+                    guardProperty(state, key) { applyProperty(view, state, key, value) }
+                    keyProfile[key.ordinal] += System.nanoTime() - mark
+                }
             }
         } finally {
             state.initialTextUpdates = null

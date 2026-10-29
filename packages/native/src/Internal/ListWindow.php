@@ -171,7 +171,15 @@ final class ListWindow
         if ((is_float($estimate) || is_int($estimate)) && $estimate > 0) {
             $this->estimate = (float) $estimate;
         }
-        $this->keys = $list->lazyRows?->keys ?? [];
+        $keys = $list->lazyRows?->keys ?? [];
+        if ($this->reported && $this->ranges !== null && $this->keys !== [] && $keys !== $this->keys) {
+            // Rows joined or left before the window (an older page above a
+            // conversation): the window follows its rows by key, not by
+            // index, or the rows on screen would be released and others
+            // built in their place.
+            $this->ranges = self::rekeyed($this->ranges, $this->keys, $keys);
+        }
+        $this->keys = $keys;
         $this->fixed = $list->lazyRows?->fixed ?? [];
         if (!$this->reported) {
             // Rows joining before the host reports any (a list growing in
@@ -324,6 +332,43 @@ final class ListWindow
         $this->placeholders[$key] = [$height, $element];
 
         return $element;
+    }
+
+    /**
+     * $ranges over $previous keys, mapped onto $next keys: each range spans
+     * from its first to its last row still present (rows that joined inside
+     * it are built too); a range whose rows all left is dropped.
+     *
+     * @param list<array{0: int, 1: int}> $ranges
+     * @param list<string> $previous
+     * @param list<string> $next
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function rekeyed(array $ranges, array $previous, array $next): array
+    {
+        $positions = array_flip($next);
+        $mapped = [];
+        foreach ($ranges as [$from, $to]) {
+            $start = null;
+            for ($row = max(0, $from); $row < min($to, count($previous)); $row++) {
+                if (isset($positions[$previous[$row]])) {
+                    $start = $positions[$previous[$row]];
+                    break;
+                }
+            }
+            $end = null;
+            for ($row = min($to, count($previous)) - 1; $row >= max(0, $from); $row--) {
+                if (isset($positions[$previous[$row]])) {
+                    $end = $positions[$previous[$row]];
+                    break;
+                }
+            }
+            if ($start !== null && $end !== null && $end >= $start) {
+                $mapped = self::addRange($mapped, $start, $end + 1);
+            }
+        }
+
+        return $mapped;
     }
 
     /** Viewport top the list opens at: a screen above its initial row's bottom. */

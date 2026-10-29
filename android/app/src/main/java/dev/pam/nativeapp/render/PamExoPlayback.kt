@@ -90,7 +90,7 @@ internal class PamExoPlayback(
         fun onError(message: String)
     }
 
-    private val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+    private val player: ExoPlayer = ExoPlayer.Builder(mediaContext(context))
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
@@ -195,5 +195,18 @@ internal class PamExoPlayback(
         if (released) return
         released = true
         player.release()
+    }
+}
+
+/**
+ * The player's context, attributed to the manifest's "media" tag (API 30+):
+ * an untagged audio track made AppOps log "attributionTag not declared".
+ */
+internal fun mediaContext(context: android.content.Context): android.content.Context {
+    val application = context.applicationContext
+    return if (android.os.Build.VERSION.SDK_INT >= 30) {
+        application.createAttributionContext("media")
+    } else {
+        application
     }
 }
