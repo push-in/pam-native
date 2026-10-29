@@ -292,7 +292,11 @@ final class ListWindow
                     $pathLast = $pathFirst + $span - 1;
                 }
             }
-            $next = self::addRange($next, max(0, $pathFirst - $margin), $pathLast + $margin + 1);
+            // Past the path, at most two screens: a wide window (windowSize
+            // 11, five screens each side) built five more screens past the
+            // landing in the same frame; the next gesture extends it.
+            $landingMargin = min($margin, 2 * ($last - $first + 1));
+            $next = self::addRange($next, max(0, $pathFirst - $landingMargin), $pathLast + $landingMargin + 1);
             // Built once per fling: a long path's middle stays placeholders
             // instead of being chased screen by screen.
             // The path was built with a margin past its landing: a landing
