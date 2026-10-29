@@ -78,15 +78,47 @@ class PamTextPixelSnappingTest {
         // "QA" measured as 48 px -> 18.285715 dp. Some fractional positions
         // round the two edges apart by only 47 px.
         val width = 48f / density
-        var lostPixel = false
         for (step in 0 until 20_000) {
             val start = step * 0.0137f
             val plain = snappedPixelSpan(start, width, 0f, density)
-            if (plain.extent < 48) lostPixel = true
+            org.junit.Assert.assertTrue("start=$start", plain.extent in 47..49)
             val text = snappedPixelSpan(start, width, 0f, density, preserveContentExtent = true)
             org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent >= 48)
             org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent <= 49)
         }
-        org.junit.Assert.assertTrue("fixture must cover the lossy rounding case", lostPixel)
+    }
+}
+
+class PamYogaRelativeRoundingTest {
+    private val density = 2.625f
+
+    @Test
+    fun positionsRoundRelativeToTheParentAndTextFloors() {
+        // Painel tile label 119.75 px below a tile whose own top is fractional.
+        val parent = 555.3f / density
+        val label = parent + 119.75f / density
+        assertEquals(119, snappedPixelSpan(label, 45f / density, parent, density, preserveContentExtent = true).offset)
+        assertEquals(120, snappedPixelSpan(label, 45f / density, parent, density).offset)
+    }
+
+    @Test
+    fun textTrailingEdgeCeilsAFractionalExtent() {
+        val span = snappedPixelSpan(10.2f / density, 20.5f / density, 0f, density, preserveContentExtent = true)
+        assertEquals(10, span.offset)
+        assertEquals(21, span.extent)
+    }
+
+    @Test
+    fun secondRowOfAGridKeepsYogasPixel() {
+        // Row 2 starts 222.5 px into the tiles container (196.25 + 26.25).
+        val container = 555.3f / density
+        val row = snappedPixelSpan(container + 222.5f / density, 196.25f / density, container, density)
+        assertEquals(223, row.offset)
+    }
+
+    @Test
+    fun yogaPixelGridSnapsFloatNoise() {
+        assertEquals(74, yogaPixelGrid(73.49998 / 2.625, density, forceCeil = false, forceFloor = false))
+        assertEquals(45, yogaPixelGrid(44.99999 / 2.625, density, forceCeil = true, forceFloor = false))
     }
 }

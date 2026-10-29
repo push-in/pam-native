@@ -571,9 +571,23 @@ internal fun snappedPixelSpan(
     preserveContentExtent: Boolean = false,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
-    val absoluteStart = (start * safeDensity).roundToInt()
-    val absoluteEnd = ((start + extent.coerceAtLeast(0f)) * safeDensity).roundToInt()
-    val absoluteParentStart = (parentStart * safeDensity).roundToInt()
+    val safeExtent = extent.coerceAtLeast(0f)
+    // Yoga's roundLayoutResultsToPixelGrid (what React Native mounts): the
+    // position is rounded RELATIVE to the parent (text floors it), and the
+    // size comes from the rounded absolute edges (a text's trailing edge
+    // ceils a fractional size and floors a whole one). Rounding absolute
+    // edges for the position moved children by a pixel against RN and
+    // grids drifted per row.
+    val text = preserveContentExtent
+    val fractionalExtent = !pixelGridWhole(safeExtent.toDouble() * safeDensity)
+    val offset = yogaPixelGrid(start.toDouble() - parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
+    val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
+    val absoluteEnd = yogaPixelGrid(
+        start.toDouble() + safeExtent.toDouble(),
+        safeDensity,
+        forceCeil = text && fractionalExtent,
+        forceFloor = text && !fractionalExtent,
+    )
     var snappedExtent = (absoluteEnd - absoluteStart).coerceAtLeast(0)
     if (preserveContentExtent) {
         // Text widths are measured as whole (ceiled) pixels. Rounding both
@@ -584,9 +598,34 @@ internal fun snappedPixelSpan(
         snappedExtent = max(snappedExtent, content)
     }
     return SnappedPixelSpan(
-        offset = absoluteStart - absoluteParentStart,
+        offset = offset,
         extent = snappedExtent,
     )
+}
+
+private const val PIXEL_GRID_EPSILON = 0.0001
+
+private fun pixelGridWhole(px: Double): Boolean {
+    var fraction = px % 1.0
+    if (fraction < 0.0) fraction += 1.0
+    return fraction < PIXEL_GRID_EPSILON || fraction > 1.0 - PIXEL_GRID_EPSILON
+}
+
+/** Yoga's roundValueToPixelGrid, returned in whole pixels. */
+internal fun yogaPixelGrid(points: Double, density: Float, forceCeil: Boolean, forceFloor: Boolean): Int {
+    val scaled = points * density.toDouble()
+    var fraction = scaled % 1.0
+    if (fraction < 0.0) fraction += 1.0
+    val base = scaled - fraction
+    val snapped = when {
+        fraction < PIXEL_GRID_EPSILON -> base
+        fraction > 1.0 - PIXEL_GRID_EPSILON -> base + 1.0
+        forceCeil -> base + 1.0
+        forceFloor -> base
+        fraction > 0.5 || kotlin.math.abs(fraction - 0.5) < PIXEL_GRID_EPSILON -> base + 1.0
+        else -> base
+    }
+    return kotlin.math.round(snapped).toInt()
 }
 
 internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android frames snap like Yoga's roundLayoutResultsToPixelGrid, which is
+  what React Native mounts: positions round relative to the parent (text
+  floors), sizes come from the rounded absolute edges (a text's trailing
+  edge ceils a fractional size), in double with Yoga's 0.0001 epsilon.
+  Grids of tiles no longer drift a pixel per row against RN.
 - Layout: a stretched flex item is bounded by its own min/max cross size
   like Yoga, so a `max-width` child of a column (View or Text) wraps its
   text at that width instead of the column's.
