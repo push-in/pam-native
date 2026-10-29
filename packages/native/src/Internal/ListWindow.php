@@ -72,6 +72,9 @@ final class ListWindow
 
     private ?int $request = null;
 
+    /** `initialScrollIndex` of the list (null: opens at its top). */
+    private ?int $initialIndex = null;
+
     /** Whether the host reported its rows yet (until then the top is planned). */
     private bool $reported = false;
 
@@ -89,6 +92,9 @@ final class ListWindow
 
     /** @var array<string, array{0: float, 1: Element}> */
     private array $placeholders = [];
+
+    /** @var array<string, NodeKind> root kind of each row last built */
+    private array $kinds = [];
 
     /** @var WeakMap<Element, Element> built rows with their layout observer */
     private WeakMap $observed;
@@ -125,6 +131,17 @@ final class ListWindow
         $this->size = max(1, $size);
     }
 
+    /**
+     * The row the list opens at (`initialScrollIndex`; past the last row
+     * means the last row): until the host reports its rows, the window is
+     * planned around it instead of the top, so a list opened at its end (a
+     * conversation) materializes its newest rows.
+     */
+    public function startAt(?int $index): void
+    {
+        $this->initialIndex = $index !== null && $index > 0 ? $index : null;
+    }
+
     public function size(): int
     {
         return $this->size;
@@ -158,8 +175,8 @@ final class ListWindow
         $this->fixed = $list->lazyRows?->fixed ?? [];
         if (!$this->reported) {
             // Rows joining before the host reports any (a list growing in
-            // chunks, measured headers) are planned from the top again.
-            $this->ranges = [$this->rowsAround(0.0)];
+            // chunks, measured headers) are planned from the start again.
+            $this->ranges = [$this->rowsAround($this->plannedOffset())];
         }
         $request = $properties[PropKey::ScrollRequest->value] ?? null;
         if (is_int($request) && $request !== $this->request) {
@@ -190,7 +207,7 @@ final class ListWindow
         if ($this->ranges === null || !$this->reported) {
             $this->keys = $rows->keys;
             $this->fixed = $rows->fixed;
-            $ranges = [$this->rowsAround(0.0)];
+            $ranges = [$this->rowsAround($this->plannedOffset())];
         } else {
             $ranges = $this->ranges;
         }
@@ -237,6 +254,7 @@ final class ListWindow
     /** The built row with this window's layout observer. */
     public function observe(Element $row, string $key): Element
     {
+        $this->kinds[$key] = $row->kind;
         $observed = $this->observed[$row] ?? null;
         if ($observed !== null) {
             return $observed;
@@ -282,8 +300,12 @@ final class ListWindow
     public function placeholder(string $key): Element
     {
         $height = $this->heights[$key] ?? $this->estimate;
+        // The placeholder of a row built before takes its root kind, so the
+        // row keeps its native node (and the list its anchor and pixel
+        // position) when the window releases or builds it again.
+        $kind = $this->kinds[$key] ?? NodeKind::View;
         $cached = $this->placeholders[$key] ?? null;
-        if ($cached !== null && $cached[0] === $height) {
+        if ($cached !== null && $cached[0] === $height && $cached[1]->kind === $kind) {
             return $cached[1];
         }
         $properties = [
@@ -291,16 +313,35 @@ final class ListWindow
             PropKey::ListPlaceholder->value => true,
         ] + ($this->margins[$key] ?? []);
         ksort($properties);
-        $element = View::__pamCreate(NodeKind::View, [], $properties, null, $key);
+        $element = View::__pamCreate($kind, [], $properties, null, $key);
         if (count($this->placeholders) > 2 * max(64, count($this->keys))) {
             // Keys of items that left the list.
             $this->placeholders = [];
             $this->heights = array_intersect_key($this->heights, array_flip($this->keys));
+            $this->kinds = array_intersect_key($this->kinds, array_flip($this->keys));
             $this->margins = array_intersect_key($this->margins, $this->heights);
         }
         $this->placeholders[$key] = [$height, $element];
 
         return $element;
+    }
+
+    /** Viewport top the list opens at: a screen above its initial row's bottom. */
+    private function plannedOffset(): float
+    {
+        if ($this->initialIndex === null || $this->keys === []) {
+            return 0.0;
+        }
+        $last = min($this->initialIndex, count($this->keys) - 1);
+        $bottom = 0.0;
+        foreach ($this->keys as $row => $key) {
+            $bottom += $this->heights[$key] ?? (isset($this->fixed[$row]) ? 0.0 : $this->estimate);
+            if ($row >= $last) {
+                break;
+            }
+        }
+
+        return max(0.0, $bottom - self::VIEWPORT_FALLBACK);
     }
 
     /**

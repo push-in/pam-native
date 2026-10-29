@@ -412,10 +412,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             3 -> available
             else -> 0
         }
-        val start = extents.subList(0, index).sum() + innerStartPx
-        val position = virtualScrollPosition(extents, (start - adjustment).coerceAtLeast(0))
+        // Anchored on the target cell itself: the rows above may be windowed
+        // placeholders whose extents are estimates, so summing them landed
+        // the target (a conversation's end) screens away. The layout manager
+        // closes any gap at either end of the list.
         stopScroll()
-        scrollToVirtualPosition(position.index, -position.offset, animated)
+        scrollToVirtualPosition(index, adjustment - innerStartPx, animated)
         return true
     }
 
@@ -1276,7 +1278,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var richSpans: Map<Long, IntArray> = emptyMap()
 
     /** A list row and how far the viewport's start edge is inside it (px). */
-    class RowAnchor(val row: Int, val intoRow: Int, val itemId: Long, val intoItem: Int)
+    class RowAnchor(val row: Int, val intoRow: Int, val itemId: Long, val intoItem: Int, val single: Boolean = false)
 
     /**
      * The row at the viewport's start edge (inside a placeholder run, the row
@@ -1310,7 +1312,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             if (inverted) height - paddingBottom else paddingTop
         }
         val into = (if (inverted) view.bottom - edge else edge - view.top).coerceIn(0, max(0, extent - 1))
-        if (rows == 1 || extent <= 0) return RowAnchor(start, into, id, 0)
+        if (rows == 1 || extent <= 0) return RowAnchor(start, into, id, 0, single = rows == 1)
         val rowPx = extent.toFloat() / rows
         val row = (into / rowPx).toInt().coerceIn(0, rows - 1)
         val rowStart = (row * rowPx).toInt()
@@ -1324,6 +1326,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     fun restoreRowAnchor(anchor: RowAnchor) {
         if (rowSpan == null) return
+        // A single row that is still in the list: RecyclerView keeps it in
+        // place by its stable id. Its row index may have moved (rows joined
+        // above it), so restoring the old index jumped by those rows.
+        if (anchor.single && anchor.itemId in richIds) return
         val span = richSpans::get
         val manager = layoutManager as? LinearLayoutManager ?: return
         for ((position, id) in richIds.withIndex()) {

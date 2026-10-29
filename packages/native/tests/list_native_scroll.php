@@ -84,6 +84,54 @@ final class ScrollTail extends Component
     </VirtualizedList>
 </template>
 PAM);
+file_put_contents($scrollDirectory.'/ScrollTailSized.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\NativeScroll;
+
+use Pam\Native\Component;
+
+final class ScrollTailSized extends Component
+{
+    /** @var list<string> */
+    public array $items = [];
+}
+?>
+
+<template>
+    <VirtualizedList estimatedRowHeight="64" windowSize="5" initialScrollIndex="1000000">
+        <View p-for="$item in $items" :key="$item"><Text>{{ $item }}</Text></View>
+    </VirtualizedList>
+</template>
+PAM);
+file_put_contents($scrollDirectory.'/ScrollKinds.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\NativeScroll;
+
+use Pam\Native\Component;
+
+final class ScrollKinds extends Component
+{
+    /** @var list<string> */
+    public array $items = [];
+
+    public function tapped(): void
+    {
+    }
+}
+?>
+
+<template>
+    <VirtualizedList estimatedRowHeight="64" windowSize="3">
+        <Pressable p-for="$item in $items" :key="$item" :accessibilityLabel="$item" on:press="tapped"><Text>{{ $item }}</Text></Pressable>
+    </VirtualizedList>
+</template>
+PAM);
 App::components($scrollDirectory, $scrollDirectory.'/.cache');
 $scrollFeed = App::make('Pam\\Native\\Tests\\NativeScroll\\ScrollFeed');
 $scrollFeed->items = array_map(static fn (int $i): string => "msg-{$i}", range(100, 159));
@@ -179,6 +227,69 @@ $assert(
     (bool) array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-299'))
         && !array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-100')),
     'A list opened past its end must materialize its last rows (got '.count($tailTexts).' texts).',
+);
+Runtime::shutdown();
+$GLOBALS['pamIdentityFrames'] = [];
+
+// A row released by a `windowSize` window and built again keeps its native
+// node: its placeholder takes the row's root kind, so the list never sees a
+// remove + insert (which lost its anchor and the pixel position).
+$scrollKinds = App::make('Pam\\Native\\Tests\\NativeScroll\\ScrollKinds');
+$scrollKinds->items = array_map(static fn (int $i): string => "k-{$i}", range(0, 299));
+App::run($scrollKinds);
+$syncNative();
+$kindList = null;
+foreach ($nativeTree->nodes as $nodeId => $node) {
+    if ($node['kind'] === NodeKind::VirtualList->value) {
+        $kindList = $nodeId;
+    }
+}
+$rowOf = static function (string $label) use ($nativeTree): ?int {
+    foreach ($nativeTree->nodes as $nodeId => $node) {
+        $value = $node['props'][PropKey::AccessibilityLabel->value] ?? null;
+        if (is_string($value) && str_contains($value, $label)) {
+            return $nodeId;
+        }
+    }
+
+    return null;
+};
+$rowFive = $rowOf('k-5');
+$assert($rowFive !== null && $kindList !== null, 'The first rows of the window are built.');
+$rowFiveKind = $nativeTree->nodes[$rowFive]['kind'];
+Runtime::dispatchEvent($kindList, EventKind::ListWindow->value, '@250,260');
+$syncNative();
+$assert(
+    isset($nativeTree->nodes[$rowFive]) && $nativeTree->nodes[$rowFive]['kind'] === $rowFiveKind
+        && isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
+    'A released row stays the same native node (same kind), now a placeholder.',
+);
+Runtime::dispatchEvent($kindList, EventKind::ListWindow->value, '@0,10');
+$syncNative();
+$assert(
+    isset($nativeTree->nodes[$rowFive]) && !isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
+    'A row built again reuses its native node.',
+);
+Runtime::shutdown();
+$GLOBALS['pamIdentityFrames'] = [];
+
+// The same with `windowSize` (the window sized in screens).
+$scrollTail = App::make('Pam\\Native\\Tests\\NativeScroll\\ScrollTailSized');
+$scrollTail->items = array_map(static fn (int $i): string => "tail-{$i}", range(0, 299));
+App::run($scrollTail);
+$syncNative();
+$tailTexts = [];
+foreach ($nativeTree->nodes as $node) {
+    foreach ($node['props'] as $value) {
+        if (is_string($value) && str_contains($value, 'tail-')) {
+            $tailTexts[] = $value;
+        }
+    }
+}
+$assert(
+    (bool) array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-299'))
+        && !array_filter($tailTexts, static fn (string $text): bool => str_contains($text, 'tail-100')),
+    'A windowSize list opened past its end must materialize its last rows (got '.count($tailTexts).' texts).',
 );
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];

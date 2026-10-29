@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `windowSize` lists: a row released by the window keeps its native node
+  (its placeholder takes the row's root kind), so the list keeps its anchor
+  and pixel position; a list opened with `initialScrollIndex` past its end
+  plans its first window around the end.
+- Android virtual lists: a scroll to a cell anchors on that cell (estimated
+  placeholder heights above it no longer move the target away); a windowed
+  list keeps a visible single row in place when rows join above it (the row
+  index anchor used to jump by those rows).
+
 - Navigation focus follows the first mount: a screen opened through
   `Route::navigate()` (or any router entry) now gets
   `NavigationLifecycleAware::navigationFocused()` after `setup()` and

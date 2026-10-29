@@ -1858,6 +1858,11 @@ final class TemplateRenderer
             if (isset($values['windowSize'])) {
                 $listWindow = ListWindow::for($scope instanceof Component ? $scope : null, $listPath);
                 $listWindow->configure(self::intValue($values['windowSize'], 'VirtualizedList windowSize'));
+                $listWindow->startAt(
+                    isset($values['initialScrollIndex'])
+                        ? self::intValue($values['initialScrollIndex'], 'VirtualizedList initialScrollIndex')
+                        : null,
+                );
             }
             $childData['__pamListLoop'] = [$listPath, $listWindow !== null];
             $listLoop = true;
