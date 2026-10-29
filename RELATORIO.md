@@ -130,7 +130,7 @@ Worktree `codex-composer-fw`, branch `codex/composer-fw`, criado a partir de
 preservando top/bottom nas linhas internas e ajustando apenas as bordas do
 parágrafo. O algoritmo anterior podia manter avanço de 54 px quando o estilo
 solicitava 56 px e deslocar a primeira baseline. Referência de semântica:
-[CustomLineHeightSpan do RN 0.85](https://github.com/facebook/react-native/blob/v0.85.0/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/views/text/internal/span/CustomLineHeightSpan.kt).
+[CustomLineHeightSpan do RN 0.85](https://github.com/facebook/react-native/blob/v0.85.3/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/views/text/internal/span/CustomLineHeightSpan.kt).
 Medição do engine e desenho continuam usando o mesmo pipeline.
 
 O renderer evita que `setZ` aplicado por z-index reduza uma elevation já
@@ -157,3 +157,28 @@ framework gerados com sucesso; 336 testes JVM e 181 Rust aprovados.
 A integração inicial é feita com QA visual pendente, conforme autorização
 expressa desta rodada; a evidência Android será acrescentada após o lock.
 
+
+
+### Encerramento z2
+
+App e framework integrados e enviados a `integrate/port3-20261027` após
+498/498 validadores PHP verdes; no app, mais 53/53 gates afetados pelo rebase
+foram aprovados. Commits funcionais do framework: b55f56b8 (leading), d013d628
+(elevation) e 54e4cccd (regressão 54→56 px).
+
+**Limitação de QA:** não houve sessão no emulador. O lock compartilhado
+permaneceu ocupado e trocou de dono entre outras tarefas durante cerca de
+14 minutos de espera. A espera foi encerrada sem tomar/remover lock alheio e
+sem deixar aquisição pendente. Os 11 testes instrumentados de texto/Z foram
+compilados, mas não executados. Não há comparação visual RN×PAM, screenshots
+ou medições de CPU/PSS/FPS desta rodada. O deslocamento visual do botão e a
+sombra ainda precisam de confirmação no dispositivo; a adoção da semântica
+de texto do RN 0.85.3 foi conferida no código-fonte primário.
+
+APKs de QA e seus hashes preservados em
+`~/.local/share/pam-codex/shots/z2/`; logs em `/tmp/codex-z2-validation/`.
+O APK final do app inclui a atualização concorrente de PamRecyclerList, sem
+edição deste arquivo pela tarefa z2. Vendor, .pam-native, builds, .cxx e target
+próprios foram removidos. O disco permaneceu abaixo de 20 GB por uso
+concorrente; nenhum artefato alheio foi apagado. Não houve Mac, Swift, aparelho
+físico, nova tag ou workflow disparado manualmente.
