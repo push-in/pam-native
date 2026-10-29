@@ -7,6 +7,7 @@ import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.StaticLayout
 import android.text.TextUtils
+import android.util.Log
 import android.view.MotionEvent
 import android.widget.TextView
 import java.text.BreakIterator
@@ -39,6 +40,7 @@ internal class PamTextView(context: Context) : TextView(context) {
             sourceText = text
             truncatedFor = null
         }
+        if (maxLines in 1 until Int.MAX_VALUE) Log.d("PAMELLIPSIS", "setText internal=$settingTruncated maxLines=$maxLines ellipsize=$ellipsize text=[$text] width=$width")
         super.setText(text, type)
     }
 
@@ -53,6 +55,7 @@ internal class PamTextView(context: Context) : TextView(context) {
     private fun truncateTail(contentWidth: Int) {
         val source = sourceText ?: return
         val lines = maxLines
+        if (lines in 1 until Int.MAX_VALUE) Log.d("PAMELLIPSIS", "truncate width=$contentWidth lines=$lines ellipsize=$ellipsize textSize=${paint.textSize} source=[$source] shown=[$text]")
         val tail = ellipsize == TextUtils.TruncateAt.END
         if (!tail || lines <= 0 || lines == Int.MAX_VALUE || contentWidth <= 0 || source.isEmpty()) {
             restoreSource()
@@ -89,6 +92,7 @@ internal class PamTextView(context: Context) : TextView(context) {
         val advances = FloatArray(boundaries.size) { line.getPrimaryHorizontal(boundaries[it]) }
         val keep = tailEllipsisCut(boundaries, advances, contentWidth.toFloat(), ellipsisWidth)
         val truncated = SpannableStringBuilder(source, 0, lastStart + keep).append(ellipsis)
+        Log.d("PAMELLIPSIS", "result keep=$keep lastStart=$lastStart avail=$contentWidth ellipsisW=$ellipsisWidth lineCount=${full.lineCount} truncated=[$truncated]")
         settingTruncated = true
         try {
             super.setText(truncated, BufferType.SPANNABLE)
@@ -110,12 +114,14 @@ internal class PamTextView(context: Context) : TextView(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
+        if (maxLines in 1 until Int.MAX_VALUE) Log.d("PAMELLIPSIS", "onMeasure mode=${MeasureSpec.getMode(widthMeasureSpec)} width=$width text=[$text]")
         if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) truncateTail(width)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (maxLines in 1 until Int.MAX_VALUE) Log.d("PAMELLIPSIS", "onSizeChanged w=$w old=$oldw scrolling=${canScrollHorizontally(1)} text=[$text]")
         // A layout pass that skipped measure at this width still truncates
         // against the real content width.
         val before = text
@@ -133,6 +139,7 @@ internal class PamTextView(context: Context) : TextView(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (maxLines in 1 until Int.MAX_VALUE) Log.d("PAMELLIPSIS", "onDraw width=$width layoutWidth=${layout?.width} lines=${layout?.lineCount} ellipsisCount=${layout?.getEllipsisCount(0)} text=[$text]")
         val offset = blockOffset()
         if (offset == 0f) {
             super.onDraw(canvas)
