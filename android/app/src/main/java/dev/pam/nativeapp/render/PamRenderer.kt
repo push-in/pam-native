@@ -6884,7 +6884,10 @@ class PamRenderer(
         if (total <= 0) return
         val first = firstVisible.coerceIn(0, total - 1)
         val last = (first + max(visibleCount, 1) - 1).coerceIn(first, total - 1)
-        val margin = max(LIST_WINDOW_MARGIN_ROWS, last - first + 1)
+        // A fling reaches rows several screens ahead before PHP can build
+        // them: it asks three screens ahead instead of one.
+        val screens = if (list.scrollState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_SETTLING) 3 else 1
+        val margin = max(LIST_WINDOW_MARGIN_ROWS, (last - first + 1) * screens)
         var placeholderNear = false
         for (position in (first - margin).coerceAtLeast(0)..(last + margin).coerceAtMost(total - 1)) {
             val id = list.richIdAt(position) ?: continue
@@ -6897,7 +6900,10 @@ class PamRenderer(
         // Row indexes ("@first,last"): rows inside a placeholder run have no
         // node of their own.
         val rows = list.visibleRows() ?: return
-        val request = "@${rows[0]},${rows[1]}"
+        // With the row count it saw: a report made before rows joined (an
+        // older page) is recognized and ignored instead of moving the window
+        // onto other rows.
+        val request = "@${rows[0]},${rows[1]},${list.rowCount()}"
         val now = SystemClock.uptimeMillis()
         if (request == state.listWindowRequest && now - state.listWindowRequestedAt < LIST_WINDOW_RETRY_MS) return
         state.listWindowRequest = request

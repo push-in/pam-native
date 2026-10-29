@@ -162,11 +162,24 @@ class PamListNativeScrollInstrumentedTest {
         }
     }
 
+    @Test
+    fun aFullRebindKeepsTheFirstVisibleRowInPlace() {
+        // An older page above plus many rows re-measured: too many ranges for
+        // keyed updates, so the adapter rebinds everything (positions kept).
+        anchored(
+            initial = (1L..200L).toList(),
+            scrollTo = 20 to -10,
+            next = { ids -> (-60L..-1L).toList() + ids },
+            extentsOf = { ids -> ids.associateWith { id -> if (id > 0 && id % 2 == 0L) 90f else 48f + (Math.floorMod(id, 5L) * 17f) } },
+        )
+    }
+
     private fun anchored(
         initial: List<Long>,
         scrollTo: Pair<Int, Int>,
         next: (List<Long>) -> List<Long>,
         anchorAfterHeader: Boolean = false,
+        extentsOf: ((List<Long>) -> Map<Long, Float>)? = null,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -195,7 +208,12 @@ class PamListNativeScrollInstrumentedTest {
                 anchorId = initial[position]
                 anchorTop = requireNotNull(manager.findViewByPosition(position)).top
                 val replacement = next(initial)
-                list.setRichItems(replacement, extents(replacement), ::bindRow, { _, holder -> holder.removeAllViews() })
+                list.setRichItems(
+                    replacement,
+                    extentsOf?.invoke(replacement) ?: extents(replacement),
+                    ::bindRow,
+                    { _, holder -> holder.removeAllViews() },
+                )
             }
             awaitFrames(instrumentation, 4)
             onMain(instrumentation) {

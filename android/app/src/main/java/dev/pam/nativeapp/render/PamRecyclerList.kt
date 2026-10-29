@@ -281,6 +281,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp(start = prepended, end = appended)
         }
         val headAnchor = headInsertAnchorCapture(richIds, ids)
+        val idAnchor = if (headAnchor == null && ids != richIds) firstVisibleKeptAnchor(ids) else null
         // Rows re-measured at rest (media, a preview or reactions arriving):
         // RecyclerView keeps the partly hidden top row's top, so a height
         // change there pushed every visible row. The first fully visible row
@@ -311,6 +312,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             ).also(::installOffscreenMounts)
         } else {
             current.submit(ids, pixelExtents)
+            // A full rebind keeps adapter positions, so rows joining above
+            // (an older page) moved the content under the reader: the first
+            // visible row that is still there keeps its pixel offset.
+            if (current.reboundAll) idAnchor?.let(::restoreHeadInsertAnchor)
         }
         configureAdapter()
         updateHeaderSpans()
@@ -335,6 +340,23 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         val id = headInsertAnchor(previous, next, first) ?: return null
         val view = manager.findViewByPosition(previous.indexOf(id)) ?: return null
         return id to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
+    }
+
+    /** (row id, top px) of the first visible row that [next] keeps. */
+    private fun firstVisibleKeptAnchor(next: List<Long>): Pair<Long, Int>? {
+        if (!initialPositionApplied || inverted || !isLaidOut || richIds.isEmpty()) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val first = manager.findFirstVisibleItemPosition()
+        val last = manager.findLastVisibleItemPosition()
+        if (first == NO_POSITION) return null
+        val kept = next.toHashSet()
+        for (position in first..last) {
+            val id = richIds.getOrNull(position) ?: continue
+            if (id !in kept) continue
+            val view = manager.findViewByPosition(position) ?: continue
+            return id to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
+        }
+        return null
     }
 
     /** (row id, top px) of the first row fully on screen, when the list is laid out and idle. */
@@ -1286,6 +1308,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     fun rowAnchor(): RowAnchor? = rowAt(atEnd = false)
 
+    /** Logical rows of the list (a placeholder run counts its rows). */
+    fun rowCount(): Int {
+        val span = rowSpan ?: return richIds.size
+        var rows = 0
+        for (id in richIds) rows += span(id)?.get(1)?.coerceAtLeast(1) ?: 1
+        return rows
+    }
+
     /** First and last row index the viewport shows, or null. */
     fun visibleRows(): IntArray? {
         val first = rowAt(atEnd = false) ?: return null
@@ -1326,10 +1356,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     fun restoreRowAnchor(anchor: RowAnchor) {
         if (rowSpan == null) return
-        // A single row that is still in the list: RecyclerView keeps it in
-        // place by its stable id. Its row index may have moved (rows joined
-        // above it), so restoring the old index jumped by those rows.
-        if (anchor.single && anchor.itemId in richIds) return
+        // The anchor exists for placeholder runs that split into rows. A
+        // single row is kept by its stable id (RecyclerView, head-insert and
+        // rebind anchors); if it left, its old row index names another row
+        // now (rows joined above it), so restoring that index jumped the list
+        // by those rows (an older page landing under the reader).
+        if (anchor.single) return
         val span = richSpans::get
         val manager = layoutManager as? LinearLayoutManager ?: return
         for ((position, id) in richIds.withIndex()) {
@@ -1848,6 +1880,7 @@ internal class RichRecyclerAdapter(
         ids = replacement
         extents = replacementExtents
         if (runs > MAX_RANGE_UPDATES) {
+            reboundAll = true
             notifyDataSetChanged()
             return true
         }
@@ -1908,7 +1941,11 @@ internal class RichRecyclerAdapter(
         return true
     }
 
+    /** The last submit rebound every row (notifyDataSetChanged: positions, not ids, are kept). */
+    var reboundAll = false
+
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
+        reboundAll = false
         if (ids == next && extents == nextExtents) {
             remountEmptyHolders()
             return
@@ -1936,6 +1973,7 @@ internal class RichRecyclerAdapter(
             // O(N + D^2); rebinding by stable id is cheaper.
             ids = replacement
             extents = replacementExtents
+            reboundAll = true
             notifyDataSetChanged()
             return
         }

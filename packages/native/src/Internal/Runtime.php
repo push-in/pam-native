@@ -599,15 +599,22 @@ final class Runtime
                 // Framework-owned: native shows rows near placeholders of a
                 // windowed list. Materialize ahead of them; no app callback
                 // and no component is invalidated.
-                // "first,last": node ids of the visible rows; "@first,last":
-                // row indexes (rows inside a placeholder run have no node).
+                // "first,last": node ids of the visible rows; "@first,last"
+                // (or "@first,last,rows"): row indexes (rows inside a
+                // placeholder run have no node), with the row count the host
+                // had, so a report made before rows joined is recognized.
                 $rows = str_starts_with($payload, '@');
-                $ids = explode(',', $rows ? substr($payload, 1) : $payload, 2);
+                $ids = explode(',', $rows ? substr($payload, 1) : $payload, 3);
                 if (
-                    count($ids) === 2
+                    count($ids) >= 2
                     && (
                         $rows
-                            ? self::$encoder?->extendWindowRows($nodeId, (int) $ids[0], (int) $ids[1])
+                            ? self::$encoder?->extendWindowRows(
+                                $nodeId,
+                                (int) $ids[0],
+                                (int) $ids[1],
+                                isset($ids[2]) ? (int) $ids[2] : null,
+                            )
                             : self::$encoder?->extendWindow($nodeId, (int) $ids[0], (int) $ids[1])
                     ) === true
                 ) {

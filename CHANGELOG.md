@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Android lists: a page landing above the rows on screen (older history)
+  never moves or rebuilds them: window reports made before the rows changed
+  are recognized (`@first,last,rows`) and ignored, a full rebind keeps the
+  first visible row by id, and the row-index anchor (for placeholder runs)
+  no longer applies to single rows (it jumped by the rows that joined).
+- Android: during a fling, windowed lists ask for rows three screens ahead.
+
 - `windowSize` lists follow their rows by key when rows join or leave
   before the window (an older page above a conversation): the rows on screen
   stay built instead of being released and replaced (a visible swap/jump).

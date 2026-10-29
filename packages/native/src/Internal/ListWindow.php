@@ -72,6 +72,9 @@ final class ListWindow
 
     private ?int $request = null;
 
+    /** Row count before the rows last changed (a host report with it is stale). */
+    private int $previousRowCount = -1;
+
     /** `initialScrollIndex` of the list (null: opens at its top). */
     private ?int $initialIndex = null;
 
@@ -179,6 +182,9 @@ final class ListWindow
             // built in their place.
             $this->ranges = self::rekeyed($this->ranges, $this->keys, $keys);
         }
+        if ($keys !== $this->keys) {
+            $this->previousRowCount = count($this->keys);
+        }
         $this->keys = $keys;
         $this->fixed = $list->lazyRows?->fixed ?? [];
         if (!$this->reported) {
@@ -230,9 +236,16 @@ final class ListWindow
      * The host shows rows $first..$last: keeps `(windowSize - 1) / 2` of
      * those screens materialized on each side. True when the window moved.
      */
-    public function extend(int $first, int $last): bool
+    public function extend(int $first, int $last, ?int $rows = null): bool
     {
         if ($first < 0 || $last < 0) {
+            return false;
+        }
+        if ($rows !== null && $rows !== count($this->keys) && $rows === $this->previousRowCount) {
+            // Reported before rows joined or left (an older page landed
+            // meanwhile): its indexes name other rows now, and moving the
+            // window there released the rows on screen. The host reports
+            // again once it shows the new rows.
             return false;
         }
         if ($last < $first) {

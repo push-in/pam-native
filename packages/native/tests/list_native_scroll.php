@@ -276,10 +276,24 @@ $assert(
 $scrollKinds->items = [...array_map(static fn (int $i): string => "older-{$i}", range(0, 49)), ...$scrollKinds->items];
 Runtime::requestRender();
 Runtime::render();
+$pageBytes = array_sum(array_map('strlen', $GLOBALS['pamIdentityFrames']));
 $syncNative();
+$assert(
+    $pageBytes < 16_384,
+    'A page landing above the window is a small patch (its rows arrive as placeholders), got '.$pageBytes.' bytes.',
+);
 $assert(
     isset($nativeTree->nodes[$rowFive]) && !isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
     'A page prepended before the window keeps the rows on screen built.',
+);
+// A report the host made before the page landed (its row count is the old
+// one) names other rows now: it must not move the window off the screen.
+$frameCount = count($GLOBALS['pamIdentityFrames']);
+Runtime::dispatchEvent($kindList, EventKind::ListWindow->value, '@250,260,300');
+$syncNative();
+$assert(
+    isset($nativeTree->nodes[$rowFive]) && !isset($nativeTree->nodes[$rowFive]['props'][PropKey::ListPlaceholder->value]),
+    'A stale window report (rows joined since) keeps the rows on screen built.',
 );
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];
