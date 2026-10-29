@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android text: `numberOfLines="1"` lays the text out as one unwrapped line
+  (horizontally scrolling TextView, no input or marquee change), so the tail
+  ellipsis cuts mid-word like React Native ("hoje à…") instead of breaking
+  at the last word first and dropping text that fits ("hoje …"). Head and
+  middle ellipsize modes now work on single lines too.
 - Android media in scrolling (not paged) lists prepares its player when the
   view shows on screen and the list is not flinging, instead of when the row
   is bound ahead of the viewport (S23 feed: PSS 389 -> 310 MB, p99 32 -> 23 ms,
