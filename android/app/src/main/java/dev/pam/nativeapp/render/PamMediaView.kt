@@ -243,6 +243,11 @@ internal class PamMediaView(
             // a suspended app when it is active again.
             releasePlayer()
             if (suspended && value.isNotEmpty()) pendingRestore = true
+        } else if (awaitScreen()) {
+            // Bound ahead of the viewport (a list prefetching its next rows):
+            // the player is created and prepared when the view first shows on
+            // screen, after that frame, not inside the frame that bound it.
+            releasePlayer()
         } else {
             val uri = Uri.parse(value)
             val resolved = runCatching {
@@ -926,10 +931,17 @@ internal class PamMediaView(
     }
 
     override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
-        videoSurface?.release()
+        val previous = videoSurface
         val surface = Surface(texture)
         videoSurface = surface
-        exo?.setSurface(surface)
+        val player = exo
+        if (player != null) {
+            player.setSurface(surface)
+            // The old surface goes once the player switched to the new one.
+            if (previous != null) player.afterPending { previous.release() }
+        } else {
+            previous?.release()
+        }
         command { it.setSurface(surface) }
     }
 
@@ -950,9 +962,13 @@ internal class PamMediaView(
         val surface = videoSurface
         videoSurface = null
         exo?.let {
-            it.setSurface(null)
-            surface?.release()
-            return true
+            // Released once the player let go of it (a codec still starting
+            // must not see its queue abandoned).
+            it.detachSurface {
+                surface?.release()
+                texture.release()
+            }
+            return false
         }
         val player = preparedPlayer ?: run {
             surface?.release()
@@ -1065,7 +1081,79 @@ internal class PamMediaView(
         syncVisibility()
     }
 
+    private val screenRect = android.graphics.Rect()
+    private var screenWatcher: android.view.ViewTreeObserver.OnPreDrawListener? = null
+
+    /**
+     * Inside a scrolling (not paged) virtual list: only there a bound row can
+     * sit ahead of the viewport. Pagers prepare their next page on purpose.
+     */
+    private fun inScrollingList(): Boolean {
+        var parent = parent
+        while (parent != null) {
+            if (parent is PamRecyclerList) return !parent.pagingEnabled
+            parent = parent.parent
+        }
+        return false
+    }
+
+    private fun listFlinging(): Boolean {
+        var parent = parent
+        while (parent != null) {
+            if (parent is PamRecyclerList) {
+                return parent.scrollState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_SETTLING
+            }
+            parent = parent.parent
+        }
+        return false
+    }
+
+    /** On screen: attached, shown and at least partly inside the window. */
+    private fun onScreen(): Boolean =
+        isAttachedToWindow && isShown && width > 0 && height > 0 && getGlobalVisibleRect(screenRect)
+
+    /**
+     * True when the source must wait until this view shows on screen: then a
+     * pre-draw watcher prepares it (posted after that frame) once it does.
+     */
+    private fun awaitScreen(): Boolean {
+        // Not attached yet (a row being bound): onAttachedToWindow sets the
+        // source again and decides with the real ancestry.
+        if (!isAttachedToWindow && !keepAliveWhenCovered) return true
+        if (keepAliveWhenCovered || !inScrollingList() || (onScreen() && !listFlinging())) {
+            stopScreenWatcher()
+            return false
+        }
+        if (screenWatcher == null) {
+            val watcher = android.view.ViewTreeObserver.OnPreDrawListener {
+                // Not while the list flings past it: a player created and torn
+                // down within a second churns codecs and their threads.
+                if (onScreen() && !listFlinging()) {
+                    stopScreenWatcher()
+                    post {
+                        if (source.isNotEmpty() && exo == null && preparedPlayer == null && !creatingPlayer) {
+                            val current = source
+                            source = ""
+                            setSource(current)
+                        }
+                    }
+                }
+                true
+            }
+            screenWatcher = watcher
+            viewTreeObserver.addOnPreDrawListener(watcher)
+        }
+        return true
+    }
+
+    private fun stopScreenWatcher() {
+        val watcher = screenWatcher ?: return
+        screenWatcher = null
+        if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(watcher)
+    }
+
     override fun onDetachedFromWindow() {
+        stopScreenWatcher()
         playback.visibility(false, false)
         covered = false
         hiddenRelease = false
@@ -1074,9 +1162,18 @@ internal class PamMediaView(
         viewLifecycle = null
         main.removeCallbacks(progress)
         sourceGeneration++
-        releasePlayer()
-        videoSurface?.release()
+        val surface = videoSurface
         videoSurface = null
+        val player = exo
+        if (player != null) {
+            // The surface outlives the player's release (serialized on the
+            // player's thread): a codec mid-start never sees it abandoned.
+            exo = null
+            player.release { surface?.release() }
+        } else {
+            surface?.release()
+        }
+        releasePlayer()
         pendingRestore = false
         suspended = false
         super.onDetachedFromWindow()

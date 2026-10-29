@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Android media in scrolling (not paged) lists prepares its player when the
+  view shows on screen and the list is not flinging, instead of when the row
+  is bound ahead of the viewport (S23 feed: PSS 389 -> 310 MB, p99 32 -> 23 ms,
+  janky 3.84% -> 2.57%). Pagers (reels) keep preparing their next page.
+- Android media: a player lets go of its video surface on its own thread
+  before the surface (and texture) is released, and its owner thread
+  outlives the release by 3 s, so a codec still starting never writes into
+  an abandoned queue (CodecException, "flush() ... at Released state") and
+  late codec events never hit a dead thread. PamMediaChurnInstrumentedTest.
+
 - Android lists: a page landing above the rows on screen (older history)
   never moves or rebuilds them: window reports made before the rows changed
   are recognized (`@first,last,rows`) and ignored, a full rebind keeps the

@@ -780,6 +780,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     /** RN `pagingEnabled` for lists: one item per page, snapped natively. */
+    /** One item per page (a pager, e.g. reels): its next pages are prepared ahead on purpose. */
+    internal val pagingEnabled: Boolean get() = pagerSnap != null
+
     fun setPagingEnabled(enabled: Boolean) {
         if (enabled == (pagerSnap != null)) return
         pagerSnap?.attachToRecyclerView(null)

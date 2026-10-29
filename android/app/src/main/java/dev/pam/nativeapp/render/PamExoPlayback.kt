@@ -189,7 +189,7 @@ internal class PamExoPlayback(
                 player = null
                 snapshot = snapshot.copy(playing = false)
                 dispatch { listener.onError(error.message ?: "Media source could not be prepared.") }
-                ownerThread.quitSafely()
+                owner.postDelayed({ ownerThread.quitSafely() }, OWNER_QUIT_DELAY_MS)
             }
         }
     }
@@ -262,8 +262,29 @@ internal class PamExoPlayback(
 
     fun pause() = command { it.playWhenReady = false }
 
-    fun release() {
-        if (!released.compareAndSet(false, true)) return
+    /**
+     * Lets go of the video surface on the player's thread, then runs [done]
+     * on the main thread: the surface (and its texture) may be released only
+     * after that, or a codec still starting writes into an abandoned queue
+     * (CodecException / "flush() ... at Released state").
+     */
+    fun detachSurface(done: () -> Unit) {
+        owner.post {
+            runCatching { player?.clearVideoSurface() }
+            main.post { done() }
+        }
+    }
+
+    /** Runs [done] on the main thread after every command already posted. */
+    fun afterPending(done: () -> Unit) {
+        owner.post { main.post { done() } }
+    }
+
+    fun release(onReleased: (() -> Unit)? = null) {
+        if (!released.compareAndSet(false, true)) {
+            onReleased?.let { done -> owner.post { main.post { done() } } }
+            return
+        }
         owner.removeCallbacksAndMessages(null)
         owner.post {
             try {
@@ -274,8 +295,12 @@ internal class PamExoPlayback(
                 runCatching { player?.release() }
                 player = null
                 snapshot = snapshot.copy(playing = false)
+                onReleased?.let { done -> main.post { done() } }
             } finally {
-                ownerThread.quitSafely()
+                // The codecs finish releasing asynchronously and still post to
+                // this looper: quitting at once logged "sending message to a
+                // Handler on a dead thread" for every released player.
+                owner.postDelayed({ ownerThread.quitSafely() }, OWNER_QUIT_DELAY_MS)
             }
         }
     }
@@ -293,3 +318,6 @@ internal fun mediaContext(context: android.content.Context): android.content.Con
         application
     }
 }
+
+/** How long a released player's owner thread outlives it (late codec events). */
+private const val OWNER_QUIT_DELAY_MS = 3_000L
