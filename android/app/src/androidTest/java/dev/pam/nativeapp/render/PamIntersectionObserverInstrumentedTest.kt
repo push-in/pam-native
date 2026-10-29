@@ -5,6 +5,8 @@ import android.content.Intent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ScrollView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
@@ -68,6 +70,72 @@ class PamIntersectionObserverInstrumentedTest {
         } finally {
             activity.finish()
         }
+    }
+
+    @Test
+    fun aFlingHoldsEdgesUntilTheListRestsThenReportsWhereItStopped() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launch(instrumentation)
+        val changes = mutableListOf<Boolean>()
+        lateinit var list: RecyclerView
+        lateinit var cell: View
+        try {
+            instrumentation.runOnMainSync {
+                cell = View(activity)
+                val row = FrameLayout(activity).apply {
+                    addView(cell, FrameLayout.LayoutParams(160, 160))
+                }
+                list = RecyclerView(activity).apply {
+                    layoutManager = LinearLayoutManager(activity)
+                    adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+                        override fun getItemCount() = 40
+                        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int) =
+                            object : RecyclerView.ViewHolder(
+                                if (viewType == 1) row else View(activity),
+                            ) {}
+                        override fun getItemViewType(position: Int) = if (position == 0) 1 else 0
+                        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+                            holder.itemView.layoutParams = RecyclerView.LayoutParams(300, 160)
+                        }
+                    }
+                }
+                activity.host.addView(list, FrameLayout.LayoutParams(300, 300))
+                activity.host.measure(exactly(300), exactly(300))
+                activity.host.layout(0, 0, 300, 300)
+                PamIntersectionObserver(cell, changes::add)
+                cell.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(listOf(true), changes)
+
+                // A fling sweeps the cell out and back in: nothing is reported.
+                list.fling(0, 8000)
+                assertEquals(RecyclerView.SCROLL_STATE_SETTLING, list.scrollState)
+                cell.translationY = -400f
+                cell.viewTreeObserver.dispatchOnPreDraw()
+                cell.translationY = 0f
+                cell.viewTreeObserver.dispatchOnPreDraw()
+                cell.translationY = -400f
+                cell.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(listOf(true), changes)
+
+                // It rests: one edge, for where the cell actually stopped.
+                list.stopScroll()
+                assertEquals(listOf(true, false), changes)
+
+                // At rest (or under a finger) edges are live again.
+                cell.translationY = 0f
+                cell.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(listOf(true, false, true), changes)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun onlyASettlingListHoldsEdges() {
+        assertEquals(true, holdsVisibilityEdges(RecyclerView.SCROLL_STATE_SETTLING))
+        assertEquals(false, holdsVisibilityEdges(RecyclerView.SCROLL_STATE_DRAGGING))
+        assertEquals(false, holdsVisibilityEdges(RecyclerView.SCROLL_STATE_IDLE))
     }
 
     private fun launch(instrumentation: Instrumentation): PamTestActivity =

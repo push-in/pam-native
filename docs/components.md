@@ -847,9 +847,14 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   asked for: one committed after a press, long press or submit made since the
   gesture began (a send button, a "jump to latest" button) runs at once.
   Inserts during a fling do not stop it.
+- **Visibility settles with the fling.** A `p-intersect` inside the list
+  (an autoplay sensor, an impression) does not report the edges a fling
+  sweeps past: it reports once the list rests, with the visibility it rests
+  at (Android). Under a finger, edges stay live; detaching reports `false`.
 
 Covered by `packages/native/tests/list_native_scroll.php` and the Android
-`PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest`.
+`PamListNativeScrollInstrumentedTest` / `PamHeadInsertAnchorTest` /
+`PamIntersectionObserverInstrumentedTest`.
 
 To measure a list on a device (debug builds), enable the motion trace with
 `adb shell setprop log.tag.PamListTrace DEBUG` and reopen the screen: every
