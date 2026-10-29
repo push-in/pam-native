@@ -4371,6 +4371,7 @@ $assert(
     'Older hosts must keep empty device identity fields.',
 );
 $decodedDeviceInfo = null;
+App::run(Text::make('Device identity'));
 $deviceInfoRequest = DeviceInfo::get(static function (DeviceInfo $info) use (&$decodedDeviceInfo): void {
     $decodedDeviceInfo = $info;
 });
@@ -4382,6 +4383,7 @@ $assert(
     $decodedDeviceInfo?->manufacturer === 'Motorola' && $decodedDeviceInfo?->model === 'moto g54 5G',
     'Device info must decode and trim native manufacturer and model.',
 );
+Runtime::shutdown();
 $assert(
     $legacyDeviceInfo->safeAreaTop === 0.0
         && $legacyDeviceInfo->safeAreaRight === 0.0
