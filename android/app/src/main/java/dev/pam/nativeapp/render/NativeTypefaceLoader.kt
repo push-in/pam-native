@@ -10,7 +10,20 @@ internal class NativeTypefaceLoader(context: Context) {
     private val assets = context.assets
     private val assetFonts = ConcurrentHashMap<String, Typeface>()
 
+    /**
+     * Resolved faces by (family, weight, italic): every text cell a list
+     * binds asks for one, and resolving normalized the asset path (string
+     * splits) on each bind.
+     */
+    private val resolved = java.util.concurrent.ConcurrentHashMap<String, Typeface>()
+
     fun resolve(family: String?, weight: Int, italic: Boolean): Typeface {
+        val memo = "${family.orEmpty()}\u0000$weight\u0000$italic"
+        resolved[memo]?.let { return it }
+        return resolveUncached(family, weight, italic).also { if (resolved.size < 256) resolved[memo] = it }
+    }
+
+    private fun resolveUncached(family: String?, weight: Int, italic: Boolean): Typeface {
         val resolvedWeight = weight.coerceIn(1, 1000)
         val assetPath = family?.let(::normalizedFontAssetPath)
         if (assetPath != null) {

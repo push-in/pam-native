@@ -305,7 +305,10 @@ internal class NativeImageLoader(
     }
     private val cache = object : LruCache<String, DecodedBitmap>(memoryCacheBytes(context)) {
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
-            value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
+            nativeImageCacheWeight(
+                value.bitmap.allocationByteCount,
+                value.bitmap.width.toLong() * value.bitmap.height,
+            ) + (value.animatedBytes?.size ?: 0)
     }
     // Inline icon masks live apart from photos: a feed or an inbox of
     // avatars must never evict the glyphs of the next screen's first frame.

@@ -241,7 +241,17 @@ internal data class PamMotionProgram(
          * `set(v)`, `wait(ms)`, `timing(to,ms,easing,delay)` and
          * `spring(to,stiffness,damping,mass,velocity,delay)`.
          */
+        /** Parsed programs by source: a list binds the same program for every row. */
+        private val parsed = object : LinkedHashMap<String, PamMotionProgram>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PamMotionProgram>?) = size > 128
+        }
+
         fun parse(source: String): PamMotionProgram? {
+            synchronized(parsed) { parsed[source] }?.let { return it }
+            return parseUncached(source)?.also { program -> synchronized(parsed) { parsed[source] = program } }
+        }
+
+        private fun parseUncached(source: String): PamMotionProgram? {
             val lines = source.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
             if (lines.isEmpty()) return null
             val header = lines.first().split(' ')

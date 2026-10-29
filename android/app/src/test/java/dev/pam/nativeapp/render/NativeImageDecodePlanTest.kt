@@ -119,4 +119,13 @@ class NativeImageDecodePlanTest {
         assertEquals(8 * 1024 * 1024, nativeImageMemoryCacheBytes(128, lowRam = true))
         assertEquals(8 * 1024 * 1024, nativeImageMemoryCacheBytes(0, lowRam = false))
     }
+
+    @Test
+    fun largePhotosWeighTwiceInTheMemoryCache() {
+        // A feed photo at screen width (1080x1350) holds at most half the budget.
+        assertEquals(2 * 1080 * 1350 * 4, nativeImageCacheWeight(1080 * 1350 * 4, 1080L * 1350))
+        // Avatars and grid thumbnails keep their own size.
+        assertEquals(360 * 450 * 4, nativeImageCacheWeight(360 * 450 * 4, 360L * 450))
+        assertEquals(Int.MAX_VALUE, nativeImageCacheWeight(Int.MAX_VALUE, LARGE_IMAGE_PIXELS))
+    }
 }

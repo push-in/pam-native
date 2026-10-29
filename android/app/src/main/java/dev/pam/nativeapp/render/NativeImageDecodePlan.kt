@@ -128,6 +128,19 @@ internal fun nativeBitmapStorage(
  * sixteenth on low-RAM devices), between 8 and 64 MiB. A 256 MiB class (Galaxy
  * S10) gets 32 MiB; a 192 MiB budget phone 24 MiB; a 512 MiB tablet 64 MiB.
  */
+/** Decoded pixels from which an image counts as a large photo in the memory cache. */
+internal const val LARGE_IMAGE_PIXELS = 1_000_000L
+
+/**
+ * Bytes an image weighs in the decoded-photo cache. Large photos (a feed
+ * post at screen width: ~5 MB each, kept in GPU memory) count twice, so they
+ * hold at most about half of the budget and the rest stays for the many
+ * small images (avatars, thumbnails, grid cells) a screen shows; a feed
+ * scrolled through photos otherwise kept a whole budget of them alive.
+ */
+internal fun nativeImageCacheWeight(bytes: Int, pixels: Long): Int =
+    if (pixels >= LARGE_IMAGE_PIXELS) (bytes.toLong() * 2).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else bytes
+
 internal fun nativeImageMemoryCacheBytes(memoryClassMb: Int, lowRam: Boolean): Int {
     val divisor = if (lowRam) 16 else 8
     val bytes = memoryClassMb.toLong().coerceAtLeast(16) * 1024L * 1024L / divisor
