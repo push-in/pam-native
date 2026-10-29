@@ -101,6 +101,10 @@ O splash configurado para esperar PHP não tem mais o timeout de quatro segundos
 
 Testes: **336/336 JVM verdes**, incluindo inicialização sem abrir assets adiados, metadados síncronos, integridade/tamanho, substituição atômica, reaproveitamento por digest, espera pelo primeiro frame e interrupção ao ocultar. A suíte do consumidor passou **497/497 validadores PHP**, um por vez e com limpeza entre execuções. Dois APKs benchmark x86_64 compilaram com o mesmo engine construído das fontes desta integração. Não houve alteração de dependências nem criação de tag.
 
-Integração com gates verdes antes do QA visual, conforme autorização desta rodada. A comparação no emulador aguarda a liberação do lock compartilhado; ainda não há número medido antes/depois. Evidências: `~/.local/share/pam-codex/shots/y3/`. Este relatório será complementado após a sessão exclusiva.
+Integração com gates verdes antes do QA visual, conforme autorização desta rodada. A comparação no emulador aguarda a liberação do lock compartilhado; ainda não há número medido antes/depois. Evidências: `~/.local/share/pam-codex/shots/y3/`. O acesso não foi obtido durante a tentativa de 600 segundos.
 
 Rebase final preservou o ajuste concorrente de altura intrínseca do input e o relatório anterior. A suíte JVM foi revalidada sobre o HEAD integrado: BUILD SUCCESSFUL.
+
+Resultado final do QA em dispositivo: até 21:58 de 28/10/2026 (America/Sao_Paulo), o lock do emulador permaneceu com outra sessão (`render-diff`, arquivo de owner de 21:07), sem aquisição durante 10 minutos. **Não foram medidos primeiro start antes/depois, pixels dos temas, memória/CPU no dispositivo ou paridade visual com o app de referência.** Nenhuma melhoria numérica é afirmada. A regra desta rodada autorizou integrar com os validadores verdes mesmo sem QA visual; a limitação permanece explícita.
+
+Os APKs comparáveis estão em `~/.cache/codex-cold-start/{before,after}.apk`, com engine nativo idêntico. A inspeção de DEX confirmou que somente o corrigido contém `pam-deferred-assets`/`.assets-ready` e que o timeout antigo existe somente no baseline. O roteiro de medição e os hashes estão em `~/.local/share/pam-codex/shots/y3/`. Artefatos próprios de compilação, `.pam-native` e vendor foram removidos; APKs e evidências foram preservados. Nenhum lock ou artefato de outra sessão foi removido.
