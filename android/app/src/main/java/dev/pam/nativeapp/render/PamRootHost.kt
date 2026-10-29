@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 
@@ -32,6 +33,17 @@ internal fun isEligibleTranslatedTouchOccluder(
 ): Boolean = !isScrollContainer && containsInteractiveTarget
 
 private const val IME_RECONCILE_DELAY_MS = 350L
+
+/**
+ * The IME inset for one animation frame. A frame never reports "hidden"
+ * before the animation ends (the end reconciles), so a closing keyboard
+ * reaches 0 only once and blur/visibility observers fire once.
+ */
+/** See [PamRootHost.publishedImeInset]: hidden at once when closing, previous value while opening. */
+internal fun publishedImeDuringAnimation(target: Int, previous: Int): Int = if (target <= 0) 0 else previous
+
+internal fun imeAnimationFrameInset(frameInset: Int, current: Int): Int =
+    if (frameInset <= 0 && current > 0) 1 else frameInset.coerceAtLeast(0)
 
 internal class PamRootHost(context: Context) : FrameLayout(context) {
     internal val legacyImeInsets by lazy(LazyThreadSafetyMode.NONE) { PamLegacyImeInsets(this) }
@@ -119,7 +131,14 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             )
         }
         if (stableSafeAreaInsets != previous) post { onStableInsetsChanged?.invoke() }
-        updateImeInset(imeInsetOf(insets))
+        // While the IME animates, the layout follows its frames (below), not
+        // the end state Android dispatches before the animation starts.
+        if (imeAnimating) {
+            imeTarget = imeInsetOf(insets)
+            updateImeInset(imeBottomInset)
+        } else {
+            updateImeInset(imeInsetOf(insets))
+        }
         // The end-state insets dispatched before an IME animation can differ
         // from the settled IME (a suggestion strip appearing or not); the
         // root window insets are authoritative once the transition settles.
@@ -137,7 +156,66 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
      */
     private val imeReconciliation = Runnable { reconcileImeInset() }
 
+    /**
+     * IME show/hide animation: the root follows every frame, so content laid
+     * out above the keyboard (a chat timeline pinned to its end, a composer)
+     * moves with it in one continuous motion instead of jumping to the end
+     * state in the first frame. Another callback set on this view (a
+     * KeyboardAvoidingView) still receives every call.
+     */
+    private var imeAnimating = false
+    private var imeTarget = 0
+    private var delegateInsetsAnimation: WindowInsetsAnimation.Callback? = null
+    private val rootInsetsAnimation: WindowInsetsAnimation.Callback? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            object : WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                override fun onPrepare(animation: WindowInsetsAnimation) {
+                    if (animation.typeMask and WindowInsets.Type.ime() != 0) {
+                        imeAnimating = true
+                        imeTarget = imeBottomInset
+                    }
+                    delegateInsetsAnimation?.onPrepare(animation)
+                }
+
+                override fun onStart(
+                    animation: WindowInsetsAnimation,
+                    bounds: WindowInsetsAnimation.Bounds,
+                ): WindowInsetsAnimation.Bounds =
+                    delegateInsetsAnimation?.onStart(animation, bounds) ?: bounds
+
+                override fun onProgress(
+                    insets: WindowInsets,
+                    runningAnimations: MutableList<WindowInsetsAnimation>,
+                ): WindowInsets {
+                    if (imeAnimating && runningAnimations.any { it.typeMask and WindowInsets.Type.ime() != 0 }) {
+                        updateImeInset(imeAnimationFrameInset(insets.getInsets(WindowInsets.Type.ime()).bottom, imeBottomInset))
+                    }
+                    return delegateInsetsAnimation?.onProgress(insets, runningAnimations) ?: insets
+                }
+
+                override fun onEnd(animation: WindowInsetsAnimation) {
+                    if (animation.typeMask and WindowInsets.Type.ime() != 0) {
+                        imeAnimating = false
+                        rootWindowInsets?.let { updateImeInset(imeInsetOf(it)) }
+                    }
+                    delegateInsetsAnimation?.onEnd(animation)
+                }
+            }
+        } else {
+            null
+        }
+
+    override fun setWindowInsetsAnimationCallback(callback: WindowInsetsAnimation.Callback?) {
+        if (rootInsetsAnimation == null) {
+            super.setWindowInsetsAnimationCallback(callback)
+            return
+        }
+        delegateInsetsAnimation = callback
+        super.setWindowInsetsAnimationCallback(rootInsetsAnimation)
+    }
+
     init {
+        if (rootInsetsAnimation != null) super.setWindowInsetsAnimationCallback(rootInsetsAnimation)
         // The root absorbs the focus of a blurred input (below). Back leaves
         // touch mode, and Android 8+ would then paint its default focus
         // highlight (~8% black) over the whole screen until the next touch.
@@ -176,15 +254,32 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     }
 
     private fun updateImeInset(ime: Int) {
-        if (ime == imeBottomInset) return
+        val published = if (imeAnimating) {
+            publishedImeDuringAnimation(imeTarget, publishedImeInset)
+        } else {
+            ime
+        }
+        if (ime == imeBottomInset && published == publishedImeInset) return
         // The IME of another (dialog) window does not cover this window's
         // composer; only hiding is applied while unfocused.
         if (ime > 0 && !windowFocused()) return
         val hidden = imeBottomInset > 0 && ime == 0
         imeBottomInset = ime
+        publishedImeInset = published
         onImeInsetChanged?.invoke(ime)
         if (hidden) post(::blurInputAfterImeHidden)
     }
+
+    /**
+     * The keyboard inset observers outside layout see (keyboard visibility):
+     * a closing keyboard reads hidden from its first frame, an opening one
+     * visible once it is up (React Native keyboardWillHide / keyboardDidShow).
+     * Layout (the engine viewport) follows every frame through
+     * [imeBottomInset]. A screen that swaps its bottom gap on visibility
+     * swaps it while the keyboard still covers that gap.
+     */
+    var publishedImeInset: Int = 0
+        private set
 
     private fun blurInputAfterImeHidden() {
         if (imeBottomInset != 0 || !isAttachedToWindow) return

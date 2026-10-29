@@ -2,12 +2,17 @@
 
 ## Unreleased
 
-- Android virtual lists snap rows like Yoga: a row spans round(start) ..
-  round(start + extent) of the running offset instead of rounding each
-  height alone (rows drifted 1-2 px and left a 1 px hairline between
-  cells). Kept rows keep their sub-pixel phase, so rows joining above or
-  below never resize the rows shown; a cell root without margins fills its
-  snapped slot. PamListPixelSnapTest.
+- Android keyboard: the root follows every frame of the IME show/hide
+  animation (engine viewport and layout), so content above the keyboard
+  moves with it in one motion instead of jumping to the end state; keyboard
+  visibility observers see a closing keyboard hidden from its first frame and
+  an opening one once it is up (keyboardWillHide / keyboardDidShow). A list
+  resting at its end pins its newest row in the same layout pass as a
+  resize (no one-frame lag). PamKeyboardFollowTest.
+- Android virtual lists: a cell root without margins fills its slot (a 1 px
+  seam showed between rows); the cumulative row snap of f9437e1b is
+  reverted (it moved chat rows 1-2 px against React Native).
+  PamListPixelSnapTest.
 
 - MediaPlayer `autoPlayVisible` / `autoPlayGroup` (extension properties 1006
   and 1007, `MediaPlayer::autoPlayWhenVisible()`): Android plays a video while

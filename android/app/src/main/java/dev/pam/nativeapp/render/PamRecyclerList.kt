@@ -191,7 +191,23 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // from its start follows the end.
         val wasAtEnd = followsEnd() && oldExtent > 0 && newExtent != oldExtent && restingAtEnd()
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (wasAtEnd && !inverted) post(::keepEndAfterResize)
+        // Pinned in this same layout pass: a viewport that follows the IME
+        // frame by frame keeps its newest row on the edge every frame
+        // instead of catching up one frame late (a visible stutter).
+        if (wasAtEnd && !inverted && !pinEndInThisLayout(newExtent)) post(::keepEndAfterResize)
+    }
+
+    /** Lays the last row flush with the new viewport end in the coming layout pass. */
+    private fun pinEndInThisLayout(viewportExtent: Int): Boolean {
+        val layout = layoutManager as? LinearLayoutManager ?: return false
+        if (layout.reverseLayout || layout.stackFromEnd) return false
+        val last = (adapter?.itemCount ?: 0) - 1
+        if (last < 0) return false
+        val row = layout.findViewByPosition(last) ?: return false
+        val rowExtent = if (horizontal) layout.getDecoratedMeasuredWidth(row) else layout.getDecoratedMeasuredHeight(row)
+        val padding = if (horizontal) paddingLeft + paddingRight else paddingTop + paddingBottom
+        layout.scrollToPositionWithOffset(last, pinnedEndOffset(viewportExtent, padding, rowExtent))
+        return true
     }
 
     /**
@@ -264,9 +280,6 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         (adapter as? RichRecyclerAdapter)?.remountEmptyHolders()
     }
 
-    /** Sub-pixel start phase of each row at the last snapping (see [snappedPixelExtents]). */
-    private var rowPhases: Map<Long, Double> = emptyMap()
-
     fun setRichItems(
         ids: List<Long>,
         extents: Map<Long, Float>,
@@ -275,12 +288,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         sectionSwitch: ListSectionSwitch? = null,
     ) {
         val sectionRestore = sectionSwitch?.let(::leaveSection)
-        // Cumulative snapping (Yoga): no drift, no hairline between rows;
-        // kept rows keep their sub-pixel phase, so rows joining above or
-        // below never resize the rows shown.
-        val snapped = snappedPixelExtents(ids, extents, resources.displayMetrics.density, rowPhases)
-        rowPhases = snapped.phases
-        val pixelExtents = snapped.extents
+        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(0f)) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -1825,53 +1833,9 @@ internal fun sectionScrollTarget(
     return if (rail >= 0) VirtualScrollPosition(rail, 0) else null
 }
 
-/** Snapped row extents and each row's start phase within its pixel (0 until 1). */
-internal class SnappedExtents(val extents: Map<Long, Int>, val phases: Map<Long, Double>)
-
-/**
- * Pixel extents of rows laid end to end, snapped like Yoga/React Native: a
- * row spans round(start) .. round(start + extent) px of the running offset,
- * so rows never drift or leave a 1 px gap the way independently rounded
- * heights did. The running offset keeps the sub-pixel phase a kept row had
- * last time ([previousPhases]): rows joining above or below never change the
- * extents of the rows already shown. A row without height keeps the 1 px
- * minimum the adapter needs, outside the running offset.
- */
-internal fun snappedPixelExtents(
-    ids: List<Long>,
-    extents: Map<Long, Float>,
-    density: Float,
-    previousPhases: Map<Long, Double> = emptyMap(),
-): SnappedExtents {
-    val rows = ids.filter { extents.containsKey(it) }.distinct()
-    val anchorIndex = rows.indexOfFirst { previousPhases.containsKey(it) }.coerceAtLeast(0)
-    val px = HashMap<Long, Int>(extents.size * 2)
-    val phases = HashMap<Long, Double>(rows.size * 2)
-    fun extentPx(id: Long) = extents.getValue(id).coerceAtLeast(0f).toDouble() * density
-    fun place(id: Long, startPx: Double) {
-        val span = (Math.floor(startPx + extentPx(id) + 0.5) - Math.floor(startPx + 0.5)).toInt()
-        px[id] = if (span > 0) span else 1
-        phases[id] = startPx - Math.floor(startPx)
-    }
-    if (rows.isNotEmpty()) {
-        val anchorStart = previousPhases[rows[anchorIndex]] ?: 0.0
-        var start = anchorStart
-        for (index in anchorIndex until rows.size) {
-            place(rows[index], start)
-            start += extentPx(rows[index])
-        }
-        start = anchorStart
-        for (index in anchorIndex - 1 downTo 0) {
-            start -= extentPx(rows[index])
-            place(rows[index], start)
-        }
-    }
-    // Extents of ids outside the row order (stale entries) keep plain rounding.
-    for ((id, extent) in extents) {
-        if (!px.containsKey(id)) px[id] = max(1, (extent.coerceAtLeast(0f) * density + 0.5f).toInt())
-    }
-    return SnappedExtents(px, phases)
-}
+/** Start offset that lays a row of [rowExtent] flush with the end of a [viewportExtent] list. */
+internal fun pinnedEndOffset(viewportExtent: Int, padding: Int, rowExtent: Int): Int =
+    viewportExtent - padding - rowExtent
 
 internal fun virtualScrollPosition(extents: List<Int>, target: Int): VirtualScrollPosition {
     if (extents.isEmpty()) return VirtualScrollPosition(0, 0)

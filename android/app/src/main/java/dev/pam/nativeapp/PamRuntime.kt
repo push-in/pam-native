@@ -412,13 +412,15 @@ class PamRuntime(
      * shrinks its flexible siblings, then relayouts synchronously so native
      * views and engine frames move together.
      */
-    fun updateKeyboardInset(bottomDp: Float) {
+    /**
+     * [bottomDp] lays the engine out (every IME animation frame);
+     * [visibleDp] is the keyboard observers see (hidden from the first frame
+     * of a closing keyboard, visible once an opening one is up).
+     */
+    fun updateKeyboardInset(bottomDp: Float, visibleDp: Float = bottomDp) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            // Root insets arrive as end-state dispatches (plus a settled
-            // reconciliation), not animation frames: record the height first
-            // so a show transition already carries it.
-            keyboardVisibility.updateHeight(0, bottomDp)
-            keyboardVisibility.update(0, bottomDp)
+            keyboardVisibility.updateHeight(0, visibleDp)
+            keyboardVisibility.update(0, visibleDp)
         }
         synchronized(handleLock) {
             val active = handle

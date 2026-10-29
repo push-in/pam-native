@@ -382,11 +382,15 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         run {
             rootHost.onStableInsetsChanged = { scheduleViewportUpdate() }
             rootHost.onImeInsetChanged = { inset ->
-                runtime.updateKeyboardInset(inset / resources.displayMetrics.density)
+                val density = resources.displayMetrics.density
+                runtime.updateKeyboardInset(inset / density, rootHost.publishedImeInset / density)
             }
             rootHost.windowFocused = ::hasWindowFocus
             // A re-attached runtime may still carry the previous host's IME.
-            runtime.updateKeyboardInset(rootHost.imeBottomInset / resources.displayMetrics.density)
+            runtime.updateKeyboardInset(
+                rootHost.imeBottomInset / resources.displayMetrics.density,
+                rootHost.publishedImeInset / resources.displayMetrics.density,
+            )
             // The runtime may start after the first window layout (assets are
             // installed off the UI thread); reconcile insets and metrics now.
             scheduleViewportUpdate(force = true)
