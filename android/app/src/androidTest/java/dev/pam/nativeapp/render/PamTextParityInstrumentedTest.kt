@@ -66,6 +66,28 @@ class PamTextParityInstrumentedTest {
         }
 
     @Test
+    fun explicitLineHeightSplitsLeadingAndOnlyReplacesParagraphEdges() {
+        // Asymmetric glyph extents expose the old top/bottom algorithm.
+        for (height in listOf(56f, 54.25f, 42f)) {
+            val span = PamLineHeightSpan(height)
+            val pitch = kotlin.math.ceil(height).toInt()
+            for ((start, end) in listOf(0 to 4, 4 to 8, 8 to 12)) {
+                val metrics = android.graphics.Paint.FontMetricsInt().apply {
+                    top = -50; ascent = -42; descent = 12; bottom = 15
+                }
+                span.chooseHeight("123\n456\n7890", start, end, 0, 0, metrics)
+                val ascent = -42 - kotlin.math.ceil((pitch - 54) / 2.0).toInt()
+                val descent = 12 + kotlin.math.floor((pitch - 54) / 2.0).toInt()
+                assertEquals(pitch, metrics.descent - metrics.ascent)
+                assertEquals(ascent, metrics.ascent)
+                assertEquals(descent, metrics.descent)
+                assertEquals(if (start == 0) ascent else -50, metrics.top)
+                assertEquals(if (end == 12) descent else 15, metrics.bottom)
+            }
+        }
+    }
+
+    @Test
     fun engineMeasurementMatchesTheRenderedTextView() {
         val cases = listOf(
             "Zé Chat" to style(),
