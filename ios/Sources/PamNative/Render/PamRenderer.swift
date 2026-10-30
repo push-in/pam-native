@@ -6425,7 +6425,6 @@ public final class PamRenderer: @unchecked Sendable {
             self.control = nil
             self.scrollView = nil
             self.refreshControl = nil
-            self.drawer = nil
             self.modal = nil
             self.modalView = nil
             self.pressInKind = nil
