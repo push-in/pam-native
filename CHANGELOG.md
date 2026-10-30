@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- iOS virtual lists follow the native scrolling guarantees: a
+  `scrollRequest` committed during the user's drag or fling is dropped
+  unless the user asked for it (press, long press or submit since the
+  gesture began); rows inserted, removed or re-measured above the viewport
+  keep a row on screen at its pixel offset by key (older pages, rows
+  prepended after a leading header/loader row, a partly hidden top row that
+  grew at rest), and a list resting at its end keeps following it; window
+  reports carry the row count and a released fling's path to its landing
+  screen (UIScrollView's projected target); `endReached` counts the
+  projected fling. `PamListNativeScrollTests`.
+- iOS keyboard: frames laid out for a new root keyboard inset animate with
+  the keyboard's own duration and curve, so content above it moves with the
+  keyboard instead of jumping to the end state.
+- iOS MediaPlayer `autoPlayVisible` / `autoPlayGroup` (1006/1007) decided
+  natively like Android; videos in scrolling (not paged) lists prepare once
+  on screen outside a fling. `PamVisibleAutoplayTests`.
+- iOS borders with mixed corner radii (a chat bubble with one tight corner)
+  draw one ring that follows each radius; per-side colors split at the
+  miter lines (corners had no stroke and straight sides overshot them).
+- iOS `contentOffsetAnimationMs`: the same target committed again while the
+  glide runs keeps it (a pager re-rendered every frame crept and stalled
+  between pages).
+- iOS debug builds: `PAM_LIST_TRACE=1` (or the `PamListTrace` user default)
+  logs each list frame's row motion like Android's `PamListTrace`.
+- iOS Pressable: a nested Pressable without `onLongPress` lends the long
+  press to the nearest enclosing Pressable that has one (never across a
+  scroll view or list), with that receiver's `delayLongPress`; the nested
+  press is cancelled. A nested Pressable with its own `onLongPress` keeps
+  it. `PamNestedLongPressTests`.
+- iOS shared elements between a screen and a `<Modal>` component, like
+  Android: opening flies every tag on screen below into the Modal and closing
+  (`visible` false or unmounted) flies them home, with the Modal fading in
+  step; an unmounted Modal fades a cover of its background under the flights.
+  `launchOnTap()` hand-off to a Modal stays Android-only.
+  `PamModalSharedTransitionTests`.
+
 ## 1.46.8 - 2026-10-29
 
 Runtime batch FIFO fix (intermittent "cannot contain children"), nested Pressable long press, RN tail truncation and subpixel styled text on top of 1.46.7.
