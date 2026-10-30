@@ -1285,6 +1285,11 @@ public final class PamRenderer: @unchecked Sendable {
             return
         }
         listWindowRequests[listId] = (request, now)
+        #if DEBUG
+        if PamListTrace.enabled {
+            NSLog("PamListWindow list=%lld request=%@ offset=%.1f", listId, request, list.contentOffset.y)
+        }
+        #endif
         dispatchEvent(listId, EventKind.listWindow.rawValue, Data(request.utf8))
     }
 

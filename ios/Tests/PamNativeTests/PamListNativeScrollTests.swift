@@ -158,7 +158,7 @@ final class PamListNativeScrollTests: XCTestCase {
         let animation = try XCTUnwrap(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: false, now: 10))
         XCTAssertEqual(animation.duration, 0.25)
         XCTAssertEqual(animation.curve, 7)
-        XCTAssertEqual(animation.expires, 10.25, accuracy: 0.001)
+        XCTAssertEqual(animation.expires, 11.25, accuracy: 0.001)
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: true, now: 10))
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0, curve: 7, reduced: false, now: 10))
     }
@@ -273,5 +273,32 @@ final class PamVisibleAutoplayTests: XCTestCase {
         XCTAssertTrue(ahead.hasPlayer, "prepared once on screen at rest")
         XCTAssertFalse(ahead.awaitingScreen)
         ahead.removeFromSuperview()
+    }
+
+    func testAPlayerInAGlidingPagerWaitsForTheGlideToEnd() throws {
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        defer { window.isHidden = true }
+        window.isHidden = false
+        let pager = PamAnchoredScrollView(frame: window.bounds)
+        pager.horizontal = true
+        pager.contentSize = CGSize(width: 900, height: 600)
+        window.addSubview(pager)
+        pager.pamOffsetAnimationMs = 280
+        pager.pamRequestedContentOffsetX = 0
+        pager.layoutIfNeeded()
+        pager.pamRequestedContentOffsetX = 300
+        pager.layoutIfNeeded()
+        XCTAssertEqual(pager.pamOffsetGlide?.isRunning, true)
+        let media = PamMediaView(frame: CGRect(x: 300, y: 0, width: 300, height: 600))
+        pager.addSubview(media)
+        media.setSource(try PamMediaParityTests.makeVideo().absoluteString)
+        XCTAssertFalse(media.hasPlayer, "no AVPlayer inside the glide")
+        XCTAssertTrue(media.awaitingGlide)
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline, !media.hasPlayer {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertTrue(media.hasPlayer, "prepared once the glide ended")
+        media.removeFromSuperview()
     }
 }

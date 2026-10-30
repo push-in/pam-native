@@ -832,6 +832,11 @@ public final class PamRuntime {
         keyboardLayoutAnimation = PamKeyboardFollow.animation(
             duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
         )
+        #if DEBUG
+        if PamListTrace.enabled {
+            NSLog("PamKeyboard %@ overlap=%.1f durationMs=%.0f", hiding ? "hide" : "change", overlap, duration * 1_000)
+        }
+        #endif
         updateKeyboardInset(bottom: Float(overlap))
     }
 
@@ -1645,10 +1650,20 @@ public final class PamRuntime {
         let started = DispatchTime.now().uptimeNanoseconds
         let mutations = toProcess.map { $0.mutations }
 
-        if let animation = keyboardLayoutAnimation, CACurrentMediaTime() <= animation.expires {
-            keyboardLayoutAnimation = nil
+        let now = CACurrentMediaTime()
+        if let animation = keyboardLayoutAnimation, now <= animation.expires {
+            // Every commit while the keyboard moves follows it, for the rest
+            // of its animation: the engine's relayout and the application's
+            // own response to the keyboard (PHP), which arrives a few frames
+            // later and used to jump to its end state.
+            let remaining = animation.expires - PamKeyboardFollow.settleSlack - now
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamKeyboard commit animated remainingMs=%.0f batches=%ld", remaining * 1_000, mutations.count)
+            }
+            #endif
             UIView.animate(
-                withDuration: animation.duration,
+                withDuration: max(PamKeyboardFollow.minimumDuration, remaining),
                 delay: 0,
                 options: [
                     UIView.AnimationOptions(rawValue: animation.curve << 16),
@@ -1660,7 +1675,12 @@ public final class PamRuntime {
                 self.renderer.hostView?.layoutIfNeeded()
             }
         } else {
-            keyboardLayoutAnimation = nil
+            #if DEBUG
+            if PamListTrace.enabled, let animation = keyboardLayoutAnimation {
+                NSLog("PamKeyboard commit late byMs=%.0f", (now - animation.expires) * 1_000)
+            }
+            #endif
+            if let animation = keyboardLayoutAnimation, now > animation.expires { keyboardLayoutAnimation = nil }
             renderer.commit(mutations)
         }
         if !firstFrameLogged {
@@ -1820,13 +1840,19 @@ struct PamFramePump {
 
 /// The keyboard animation that the next committed frames follow.
 enum PamKeyboardFollow {
-    /// Frames committed while the keyboard animates (at least 0.1 s)
-    /// animate with its duration and curve; none without an animation or
-    /// with reduced motion.
+    /// A commit arriving this long after the keyboard settled (the
+    /// application's response to it) still eases in instead of jumping.
+    static let settleSlack: TimeInterval = 1.0
+    /// The shortest easing of a late commit.
+    static let minimumDuration: TimeInterval = 0.2
+
+    /// Frames committed while the keyboard animates (and shortly after)
+    /// animate with its curve for the rest of its duration; none without an
+    /// animation or with reduced motion.
     static func animation(
         duration: TimeInterval, curve: UInt, reduced: Bool, now: CFTimeInterval
     ) -> (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)? {
         guard duration > 0, !reduced else { return nil }
-        return (duration: duration, curve: curve, expires: now + max(0.1, duration))
+        return (duration: duration, curve: curve, expires: now + max(0.1, duration) + settleSlack)
     }
 }

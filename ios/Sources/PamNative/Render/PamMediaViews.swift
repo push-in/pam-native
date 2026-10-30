@@ -108,6 +108,18 @@ final class PamMediaView: UIView {
     private static var autoplayPositionOrder: [String] = []
     /// Bound ahead of the viewport in a scrolling list: prepared once on screen outside a fling.
     private(set) var awaitingScreen = false
+    /// Waiting for a pager's programmatic glide to end before preparing.
+    private(set) var awaitingGlide = false
+
+    /// A scroll view holding this view runs a programmatic offset glide.
+    var ancestorGlideRunning: Bool {
+        var parent = superview
+        while let current = parent {
+            if let scroll = current as? PamAnchoredScrollView, scroll.pamOffsetGlide?.isRunning == true { return true }
+            parent = current.superview
+        }
+        return false
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -312,6 +324,13 @@ final class PamMediaView: UIView {
         // Visible autoplay: prepared once the policy grants playback.
         if autoplayFraction > 0, !autoplayGrant {
             if window != nil { PamMediaVisibility.join(self) }
+            return
+        }
+        // A pager gliding to this page: the player is created once the glide
+        // ends (an AVPlayer set up inside the page mount stalled the glide).
+        if !keepAliveWhenCovered, window != nil, ancestorGlideRunning {
+            awaitingGlide = true
+            PamMediaVisibility.awaitScreen(self)
             return
         }
         // Bound ahead of the viewport (a list materializing rows ahead):
@@ -1093,12 +1112,18 @@ final class PamMediaView: UIView {
 
     /// Checked by `PamMediaVisibility`: on screen and its list not flinging.
     func screenReadyToPrepare() -> Bool {
+        if awaitingGlide {
+            guard window != nil, !ancestorGlideRunning else { return false }
+            if !awaitingScreen { return true }
+        }
         guard awaitingScreen, window != nil, pamVisibleRectInWindow() != nil else { return false }
         return !(scrollingList?.isDecelerating ?? false)
     }
 
     /// Prepares the source once it shows on screen (posted after that frame).
     func prepareAfterScreen() {
+        // setSource decides again (a list row still ahead keeps waiting).
+        awaitingGlide = false
         awaitingScreen = false
         guard player == nil, !source.isEmpty, !releasedForCover, !releasedForBackground, !idleSurface else { return }
         restorePlayer()

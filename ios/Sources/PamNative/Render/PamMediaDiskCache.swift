@@ -55,11 +55,14 @@ public final class PamMediaDiskCache: @unchecked Sendable {
         completion: @escaping @Sendable (Data?) -> Void
     ) {
         let identity = identity(source: source, stableKey: stableKey)
-        if let cached = memory.object(forKey: identity as NSString) {
-            completion(cached as Data)
-            return
-        }
         queue.async {
+            // A memory hit is handed over on the cache queue too: bridging
+            // the NSData and the caller's decode in its completion ran on the
+            // main thread (~60 ms per large poster inside a page mount).
+            if let cached = self.memory.object(forKey: identity as NSString) {
+                completion(cached as Data)
+                return
+            }
             let file = self.file(identity)
             guard self.fresh(file, maxAgeMs: maxAgeMs),
                   let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
