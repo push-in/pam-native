@@ -6,6 +6,17 @@ import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
     @Test
+    fun closingSheetFollowsIntermediateImeFramesEvenWhenTargetVisibilityIsFalse() {
+        for (raw in listOf(300, 240, 120, 48, 0)) {
+            val ime = animatedKeyboardInset(raw, visible = false, animating = true)
+            assertEquals(raw, ime)
+            assertEquals(-raw.toFloat(), interactiveBottomSheetLayout(400, ime).second, 0f)
+        }
+        assertEquals(0, animatedKeyboardInset(300, visible = false, animating = false))
+        assertEquals(300, animatedKeyboardInset(300, visible = true, animating = false))
+    }
+
+    @Test
     fun tallSheetsStopAtSafeTopAndLeaveResidualImeForTheirKeyboardAvoider() {
         val lift = boundedSheetKeyboardLift(883, 2272, 2044)
         assertEquals(228, lift)
