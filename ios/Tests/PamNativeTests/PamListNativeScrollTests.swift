@@ -158,7 +158,7 @@ final class PamListNativeScrollTests: XCTestCase {
         let animation = try XCTUnwrap(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: false, now: 10))
         XCTAssertEqual(animation.duration, 0.25)
         XCTAssertEqual(animation.curve, 7)
-        XCTAssertEqual(animation.expires, 10.125, accuracy: 0.001)
+        XCTAssertEqual(animation.expires, 10.25, accuracy: 0.001)
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: true, now: 10))
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0, curve: 7, reduced: false, now: 10))
     }

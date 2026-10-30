@@ -110,7 +110,27 @@ final class PamListTrace {
 
     private var tops: [Int64: CGFloat] = [:]
 
+    private weak var pendingList: UIScrollView?
+    private var pending: (listId: Int64, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int)?
+
+    /// Logs what the frame shows: several syncs inside one run loop turn
+    /// (a resize, then the end follow of the same layout pass) are one
+    /// drawn frame, so the state is read once, after the turn.
     func record(listId: Int64, list: UIScrollView, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int) {
+        let scheduled = pending != nil
+        pendingList = list
+        pending = (listId, frames, horizontal, rowCount)
+        guard !scheduled else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let pending = self.pending else { return }
+            self.pending = nil
+            guard let list = self.pendingList else { return }
+            self.flush(listId: pending.listId, list: list, frames: pending.frames,
+                       horizontal: pending.horizontal, rowCount: pending.rowCount)
+        }
+    }
+
+    private func flush(listId: Int64, list: UIScrollView, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int) {
         let offset = horizontal ? list.contentOffset.x : list.contentOffset.y
         let viewport = CGRect(origin: list.contentOffset, size: list.bounds.size)
         var next: [Int64: CGFloat] = [:]

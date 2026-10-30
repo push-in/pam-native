@@ -1820,13 +1820,13 @@ struct PamFramePump {
 
 /// The keyboard animation that the next committed frames follow.
 enum PamKeyboardFollow {
-    /// Frames committed within half the keyboard animation (at least 0.1 s)
+    /// Frames committed while the keyboard animates (at least 0.1 s)
     /// animate with its duration and curve; none without an animation or
     /// with reduced motion.
     static func animation(
         duration: TimeInterval, curve: UInt, reduced: Bool, now: CFTimeInterval
     ) -> (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)? {
         guard duration > 0, !reduced else { return nil }
-        return (duration: duration, curve: curve, expires: now + max(0.1, duration / 2))
+        return (duration: duration, curve: curve, expires: now + max(0.1, duration))
     }
 }

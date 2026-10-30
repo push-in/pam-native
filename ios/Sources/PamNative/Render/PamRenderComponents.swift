@@ -311,6 +311,39 @@ final class PamAnchoredScrollView: UIScrollView {
     let pamSticky = PamStickyRegistry()
     /// `pageTransform` of a horizontal pager (stories cube).
     let pamPageTransformer = PamPageTransformer()
+
+    /// The faces follow every offset, also the last one a programmatic glide
+    /// sets: a contentOffset change does not always run layoutSubviews
+    /// before the frame is drawn, and the faces stayed turned at an
+    /// intermediate step (the pager looked stopped between two pages).
+    override var contentOffset: CGPoint {
+        didSet {
+            guard horizontal, pamPageTransformer.kind != .none, contentOffset != oldValue else { return }
+            pamPageTransformer.apply(to: self)
+            #if DEBUG
+            if PamListTrace.enabled, pamOffsetGlide?.isRunning != true {
+                // Who moves a pager outside its glide (debug trace).
+                let caller = Thread.callStackSymbols.dropFirst(2).prefix(4)
+                    .map { $0.split(separator: " ", omittingEmptySubsequences: true).dropFirst(3).prefix(1).joined() }
+                    .joined(separator: " < ")
+                NSLog("PamGlide offset %.1f -> %.1f anim=%@ by %@", oldValue.x, contentOffset.x,
+                      layer.animationKeys()?.joined(separator: ",") ?? "-", caller)
+            }
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// Debug trace: the drawn (presentation) offset differs from the model
+    /// (an animation still runs on the pager's bounds).
+    private func pamTraceAnimatedBounds() {
+        guard PamListTrace.enabled, horizontal, pamPageTransformer.kind != .none,
+              let shown = layer.presentation()?.bounds.origin.x,
+              abs(shown - contentOffset.x) > 1 else { return }
+        NSLog("PamGlide drawn=%.1f model=%.1f anims=%@", shown, contentOffset.x,
+              layer.animationKeys()?.joined(separator: ",") ?? "-")
+    }
+    #endif
     /// `contentOffsetAnimationMs`: a changed requested offset glides there
     /// (one contentOffset per display frame, so layoutSubviews and the page
     /// transform run during it) instead of jumping; 0 jumps.
@@ -394,6 +427,9 @@ final class PamAnchoredScrollView: UIScrollView {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
         } else if pamPageTransformer.kind != .none {
             pamPageTransformer.apply(to: self)
+            #if DEBUG
+            pamTraceAnimatedBounds()
+            #endif
         }
     }
 
@@ -3655,7 +3691,15 @@ final class PamOffsetGlide {
         guard let link else { return }
         #if DEBUG
         if PamListTrace.enabled {
-            NSLog("PamGlide finish jump=%d at=%.1f to=%.1f", jump ? 1 : 0, scroll?.contentOffset.x ?? -1, to.x)
+            NSLog("PamGlide finish jump=%d at=%.1f to=%.1f drawn=%.1f anims=%@", jump ? 1 : 0, scroll?.contentOffset.x ?? -1, to.x,
+                  scroll?.layer.presentation()?.bounds.origin.x ?? -1,
+                  scroll?.layer.animationKeys()?.joined(separator: ",") ?? "-")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak scroll] in
+                guard let scroll else { return }
+                NSLog("PamGlide +1s model=%.1f drawn=%.1f anims=%@", scroll.contentOffset.x,
+                      scroll.layer.presentation()?.bounds.origin.x ?? -1,
+                      scroll.layer.animationKeys()?.joined(separator: ",") ?? "-")
+            }
         }
         #endif
         link.invalidate()
