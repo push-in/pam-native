@@ -242,3 +242,25 @@ Artefatos próprios de validação removidos ao encerrar.
 - Regressões adicionadas em `packages/native/tests/run.php`: metadados antigos vazios, decodificação wire, acento claro/escuro/alto contraste e prioridade da cor explícita.
 - Verificação isolada de contratos passou; lint PHP e `git diff --check` passaram. A suíte completa do framework, compilação Kotlin e QA visual Android continuam pendentes.
 - Ambiente com apenas ~3–5 GB livres; mínimo exigido de 20 GB inviável por limpeza própria (checkout sem vendor/build/.pam-native). Não foram apagados artefatos alheios nem usados locks de outra tarefa. Sem build/emulador, merge, push ou tag; commit local apenas. Não liberado para integração.
+
+
+## u0 — entrega ordenada de batches Android — 2026-10-29
+
+Causa identificada em `09b8809ee` (15/10): enviar cada batch interativo com `sendMessageAtFrontOfQueue` permite que o segundo patch ultrapasse o primeiro quando a UI está ocupada. Um filho chega antes da criação do pai e `PamRenderer.attach()` lança `Node … cannot contain children`. O defeito antecede a referência b29; as mudanças de fontes/texto apenas alteram a oportunidade da corrida, sem produzir uma árvore PHP inválida demonstrada.
+
+Correção: entrega FIFO via `Handler.postRuntimeBatch`, na mesma fila normal dos remounts. A resposta interativa continua executando flush imediatamente dentro da entrega, depois dos predecessores. Nenhum ajuste de texto, listas, rolagem, balões, perfil ou layout faz parte da correção.
+
+Evidências:
+
+- Matriz de 7 revisões do consumidor entre `ca12bd9c` e coverage-1-r2 contra `ef9e8ee6`, `6c61382c`, `e22c7ed3`: 21/21 renderizações/rotas e replays Rust válidos em ordem. coverage-1-r2 + call-gaps também passou com encoder PHP e C++ no host.
+- Replay sem aparelho de batches capturados: FIFO válido; batches 11/12 invertidos reproduzem exatamente `Node 527632193856624616 cannot contain children`. O ID pertence a uma Row de grade, sem pai nativo disponível naquele instante.
+- `PamRuntimeBatchOrderInstrumentedTest` bloqueia a fila principal até enfileirar uma entrega normal e duas dependentes. Com o algoritmo antigo, falha deterministicamente com `Node 2 cannot contain children`; com FIFO, 1/1 verde. Executado em Android API 36 com lock de emulador; sem aparelhos físicos.
+- PHP: run/performance/visual_dom_performance/navigation_performance/fuzz 5/5 verdes. Encoder nativo: 463 equivalências, 20001 estilos e 400 frames de patches verdes. Rust: 281 testes; JVM: 356 testes; Clippy estrito e rustfmt verdes. Contratos PHP de release/hot reload verdes; Python: 41 testes, 1 ignorado.
+- Consumidor: quatro gates de chat e três gates de criação verdes; novo validador monta a rota central, três modos, cinco permissões e página de 60 itens, total de 24 árvores.
+- Clippy encontrou um `if` aninhado preexistente em `engine_marker_matches`; simplificação equivalente em commit separado (`6297e21f`), sem mudar validação de marcadores.
+
+Sem APK completo do consumidor reconstruído ou comparação visual posterior contra a referência. A alteração não muda UI; a rodada autoriza integrar a correção de crash sem esse QA. O coordenador deve reempacotar a distribuição; nenhuma tag criada. Compilação de testes Android excluiu native build: os testes exercitam o renderer real com mutations, sem carregar o runtime C++; encoder C++ e motor Rust foram verificados separadamente no host.
+
+Disco inicial ~12 GB, abaixo do mínimo solicitado, sem artefatos próprios suficientes para recuperar 20 GB; nenhuma limpeza de outras sessões. Gradle/cargo executados com lock, 4 workers, heap Gradle 3 GB; `gradlew --stop` executado. Captura temporária no emulador restaurada e removida. Artefatos próprios são removidos ao finalizar.
+
+Evidência local: `~/.local/share/pam-codex/shots/u0/validacao/` (ordenação antes/depois e replay do host). Integração por fast-forward em `integrate/port3-20261027`, com pull/rebase antes do push.

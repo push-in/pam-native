@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Android: entrega FIFO dos batches do motor, inclusive após interação. Enviar
+  cada batch para a frente da fila invertia patches pendentes e podia anexar
+  filhos antes da criação do pai (`Node ... cannot contain children`). O flush
+  imediato da resposta à interação permanece, depois dos batches anteriores.
 - Android Pressable: a nested Pressable without `onLongPress` lends the long
   press to the nearest enclosing Pressable that has one (never across a
   scroll view or list), like React Native, using that receiver's

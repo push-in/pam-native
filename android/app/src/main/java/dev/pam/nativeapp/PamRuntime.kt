@@ -647,10 +647,9 @@ class PamRuntime(
             Trace.endSection()
         }
         val decodeNanos = System.nanoTime() - decodeStarted
-        // The answer to a press/keystroke is what the user waits for: it jumps
-        // the main queue and mounts at once, so the next traversal draws it
-        // (like a native click handler). Waiting for a frame callback cost a
-        // full frame whenever the post landed right after a vsync.
+        // A press/keystroke flushes as soon as its FIFO delivery runs, so the
+        // next traversal draws it without waiting for a frame callback.
+        // Delivery itself must never overtake an earlier dependent batch.
         val interactive = SystemClock.uptimeMillis() - lastInteractionUptime <= INTERACTION_COMMIT_WINDOW_MS
         val deliver = Runnable {
             if (closed.get() || awaitingRemount || !attachedSurface) {
@@ -671,13 +670,7 @@ class PamRuntime(
                 else -> scheduleFrame()
             }
         }
-        if (interactive) {
-            val message = android.os.Message.obtain(main, deliver)
-            message.isAsynchronous = true
-            main.sendMessageAtFrontOfQueue(message)
-        } else {
-            main.post(deliver)
-        }
+        main.postRuntimeBatch(deliver)
         return true
     }
 
