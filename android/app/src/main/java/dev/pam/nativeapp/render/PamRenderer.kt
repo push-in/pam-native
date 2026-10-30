@@ -4096,10 +4096,12 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setDecelerationRate(
                     value.decimal().toFloat(),
                 )
-            PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
-                (view as? PamScrollContainer)?.setKeyboardDismissMode(
-                    value.integer().toInt(),
-                )
+            PropKey.SCROLL_KEYBOARD_DISMISS_MODE -> when (view) {
+                is PamScrollContainer -> view.setKeyboardDismissMode(value.integer().toInt())
+                is PamRecyclerList -> view.dismissKeyboardOnDrag =
+                    value.integer().toInt() > PamScrollContainer.KEYBOARD_DISMISS_NONE
+                else -> Unit
+            }
             PropKey.ACTIVITY_ANIMATING ->
                 (view as? PamActivityIndicator)?.setAnimating(value.flag())
             PropKey.ACTIVITY_HIDES_WHEN_STOPPED ->
@@ -4777,8 +4779,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setPageTransform(PamPageTransformKind.NONE)
             PropKey.SCROLL_OFFSET_ANIMATION_MS ->
                 (view as? PamScrollContainer)?.setOffsetAnimationMs(0L)
-            PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
+            PropKey.SCROLL_KEYBOARD_DISMISS_MODE -> {
                 (view as? PamScrollContainer)?.setKeyboardDismissMode(1)
+                (view as? PamRecyclerList)?.dismissKeyboardOnDrag = false
+            }
             PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)
             PropKey.LIST_PREFETCH -> (view as? PamRecyclerList)?.setPrefetchItems(5)
             PropKey.LIST_HORIZONTAL -> (view as? PamRecyclerList)?.setHorizontal(false)

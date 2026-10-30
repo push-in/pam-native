@@ -7632,6 +7632,7 @@ require __DIR__.'/encoder_patches.php';
 require __DIR__.'/framework_utilities.php';
 require __DIR__.'/route_coverage.php';
 require __DIR__.'/keyboard_persist_taps.php';
+require __DIR__.'/keyboard_dismiss_mode_lists.php';
 require __DIR__.'/route_error_boundary.php';
 require __DIR__.'/list_window.php';
 require __DIR__.'/list_window_size.php';
