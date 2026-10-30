@@ -400,6 +400,17 @@ final class PamAnchoredScrollView: UIScrollView {
     /// Applies a requested `contentOffset` once the content extent along
     /// that axis is known; a request before measurement waits for layout.
     private func applyRequestedContentOffset() {
+        #if DEBUG
+        if PamListTrace.enabled, pamRequestedContentOffsetX != nil || pamRequestedContentOffsetY != nil {
+            NSLog(
+                "PamGlide request x=%@ y=%@ at=%.1f,%.1f tracking=%d dragging=%d decel=%d glide=%d",
+                pamRequestedContentOffsetX.map { String(format: "%.1f", $0) } ?? "-",
+                pamRequestedContentOffsetY.map { String(format: "%.1f", $0) } ?? "-",
+                contentOffset.x, contentOffset.y, isTracking ? 1 : 0, isDragging ? 1 : 0,
+                isDecelerating ? 1 : 0, pamOffsetGlide?.isRunning == true ? 1 : 0
+            )
+        }
+        #endif
         guard bounds.width > 0, bounds.height > 0, !isTracking, !isDragging else { return }
         var target = contentOffset
         var changed = false
@@ -3617,7 +3628,20 @@ final class PamOffsetGlide {
     /// True until the glide ended (reached, jumped or cancelled).
     var isRunning: Bool { link != nil }
 
+    #if DEBUG
+    private var lastTick: CFTimeInterval = 0
+    #endif
+
     fileprivate func tick(_ now: CFTimeInterval) {
+        #if DEBUG
+        if PamListTrace.enabled {
+            let gap = lastTick > 0 ? now - lastTick : 0
+            if gap > 0.05 || lastTick == 0 {
+                NSLog("PamGlide tick progress=%.2f gapMs=%.0f to=%.1f", min(1, (now - start) / duration), gap * 1_000, to.x)
+            }
+            lastTick = now
+        }
+        #endif
         guard let scroll else { return finish(jump: false) }
         // A finger down completes the glide at once (a pager never rests between pages).
         if scroll.isTracking { return finish(jump: true) }
@@ -3629,6 +3653,11 @@ final class PamOffsetGlide {
 
     func finish(jump: Bool) {
         guard let link else { return }
+        #if DEBUG
+        if PamListTrace.enabled {
+            NSLog("PamGlide finish jump=%d at=%.1f to=%.1f", jump ? 1 : 0, scroll?.contentOffset.x ?? -1, to.x)
+        }
+        #endif
         link.invalidate()
         self.link = nil
         if jump { scroll?.contentOffset = to }
