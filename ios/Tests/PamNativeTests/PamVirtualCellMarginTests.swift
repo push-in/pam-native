@@ -28,6 +28,29 @@ final class PamVirtualCellMarginTests: XCTestCase {
     }
 
     @MainActor
+    func testShortContentHasNoSyntheticScrollRangeFromTheLeadingInset() {
+        let list = PamVirtualListView(frame: CGRect(x: 0, y: 0, width: 320, height: 300))
+        list.setContentPadding(UIEdgeInsets(top: 12, left: 0, bottom: 48, right: 0))
+        list.contentSize = CGSize(width: 320, height: 240)
+        XCTAssertEqual(list.primaryMaximumOffset, -12)
+        list.scrollToLogicalOffset(0)
+        XCTAssertEqual(list.contentOffset.y, -12)
+        XCTAssertEqual(list.pamLogicalContentOffset.y, 0)
+    }
+
+    @MainActor
+    func testUpdatingAuthoredPaddingPreservesTheKeyboardInset() {
+        let scroll = PamAnchoredScrollView()
+        scroll.setContentPadding(UIEdgeInsets(top: 12, left: 0, bottom: 48, right: 0))
+        scroll.contentInset.bottom += 300
+        scroll.setContentPadding(UIEdgeInsets(top: 8, left: 0, bottom: 24, right: 0))
+        XCTAssertEqual(scroll.contentInset.bottom, 324)
+        XCTAssertEqual(scroll.contentInset.top, 8)
+        scroll.setContentPadding(.zero)
+        XCTAssertEqual(scroll.contentInset.bottom, 300)
+    }
+
+    @MainActor
     func testVirtualListContentIncludesTheLastCellBottomMargin() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         let renderer = PamRenderer(hostView: host) { _, _, _ in }
@@ -77,7 +100,11 @@ final class PamVirtualCellMarginTests: XCTestCase {
         ]])
         let list = try XCTUnwrap(host.viewWithTag(2) as? PamVirtualListView)
         list.layoutIfNeeded()
-        XCTAssertEqual(list.contentSize.height, 408 + 158, accuracy: 0.5, "the bottom padding follows the last row")
+        XCTAssertEqual(list.contentSize.height, 400, accuracy: 0.5)
+        XCTAssertEqual(list.contentInset.top, 8, accuracy: 0.5)
+        XCTAssertEqual(list.contentInset.bottom, 158, accuracy: 0.5)
+        XCTAssertEqual(list.primaryMaximumOffset, 258, accuracy: 0.5, "the bottom padding follows the last row")
+        XCTAssertEqual(host.viewWithTag(3)?.frame.minY, 0)
         XCTAssertEqual(list.contentSize.width, 320, accuracy: 0.5, "a vertical list adds no trailing width")
     }
 

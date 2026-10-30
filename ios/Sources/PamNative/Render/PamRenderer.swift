@@ -977,6 +977,7 @@ public final class PamRenderer: @unchecked Sendable {
         // Keyed sections: only shared rows and the active section's rows are
         // listed; the others keep their views parked out of the list.
         let activeSection = nodes[id]?.properties[PamConstants.listActiveSection]?.textOrNil() ?? ""
+        list.setContentPadding(Self.leafContentInsets(nodes[id]?.properties ?? [:]))
         let sectionOf: (Int64) -> String? = { [nodes = self.nodes] cellId in
             nodes[cellId]?.properties[PamConstants.listSection]?.textOrNil().flatMap { $0.isEmpty ? nil : $0 }
         }
@@ -1000,25 +1001,22 @@ public final class PamRenderer: @unchecked Sendable {
                 cellId,
                 PamCellMargins(properties: nodes[cellId]?.properties).slot(
                     CGRect(
-                        x: CGFloat(frame.x - listFrame.x),
-                        y: CGFloat(frame.y - listFrame.y),
+                        x: CGFloat(frame.x - listFrame.x) - list.pamContentPadding.left,
+                        y: CGFloat(frame.y - listFrame.y) - list.pamContentPadding.top,
                         width: CGFloat(max(0, frame.width)),
                         height: CGFloat(max(0, frame.height))
                     )
                 )
             )
         }
-        // The trailing padding belongs to the content (React Native
-        // contentContainerStyle, Android RecyclerView with clipToPadding
-        // off): the last row can scroll clear of what floats over the list.
-        let padding = Self.leafContentInsets(nodes[id]?.properties ?? [:])
-        let trailingX = localFrames.isEmpty || !horizontal ? 0 : padding.right
-        let trailingY = localFrames.isEmpty || horizontal ? 0 : padding.bottom
-        let contentWidth = localFrames.reduce(list.bounds.width) {
-            max($0, $1.1.maxX + trailingX)
+        // Engine origins include leading padding. Normalize cell frames to
+        // the content origin and let UIKit own both scrollable inset edges.
+        let padding = list.pamContentPadding
+        let contentWidth = localFrames.reduce(max(0, list.bounds.width - padding.left - padding.right)) {
+            max($0, $1.1.maxX)
         }
-        let contentHeight = localFrames.reduce(list.bounds.height) {
-            max($0, $1.1.maxY + trailingY)
+        let contentHeight = localFrames.reduce(max(0, list.bounds.height - padding.top - padding.bottom)) {
+            max($0, $1.1.maxY)
         }
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
         if list.contentSize != contentSize {
@@ -1044,10 +1042,10 @@ public final class PamRenderer: @unchecked Sendable {
                 if abs(delta) >= 0.5 {
                     // Does not stop a running fling: it continues from here.
                     if horizontal {
-                        let maximum = max(0, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
+                        let maximum = max(-list.adjustedContentInset.left, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
                         list.contentOffset.x = min(maximum, max(-list.adjustedContentInset.left, list.contentOffset.x + delta))
                     } else {
-                        let maximum = max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                        let maximum = max(-list.adjustedContentInset.top, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
                         list.contentOffset.y = min(maximum, max(-list.adjustedContentInset.top, list.contentOffset.y + delta))
                     }
                 }
@@ -1061,7 +1059,7 @@ public final class PamRenderer: @unchecked Sendable {
             // Android `restoreRowAnchor`: keep the top row where it was.
             let delta = top - anchor.top
             if abs(delta) >= 0.5 {
-                let maximum = max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                let maximum = max(-list.adjustedContentInset.top, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
                 list.contentOffset.y = min(maximum, max(-list.adjustedContentInset.top, list.contentOffset.y + delta))
             }
         }
@@ -1339,6 +1337,10 @@ public final class PamRenderer: @unchecked Sendable {
 
         var left = CGFloat(frame.x - parentFrame.x)
         var top = CGFloat(frame.y - parentFrame.y)
+        if let parentScroll = views[effectiveParent] as? PamContentScrollView {
+            left -= parentScroll.pamContentPadding.left
+            top -= parentScroll.pamContentPadding.top
+        }
         var width = CGFloat(max(0, frame.width))
         var height = CGFloat(max(0, frame.height))
 
@@ -1531,6 +1533,8 @@ public final class PamRenderer: @unchecked Sendable {
         guard let scroll = views[scrollId] as? UIScrollView,
               !(scroll is PamVirtualListView),
               let scrollFrame = frames[scrollId] else { return }
+        let padding = Self.leafContentInsets(nodes[scrollId]?.properties ?? [:])
+        (scroll as? PamContentScrollView)?.setContentPadding(padding)
         var width: CGFloat = 0
         var height: CGFloat = 0
         for childId in children[scrollId] ?? [] {
@@ -1538,7 +1542,7 @@ public final class PamRenderer: @unchecked Sendable {
             width = max(width, CGFloat(frame.x - scrollFrame.x + frame.width))
             height = max(height, CGFloat(frame.y - scrollFrame.y + frame.height))
         }
-        let size = CGSize(width: max(0, width), height: max(0, height))
+        let size = CGSize(width: max(0, width - padding.left), height: max(0, height - padding.top))
         if scroll.contentSize != size {
             scroll.contentSize = size
         }
@@ -4110,9 +4114,10 @@ public final class PamRenderer: @unchecked Sendable {
     /// child frame, so those views inset their own content by the authored
     /// padding plus the border widths (Yoga's padding box).
     private func applyLeafPadding(view: UIView, nodeId: Int64) {
-        guard view is PamTextView || view is PamInputField || view is PamMultilineInputField else { return }
+        guard view is PamTextView || view is PamInputField || view is PamMultilineInputField || view is PamContentScrollView else { return }
         let insets = nodes[nodeId].map { Self.leafContentInsets($0.properties) } ?? .zero
         switch view {
+        case let scroll as PamContentScrollView: scroll.setContentPadding(insets)
         case let text as PamTextView: text.contentInsets = insets
         case let field as PamInputField: field.contentInsets = insets
         case let field as PamMultilineInputField: field.contentInsets = insets
@@ -7107,7 +7112,8 @@ public final class PamRenderer: @unchecked Sendable {
                 return
             }
 
-            let offset = isHorizontal ? scrollView.contentOffset.x : scrollView.contentOffset.y
+            let logical = (scrollView as? PamContentScrollView)?.pamLogicalContentOffset ?? scrollView.contentOffset
+            let offset = isHorizontal ? logical.x : logical.y
             scrollOffset = "\(offset)".data(using: .utf8) ?? Data()
             if scrollScheduled {
                 return
@@ -7164,18 +7170,20 @@ public final class PamRenderer: @unchecked Sendable {
         /// `layoutMeasurement` (the content's end distance for handlers).
         private func dispatchScrollPhase(_ scrollView: UIScrollView, kind: Int, velocity: CGPoint) {
             let insets = scrollView.adjustedContentInset
+            let padding = (scrollView as? PamContentScrollView)?.pamContentPadding ?? .zero
+            let logical = (scrollView as? PamContentScrollView)?.pamLogicalContentOffset ?? scrollView.contentOffset
             let payload = (try? WireMap.encode([
-                "x": .decimal(scrollView.contentOffset.x),
-                "y": .decimal(scrollView.contentOffset.y),
+                "x": .decimal(logical.x),
+                "y": .decimal(logical.y),
                 "velocityX": .decimal(velocity.x),
                 "velocityY": .decimal(velocity.y),
                 "page": .integer(Int64(Self.pageIndex(scrollView))),
-                "contentWidth": .decimal(scrollView.contentSize.width),
-                "contentHeight": .decimal(scrollView.contentSize.height),
+                "contentWidth": .decimal(scrollView.contentSize.width + padding.left + padding.right),
+                "contentHeight": .decimal(scrollView.contentSize.height + padding.top + padding.bottom),
                 // Minus the trailing insets: contentSize - layout - offset is
                 // then the distance to the end, as on Android.
-                "layoutWidth": .decimal(scrollView.bounds.width - insets.right),
-                "layoutHeight": .decimal(scrollView.bounds.height - insets.bottom),
+                "layoutWidth": .decimal(scrollView.bounds.width - insets.right + padding.right),
+                "layoutHeight": .decimal(scrollView.bounds.height - insets.bottom + padding.bottom),
             ])) ?? Data()
             dispatchEvent(nodeId, kind, payload)
         }
@@ -7228,8 +7236,8 @@ public final class PamRenderer: @unchecked Sendable {
                 let horizontal = list.horizontal
                 let position = horizontal ? list.contentOffset.x : list.contentOffset.y
                 let maximum = horizontal
-                    ? max(0, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
-                    : max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                    ? max(-list.adjustedContentInset.left, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
+                    : max(-list.adjustedContentInset.top, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
                 let target = PamVirtualListView.itemPageTarget(
                     starts: list.pamItemStarts,
                     start: scrollGestureStart,
@@ -7250,8 +7258,8 @@ public final class PamRenderer: @unchecked Sendable {
             let horizontal = scroll.horizontal
             let position = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
             let maximum = horizontal
-                ? max(0, scroll.contentSize.width - scroll.bounds.width + scroll.adjustedContentInset.right)
-                : max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+                ? max(-scroll.adjustedContentInset.left, scroll.contentSize.width - scroll.bounds.width + scroll.adjustedContentInset.right)
+                : max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
             let pointsPerSecond = (horizontal ? velocity.x : velocity.y) * 1_000
             let target = PamAnchoredScrollView.onePageTarget(
                 start: scrollGestureStart,

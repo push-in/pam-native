@@ -28,6 +28,12 @@ final class Scroll extends Element
         return (new self(NodeKind::Scroll))->withChildren([$child]);
     }
 
+    /** Content padding uses the native scroll insets; no extra wrapper or rows. */
+    public function contentContainerStyle(\Pam\Native\Style $style): self
+    {
+        return $this->style($style);
+    }
+
     public function scrollEnabled(bool $enabled = true): self
     {
         return $this->withProperty(PropKey::ScrollEnabled, $enabled);

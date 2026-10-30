@@ -19,6 +19,7 @@ final class PamListNativeScrollTests: XCTestCase {
         _ properties: [Int: PropValue] = [:],
         ids: [Int64],
         cellExtent: Float = 100,
+        paddingTop: Float = 0,
         events: @escaping (Int64, Int, Data) -> Void = { _, _, _ in }
     ) throws -> (renderer: PamRenderer, list: PamVirtualListView) {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
@@ -35,7 +36,7 @@ final class PamListNativeScrollTests: XCTestCase {
         ]
         for (index, id) in ids.enumerated() {
             mutations.append(.create(NodeSpec(id: id, parent: 2, index: index, kind: .view, properties: [:])))
-            mutations.append(.layout(id: id, frame: Frame(x: 0, y: Float(index) * cellExtent, width: 320, height: cellExtent)))
+            mutations.append(.layout(id: id, frame: Frame(x: 0, y: paddingTop + Float(index) * cellExtent, width: 320, height: cellExtent)))
         }
         mutations.append(.setRoot(1))
         renderer.commit([mutations])
@@ -45,11 +46,11 @@ final class PamListNativeScrollTests: XCTestCase {
     }
 
     /// Rows `ids` laid out from the top (index order) after `inserted` joined.
-    private func relayout(_ ids: [Int64], extent: Float = 100) -> [Mutation] {
+    private func relayout(_ ids: [Int64], extent: Float = 100, paddingTop: Float = 0) -> [Mutation] {
         ids.enumerated().flatMap { index, id -> [Mutation] in
             [
                 .move(id: id, parent: 2, index: index),
-                .layout(id: id, frame: Frame(x: 0, y: Float(index) * extent, width: 320, height: extent)),
+                .layout(id: id, frame: Frame(x: 0, y: paddingTop + Float(index) * extent, width: 320, height: extent)),
             ]
         }
     }
@@ -75,6 +76,31 @@ final class PamListNativeScrollTests: XCTestCase {
         list.layoutIfNeeded()
         XCTAssertEqual(try XCTUnwrap(screenTop(list, 111)), before, accuracy: 0.5)
         XCTAssertEqual(list.contentOffset.y, 1_530, accuracy: 0.5)
+    }
+
+    func testPrependWithNativeContentInsetsKeepsTheKeyAndScreenPosition() throws {
+        let ids = (0..<30).map { Int64(100 + $0) }
+        let (renderer, list) = try renderList([
+            PamConstants.paddingTop: .decimal(12),
+            PamConstants.paddingBottom: .decimal(48),
+        ], ids: ids, paddingTop: 12)
+        defer { renderer.close() }
+        list.contentOffset.y = 1_030
+        list.layoutIfNeeded()
+        let row = try XCTUnwrap(list.viewWithTag(111))
+        let before = try XCTUnwrap(screenTop(list, 111))
+        let older = (0..<5).map { Int64(500 + $0) }
+        var mutations: [Mutation] = older.enumerated().map { index, id in
+            .create(NodeSpec(id: id, parent: 2, index: index, kind: .view, properties: [:]))
+        }
+        mutations += relayout(older + ids, paddingTop: 12)
+        renderer.commit([mutations])
+        list.layoutIfNeeded()
+        XCTAssertTrue(list.viewWithTag(111) === row)
+        XCTAssertEqual(try XCTUnwrap(screenTop(list, 111)), before, accuracy: 0.5)
+        XCTAssertEqual(list.contentInset.top, 12)
+        XCTAssertEqual(list.contentInset.bottom, 48)
+        XCTAssertEqual(list.primaryMaximumOffset, 3_500 - 480 + 48, accuracy: 0.5)
     }
 
     func testHeadInsertBelowALeadingRowKeepsTheFirstRowAfterIt() throws {

@@ -22,6 +22,36 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamScrollContainerInstrumentedTest {
     @Test
+    fun authoredPaddingRemainsScrollableAndCanBeCleared() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val scroll = PamScrollContainer(activity).apply {
+                    setContentInsets(0, 12, 0, 48)
+                    setEngineContentExtent(300, 600)
+                    insert(View(activity).apply {
+                        layoutParams = FrameLayout.LayoutParams(300, 600)
+                    })
+                }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 300))
+                activity.host.measure(exactly(300), exactly(300))
+                activity.host.layout(0, 0, 300, 300)
+                val nativeScroll = scroll.getChildAt(0) as ViewGroup
+                assertEquals(false, nativeScroll.clipToPadding)
+                nativeScroll.scrollTo(0, Int.MAX_VALUE)
+                assertEquals(360, scroll.snapshotOffsetPixels().second)
+                assertEquals(48, nativeScroll.paddingBottom)
+                scroll.setContentInsets(0, 0, 0, 0)
+                activity.host.measure(exactly(300), exactly(300))
+                activity.host.layout(0, 0, 300, 300)
+                nativeScroll.scrollTo(0, Int.MAX_VALUE)
+                assertEquals(300, scroll.snapshotOffsetPixels().second)
+            }
+        } finally { activity.finish() }
+    }
+
+    @Test
     fun indicatorAppearanceChangePreservesOffsetAndDrawsOnDarkSurface() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

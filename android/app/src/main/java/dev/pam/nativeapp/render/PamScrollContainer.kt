@@ -151,6 +151,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         clipChildren = true
         clipToPadding = true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        applyContentInsets()
         activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
         addView(activeScroll, matchParentLayout())
@@ -184,6 +185,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         previous.removeView(content)
         removeView(previous)
         activeScroll = if (horizontal) createHorizontalScroll() else createVerticalScroll()
+        applyContentInsets()
         activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
         // Attaching a fading viewport schedules the platform's fade callback.
@@ -469,6 +471,26 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     fun keyboardAvoidanceInsetPixels(): Int = keyboardAvoidanceInsetPx
+
+    var contentInsetLeft: Int = 0
+        private set
+    var contentInsetTop: Int = 0
+        private set
+    private var contentInsetRight: Int = 0
+    private var contentInsetBottom: Int = 0
+
+    fun setContentInsets(left: Int, top: Int, right: Int, bottom: Int) {
+        contentInsetLeft = left
+        contentInsetTop = top
+        contentInsetRight = right
+        contentInsetBottom = bottom
+        applyContentInsets()
+    }
+
+    private fun applyContentInsets() {
+        activeScroll.clipToPadding = false
+        activeScroll.setPadding(contentInsetLeft, contentInsetTop, contentInsetRight, contentInsetBottom)
+    }
 
     /**
      * Extent of the scroll content as laid out by the engine (pixels), i.e.
