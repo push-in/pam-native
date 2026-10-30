@@ -78,6 +78,14 @@ final class PamPageTransformer {
                 if shades[id] != nil { clear(page) }
                 continue
             }
+            #if DEBUG
+            if PamListTrace.enabled, abs(t) > 0.001,
+               abs(scroll.contentOffset.x.truncatingRemainder(dividingBy: max(1, scroll.bounds.width))) < 0.5 {
+                // At rest on a page every face is either front (0) or aside (±1).
+                NSLog("PamCube rest offset=%.1f page=%ld frameX=%.1f centerX=%.1f width=%.1f t=%.3f",
+                      scroll.contentOffset.x, page.tag, page.frame.minX, page.center.x, width, t)
+            }
+            #endif
             let face = PamCubeFace.at(t)
             page.layer.transform = face.transform(width: width)
             shade(page, face.shade)

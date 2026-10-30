@@ -111,6 +111,7 @@ final class PamListTrace {
     private var tops: [Int64: CGFloat] = [:]
 
     private weak var pendingList: UIScrollView?
+    private var pendingAnimated = false
     private var pending: (listId: Int64, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int)?
 
     /// Logs what the frame shows: several syncs inside one run loop turn
@@ -118,6 +119,9 @@ final class PamListTrace {
     /// drawn frame, so the state is read once, after the turn.
     func record(listId: Int64, list: UIScrollView, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int) {
         let scheduled = pending != nil
+        // Inside an animation block (keyboard follow, an animated scroll):
+        // the frame moves there over the animation, not at once.
+        pendingAnimated = (scheduled && pendingAnimated) || UIView.inheritedAnimationDuration > 0
         pendingList = list
         pending = (listId, frames, horizontal, rowCount)
         guard !scheduled else { return }
@@ -161,7 +165,7 @@ final class PamListTrace {
         // decelerating is checked first. "anim": the offset or bounds changed
         // inside a Core Animation animation (keyboard follow, an animated
         // scroll); the trace sees the model values, not each drawn frame.
-        let animating = UIView.inheritedAnimationDuration > 0 || list.layer.animationKeys()?.isEmpty == false
+        let animating = pendingAnimated || list.layer.animationKeys()?.isEmpty == false
         let state = list.isTracking ? "drag"
             : (list.isDecelerating ? "fling" : (list.isDragging ? "drag" : (animating ? "anim" : "idle")))
         NSLog(

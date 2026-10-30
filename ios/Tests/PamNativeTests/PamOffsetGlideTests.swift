@@ -83,4 +83,39 @@ final class PamOffsetGlideTests: XCTestCase {
         XCTAssertTrue(CATransform3DIsIdentity(pages[0].layer.transform))
         XCTAssertTrue(CATransform3DIsIdentity(pages[2].layer.transform))
     }
+
+    /// A page laid out again while its cube face is turned keeps its slot:
+    /// once it faces the viewer it sits exactly at its frame.
+    func testAPageLaidOutMidTurnRestsAtItsFrame() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        var mutations: [Mutation] = [
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .scroll, properties: [
+                PamConstants.scrollHorizontal: .flag(true),
+                PamConstants.scrollPageTransform: .integer(1),
+            ])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .row, properties: [:])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 300, height: 600)),
+            .layout(id: 2, frame: Frame(x: 0, y: 0, width: 300, height: 600)),
+            .layout(id: 3, frame: Frame(x: 0, y: 0, width: 900, height: 600)),
+        ]
+        for index in 0..<3 {
+            mutations.append(.create(NodeSpec(id: Int64(10 + index), parent: 3, index: index, kind: .view, properties: [:])))
+            mutations.append(.layout(id: Int64(10 + index), frame: Frame(x: Float(index) * 300, y: 0, width: 300, height: 600)))
+        }
+        mutations.append(.setRoot(1))
+        renderer.commit([mutations])
+        let scroll = try XCTUnwrap(host.viewWithTag(2) as? PamAnchoredScrollView)
+        let page = try XCTUnwrap(host.viewWithTag(11))
+        scroll.layoutIfNeeded()
+        // Mid turn toward page 1, the engine lays the page out again.
+        scroll.contentOffset = CGPoint(x: 120, y: 0)
+        XCTAssertFalse(CATransform3DIsIdentity(page.layer.transform))
+        renderer.commit([[.layout(id: 11, frame: Frame(x: 300, y: 0, width: 300, height: 600))]])
+        scroll.setContentOffset(CGPoint(x: 300, y: 0), animated: false)
+        XCTAssertTrue(CATransform3DIsIdentity(page.layer.transform))
+        XCTAssertEqual(page.frame, CGRect(x: 300, y: 0, width: 300, height: 600))
+    }
 }

@@ -1460,9 +1460,12 @@ public final class PamRenderer: @unchecked Sendable {
             height: max(0, height),
         )
         // `frame` is undefined while a transform (drag, animation program,
-        // transition) is applied; position through bounds/center instead.
+        // transition, a pager's 3D cube face) is applied; position through
+        // bounds/center instead. The layer's 3D transform counts: a cube face
+        // laid out through `frame` mid-turn kept a shifted position once it
+        // faced the viewer again.
         let layoutChanged: Bool
-        if view.transform.isIdentity {
+        if CATransform3DIsIdentity(view.layer.transform) {
             layoutChanged = view.frame != nextFrame
             view.frame = nextFrame
         } else {
@@ -2942,15 +2945,24 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamMediaView)?.setResizeMode(mode)
         case PamConstants.width:
             if let width = value.decimalOrNil() {
-                var frame = view.frame
-                frame.size.width = CGFloat(width)
-                view.frame = frame
+                if CATransform3DIsIdentity(view.layer.transform) {
+                    var frame = view.frame
+                    frame.size.width = CGFloat(width)
+                    view.frame = frame
+                } else {
+                    // Transformed (`frame` is undefined): size through bounds.
+                    view.bounds.size.width = CGFloat(width)
+                }
             }
         case PamConstants.height:
             if let height = value.decimalOrNil() {
-                var frame = view.frame
-                frame.size.height = CGFloat(height)
-                view.frame = frame
+                if CATransform3DIsIdentity(view.layer.transform) {
+                    var frame = view.frame
+                    frame.size.height = CGFloat(height)
+                    view.frame = frame
+                } else {
+                    view.bounds.size.height = CGFloat(height)
+                }
             }
             (view as? PamMultilineInputField)?.growsWithContent = false
         case PamConstants.zIndex:
