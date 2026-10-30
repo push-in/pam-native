@@ -93,6 +93,22 @@ final class PamMediaView: UIView {
     /// Views bound to this player's `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer.
     var boundViews: (() -> [UIView])?
 
+    /// `autoPlayVisible` (0 = off): `PamMediaVisibility` grants playback
+    /// while this share of the view shows and its lists are at rest. Without
+    /// the grant no player exists; a withdrawn grant pauses at once and
+    /// releases the player after `autoplayReleaseDelay`, keeping the position.
+    private var autoplayFraction: CGFloat = 0
+    private var autoplayGroup = ""
+    private var autoplayGrant = false
+    private var autoplayReleaseGeneration: UInt64 = 0
+    /// A withdrawn autoplay grant keeps the paused player this long (scrolling back resumes at once).
+    static var autoplayReleaseDelay: TimeInterval = 1.5
+    /// Last positions of visible-autoplay sources (bounded, main thread).
+    private static var autoplayPositions: [String: Double] = [:]
+    private static var autoplayPositionOrder: [String] = []
+    /// Bound ahead of the viewport in a scrolling list: prepared once on screen outside a fling.
+    private(set) var awaitingScreen = false
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         coverageObserver = NotificationCenter.default.addObserver(
@@ -122,9 +138,11 @@ final class PamMediaView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if thumbnail != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0 {
+        if thumbnail != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0,
+           autoplayFraction == 0 || autoplayGrant {
             loadThumbnail()
         }
+        if autoplayFraction > 0 || awaitingScreen { PamMediaVisibility.schedule() }
         if releasedForCover { syncCoverage() }
     }
 
@@ -147,6 +165,21 @@ final class PamMediaView: UIView {
         super.didMoveToWindow()
         // Next turn: a reparent (remove + add) must not recreate the player.
         DispatchQueue.main.async { [weak self] in self?.syncCoverage() }
+        if window == nil {
+            if autoplayFraction > 0 {
+                rememberAutoplayPosition()
+                PamMediaVisibility.leave(self)
+                if autoplayGrant {
+                    autoplayGrant = false
+                    pause()
+                    scheduleAutoplayRelease()
+                }
+            }
+            if awaitingScreen { PamMediaVisibility.schedule() }
+        } else {
+            if autoplayFraction > 0 { PamMediaVisibility.join(self) }
+            if awaitingScreen { PamMediaVisibility.awaitScreen(self) }
+        }
     }
 
     func setKeepAliveWhenCovered(_ value: Bool) {
@@ -157,6 +190,7 @@ final class PamMediaView: UIView {
 
     private func syncCoverage() {
         hiddenSince = nil
+        if autoplayFraction > 0 { PamMediaVisibility.schedule() }
         let covered = !keepAliveWhenCovered && !source.isEmpty && PamRouteCoverage.isCovered(self)
         guard covered != releasedForCover else { return }
         releasedForCover = covered
@@ -275,6 +309,14 @@ final class PamMediaView: UIView {
             releasedForCover = true
             return
         }
+        // Visible autoplay: prepared once the policy grants playback.
+        if autoplayFraction > 0, !autoplayGrant {
+            if window != nil { PamMediaVisibility.join(self) }
+            return
+        }
+        // Bound ahead of the viewport (a list materializing rows ahead):
+        // prepared when the view first shows on screen, outside a fling.
+        if awaitScreen() { return }
         if PamPhotoAssetURI.identifier(value) != nil {
             guard let asset = PamPhotoAssetURI.asset(value), asset.mediaType == .video else {
                 onError?("Photo asset is unavailable or is not a video")
@@ -442,7 +484,11 @@ final class PamMediaView: UIView {
                 switch item.status {
                 case .readyToPlay:
                     let resuming = !self.resumeSource.isEmpty && self.resumeSource == self.source
-                    let startAt = resuming ? self.resumeAt : self.currentTime
+                    // A recycled view playing a source again resumes where it
+                    // stopped (visible autoplay, React Native feed rule).
+                    let startAt = resuming ? self.resumeAt : (self.autoplayFraction > 0
+                        ? Self.autoplayPositions[self.source] ?? self.currentTime
+                        : self.currentTime)
                     let willPlay = self.autoPlay || (resuming && self.resumePlaying)
                     if startAt > 0 || !willPlay {
                         // A paused player (autoPlay=false) draws the exact
@@ -461,7 +507,10 @@ final class PamMediaView: UIView {
                         duration.isFinite ? max(0, duration) : 0
                     )
                     self.updateBindings(position: startAt, duration: duration, animated: false)
-                    if self.autoPlay || (resuming && self.resumePlaying) { self.play() }
+                    if self.autoPlay || (resuming && self.resumePlaying),
+                       self.autoplayFraction == 0 || self.autoplayGrant {
+                        self.play()
+                    }
                 case .failed:
                     self.videoReadyForDisplay = false
                     self.updatePoster()
@@ -505,6 +554,7 @@ final class PamMediaView: UIView {
             return
         }
         guard player?.currentItem?.status == .readyToPlay else { return }
+        if value, autoplayFraction > 0, !autoplayGrant { return }
         if value { play() } else { pause() }
     }
     func setControls(_ value: Bool) {
@@ -592,6 +642,17 @@ final class PamMediaView: UIView {
     /// decoded image is the largest allocation of a full-screen cell); it is
     /// decoded again from the media cache whenever it must cover the surface.
     private func updatePoster() {
+        if autoplayFraction > 0, !autoplayGrant, player == nil {
+            // Visible autoplay: the poster is decoded when playback is
+            // granted; until then whatever the application draws under the
+            // player shows through.
+            posterView.isHidden = true
+            if posterView.image != nil {
+                posterView.image = nil
+                thumbnailLoaded = false
+            }
+            return
+        }
         if player != nil && videoReadyForDisplay {
             posterView.isHidden = true
             if posterView.image != nil {
@@ -867,6 +928,153 @@ final class PamMediaView: UIView {
         playerView.playerLayer.player = nil
         controller?.player = nil
         if restoresPoster { updatePoster() }
+    }
+
+    // MARK: Visible autoplay and screen-gated prepare
+
+    func setAutoPlayVisible(_ fraction: CGFloat) {
+        let value = fraction.isFinite ? min(max(fraction, 0), 1) : 0
+        guard value != autoplayFraction else { return }
+        let enabling = autoplayFraction == 0
+        autoplayFraction = value
+        if value > 0 {
+            if enabling {
+                autoplayGrant = false
+                // A player prepared before the policy took over waits for its grant.
+                if player != nil {
+                    rememberAutoplayPosition()
+                    sourceGeneration &+= 1
+                    releasePlayer()
+                }
+                updatePoster()
+            }
+            if window != nil { PamMediaVisibility.join(self) }
+        } else {
+            PamMediaVisibility.leave(self)
+            autoplayReleaseGeneration &+= 1
+            autoplayGrant = false
+            updatePoster()
+            if player == nil, !source.isEmpty, !releasedForCover, !releasedForBackground, !idleSurface {
+                restorePlayer()
+            }
+        }
+    }
+
+    func setAutoPlayGroup(_ value: String) {
+        guard autoplayGroup != value else { return }
+        autoplayGroup = value
+        PamMediaVisibility.schedule()
+    }
+
+    var autoplayThreshold: CGFloat { autoplayFraction }
+    var autoplayGroupName: String { autoplayGroup }
+    /// True while the visible-autoplay policy lets this player play (tests, diagnostics).
+    var autoplayGranted: Bool { autoplayGrant }
+
+    /// The visible part of the view in window coordinates, nil when it
+    /// cannot play (hidden, covered, suspended, idle, no source).
+    func visibleRect() -> CGRect? {
+        guard !source.isEmpty, !releasedForCover, !releasedForBackground, !idleSurface,
+              !Self.appInBackground, !PamRouteCoverage.isCovered(self) else { return nil }
+        return pamVisibleRectInWindow()
+    }
+
+    /// The policy's decision: playback granted (prepare and play) or
+    /// withdrawn (pause now, release later).
+    func grantAutoplay(_ granted: Bool) {
+        guard autoplayFraction > 0, granted != autoplayGrant else { return }
+        autoplayGrant = granted
+        autoplayReleaseGeneration &+= 1
+        if granted {
+            if let player, player.currentItem?.status == .readyToPlay {
+                if autoPlay { play() }
+            } else if player == nil, !source.isEmpty, !releasedForCover, !releasedForBackground, !idleSurface {
+                restorePlayer()
+            }
+            updatePoster()
+        } else {
+            pause()
+            scheduleAutoplayRelease()
+        }
+    }
+
+    private func scheduleAutoplayRelease() {
+        let generation = autoplayReleaseGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoplayReleaseDelay) { [weak self] in
+            guard let self, self.autoplayReleaseGeneration == generation, !self.autoplayGrant,
+                  self.autoplayFraction > 0 else { return }
+            self.releaseForAutoplay()
+        }
+    }
+
+    /// Frees a player whose grant was withdrawn; its position resumes the next grant.
+    func releaseForAutoplay() {
+        guard player != nil else { return }
+        rememberAutoplayPosition()
+        sourceGeneration &+= 1
+        releasePlayer()
+    }
+
+    private func rememberAutoplayPosition() {
+        guard autoplayFraction > 0, !source.isEmpty, let player,
+              let item = player.currentItem, item.status == .readyToPlay else { return }
+        let position = player.currentTime().seconds
+        let total = item.duration.seconds
+        guard position.isFinite else { return }
+        // Stopped at its end: the next grant starts over.
+        let value = total.isFinite && total > 0 && position >= total - 0.25 ? 0 : position
+        Self.autoplayPositions[source] = value
+        Self.autoplayPositionOrder.removeAll { $0 == source }
+        Self.autoplayPositionOrder.append(source)
+        if Self.autoplayPositionOrder.count > 64 {
+            Self.autoplayPositions[Self.autoplayPositionOrder.removeFirst()] = nil
+        }
+    }
+
+    /// The nearest virtual list, when it scrolls (not a pager: pagers prepare
+    /// their next page on purpose).
+    private var scrollingList: PamVirtualListView? {
+        var parent = superview
+        while let current = parent {
+            if let list = current as? PamVirtualListView { return list.pamPagingEnabled ? nil : list }
+            parent = current.superview
+        }
+        return nil
+    }
+
+    /// True when the source must wait until this view shows on screen
+    /// outside a fling (Android `awaitScreen`).
+    private func awaitScreen() -> Bool {
+        guard !keepAliveWhenCovered, let list = scrollingList else {
+            stopAwaitingScreen()
+            return false
+        }
+        if window != nil, pamVisibleRectInWindow() != nil, !list.isDecelerating {
+            stopAwaitingScreen()
+            return false
+        }
+        awaitingScreen = true
+        if window != nil { PamMediaVisibility.awaitScreen(self) }
+        return true
+    }
+
+    private func stopAwaitingScreen() {
+        guard awaitingScreen else { return }
+        awaitingScreen = false
+        PamMediaVisibility.stopAwaiting(self)
+    }
+
+    /// Checked by `PamMediaVisibility`: on screen and its list not flinging.
+    func screenReadyToPrepare() -> Bool {
+        guard awaitingScreen, window != nil, pamVisibleRectInWindow() != nil else { return false }
+        return !(scrollingList?.isDecelerating ?? false)
+    }
+
+    /// Prepares the source once it shows on screen (posted after that frame).
+    func prepareAfterScreen() {
+        awaitingScreen = false
+        guard player == nil, !source.isEmpty, !releasedForCover, !releasedForBackground, !idleSurface else { return }
+        restorePlayer()
     }
 
     /// Player state for tests.

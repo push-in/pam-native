@@ -740,15 +740,9 @@ public final class PamRuntime {
         let currentHandle = currentHandle()
         let viewport = layoutViewport
         guard currentHandle != 0, surface > 0, viewport.width > 0, viewport.height > 0 else { return }
-        if duration > 0, !PamMotionPolicy.isReduced {
-            keyboardLayoutAnimation = (
-                duration: duration,
-                curve: curve,
-                expires: CACurrentMediaTime() + max(0.1, duration / 2)
-            )
-        } else {
-            keyboardLayoutAnimation = nil
-        }
+        keyboardLayoutAnimation = PamKeyboardFollow.animation(
+            duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
+        )
         pam_native_runtime_set_surface_keyboard_inset(
             currentHandle,
             UInt64(surface),
@@ -828,6 +822,16 @@ public final class PamRuntime {
         // dialog's IME); only hiding applies.
         if !hiding, PamModalHost.hostsFirstResponder(in: window) { return }
         let overlap = hiding ? 0 : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
+        // The frames laid out for the new inset follow the keyboard's own
+        // animation (duration and curve), so the content above it moves with
+        // the keyboard in one motion instead of jumping to the end state on
+        // the first frame (Android: the root follows every IME frame). A list
+        // resting at its end keeps its last row flush in the same pass.
+        let curve = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?
+            .uintValue ?? 7
+        keyboardLayoutAnimation = PamKeyboardFollow.animation(
+            duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
+        )
         updateKeyboardInset(bottom: Float(overlap))
     }
 
@@ -1812,4 +1816,17 @@ struct PamFramePump {
     mutating func paused() { scheduled = false }
 
     mutating func reset() { scheduled = false }
+}
+
+/// The keyboard animation that the next committed frames follow.
+enum PamKeyboardFollow {
+    /// Frames committed within half the keyboard animation (at least 0.1 s)
+    /// animate with its duration and curve; none without an animation or
+    /// with reduced motion.
+    static func animation(
+        duration: TimeInterval, curve: UInt, reduced: Bool, now: CFTimeInterval
+    ) -> (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)? {
+        guard duration > 0, !reduced else { return nil }
+        return (duration: duration, curve: curve, expires: now + max(0.1, duration / 2))
+    }
 }

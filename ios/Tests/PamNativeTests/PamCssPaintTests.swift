@@ -24,6 +24,49 @@ final class PamCssPaintTests: XCTestCase {
         PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 100, 50), 0xFFFF_FFFF)
     }
 
+    /// Mixed corner radii (a chat bubble with one tight corner) draw the
+    /// border as one ring that follows each radius: the arc of a rounded
+    /// corner is stroked, nothing is painted outside it.
+    func testMixedRadiiBorderFollowsEachCorner() {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.backgroundColor: .integer(0xFFFF_FFFF),
+            PamConstants.borderRadius: .decimal(40),
+            PamConstants.borderBottomLeftRadius: .decimal(4),
+            PamConstants.borderWidth: .decimal(3),
+            PamConstants.borderColor: .integer(0xFFFF_0000),
+        ], kind: .column)
+        defer { renderer.close() }
+        let image = PamRenderTestSupport.snapshot(view)
+        // On the top-left arc (radius 40, 45 degrees, inside the 3 pt ring).
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 12, 12), 0xFFFF_0000, tolerance: 60)
+        // Straight sides.
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 100, 1), 0xFFFF_0000)
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 1, 60), 0xFFFF_0000)
+        // Outside the big corner: nothing (no straight segment overshooting it).
+        XCTAssertLessThan(PamRenderTestSupport.pixel(image, 3, 1) >> 24, 0x40)
+        XCTAssertLessThan(PamRenderTestSupport.pixel(image, 197, 98) >> 24, 0x40)
+        // Inside: the background.
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 100, 50), 0xFFFF_FFFF)
+    }
+
+    /// Per-side colors with rounded corners still paint the corner arcs.
+    func testPerSideColorsPaintRoundedCornerArcs() {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.backgroundColor: .integer(0xFFFF_FFFF),
+            PamConstants.borderRadius: .decimal(40),
+            PamConstants.borderBottomLeftRadius: .decimal(4),
+            PamConstants.borderWidth: .decimal(3),
+            PamConstants.borderColor: .integer(0xFF00_00FF),
+            PamConstants.borderTopColor: .integer(0xFFFF_0000),
+        ], kind: .column)
+        defer { renderer.close() }
+        let image = PamRenderTestSupport.snapshot(view)
+        // The top-left arc above its miter (y < x) belongs to the top side.
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 20, 6), 0xFFFF_0000, tolerance: 80)
+        // Below its miter, to the left side.
+        PamRenderTestSupport.assertColor(PamRenderTestSupport.pixel(image, 6, 20), 0xFF00_00FF, tolerance: 80)
+    }
+
     func testTextShadowFontFeaturesAndJustifyApply() throws {
         let (_, renderer, view) = PamRenderTestSupport.render([
             PamConstants.text: .text("0123456789 justified text that wraps across lines"),

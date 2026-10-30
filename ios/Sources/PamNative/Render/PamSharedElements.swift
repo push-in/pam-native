@@ -220,6 +220,20 @@ final class PamSharedElementFlights {
 
     private var touch: CGPoint?
 
+    /// A subtree left out of tag lookups (a Modal pairing with the window
+    /// under it, which also holds the Modal).
+    weak var excluded: UIView?
+
+    /// The last touch in window coordinates, whichever host saw it (routes
+    /// and Modals), so a Modal's flights pick the instance under the finger.
+    static var lastWindowTouch: CGPoint?
+
+    /// Shows [view] in the flights' overlay under every flight (the cover of
+    /// an unmounted Modal while its tags fly home).
+    func addUnderlay(_ view: UIView) {
+        overlayView().insertSubview(view, at: 0)
+    }
+
     /// The last touch in host coordinates: when a tag is on screen more than
     /// once (one author's avatar on several posts) the instance under the
     /// finger flies, and the flight home lands there (Android parity).
@@ -725,7 +739,9 @@ final class PamSharedElementFlights {
 
     private func taggedViews(in root: UIView) -> [String: [UIView]] {
         var result: [String: [UIView]] = [:]
+        let excluded = self.excluded
         func visit(_ view: UIView) {
+            if let excluded, view === excluded { return }
             if let tag = view.layer.value(forKey: "pamSharedTransitionTag") as? String, !tag.isEmpty {
                 result[tag, default: []].append(view)
             }

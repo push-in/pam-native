@@ -68,6 +68,12 @@ public final class PamRenderer: @unchecked Sendable {
     /// last sync: a placeholder run splitting into rows (or rows going back
     /// to placeholders) above it must not move what is on screen.
     private var listRowAnchors: [Int64: (cell: Int64, row: Int, top: CGFloat)] = [:]
+    /// Per list, after each sync: the rows on screen (id, start along the
+    /// axis, fully visible), the first rows of the list and whether it rested
+    /// at its end. The next sync keeps an anchor row at its pixel offset.
+    private var listKeyAnchors: [Int64: PamListKeyAnchor] = [:]
+    /// Debug: per list, the previous frame's on-screen row tops (`PamListTrace`).
+    private var listTraces: [Int64: PamListTrace] = [:]
     /// Scroll offset of each switched-away section, per list.
     private var listSectionOffsets: [Int64: [String: CGFloat]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
@@ -282,6 +288,7 @@ public final class PamRenderer: @unchecked Sendable {
         var needsModalSync = false
         let outerCommit = committing
         committing = true
+        if !liftedModals.isEmpty { prepareModalSharedRemovals(batches) }
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -618,6 +625,31 @@ public final class PamRenderer: @unchecked Sendable {
         }
     }
 
+    /// A presented Modal unmounted by this commit (itself or an ancestor)
+    /// starts its shared elements home while its views are still laid out,
+    /// before the removals take them away (Android parity).
+    private func prepareModalSharedRemovals(_ batches: [[Mutation]]) {
+        var removed = Set<Int64>()
+        for batch in batches {
+            for mutation in batch {
+                if case let .remove(id) = mutation { removed.insert(id) }
+            }
+        }
+        guard !removed.isEmpty else { return }
+        for case let modal as PamModalHost in host.subviews where modal.isPresentedOnScreen {
+            var current = Int64(modal.tag)
+            var depth = 0
+            while current != 0, depth < 512 {
+                if removed.contains(current) {
+                    modal.prepareSharedRemoval()
+                    break
+                }
+                current = nodes[current]?.parent ?? 0
+                depth += 1
+            }
+        }
+    }
+
     private func remove(_ id: Int64) {
         guard let state = nodes[id] else {
             return
@@ -670,6 +702,8 @@ public final class PamRenderer: @unchecked Sendable {
         listSectionOffsets[id] = nil
         listWindowRequests[id] = nil
         listRowAnchors[id] = nil
+        listKeyAnchors[id] = nil
+        listTraces[id] = nil
         frames[id] = nil
         children[id] = nil
         imageLoadContexts = imageLoadContexts.filter { _, context in
@@ -871,6 +905,8 @@ public final class PamRenderer: @unchecked Sendable {
         list.pamInitialScrollIndexApplied = true
         DispatchQueue.main.async { [weak self, weak list] in
             guard let self, let list, let state = self.nodes[nodeId] else { return }
+            // The user's drag or fling wins over requests they did not ask for.
+            guard list.pamAcceptsProgrammaticScroll(userActionAt: self.lastUserActionAt) else { return }
             let targetTestId = state.properties[PamConstants.scrollTargetTestId]?.textOrNil() ?? ""
             let targetAlignment = Int(
                 state.properties[PamConstants.scrollTargetAlignment]?.integerOrNil() ?? 1
@@ -992,11 +1028,36 @@ public final class PamRenderer: @unchecked Sendable {
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
         let windowed = nodes[id]?.properties[PamConstants.listWindowed]?.pamFlag == true
             && !horizontal && !list.pamInverted
-        // The same cell when it is still there, else the cell now holding
-        // its row (a run that split, a row that became a placeholder).
-        if windowed, let anchor = listRowAnchors[id],
-           let top = localFrames.first(where: { $0.0 == anchor.cell && rowSpan($0.0).rows == 1 })?.1.minY
-               ?? rowTop(anchor.row, frames: localFrames) {
+        // Rows inserted, removed or re-measured above the viewport keep the
+        // anchor row (a row that was on screen) at its pixel offset, also
+        // mid-fling (Android RecyclerView + head-insert/rebind anchors).
+        var keyAnchored = false
+        if !list.pamInverted, list.pamInitialScrollIndexApplied, let anchor = listKeyAnchors[id],
+           !(anchor.atEnd && list.pamFollowEndOnResize) {
+            var positions: [Int64: CGRect] = [:]
+            positions.reserveCapacity(localFrames.count)
+            for entry in localFrames { positions[entry.0] = entry.1 }
+            if let (cell, start) = anchor.anchor(next: cellIds, positions: positions, horizontal: horizontal),
+               let frame = positions[cell] {
+                keyAnchored = true
+                let delta = (horizontal ? frame.minX : frame.minY) - start
+                if abs(delta) >= 0.5 {
+                    // Does not stop a running fling: it continues from here.
+                    if horizontal {
+                        let maximum = max(0, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
+                        list.contentOffset.x = min(maximum, max(-list.adjustedContentInset.left, list.contentOffset.x + delta))
+                    } else {
+                        let maximum = max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                        list.contentOffset.y = min(maximum, max(-list.adjustedContentInset.top, list.contentOffset.y + delta))
+                    }
+                }
+            }
+        }
+        // Placeholder runs that split into rows keep their row index. A
+        // single row is kept by its key above; if it left, its old index
+        // names another row now (rows joined above it), so it is not used.
+        if windowed, !keyAnchored, let anchor = listRowAnchors[id], anchor.cell == 0,
+           let top = rowTop(anchor.row, frames: localFrames) {
             // Android `restoreRowAnchor`: keep the top row where it was.
             let delta = top - anchor.top
             if abs(delta) >= 0.5 {
@@ -1062,6 +1123,22 @@ public final class PamRenderer: @unchecked Sendable {
         if nodes[id]?.properties[PamConstants.listWindowed]?.pamFlag == true {
             requestListWindow(id, list: list, frames: localFrames, window: visible, horizontal: horizontal)
         }
+        listKeyAnchors[id] = list.pamInverted ? nil : PamListKeyAnchor.capture(
+            cellIds: cellIds,
+            frames: localFrames,
+            viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
+            horizontal: horizontal,
+            atEnd: (horizontal ? list.contentOffset.x : list.contentOffset.y) >= list.primaryMaximumOffset - 1
+                && list.primaryMaximumOffset > 0,
+            previous: listKeyAnchors[id]
+        )
+        #if DEBUG
+        if PamListTrace.enabled {
+            let trace = listTraces[id] ?? PamListTrace()
+            listTraces[id] = trace
+            trace.record(listId: id, list: list, frames: localFrames, horizontal: horizontal, rowCount: listRowCount(cellIds))
+        }
+        #endif
         // A list nobody sees yet (a screen mounted ahead, hidden under the
         // visible one) creates its cells a few per frame within a budget.
         let deferMounts = !list.pamIsShown
@@ -1128,6 +1205,29 @@ public final class PamRenderer: @unchecked Sendable {
         return nil
     }
 
+    /// Logical rows of a windowed list (a placeholder run counts its rows).
+    private func listRowCount(_ cellIds: [Int64]) -> Int {
+        cellIds.reduce(0) { $0 + rowSpan($1).rows }
+    }
+
+    /// Rows a released fling sweeps up to the screen it lands on (the
+    /// leading edge of that screen), as `(first, last)` with the rows on
+    /// screen; nil when no fling runs (Android `flingPathRows`).
+    private func flingPathRows(
+        _ list: PamVirtualListView,
+        frames localFrames: [(Int64, CGRect)],
+        horizontal: Bool,
+        firstRow: Int,
+        lastRow: Int
+    ) -> (first: Int, last: Int)? {
+        guard !horizontal, !list.pamInverted, list.isDecelerating, let target = list.pamFlingTarget else { return nil }
+        let forward = target.y > list.contentOffset.y
+        let edge = forward ? target.y + list.bounds.height - 1 : target.y
+        guard let entry = localFrames.first(where: { $0.1.minY <= edge && $0.1.maxY > edge }) else { return nil }
+        let landing = rowAt(entry, edge: edge)
+        return forward ? (firstRow, max(lastRow, landing)) : (min(firstRow, landing), lastRow)
+    }
+
     /// A windowed list (long VirtualizedList) ships rows outside PHP's window
     /// as placeholders. When one enters the overscanned window, report the
     /// rows on screen so PHP materializes ahead of the scroll (Android:
@@ -1140,8 +1240,18 @@ public final class PamRenderer: @unchecked Sendable {
         window: Set<Int64>,
         horizontal: Bool
     ) {
-        guard window.contains(where: { nodes[$0]?.properties[PamConstants.listPlaceholder] != nil }) else { return }
         let viewport = CGRect(origin: list.contentOffset, size: list.bounds.size)
+        let isPlaceholder: (Int64) -> Bool = { [nodes = self.nodes] in
+            nodes[$0]?.properties[PamConstants.listPlaceholder] != nil
+        }
+        var placeholderNear = window.contains(where: isPlaceholder)
+        if !placeholderNear, let target = list.pamFlingTarget, list.isDecelerating {
+            // Rows a released fling sweeps toward its landing screen.
+            let landing = CGRect(origin: target, size: list.bounds.size)
+            let span = viewport.union(landing)
+            placeholderNear = localFrames.contains { $0.1.intersects(span) && isPlaceholder($0.0) }
+        }
+        guard placeholderNear else { return }
         let onScreen = localFrames
             .filter { $0.1.intersects(viewport) }
             .sorted { horizontal ? $0.1.minX < $1.1.minX : $0.1.minY < $1.1.minY }
@@ -1158,7 +1268,16 @@ public final class PamRenderer: @unchecked Sendable {
         }
         let firstRow = row(first, at: horizontal ? viewport.minX : viewport.minY)
         let lastRow = row(last, at: (horizontal ? viewport.maxX : viewport.maxY) - 1)
-        let request = "@\(firstRow),\(lastRow)"
+        // With the row count it saw: a report made before rows joined (an
+        // older page) is recognized by PHP and ignored instead of moving the
+        // window onto other rows. A released fling also names the rows it
+        // sweeps and the screen it lands on (UIScrollView's projected target),
+        // built in one frame instead of one per screen crossed.
+        let rows = listRowCount(localFrames.map(\.0))
+        var request = "@\(firstRow),\(lastRow),\(rows)"
+        if let path = flingPathRows(list, frames: localFrames, horizontal: horizontal, firstRow: firstRow, lastRow: lastRow) {
+            request += ",\(path.first),\(path.last)"
+        }
         let now = CACurrentMediaTime()
         if let previous = listWindowRequests[listId], previous.request == request, now - previous.at < 0.25 {
             return
@@ -1827,6 +1946,9 @@ public final class PamRenderer: @unchecked Sendable {
         }
     }
 
+    /// When the user last pressed, long pressed or submitted (CACurrentMediaTime).
+    private var lastUserActionAt: CFTimeInterval = 0
+
     /// Android `flushFocusedNativeInputs()`: a native-synced input keeps its
     /// keystrokes on the device until blur or submit, but a press (a "Done"
     /// button next to the field, which never takes the keyboard focus) must
@@ -1835,6 +1957,10 @@ public final class PamRenderer: @unchecked Sendable {
     func routeEvent(_ id: Int64, _ kind: Int, _ payload: Data) {
         if kind == EventKind.press.rawValue {
             flushPendingNativeInputs()
+        }
+        if kind == EventKind.press.rawValue || kind == EventKind.longPress.rawValue
+            || kind == EventKind.submit.rawValue {
+            lastUserActionAt = CACurrentMediaTime()
         }
         sinkEvent(id, kind, payload)
     }
@@ -3148,12 +3274,19 @@ public final class PamRenderer: @unchecked Sendable {
                 configureMediaCache(media, state: state)
                 // An idle view never starts preparing its source (key order applies the source first).
                 media.setIdleSurface(state.properties[PamConstants.mediaIdleSurface]?.boolOrNil() ?? false)
+                // Visible autoplay holds the source back until the policy grants it.
+                media.setAutoPlayGroup(state.properties[PamConstants.mediaAutoPlayGroup]?.textOrNil() ?? "")
+                media.setAutoPlayVisible(CGFloat(state.properties[PamConstants.mediaAutoPlayVisible]?.decimalOrNil() ?? 0))
             }
             (view as? PamMediaView)?.setSource(value.textOrNil() ?? "")
         case PamConstants.mediaType:
             break
         case PamConstants.mediaAutoPlay:
             (view as? PamMediaView)?.setAutoPlay(value.boolOrNil() ?? false)
+        case PamConstants.mediaAutoPlayVisible:
+            (view as? PamMediaView)?.setAutoPlayVisible(CGFloat(value.decimalOrNil() ?? 0))
+        case PamConstants.mediaAutoPlayGroup:
+            (view as? PamMediaView)?.setAutoPlayGroup(value.textOrNil() ?? "")
         case PamConstants.mediaControls:
             (view as? PamMediaView)?.setControls(value.boolOrNil() ?? true)
         case PamConstants.mediaLoop:
@@ -3703,6 +3836,10 @@ public final class PamRenderer: @unchecked Sendable {
             break
         case PamConstants.mediaAutoPlay:
             (view as? PamMediaView)?.setAutoPlay(false)
+        case PamConstants.mediaAutoPlayVisible:
+            (view as? PamMediaView)?.setAutoPlayVisible(0)
+        case PamConstants.mediaAutoPlayGroup:
+            (view as? PamMediaView)?.setAutoPlayGroup("")
         case PamConstants.mediaControls:
             (view as? PamMediaView)?.setControls(true)
         case PamConstants.mediaLoop:
@@ -5928,9 +6065,19 @@ public final class PamRenderer: @unchecked Sendable {
         func attachLongPress(to view: UIView, minimumDurationMs: Int64 = 500) {
             let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(onLongPress(_:)))
             recognizer.minimumPressDuration = TimeInterval(min(max(minimumDurationMs, 1), 60_000)) / 1_000
+            recognizer.name = PamNestedLongPress.recognizerName
             recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
             longPress = recognizer
+        }
+
+        /// A long press reaches this Pressable from a nested one only when the
+        /// nested one has no `onLongPress` and this is its nearest enclosing
+        /// handler, never across a scroll view (React Native responders).
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard gestureRecognizer === longPress, let receiver = gestureRecognizer.view,
+                  let start = touch.view else { return true }
+            return PamNestedLongPress.receives(touchView: start, receiver: receiver)
         }
 
         func attachPressPointer(
@@ -6966,6 +7113,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
             if let list = scrollView as? PamVirtualListView {
                 scrollGestureStart = list.horizontal ? list.contentOffset.x : list.contentOffset.y
+                list.pamFlingTarget = nil
             }
             guard let scroll = scrollView as? PamAnchoredScrollView else { return }
             scrollGestureStart = scroll.horizontal
@@ -6987,6 +7135,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            (scrollView as? PamVirtualListView)?.pamFlingTarget = nil
             guard emitsMomentumScrollEnd else { return }
             dispatchScrollPhase(scrollView, kind: EventKind.momentumScrollEnd.rawValue, velocity: .zero)
         }
@@ -7044,6 +7193,8 @@ public final class PamRenderer: @unchecked Sendable {
             withVelocity velocity: CGPoint,
             targetContentOffset: UnsafeMutablePointer<CGPoint>
         ) {
+            // After any paging adjustment below: where the fling lands.
+            defer { (scrollView as? PamVirtualListView)?.pamFlingTarget = targetContentOffset.pointee }
             if scrollPhaseDragging {
                 scrollPhaseDragging = false
                 if emitsScrollEndDrag {
@@ -7131,7 +7282,14 @@ public final class PamRenderer: @unchecked Sendable {
             let offset = isHorizontal
                 ? scrollView.contentOffset.x + inset.left
                 : scrollView.contentOffset.y + inset.top
-            let distanceFromEnd = contentLength - (offset + viewportLength)
+            var distanceFromEnd = contentLength - (offset + viewportLength)
+            // A running fling toward the end counts where it will rest
+            // (UIScrollView's projected target), so the next page is asked
+            // for before the list rests at a temporary end (Android).
+            if let list = scrollView as? PamVirtualListView, list.isDecelerating, let target = list.pamFlingTarget {
+                let remaining = isHorizontal ? target.x - scrollView.contentOffset.x : target.y - scrollView.contentOffset.y
+                if remaining > 0 { distanceFromEnd -= remaining }
+            }
             guard distanceFromEnd <= viewportLength * endReachedThreshold else {
                 return
             }
