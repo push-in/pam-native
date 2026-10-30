@@ -312,6 +312,17 @@ final class PamAnchoredScrollView: UIScrollView {
     /// `pageTransform` of a horizontal pager (stories cube).
     let pamPageTransformer = PamPageTransformer()
 
+    /// A requested offset waiting for its content applies in the layout
+    /// pass right after the content size arrives (it waited for an
+    /// unrelated layout, seconds at a pager's open).
+    override var contentSize: CGSize {
+        didSet {
+            if contentSize != oldValue, pamRequestedContentOffsetX != nil || pamRequestedContentOffsetY != nil {
+                setNeedsLayout()
+            }
+        }
+    }
+
     /// The faces follow every offset, also the last one a programmatic glide
     /// sets: a contentOffset change does not always run layoutSubviews
     /// before the frame is drawn, and the faces stayed turned at an
