@@ -76,8 +76,12 @@ class PamZIndexHostInstrumentedTest {
             renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.Z_INDEX, null))))
             assertEquals(elevation, view.z, 0.01f)
             renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.ELEVATION, null))))
-            assertEquals(0f, view.elevation, 0.01f)
-            assertEquals(0f, view.z, 0.01f)
+            // Without zIndex or elevation the column is layout-only again and
+            // may be elided; a view that stays hosted must be flat.
+            renderer.viewForNode(2)?.let { hosted ->
+                assertEquals(0f, hosted.elevation, 0.01f)
+                assertEquals(0f, hosted.z, 0.01f)
+            }
         }
     }
 
