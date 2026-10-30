@@ -2735,6 +2735,11 @@ class PamRenderer(
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
+        attachView(view, parentId, index)
+        (view.parent as? ViewGroup)?.let { PamPaintOrder.childAdded(it, view) }
+    }
+
+    private fun attachView(view: View, parentId: Long, index: Int) {
         if (parentId == 0L) {
             host.addView(view, index.coerceIn(0, host.childCount))
             return
@@ -8911,9 +8916,10 @@ class PamRenderer(
 
     private fun applyStackingZ(view: View, state: NodeState) {
         // setZ changes translationZ too. A later z-index must never cancel an
-        // authored elevation (which Android uses for the native shadow).
-        val stacking = state.number(PropKey.Z_INDEX, 0.0).toFloat()
-        view.z = if (view.elevation > 0f) max(view.elevation, stacking) else stacking
+        // authored elevation (which Android uses for the native shadow), and
+        // the elevation must not paint the view above its later siblings.
+        PamPaintOrder.setAuthoredZIndex(view, state.number(PropKey.Z_INDEX, 0.0).toFloat())
+        PamPaintOrder.apply(view)
     }
 
     /**
@@ -8922,19 +8928,9 @@ class PamRenderer(
      * timeline with `z-index: 1`): lift it above its siblings while
      * translated and restore the authored z-index afterwards.
      */
-    private fun liftTranslatedKeyboardView(view: View, state: NodeState, translated: Boolean) {
-        val authored = runCatching {
-            state.properties[PropKey.Z_INDEX]?.decimal()?.toFloat()
-        }.getOrNull() ?: 0f
-        val parent = view.parent as? ViewGroup
-        var target = if (view.elevation > 0f) max(view.elevation, authored) else authored
-        if (translated && parent != null) {
-            for (index in 0 until parent.childCount) {
-                val sibling = parent.getChildAt(index)
-                if (sibling !== view) target = max(target, sibling.z + 1f)
-            }
-        }
-        if (view.z != target) view.z = target
+    private fun liftTranslatedKeyboardView(view: View, @Suppress("UNUSED_PARAMETER") state: NodeState, translated: Boolean) {
+        PamPaintOrder.setKeyboardLifted(view, translated)
+        PamPaintOrder.apply(view)
     }
 
     private fun keyboardOverlap(

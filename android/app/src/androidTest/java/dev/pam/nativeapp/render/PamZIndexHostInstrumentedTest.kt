@@ -81,6 +81,56 @@ class PamZIndexHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun earlierElevatedSiblingPaintsBelowLaterSiblingLikeDocumentOrder() = withElevatedScene { activity, renderer ->
+        instrumentation.runOnMainSync {
+            val elevated = renderer.viewForNode(2)!!
+            assertTrue("the elevation keeps its shadow", elevated.elevation > 0f)
+        }
+        assertPixel(activity, Color.GREEN)
+        instrumentation.runOnMainSync {
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.Z_INDEX, PropValue.Decimal(1.0)))))
+        }
+        assertPixel(activity, Color.RED)
+        instrumentation.runOnMainSync {
+            renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.Z_INDEX, null))))
+            // A sibling mounted later still paints above the elevated one.
+            renderer.commit(listOf(listOf(
+                Mutation.Create(NodeSpec(5, 1, 2, NodeKind.VIEW, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF0000FF)))),
+                Mutation.Layout(5, Frame(20f, 20f, 160f, 120f)),
+            )))
+        }
+        assertPixel(activity, Color.BLUE)
+    }
+
+    private fun withElevatedScene(check: (PamTestActivity, PamRenderer) -> Unit) {
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as PamTestActivity
+        lateinit var renderer: PamRenderer
+        try {
+            instrumentation.runOnMainSync {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(NodeSpec(1, 0, 0, NodeKind.SCREEN, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFF)))),
+                    Mutation.Create(NodeSpec(2, 1, 0, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFF0000),
+                        PropKey.ELEVATION to PropValue.Decimal(8.0),
+                    ))),
+                    Mutation.Create(NodeSpec(4, 1, 1, NodeKind.VIEW, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF00FF00)))),
+                    Mutation.Layout(1, Frame(0f, 0f, 320f, 480f)),
+                    Mutation.Layout(2, Frame(20f, 20f, 160f, 120f)),
+                    Mutation.Layout(4, Frame(20f, 20f, 160f, 120f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            instrumentation.waitForIdleSync()
+            check(activity, renderer)
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     private fun withScene(zIndex: Double, check: (PamTestActivity, PamRenderer) -> Unit) {
         val activity = instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
