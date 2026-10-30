@@ -168,9 +168,10 @@ final class PamListTrace {
         let animating = pendingAnimated || list.layer.animationKeys()?.isEmpty == false
         let state = list.isTracking ? "drag"
             : (list.isDecelerating ? "fling" : (list.isDragging ? "drag" : (animating ? "anim" : "idle")))
+        let first = frames.first { ($0.1.maxY > offset) && $0.1.intersects(viewport) }?.0 ?? 0
         NSLog(
-            "PamListTrace list=%lld dy=%@ common=%ld shown=%ld state=%@ above=%ld count=%ld",
-            listId, dy, deltas.count, next.count, state, above, rowCount
+            "PamListTrace list=%lld dy=%@ common=%ld shown=%ld state=%@ above=%ld count=%ld offset=%.1f height=%.1f first=%lld",
+            listId, dy, deltas.count, next.count, state, above, rowCount, offset, list.bounds.height, first
         )
     }
 }
