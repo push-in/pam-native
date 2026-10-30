@@ -68,9 +68,18 @@ final class PamPageTransformer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         var seen = Set<ObjectIdentifier>()
+        // The content row itself is never a face (it was turned whole while
+        // it was not wider than the viewport yet, before its pages arrived).
+        if row !== scroll, shades[ObjectIdentifier(row)] != nil || !CATransform3DIsIdentity(row.layer.transform) {
+            clear(row)
+        }
         for page in row.subviews where page.tag > 0 {
             let width = page.bounds.width
-            guard width > 0 else { continue }
+            // Only page-sized children turn (a wider child is content, not a face).
+            guard width > 0, width <= scroll.bounds.width * 1.5 else {
+                if shades[ObjectIdentifier(page)] != nil || !CATransform3DIsIdentity(page.layer.transform) { clear(page) }
+                continue
+            }
             let left = page.center.x - width / 2
             let t = (rowOrigin + left - scroll.contentOffset.x) / width
             let id = ObjectIdentifier(page)
@@ -105,13 +114,19 @@ final class PamPageTransformer {
         shades.removeAll()
     }
 
-    private func pageRow(_ scroll: UIScrollView) -> UIView {
+    /// The content row holding the pages: the widest node subview when it is
+    /// wider than the viewport (a Row wrapping every page, like Android's
+    /// content row), else the scroll view's own node subviews are the pages.
+    static func pageRow(_ scroll: UIScrollView) -> UIView {
         let nodes = scroll.subviews.filter { $0.tag > 0 }
-        if nodes.count == 1, let only = nodes.first, only.bounds.width > scroll.bounds.width {
-            return only
+        if let widest = nodes.max(by: { $0.bounds.width < $1.bounds.width }),
+           widest.bounds.width > scroll.bounds.width + 0.5 {
+            return widest
         }
         return scroll
     }
+
+    private func pageRow(_ scroll: UIScrollView) -> UIView { Self.pageRow(scroll) }
 
     private func shade(_ page: UIView, _ amount: CGFloat) {
         let id = ObjectIdentifier(page)
