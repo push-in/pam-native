@@ -2396,6 +2396,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private var slideFadeAnimator: UIViewPropertyAnimator?
+    /// Shared elements with what is on screen under the Modal.
+    private let shared = PamModalSharedTransition()
+    /// Android dialog durations the flights default to.
+    static let sharedEnterDuration: TimeInterval = 0.225
+    static let sharedExitDuration: TimeInterval = 0.125
 
     private enum Orientation {
         static let portrait = 1
@@ -2523,6 +2528,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     deinit {
+        // An unmounted Modal's flights home outlive it (detached); anything
+        // else lands now.
+        if !shared.running { shared.release() }
         if let token = orientationToken {
             orientationObserver.removeObserver(token)
         }
@@ -2789,6 +2797,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func present() {
+        if shared.running {
+            // Shown again while its tags flew home: it stays.
+            shared.cancel()
+            isUserInteractionEnabled = true
+        }
         backdropView.layer.removeAllAnimations()
         contentClip.layer.removeAllAnimations()
         if currentlyVisible {
@@ -2809,6 +2822,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         contentClip.alpha = 0
         contentClip.transform = presentation == Presentation.sheet ? CGAffineTransform(translationX: 0, y: bounds.height * 0.25) : .identity
         applyBackdropColor()
+        // Shared elements set the entrance: a fade in step with the flights.
+        if startSharedEntrance() {
+            finishPresent()
+            return
+        }
         let animationDuration: TimeInterval = 0.225
         let animated = !PamMotionPolicy.isReduced && animationType != Animation.none
 
@@ -2984,6 +3002,15 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             self.previousFocus = nil
         }
 
+        // Its tags fly home under the hidden Modal's fade.
+        if !shared.running, startSharedExit(shade: false, onEnd: { [weak self] completed in
+            guard let self, completed, generation == self.visibilityGeneration, !self.desiredVisible else { return }
+            self.isUserInteractionEnabled = true
+            completion()
+        }) {
+            return
+        }
+
         let animated = !PamMotionPolicy.isReduced && animationType != Animation.none
         if presentation == Presentation.sheet && animated {
             let distance = sheetTravel
@@ -3059,6 +3086,95 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             completion()
         }
     }
+
+    /// On the Modal's first frame (laid out at rest, nothing drawn yet), tags
+    /// on screen below fly into it and the Modal fades in with them instead
+    /// of its own entrance (Android `armSharedEntrance`). False when nothing
+    /// flies; the entrance state is then untouched.
+    private func startSharedEntrance() -> Bool {
+        guard !PamMotionPolicy.isReduced, let below = superview, window != nil,
+              PamModalSharedTransition.hasTag(contentHost) else { return false }
+        let saved = (
+            clip: contentClip.transform, host: contentHost.transform, handle: sheetHandle.transform,
+            clipAlpha: contentClip.alpha, backdropAlpha: backdropView.alpha
+        )
+        // Destinations are measured at rest.
+        contentClip.transform = .identity
+        contentHost.transform = .identity
+        sheetHandle.transform = .identity
+        contentClip.alpha = 1
+        backdropView.alpha = 1
+        layoutIfNeeded()
+        let entered = shared.enter(
+            modal: self,
+            below: below,
+            defaultDuration: Self.sharedEnterDuration,
+            fade: { [weak self] alpha in
+                self?.contentClip.alpha = alpha
+                self?.backdropView.alpha = alpha
+            },
+            onEnd: { [weak self] in
+                self?.contentClip.alpha = 1
+                self?.backdropView.alpha = 1
+            }
+        )
+        if !entered {
+            contentClip.transform = saved.clip
+            contentHost.transform = saved.host
+            sheetHandle.transform = saved.handle
+            contentClip.alpha = saved.clipAlpha
+            backdropView.alpha = saved.backdropAlpha
+        }
+        return entered
+    }
+
+    /// The Modal's tags fly home to the window below while it fades. [shade]
+    /// keeps a cover of the Modal's background for an unmounted Modal, whose
+    /// views go away at once. The Modal stops taking touches meanwhile.
+    private func startSharedExit(shade: Bool, onEnd: @escaping (Bool) -> Void) -> Bool {
+        guard !PamMotionPolicy.isReduced, let below = superview, window != nil, !isHidden else { return false }
+        let cover = shade ? PamModalSharedTransition.coverColor(self, skip: sheetHandle) : nil
+        let flying = shared.exit(
+            modal: self,
+            below: below,
+            defaultDuration: Self.sharedExitDuration,
+            shadeColor: cover,
+            fade: { [weak self] () -> Void in
+                self?.contentClip.alpha = 0
+                self?.backdropView.alpha = 0
+            },
+            onEnd: onEnd
+        )
+        if flying {
+            slideFadeAnimator?.stopAnimation(true)
+            slideFadeAnimator = nil
+            isUserInteractionEnabled = false
+        }
+        return flying
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Repeated tags: the instance under the finger flies (any window host).
+        if event?.type == .touches { PamSharedElementFlights.lastWindowTouch = convert(point, to: nil) }
+        return super.hitTest(point, with: event)
+    }
+
+    /// Whether the Modal shows on screen (its tags can fly home).
+    var isPresentedOnScreen: Bool { currentlyVisible && !isHidden && window != nil }
+
+    /// The Modal (or an ancestor) is unmounted by the commit about to run:
+    /// while its views are still laid out, its tags start flying home over a
+    /// cover of its background, and the flights outlive the Modal.
+    func prepareSharedRemoval() {
+        guard isPresentedOnScreen else { return }
+        if shared.running { shared.cancel() }
+        if startSharedExit(shade: true, onEnd: { _ in }) {
+            shared.detach()
+        }
+    }
+
+    /// Flights in progress (tests, diagnostics).
+    var activeSharedElementCount: Int { shared.activeCount }
 
     /// Travel that hides the content fully below the screen (at least half
     /// the screen, like Android).

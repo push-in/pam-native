@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- iOS Pressable: a nested Pressable without `onLongPress` lends the long
+  press to the nearest enclosing Pressable that has one (never across a
+  scroll view or list), with that receiver's `delayLongPress`; the nested
+  press is cancelled. A nested Pressable with its own `onLongPress` keeps
+  it. `PamNestedLongPressTests`.
+- iOS shared elements between a screen and a `<Modal>` component, like
+  Android: opening flies every tag on screen below into the Modal and closing
+  (`visible` false or unmounted) flies them home, with the Modal fading in
+  step; an unmounted Modal fades a cover of its background under the flights.
+  `launchOnTap()` hand-off to a Modal stays Android-only.
+  `PamModalSharedTransitionTests`.
+
 - Android Pressable: a nested Pressable without `onLongPress` lends the long
   press to the nearest enclosing Pressable that has one (never across a
   scroll view or list), like React Native, using that receiver's

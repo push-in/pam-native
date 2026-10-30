@@ -448,7 +448,11 @@ What flies, with no app measuring or animation code:
   </Modal>
   ```
 
-  Android only for now; iOS keeps the Modal's own animation.
+  Android and iOS. On iOS the flights draw in the window overlay above the
+  Modal (`PamModalSharedTransition`); an unmounted Modal leaves a cover of
+  its full-window background that fades under the flights. Not yet on iOS:
+  handing a `launchOnTap()` flight to the Modal (the route keeps it) and
+  `Drag::holdAt(...)` release positions for a Modal flight home.
 - **Platforms.** Android draws flights in the navigation host overlay from the
   transition animator; iOS animates them with a `UIViewPropertyAnimator`
   (`UISpringTimingParameters` for springs) above the routes, and presents a

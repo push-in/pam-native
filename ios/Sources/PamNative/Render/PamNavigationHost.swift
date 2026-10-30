@@ -123,6 +123,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if event?.type == .touches {
             sharedElements.touched(point)
+            PamSharedElementFlights.lastWindowTouch = convert(point, to: nil)
             if event?.timestamp != tapTouchTimestamp {
                 tapTouchTimestamp = event?.timestamp ?? 0
                 tapBeganAt = CACurrentMediaTime()

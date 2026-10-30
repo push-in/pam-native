@@ -282,6 +282,7 @@ public final class PamRenderer: @unchecked Sendable {
         var needsModalSync = false
         let outerCommit = committing
         committing = true
+        if !liftedModals.isEmpty { prepareModalSharedRemovals(batches) }
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -615,6 +616,31 @@ public final class PamRenderer: @unchecked Sendable {
                 for: .touchUpInside
             )
             localModalActions[nodeId] = identifier
+        }
+    }
+
+    /// A presented Modal unmounted by this commit (itself or an ancestor)
+    /// starts its shared elements home while its views are still laid out,
+    /// before the removals take them away (Android parity).
+    private func prepareModalSharedRemovals(_ batches: [[Mutation]]) {
+        var removed = Set<Int64>()
+        for batch in batches {
+            for mutation in batch {
+                if case let .remove(id) = mutation { removed.insert(id) }
+            }
+        }
+        guard !removed.isEmpty else { return }
+        for case let modal as PamModalHost in host.subviews where modal.isPresentedOnScreen {
+            var current = Int64(modal.tag)
+            var depth = 0
+            while current != 0, depth < 512 {
+                if removed.contains(current) {
+                    modal.prepareSharedRemoval()
+                    break
+                }
+                current = nodes[current]?.parent ?? 0
+                depth += 1
+            }
         }
     }
 
@@ -5928,9 +5954,19 @@ public final class PamRenderer: @unchecked Sendable {
         func attachLongPress(to view: UIView, minimumDurationMs: Int64 = 500) {
             let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(onLongPress(_:)))
             recognizer.minimumPressDuration = TimeInterval(min(max(minimumDurationMs, 1), 60_000)) / 1_000
+            recognizer.name = PamNestedLongPress.recognizerName
             recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
             longPress = recognizer
+        }
+
+        /// A long press reaches this Pressable from a nested one only when the
+        /// nested one has no `onLongPress` and this is its nearest enclosing
+        /// handler, never across a scroll view (React Native responders).
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard gestureRecognizer === longPress, let receiver = gestureRecognizer.view,
+                  let start = touch.view else { return true }
+            return PamNestedLongPress.receives(touchView: start, receiver: receiver)
         }
 
         func attachPressPointer(
@@ -6425,7 +6461,6 @@ public final class PamRenderer: @unchecked Sendable {
             self.control = nil
             self.scrollView = nil
             self.refreshControl = nil
-            self.drawer = nil
             self.modal = nil
             self.modalView = nil
             self.pressInKind = nil
