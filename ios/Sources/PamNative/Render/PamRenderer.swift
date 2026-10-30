@@ -1128,8 +1128,10 @@ public final class PamRenderer: @unchecked Sendable {
             frames: localFrames,
             viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
             horizontal: horizontal,
+            // A list opened at its end (`initialScrollIndex`) follows it even
+            // while its rows still fit (maintainEndAnchor): the end wins.
             atEnd: (horizontal ? list.contentOffset.x : list.contentOffset.y) >= list.primaryMaximumOffset - 1
-                && list.primaryMaximumOffset > 0,
+                && (list.primaryMaximumOffset > 0 || list.pamInitialScrollIndex > 0),
             previous: listKeyAnchors[id]
         )
         #if DEBUG

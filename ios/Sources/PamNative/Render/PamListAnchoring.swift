@@ -137,7 +137,13 @@ final class PamListTrace {
             guard abs(median) >= 0.01 || joined else { return }
             dy = String(format: "%.2f", median)
         }
-        let state = list.isTracking || list.isDragging ? "drag" : (list.isDecelerating ? "fling" : "idle")
+        // isDragging stays true through the deceleration a drag released:
+        // decelerating is checked first. "anim": the offset or bounds changed
+        // inside a Core Animation animation (keyboard follow, an animated
+        // scroll); the trace sees the model values, not each drawn frame.
+        let animating = UIView.inheritedAnimationDuration > 0 || list.layer.animationKeys()?.isEmpty == false
+        let state = list.isTracking ? "drag"
+            : (list.isDecelerating ? "fling" : (list.isDragging ? "drag" : (animating ? "anim" : "idle")))
         NSLog(
             "PamListTrace list=%lld dy=%@ common=%ld shown=%ld state=%@ above=%ld count=%ld",
             listId, dy, deltas.count, next.count, state, above, rowCount

@@ -920,14 +920,41 @@ final class PamMediaView: UIView {
         statusObservation = nil
         bufferingObservation?.invalidate()
         bufferingObservation = nil
-        player?.pause()
-        player = nil
         readyForDisplayObservation?.invalidate()
         readyForDisplayObservation = nil
         videoReadyForDisplay = false
+        // The surface lets go first, then the player is torn down off the
+        // main thread (Android releases on the player's own thread): pausing
+        // or freeing an AVPlayer whose item is still loading over the network
+        // waits for that load, which froze the UI for seconds (a pager glide
+        // stopped between pages, a first story page stayed black).
         playerView.playerLayer.player = nil
         controller?.player = nil
+        if let doomed = player {
+            player = nil
+            Self.retire(doomed)
+        }
         if restoresPoster { updatePoster() }
+    }
+
+    /// Serial queue where released players are paused, emptied and freed.
+    private static let retireQueue = DispatchQueue(label: "dev.pam.native.media-retire", qos: .utility)
+
+    /// Players handed to `retireQueue` and not freed yet (tests, diagnostics).
+    private(set) static var retiringPlayers = 0
+
+    /// Cancels the item's loading on the caller (non-blocking) and pauses,
+    /// empties and frees the player on `retireQueue`.
+    static func retire(_ player: AVPlayer) {
+        let item = player.currentItem
+        item?.cancelPendingSeeks()
+        (item?.asset as? AVURLAsset)?.cancelLoading()
+        retiringPlayers += 1
+        retireQueue.async {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            DispatchQueue.main.async { retiringPlayers -= 1 }
+        }
     }
 
     // MARK: Visible autoplay and screen-gated prepare
