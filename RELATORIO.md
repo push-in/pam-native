@@ -1,3 +1,89 @@
+# p1 — lacunas genéricas de insets, rolagem e teclado (30/10/2026)
+
+Worktree `codex-p1-fw`, branch `codex/p1-fw`, base
+`origin/integrate/port3-20261027` em `3170255c`. Entrega sem merge, sem tag,
+sem workflow e sem alterações no consumidor. Todos os commits usam `[skip ci]`.
+
+## Implementação
+
+- Android: RecyclerView recebe padding nativo e conserva `clipToPadding=false`.
+  ScrollView aplica padding no seu host interno. Os frames e a extensão do
+  engine são compensados pela origem nativa, evitando duplicação do espaço
+  superior. Remover uma propriedade de padding também limpa o padding nativo.
+- iOS: ScrollView e listas usam `contentInset`, com origem das células
+  normalizada. Limites de rolagem respeitam o inset superior inclusive para
+  conteúdo curto; offsets explícitos e eventos mantêm coordenadas lógicas.
+  Atualizar padding preserva o inset adicional aplicado pelo teclado.
+  A identidade das linhas e as regras de ancoragem por key/head insert foram
+  preservadas. Há regressões XCTest para prepend com padding, espaço final,
+  conteúdo curto e atualização de padding durante o IME.
+- PHP: `Scroll`/`ScrollView` e `VirtualizedList` oferecem
+  `contentContainerStyle(Style)` como alias de `style()`, usando os mesmos
+  PropKeys existentes. Não há novo wrapper, célula nem alteração de protocolo.
+- `$insets` Android: `navigationBars` e `tappableElement` têm prioridade sobre
+  fallback. Se ambas as medidas inferiores forem zero, aplica 48 dp (ou a
+  configuração existente, se maior) somente com barra inferior visível de
+  três botões identificada pela configuração do sistema. Gestos, hardware,
+  barras laterais e barras ocultas não ganham padding sintético.
+  A mesma resolução atende SafeAreaView e o dimensionamento de sheets.
+- BottomSheet Android: durante o fechamento do IME, `isVisible=false` pode
+  chegar antes da altura zero. A folha e seu inset residual continuam seguindo
+  os frames positivos da animação; o estado final só assume zero ao terminar.
+  iOS já acompanha o frame final com duração/curva do teclado; não foi
+  substituído esse mecanismo.
+- Toast com `icon` já existe no plugin opcional `pushinbr/pam-native-toast`
+  publicado em `0.1.0` (`5212741a`), tanto em Android quanto em iOS.
+  Verificado também no `main` remoto `7a7bd78a`. O teste de compatibilidade
+  passou para glyph registrado, asset PNG, ausência de ícone e glyph inválido.
+  O núcleo conserva o alias para o plugin; não duplica essa funcionalidade.
+
+Contrato e exemplos: `docs/scroll-content-insets.md`.
+
+## Validação
+
+- JVM: **363/363**, zero falhas. Harness local em
+  `/tmp/p1-validation/jvm.py`: compila todas as fontes Android do núcleo e da
+  plugin-api e todos os testes JVM, com Kotlin 2.2.10, Android SDK 36 e JUnit
+  4.13.2 do cache. IDs R vêm do `ids.xml` atual; demais símbolos gerados e
+  BuildConfig vêm do build local existente. Não equivale a um build APK.
+- PHP 8.5 do runtime indicado: suíte completa do SDK **1/1** verde.
+  Segunda execução completa com o plugin Toast carregado: **1/1** verde.
+  Cada rodada usa TMPDIR próprio, sem instalação de dependências.
+- `scripts/protocol-parity.py`: **1/1** verde.
+- `python3 -m unittest scripts/test_protocol_parity.py`: **6/6** verdes.
+- `git diff --check`: verde.
+
+Logs em `/tmp/p1-validation/{jvm,php,php-toast,gradle-stop}.log`.
+Compilação JVM sob o lock `/tmp/pam-gradle.lock.d`, heap máximo 3 GB;
+`./gradlew --stop` confirmou ausência de daemons no fim e o lock foi liberado.
+Nenhum manifesto/lockfile de dependências mudou; nenhum vendor foi instalado.
+Nenhuma pasta `.pam-native` foi deixada nesta worktree.
+
+## Limites e validação no aparelho
+
+Não houve APK, emulador, captura, profiling nem execução de testes
+instrumentados nesta tarefa. Não houve Mac ou execução de XCTest; os testes
+iOS adicionados aguardam execução em ambiente com UIKit. A homologação no
+aparelho fica com Claude, conforme a tarefa; **não fazer merge antes dela**.
+Sem números medidos de CPU, PSS ou frames.
+
+O disco permaneceu em aproximadamente **10–11 GB livres**, abaixo dos 20 GB
+pedidos nas regras comuns. A worktree era nova (66 MB) e os únicos artefatos
+próprios desta execução somaram cerca de 4 MB; não havia material próprio
+suficiente para recuperar 9 GB. Não foram apagados artefatos de outras sessões.
+A validação utilizou o cache existente e o harness JVM sem build APK/Gradle.
+
+Roteiro para Claude: verificar fim de rolagem com conteúdo curto e longo,
+padding 12/48 e padding removido; prepend por key e inserção após header
+com fling; navegação de três botões/gestos e rotação; BottomSheet com IME
+abrindo e fechando lentamente, inclusive detent alto com deslocamento limitado;
+Toast com e sem ícone. Conferir capturas antes/depois e métricas de recursos.
+
+Commits de código: `8eed818d` (fallback), `c88d9c55` (rolagem),
+`dde390fb` (IME). Branch destinada somente a revisão e QA.
+
+---
+
 # q2 — identidade, acento e descarte de mídia Android (29/10/2026)
 
 Registro final que supera a validação parcial de z5 abaixo. Worktree `codex-misc-polish-fw`, rebaseado na integração; commits pequenos com `[skip ci]`, sem tag.
