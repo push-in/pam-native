@@ -485,6 +485,22 @@ final class PamPaintLayer: CALayer {
 
     override func action(forKey event: String) -> CAAction? { nil }
 
+    /// Where a corner's miter line (outer corner through inner corner)
+    /// meets the box's vertical or horizontal midline, whichever comes first.
+    static func miterEnd(outer: CGPoint, inner: CGPoint, rect: CGRect) -> CGPoint {
+        var dx = inner.x - outer.x
+        var dy = inner.y - outer.y
+        if abs(dx) < 0.0001 && abs(dy) < 0.0001 {
+            dx = rect.midX - outer.x
+            dy = rect.midY - outer.y
+        }
+        var t = CGFloat.greatestFiniteMagnitude
+        if abs(dx) > 0.0001 { t = min(t, abs((rect.midX - outer.x) / dx)) }
+        if abs(dy) > 0.0001 { t = min(t, abs((rect.midY - outer.y) / dy)) }
+        guard t.isFinite, t < .greatestFiniteMagnitude else { return CGPoint(x: rect.midX, y: rect.midY) }
+        return CGPoint(x: outer.x + dx * t, y: outer.y + dy * t)
+    }
+
     override func draw(in context: CGContext) {
         let rect = bounds
         guard rect.width > 0, rect.height > 0 else { return }
@@ -542,7 +558,19 @@ final class PamPaintLayer: CALayer {
             context.restoreGState()
             return
         }
-        // Each side owns the trapezoid between its outer and inner corners (CSS miter joins).
+        // One color for every drawn side: the ring is one path that follows
+        // each corner's radius (Android draws it as one rounded path too).
+        let drawn = (0..<4).filter { widths[$0] > 0 && PamARGB.alpha(spec.borderColors[$0]) > 0 }
+        if let first = drawn.first, drawn.allSatisfy({ spec.borderColors[$0] == spec.borderColors[first] }) {
+            context.addPath(ring)
+            context.setFillColor(PamARGB.cgColor(spec.borderColors[first]))
+            context.fillPath(using: .evenOdd)
+            return
+        }
+        // Each side owns the region between its two corner miter lines (CSS
+        // joins). The miter runs from the outer corner through the inner one
+        // and on to the box's midline, so a rounded corner's arc (which lies
+        // well inside the border widths) is painted by its two sides.
         let outerCorners = [
             CGPoint(x: rect.minX, y: rect.minY),
             CGPoint(x: rect.maxX, y: rect.minY),
@@ -555,18 +583,21 @@ final class PamPaintLayer: CALayer {
             CGPoint(x: inner.maxX, y: inner.maxY),
             CGPoint(x: inner.minX, y: inner.maxY),
         ]
+        let miterEnds = (0..<4).map {
+            PamPaintLayer.miterEnd(outer: outerCorners[$0], inner: innerPoints[$0], rect: rect)
+        }
         // side index: 0 left (corners 3,0), 1 top (0,1), 2 right (1,2), 3 bottom (2,3)
         let sideCorners = [(3, 0), (0, 1), (1, 2), (2, 3)]
-        for side in 0..<4 where widths[side] > 0 && PamARGB.alpha(spec.borderColors[side]) > 0 {
+        for side in drawn {
             let (a, b) = sideCorners[side]
-            let trapezoid = CGMutablePath()
-            trapezoid.move(to: outerCorners[a])
-            trapezoid.addLine(to: outerCorners[b])
-            trapezoid.addLine(to: innerPoints[b])
-            trapezoid.addLine(to: innerPoints[a])
-            trapezoid.closeSubpath()
+            let region = CGMutablePath()
+            region.move(to: outerCorners[a])
+            region.addLine(to: outerCorners[b])
+            region.addLine(to: miterEnds[b])
+            region.addLine(to: miterEnds[a])
+            region.closeSubpath()
             context.saveGState()
-            context.addPath(trapezoid)
+            context.addPath(region)
             context.clip()
             context.addPath(ring)
             context.setFillColor(PamARGB.cgColor(spec.borderColors[side]))
