@@ -311,6 +311,39 @@ final class PamAnchoredScrollView: UIScrollView {
     let pamSticky = PamStickyRegistry()
     /// `pageTransform` of a horizontal pager (stories cube).
     let pamPageTransformer = PamPageTransformer()
+
+    /// The faces follow every offset, also the last one a programmatic glide
+    /// sets: a contentOffset change does not always run layoutSubviews
+    /// before the frame is drawn, and the faces stayed turned at an
+    /// intermediate step (the pager looked stopped between two pages).
+    override var contentOffset: CGPoint {
+        didSet {
+            guard horizontal, pamPageTransformer.kind != .none, contentOffset != oldValue else { return }
+            pamPageTransformer.apply(to: self)
+            #if DEBUG
+            if PamListTrace.enabled, pamOffsetGlide?.isRunning != true {
+                // Who moves a pager outside its glide (debug trace).
+                let caller = Thread.callStackSymbols.dropFirst(2).prefix(4)
+                    .map { $0.split(separator: " ", omittingEmptySubsequences: true).dropFirst(3).prefix(1).joined() }
+                    .joined(separator: " < ")
+                NSLog("PamGlide offset %.1f -> %.1f anim=%@ by %@", oldValue.x, contentOffset.x,
+                      layer.animationKeys()?.joined(separator: ",") ?? "-", caller)
+            }
+            #endif
+        }
+    }
+
+    #if DEBUG
+    /// Debug trace: the drawn (presentation) offset differs from the model
+    /// (an animation still runs on the pager's bounds).
+    private func pamTraceAnimatedBounds() {
+        guard PamListTrace.enabled, horizontal, pamPageTransformer.kind != .none,
+              let shown = layer.presentation()?.bounds.origin.x,
+              abs(shown - contentOffset.x) > 1 else { return }
+        NSLog("PamGlide drawn=%.1f model=%.1f anims=%@", shown, contentOffset.x,
+              layer.animationKeys()?.joined(separator: ",") ?? "-")
+    }
+    #endif
     /// `contentOffsetAnimationMs`: a changed requested offset glides there
     /// (one contentOffset per display frame, so layoutSubviews and the page
     /// transform run during it) instead of jumping; 0 jumps.
@@ -394,12 +427,26 @@ final class PamAnchoredScrollView: UIScrollView {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
         } else if pamPageTransformer.kind != .none {
             pamPageTransformer.apply(to: self)
+            #if DEBUG
+            pamTraceAnimatedBounds()
+            #endif
         }
     }
 
     /// Applies a requested `contentOffset` once the content extent along
     /// that axis is known; a request before measurement waits for layout.
     private func applyRequestedContentOffset() {
+        #if DEBUG
+        if PamListTrace.enabled, pamRequestedContentOffsetX != nil || pamRequestedContentOffsetY != nil {
+            NSLog(
+                "PamGlide request x=%@ y=%@ at=%.1f,%.1f tracking=%d dragging=%d decel=%d glide=%d",
+                pamRequestedContentOffsetX.map { String(format: "%.1f", $0) } ?? "-",
+                pamRequestedContentOffsetY.map { String(format: "%.1f", $0) } ?? "-",
+                contentOffset.x, contentOffset.y, isTracking ? 1 : 0, isDragging ? 1 : 0,
+                isDecelerating ? 1 : 0, pamOffsetGlide?.isRunning == true ? 1 : 0
+            )
+        }
+        #endif
         guard bounds.width > 0, bounds.height > 0, !isTracking, !isDragging else { return }
         var target = contentOffset
         var changed = false
@@ -3617,7 +3664,20 @@ final class PamOffsetGlide {
     /// True until the glide ended (reached, jumped or cancelled).
     var isRunning: Bool { link != nil }
 
+    #if DEBUG
+    private var lastTick: CFTimeInterval = 0
+    #endif
+
     fileprivate func tick(_ now: CFTimeInterval) {
+        #if DEBUG
+        if PamListTrace.enabled {
+            let gap = lastTick > 0 ? now - lastTick : 0
+            if gap > 0.05 || lastTick == 0 {
+                NSLog("PamGlide tick progress=%.2f gapMs=%.0f to=%.1f", min(1, (now - start) / duration), gap * 1_000, to.x)
+            }
+            lastTick = now
+        }
+        #endif
         guard let scroll else { return finish(jump: false) }
         // A finger down completes the glide at once (a pager never rests between pages).
         if scroll.isTracking { return finish(jump: true) }
@@ -3629,6 +3689,19 @@ final class PamOffsetGlide {
 
     func finish(jump: Bool) {
         guard let link else { return }
+        #if DEBUG
+        if PamListTrace.enabled {
+            NSLog("PamGlide finish jump=%d at=%.1f to=%.1f drawn=%.1f anims=%@", jump ? 1 : 0, scroll?.contentOffset.x ?? -1, to.x,
+                  scroll?.layer.presentation()?.bounds.origin.x ?? -1,
+                  scroll?.layer.animationKeys()?.joined(separator: ",") ?? "-")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak scroll] in
+                guard let scroll else { return }
+                NSLog("PamGlide +1s model=%.1f drawn=%.1f anims=%@", scroll.contentOffset.x,
+                      scroll.layer.presentation()?.bounds.origin.x ?? -1,
+                      scroll.layer.animationKeys()?.joined(separator: ",") ?? "-")
+            }
+        }
+        #endif
         link.invalidate()
         self.link = nil
         if jump { scroll?.contentOffset = to }

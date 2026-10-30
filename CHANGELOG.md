@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- iOS media: a released player is paused, emptied and freed on a
+  background queue after its loading is cancelled; the main thread never
+  waits on an item still loading over the network. `PamMediaRetireTests`.
+- iOS list trace: decelerating reads `fling` (UIScrollView keeps
+  `isDragging` through it) and changes made inside an animation (keyboard
+  follow) read `anim`; with the trace on, `PamGlide` lines log every
+  `contentOffset` request and glide stall (debug builds).
+- iOS: a list opened at its end whose rows still fit keeps following its
+  end over the key anchor.
+
 ## 1.46.9 - 2026-10-30
 
 iOS port of the Android list, keyboard, media and Pressable guarantees, iOS bubble borders and cube pager glide, Android document paint order and keyboardDismissMode on lists, on top of 1.46.8.
