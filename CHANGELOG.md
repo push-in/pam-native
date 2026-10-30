@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.46.9 - 2026-10-30
+
+iOS port of the Android list, keyboard, media and Pressable guarantees, iOS bubble borders and cube pager glide, Android document paint order and keyboardDismissMode on lists, on top of 1.46.8.
+
+- Android: siblings paint in document order with `zIndex` respected, like
+  React Native and iOS. A native `elevation` keeps its shadow but no longer
+  lifts the view above its later siblings; a view raised only to keep that
+  order casts no shadow. `PamPaintOrderTest`,
+  `PamZIndexHostInstrumentedTest`.
+- `keyboardDismissMode` (`on-drag` / `interactive`) applies to
+  `VirtualizedList`, `FlatList` and `SectionList` too. On Android a user drag
+  that scrolls the list closes the keyboard; nothing changes unless the
+  template sets it.
 - iOS virtual lists follow the native scrolling guarantees: a
   `scrollRequest` committed during the user's drag or fling is dropped
   unless the user asked for it (press, long press or submit since the
