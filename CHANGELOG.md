@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 1.46.10 - 2026-10-30
+
+iOS keyboard, cube pager, media and layout follow-ups to the 1.46.9 iOS port, on top of 1.46.9.
+
+- iOS keyboard: every commit made while the keyboard moves (and up to 1 s
+  after it settles) follows the keyboard's curve for the rest of its
+  animation, not only the first one; keyboard frames animate for the whole
+  keyboard animation.
+- iOS cube pager: faces follow every content offset (a programmatic jump or
+  the last glide step no longer leaves them turned); a view with a 3D layer
+  transform is laid out through bounds/center, never frame, so a face laid
+  out mid-turn rests without a shift; the pager turns the pages of a
+  wrapper content row (the widest child wider than the viewport), like
+  Android; a glide's clock starts at its first drawn step.
+- iOS: a requested scroll offset applies as soon as its content size
+  arrives.
+- iOS media: memory-cache hits and their decode leave the main thread; a
+  pager gliding to a page creates its players after the glide.
 - iOS media: a released player is paused, emptied and freed on a
   background queue after its loading is cancelled; the main thread never
   waits on an item still loading over the network. `PamMediaRetireTests`.
