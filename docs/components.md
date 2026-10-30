@@ -820,7 +820,7 @@ settles, unless a finger took over. iOS lists now jump by default too
 #### Native scrolling guarantees of long lists
 
 Any `VirtualizedList`, `VirtualGrid` or `SectionList` (chat, feed, comments)
-scrolls natively; no app code is needed for these (Android now, iOS next):
+scrolls natively; no app code is needed for these (Android and iOS):
 
 - **No PHP during a drag or fling.** Scrolling runs on the platform list. PHP
   hears only the phases an app binds (`scrollBeginDrag`, `scrollEndDrag`,
@@ -851,14 +851,15 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
   are within `endReachedThreshold` screens (RN semantics, up to 10) plus the
   rows a running fling still projects to travel (the platform spline), so a
   fling toward the end asks for the next page early instead of resting at a
-  temporary end (Android).
+  temporary end (Android; iOS uses UIScrollView's projected target).
 - **One window move per fling.** A `windowSize` list asks for the rows a
   released fling sweeps and the screen it lands on (the platform spline) in
   one request, built in one frame; nothing is released while it moves, and
   rows behind go with the next move that builds rows. Rows a commit changes
   while bound off screen build their views within the per-frame mount budget,
   always before they are drawn; an insert that lands mid-fling is checked
-  before the next draw so the rows on screen never jump (Android).
+  before the next draw so the rows on screen never jump (Android; iOS
+  sends the same one request per fling from UIScrollView's projected target).
 - **Visibility settles with the fling.** A `p-intersect` inside the list
   (an autoplay sensor, an impression) does not report the edges a fling
   sweeps past: it reports once the list rests, with the visibility it rests
@@ -867,7 +868,7 @@ scrolls natively; no app code is needed for these (Android now, iOS next):
 Covered by `packages/native/tests/list_native_scroll.php`,
 `packages/native/tests/list_window_size.php` and the Android
 `PamListNativeScrollInstrumentedTest` / `PamListFlingWindowInstrumentedTest` / `PamHeadInsertAnchorTest` /
-`PamIntersectionObserverInstrumentedTest`.
+`PamIntersectionObserverInstrumentedTest`; iOS `PamListNativeScrollTests`.
 
 To measure a list on a device (debug builds), enable the motion trace with
 `adb shell setprop log.tag.PamListTrace DEBUG` and reopen the screen: every
@@ -1264,9 +1265,9 @@ MediaPlayer::make($url)->autoPlay()->autoPlayWhenVisible(0.5, group: 'feed');
   `autoPlay` stays the play intent, so `autoPlay="false"` keeps a player
   paused whatever its visibility (data saver, an open sheet).
 - Covered routes, inactive tabs and the app in background never play.
-- Renderer support: Android (extension properties 1006 and 1007). Other
-  renderers declare and ignore them, so keep a visibility gate of your own
-  there (for example `p-intersect`).
+- Renderer support: Android and iOS (extension properties 1006 and 1007).
+  Other renderers declare and ignore them, so keep a visibility gate of
+  your own there (for example `p-intersect`).
 
 Set `thumbnail` to avoid an empty surface while a video prepares. The Android
 renderer keeps the poster in front of the video surface until the first frame
