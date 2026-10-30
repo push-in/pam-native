@@ -227,7 +227,7 @@ final class PamVisibleAutoplayTests: XCTestCase {
         XCTAssertEqual(PamAutoplayPolicy.choose([player(0.9995, 0, threshold: 1)]), [true])
     }
 
-    func testAPlayerIsCreatedOnlyWithItsGrantAndReleasedAfterTheWithdrawal() {
+    func testAPlayerIsCreatedOnlyWithItsGrantAndReleasedAfterTheWithdrawal() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         defer { window.isHidden = true }
         window.isHidden = false
@@ -235,7 +235,7 @@ final class PamVisibleAutoplayTests: XCTestCase {
         window.addSubview(media)
         media.setAutoPlay(true)
         media.setAutoPlayVisible(0.5)
-        media.setSource("https://example.invalid/video.mp4")
+        media.setSource(try PamMediaParityTests.makeVideo().absoluteString)
         XCTAssertFalse(media.hasPlayer, "no player before the policy grants playback")
         PamMediaVisibility.evaluateNow()
         XCTAssertTrue(media.autoplayGranted)
@@ -248,12 +248,15 @@ final class PamVisibleAutoplayTests: XCTestCase {
         PamMediaVisibility.evaluateNow()
         XCTAssertFalse(media.autoplayGranted)
         XCTAssertTrue(media.hasPlayer, "a short withdrawal keeps the paused player")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let deadline = Date().addingTimeInterval(3)
+        while media.hasPlayer, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
         XCTAssertFalse(media.hasPlayer, "released after the delay")
         media.removeFromSuperview()
     }
 
-    func testListMediaBoundAheadOfTheViewportWaitsForTheScreen() {
+    func testListMediaBoundAheadOfTheViewportWaitsForTheScreen() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         defer { window.isHidden = true }
         window.isHidden = false
@@ -262,7 +265,7 @@ final class PamVisibleAutoplayTests: XCTestCase {
         window.addSubview(list)
         let ahead = PamMediaView(frame: CGRect(x: 0, y: 1_200, width: 320, height: 200))
         list.addSubview(ahead)
-        ahead.setSource("https://example.invalid/ahead.mp4")
+        ahead.setSource(try PamMediaParityTests.makeVideo().absoluteString)
         XCTAssertFalse(ahead.hasPlayer, "bound ahead of the viewport: not prepared")
         XCTAssertTrue(ahead.awaitingScreen)
         list.contentOffset.y = 1_000

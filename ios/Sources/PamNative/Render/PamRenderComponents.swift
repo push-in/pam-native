@@ -566,6 +566,29 @@ final class PamVirtualListView: UIScrollView {
         if recognizer.state == .began {
             pamUserScrollStartedAt = CACurrentMediaTime()
         }
+        if recognizer.state == .ended || recognizer.state == .cancelled {
+            pamFinishInteractiveDismiss(recognizer)
+        }
+    }
+
+    /// `keyboardDismissMode="interactive"`: a drag released inside the
+    /// keyboard closes it (React Native's interactive mode). UIKit's own
+    /// tracking does not see a keyboard the engine laid the list out above
+    /// (the list ends at the keyboard's top), so the release is checked here.
+    private func pamFinishInteractiveDismiss(_ recognizer: UIPanGestureRecognizer) {
+        guard keyboardDismissMode == .interactive, let window else { return }
+        let keyboard = window.keyboardLayoutGuide.layoutFrame
+        guard keyboard.height > 1, keyboard.minY < window.bounds.maxY - 1 else { return }
+        if PamVirtualListView.releasesInsideKeyboard(
+            location: recognizer.location(in: window),
+            keyboardTop: keyboard.minY
+        ) {
+            window.endEditing(true)
+        }
+    }
+
+    static func releasesInsideKeyboard(location: CGPoint, keyboardTop: CGFloat) -> Bool {
+        location.y >= keyboardTop
     }
 
     override func didMoveToWindow() {
