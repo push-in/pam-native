@@ -8619,13 +8619,12 @@ fn engine_marker_matches(marker: &str, native_home: &Path, require_source: bool)
     if lines.first().copied() != Some(env!("CARGO_PKG_VERSION")) {
         return false;
     }
-    if let Some(expected) = protocol_fingerprint(native_home) {
-        if !lines
+    if let Some(expected) = protocol_fingerprint(native_home)
+        && !lines
             .iter()
             .any(|line| *line == format!("protocol={expected}"))
-        {
-            return false;
-        }
+    {
+        return false;
     }
     let Some(expected) = engine_source_fingerprint(native_home) else {
         return true;
