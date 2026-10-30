@@ -2,10 +2,15 @@
 
 ## Unreleased
 
-- Android: entrega FIFO dos batches do motor, inclusive após interação. Enviar
-  cada batch para a frente da fila invertia patches pendentes e podia anexar
-  filhos antes da criação do pai (`Node ... cannot contain children`). O flush
-  imediato da resposta à interação permanece, depois dos batches anteriores.
+## 1.46.8 - 2026-10-29
+
+Runtime batch FIFO fix (intermittent "cannot contain children"), nested Pressable long press, RN tail truncation and subpixel styled text on top of 1.46.7.
+
+- Android: engine batches are delivered in FIFO order, including after an
+  interaction. Sending each batch to the front of the queue reversed pending
+  patches and could attach children before their parent was created
+  (`Node ... cannot contain children`). The immediate flush of an
+  interaction's response stays, after the earlier batches.
 - Android Pressable: a nested Pressable without `onLongPress` lends the long
   press to the nearest enclosing Pressable that has one (never across a
   scroll view or list), like React Native, using that receiver's
