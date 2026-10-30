@@ -318,7 +318,7 @@ final class PamAnchoredScrollView: UIScrollView {
         didSet { if pamOffsetAnimationMs <= 0 { pamOffsetGlide?.finish(jump: true) } }
     }
     private var pamOffsetAppliedOnce = false
-    private var pamOffsetGlide: PamOffsetGlide?
+    private(set) var pamOffsetGlide: PamOffsetGlide?
 
     /// RN `keyboardShouldPersistTaps`; nil when absent or `always`.
     var pamKeyboardTaps: PamKeyboardTapController?
@@ -371,6 +371,7 @@ final class PamAnchoredScrollView: UIScrollView {
 
     override func layoutSubviews() {
         PamImageResidency.requestSweep()
+        PamMediaVisibility.schedule()
         let oldMax = previousMaxOffset
         let previousOffset = primaryOffset
         let distanceFromEnd = max(0, oldMax - previousOffset)
@@ -415,6 +416,14 @@ final class PamAnchoredScrollView: UIScrollView {
             changed = true
         }
         guard changed else { return }
+        // The same target again (a re-render while the glide runs, e.g. a
+        // progress or page-change handler): the running glide keeps its
+        // timing. Restarting it every commit crept a few points per frame
+        // (ease-in) and the pager stalled between two pages.
+        if let glide = pamOffsetGlide, glide.isRunning,
+           abs(glide.target.x - target.x) < 0.5, abs(glide.target.y - target.y) < 0.5 {
+            return
+        }
         let glides = pamOffsetAnimationMs > 0 && pamOffsetAppliedOnce && window != nil
             && !UIAccessibility.isReduceMotionEnabled
         pamOffsetAppliedOnce = true
@@ -531,6 +540,39 @@ final class PamAnchoredScrollView: UIScrollView {
 
 final class PamVirtualListView: UIScrollView {
     var onViewportChange: (() -> Void)?
+
+    /// Where a released fling will come to rest (UIScrollView's projected
+    /// `targetContentOffset`), nil when no fling runs.
+    var pamFlingTarget: CGPoint?
+
+    /// When the user's current drag began (CACurrentMediaTime), 0 before any.
+    private(set) var pamUserScrollStartedAt: CFTimeInterval = 0
+
+    /// A finger drag, or the deceleration it released, is moving the list.
+    var pamUserScrolling: Bool { isTracking || isDragging || isDecelerating }
+
+    /// Whether a programmatic scroll may move the list now. While the user's
+    /// own drag or fling moves it, only a request the user asked for (a press,
+    /// long press or submit dispatched after the gesture began, `userActionAt`)
+    /// takes over; any other request (an anchor, a follow-the-end, a window
+    /// shift) is dropped: setting the offset mid-deceleration cut the fling,
+    /// and running it once the list rested snapped it.
+    func pamAcceptsProgrammaticScroll(userActionAt: CFTimeInterval) -> Bool {
+        guard pamUserScrolling else { return true }
+        return userActionAt >= pamUserScrollStartedAt
+    }
+
+    @objc private func pamPanChanged(_ recognizer: UIPanGestureRecognizer) {
+        if recognizer.state == .began {
+            pamUserScrollStartedAt = CACurrentMediaTime()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Idempotent: UIKit ignores a target/action pair already added.
+        panGestureRecognizer.addTarget(self, action: #selector(pamPanChanged(_:)))
+    }
 
     /// In a window and not hidden by any ancestor (a prewarmed route is).
     var pamIsShown: Bool {
@@ -724,6 +766,8 @@ final class PamVirtualListView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         PamImageResidency.requestSweep()
+        // Media waiting for the screen (visible autoplay, prepare on screen).
+        PamMediaVisibility.schedule()
         maintainEndAnchor()
         if !horizontal {
             pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
@@ -3427,6 +3471,12 @@ final class PamOffsetGlide {
         self.link = link
         start = CACurrentMediaTime()
     }
+
+    /// Where the glide ends.
+    var target: CGPoint { to }
+
+    /// True until the glide ended (reached, jumped or cancelled).
+    var isRunning: Bool { link != nil }
 
     fileprivate func tick(_ now: CFTimeInterval) {
         guard let scroll else { return finish(jump: false) }
