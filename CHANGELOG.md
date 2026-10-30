@@ -1,6 +1,5 @@
 # Changelog
 
-
 ## Unreleased
 
 - iOS media: a released player is paused, emptied and freed on a
@@ -12,7 +11,6 @@
   `contentOffset` request and glide stall (debug builds).
 - iOS: a list opened at its end whose rows still fit keeps following its
   end over the key anchor.
-## Unreleased
 
 ## 1.46.9 - 2026-10-30
 
