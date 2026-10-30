@@ -3654,6 +3654,7 @@ final class PamOffsetGlide {
     private let to: CGPoint
     private let duration: CFTimeInterval
     private var start: CFTimeInterval = 0
+    private var started = false
     private var link: CADisplayLink?
     private let completion: (PamOffsetGlide) -> Void
 
@@ -3692,6 +3693,12 @@ final class PamOffsetGlide {
         guard let scroll else { return finish(jump: false) }
         // A finger down completes the glide at once (a pager never rests between pages).
         if scroll.isTracking { return finish(jump: true) }
+        // The clock starts at the first drawn step: a commit that kept the
+        // main thread busy (a page mounting) no longer eats the glide.
+        if !started {
+            started = true
+            start = now - 1.0 / 60.0
+        }
         let progress = min(1, (now - start) / duration)
         let eased = CGFloat(pamEaseInOutQuad(progress))
         scroll.contentOffset = CGPoint(x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased)

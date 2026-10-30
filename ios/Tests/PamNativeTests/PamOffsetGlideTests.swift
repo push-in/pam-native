@@ -118,4 +118,33 @@ final class PamOffsetGlideTests: XCTestCase {
         XCTAssertTrue(CATransform3DIsIdentity(page.layer.transform))
         XCTAssertEqual(page.frame, CGRect(x: 300, y: 0, width: 300, height: 600))
     }
+
+    /// A Row wrapping every page (with another node beside it) is the
+    /// content row: its children are the faces, the row never turns.
+    func testWrapperRowChildrenAreTheFaces() {
+        let scroll = PamAnchoredScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        scroll.horizontal = true
+        scroll.contentSize = CGSize(width: 900, height: 600)
+        let row = UIView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        row.tag = 5
+        scroll.addSubview(row)
+        let overlay = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 10))
+        overlay.tag = 6
+        scroll.addSubview(overlay)
+        let pages = (0..<3).map { index -> UIView in
+            let page = UIView(frame: CGRect(x: CGFloat(index) * 300, y: 0, width: 300, height: 600))
+            page.tag = 10 + index
+            row.addSubview(page)
+            return page
+        }
+        XCTAssertTrue(PamPageTransformer.pageRow(scroll) === row)
+        scroll.pamPageTransformer.setKind(PamPageTransformKind.cube.rawValue, on: scroll)
+        scroll.contentOffset = CGPoint(x: 150, y: 0)
+        XCTAssertTrue(CATransform3DIsIdentity(row.layer.transform), "the wrapper never turns")
+        XCTAssertFalse(CATransform3DIsIdentity(pages[0].layer.transform))
+        XCTAssertFalse(CATransform3DIsIdentity(pages[1].layer.transform))
+        scroll.setContentOffset(CGPoint(x: 300, y: 0), animated: false)
+        XCTAssertTrue(pages.allSatisfy { CATransform3DIsIdentity($0.layer.transform) }, "at rest on page 1")
+        XCTAssertEqual(pages[1].frame.minX, 300)
+    }
 }
