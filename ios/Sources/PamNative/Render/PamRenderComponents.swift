@@ -3723,6 +3723,8 @@ final class PamOffsetGlide {
         link.invalidate()
         self.link = nil
         if jump { scroll?.contentOffset = to }
+        // Media held back while the pager glided prepare now.
+        PamMediaVisibility.schedule()
         completion(self)
     }
 }

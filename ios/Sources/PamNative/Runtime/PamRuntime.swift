@@ -832,6 +832,11 @@ public final class PamRuntime {
         keyboardLayoutAnimation = PamKeyboardFollow.animation(
             duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
         )
+        #if DEBUG
+        if PamListTrace.enabled {
+            NSLog("PamKeyboard %@ overlap=%.1f durationMs=%.0f", hiding ? "hide" : "change", overlap, duration * 1_000)
+        }
+        #endif
         updateKeyboardInset(bottom: Float(overlap))
     }
 
@@ -1652,6 +1657,11 @@ public final class PamRuntime {
             // own response to the keyboard (PHP), which arrives a few frames
             // later and used to jump to its end state.
             let remaining = animation.expires - PamKeyboardFollow.settleSlack - now
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamKeyboard commit animated remainingMs=%.0f batches=%ld", remaining * 1_000, mutations.count)
+            }
+            #endif
             UIView.animate(
                 withDuration: max(PamKeyboardFollow.minimumDuration, remaining),
                 delay: 0,
@@ -1665,6 +1675,11 @@ public final class PamRuntime {
                 self.renderer.hostView?.layoutIfNeeded()
             }
         } else {
+            #if DEBUG
+            if PamListTrace.enabled, let animation = keyboardLayoutAnimation {
+                NSLog("PamKeyboard commit late byMs=%.0f", (now - animation.expires) * 1_000)
+            }
+            #endif
             if let animation = keyboardLayoutAnimation, now > animation.expires { keyboardLayoutAnimation = nil }
             renderer.commit(mutations)
         }
@@ -1827,7 +1842,7 @@ struct PamFramePump {
 enum PamKeyboardFollow {
     /// A commit arriving this long after the keyboard settled (the
     /// application's response to it) still eases in instead of jumping.
-    static let settleSlack: TimeInterval = 0.35
+    static let settleSlack: TimeInterval = 1.0
     /// The shortest easing of a late commit.
     static let minimumDuration: TimeInterval = 0.2
 
