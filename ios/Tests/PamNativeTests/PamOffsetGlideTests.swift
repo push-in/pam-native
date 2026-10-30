@@ -62,4 +62,25 @@ final class PamOffsetGlideTests: XCTestCase {
         XCTAssertTrue(CATransform3DIsIdentity(pages[1].layer.transform), "the front page faces the viewer")
         XCTAssertTrue(CATransform3DIsIdentity(pages[0].layer.transform), "the page left behind is cleared")
     }
+
+    func testCubeFacesFollowAProgrammaticJumpWithoutALayoutPass() {
+        let scroll = PamAnchoredScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        scroll.horizontal = true
+        scroll.contentSize = CGSize(width: 900, height: 600)
+        let pages = (0..<3).map { index -> UIView in
+            let page = UIView(frame: CGRect(x: CGFloat(index) * 300, y: 0, width: 300, height: 600))
+            page.tag = 10 + index
+            scroll.addSubview(page)
+            return page
+        }
+        scroll.pamPageTransformer.setKind(PamPageTransformKind.cube.rawValue, on: scroll)
+        // An intermediate step turned the faces.
+        scroll.contentOffset = CGPoint(x: 120, y: 0)
+        XCTAssertFalse(CATransform3DIsIdentity(pages[0].layer.transform))
+        // A jump to page 1: the resting faces at once.
+        scroll.setContentOffset(CGPoint(x: 300, y: 0), animated: false)
+        XCTAssertTrue(CATransform3DIsIdentity(pages[1].layer.transform))
+        XCTAssertTrue(CATransform3DIsIdentity(pages[0].layer.transform))
+        XCTAssertTrue(CATransform3DIsIdentity(pages[2].layer.transform))
+    }
 }
