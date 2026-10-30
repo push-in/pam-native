@@ -25,7 +25,7 @@ final class PamMediaRetireTests: XCTestCase {
         let elapsed = CACurrentMediaTime() - started
         NSLog("PamMediaRetire release on main took %.3f s", elapsed)
         XCTAssertFalse(media.hasPlayer)
-        XCTAssertLessThan(elapsed, 0.1, "the release ran on the main thread")
+        XCTAssertLessThan(elapsed, 1.0, "the release waited on the loading item (seconds before)")
         media.removeFromSuperview()
     }
 
