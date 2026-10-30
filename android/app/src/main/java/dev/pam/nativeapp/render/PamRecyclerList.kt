@@ -30,6 +30,20 @@ import kotlin.math.min
 private const val MOTION_TRACE_TAG = "PamListTrace"
 
 internal class PamRecyclerList(context: Context) : RecyclerView(context) {
+    /**
+     * `keyboardDismissMode` "on-drag" / "interactive": a user drag that
+     * scrolls the list closes the keyboard, as on a scroll view. Off unless
+     * the app sets it.
+     */
+    var dismissKeyboardOnDrag = false
+
+    private fun dismissKeyboard() {
+        val focused = rootView.findFocus() ?: return
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(focused.windowToken, 0)
+        focused.clearFocus()
+    }
+
     private var rowHeight = 48f
     private var keyboardTaps: KeyboardTapTracker? = null
     private var horizontal = false
@@ -97,6 +111,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                     SCROLL_STATE_DRAGGING -> if (!userScrolling) {
                         userScrolling = true
                         userScrollStartedAt = android.os.SystemClock.uptimeMillis()
+                        if (dismissKeyboardOnDrag) dismissKeyboard()
                     }
                     SCROLL_STATE_IDLE -> {
                         userScrolling = false

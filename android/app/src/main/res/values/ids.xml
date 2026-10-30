@@ -9,4 +9,7 @@
     <item name="pam_media_clock" type="id" />
     <item name="pam_media_clock_format" type="id" />
     <item name="pam_media_progress" type="id" />
+    <item name="pam_stacking_z_index" type="id" />
+    <item name="pam_stacking_keyboard_lift" type="id" />
+    <item name="pam_stacking_elevated" type="id" />
 </resources>
