@@ -561,4 +561,5 @@ enum PropKey: int
     case MediaAutoPlayGroup = 1007;
     case PressBackgroundColor = 1008;
     case KeyboardProgress = 1009;
+    case ModalNavigationBarColor = 1010;
 }

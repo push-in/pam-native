@@ -185,7 +185,16 @@ internal fun modalNavigationBarStyle(
     lightAppearance: Boolean,
     windowBackground: Int,
     sheet: Boolean = false,
+    authoredColor: Int? = null,
 ): ModalNavigationBarStyle {
+    if (authoredColor != null) {
+        // Modal `navigationBarColor`: that colour, no scrim, buttons by contrast.
+        return ModalNavigationBarStyle(
+            color = authoredColor,
+            contrastEnforced = false,
+            lightAppearance = sdkInt >= Build.VERSION_CODES.O && isLightNavigationBarColor(authoredColor),
+        )
+    }
     val light = lightAppearance && sdkInt >= Build.VERSION_CODES.O
     val color = when {
         translucent && sdkInt >= Build.VERSION_CODES.Q -> Color.TRANSPARENT
@@ -219,9 +228,29 @@ internal fun modalNavigationBarLightAppearance(
     themeDarkIcons
 }
 
+/** True when [argb] is visible and light enough to need dark buttons. */
+internal fun isLightNavigationBarColor(argb: Int): Boolean {
+    if ((argb ushr 24) == 0) return false
+    val r = (argb shr 16) and 0xFF
+    val g = (argb shr 8) and 0xFF
+    val b = argb and 0xFF
+    return 0.299 * r + 0.587 * g + 0.114 * b > 160.0
+}
+
 /** RN `WindowUtil` LightNavigationBarColor / DarkNavigationBarColor. */
 internal const val MODAL_LIGHT_NAVIGATION_BAR = 0xE6FFFFFF.toInt()
 internal const val MODAL_DARK_NAVIGATION_BAR = 0x801B1B1B.toInt()
+
+/**
+ * The view a modal focuses when it opens without autoFocus: never an input
+ * (focusing one shows its caret with no keyboard; RN focuses none).
+ */
+internal fun isModalInitialFocusCandidate(
+    isInput: Boolean,
+    focusable: Boolean,
+    enabled: Boolean,
+    visible: Boolean,
+): Boolean = !isInput && focusable && enabled && visible
 
 internal fun isPointOutsideModalChild(
     x: Float,
@@ -369,6 +398,12 @@ internal class PamModalHost @JvmOverloads constructor(
 
     init {
         visibility = View.INVISIBLE
+        // The window's first traversal focuses the first view focusable in
+        // touch mode: without this the first input took it (blinking caret,
+        // no keyboard) in a modal that never asked for focus. An input still
+        // focuses on tap or autoFocus; the container holds the idle focus.
+        content.isFocusable = true
+        content.isFocusableInTouchMode = true
         content.clipChildren = false
         content.clipToPadding = false
         content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -453,6 +488,14 @@ internal class PamModalHost @JvmOverloads constructor(
     fun setHardwareAccelerated(value: Boolean) {
         hardwareAccelerated = value
         dialog?.let(::applyWindowConfiguration)
+    }
+
+    private var navigationBarColor: Int? = null
+
+    fun setNavigationBarColor(value: Int?) {
+        if (navigationBarColor == value) return
+        navigationBarColor = value
+        dialog?.let(::applyNavigationBar)
     }
 
     fun setNavigationBarTranslucent(value: Boolean) {
@@ -599,6 +642,7 @@ internal class PamModalHost @JvmOverloads constructor(
             ),
             windowBackground = PamAppearance.color(context, R.color.pam_window_background, dark),
             sheet = presentation == PRESENTATION_SHEET,
+            authoredColor = navigationBarColor,
         )
         window.navigationBarColor = style.color
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1015,7 +1059,7 @@ internal class PamModalHost @JvmOverloads constructor(
             // An auto-focused input that already took focus keeps it: moving
             // focus to the first focusable (a header button) would drop the
             // keyboard it is opening.
-            if (dialog === modal && modal.isPresentedWindow && (focusKeyboard || content.findFocus() == null)) {
+            if (dialog === modal && modal.isPresentedWindow && (focusKeyboard || content.findFocus().let { it == null || it === content })) {
                 val focus = if (focusKeyboard) {
                     content.findFirstEditText()
                 } else {
@@ -1825,9 +1869,10 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     private fun View.findFirstFocusable(): View? {
-        if (this !== content && isFocusable && isEnabled && visibility == View.VISIBLE) {
+        if (this !== content && isModalInitialFocusCandidate(this is EditText, isFocusable, isEnabled, visibility == View.VISIBLE)) {
             return this
         }
+        if (this is EditText) return null
         if (this !is ViewGroup) return null
         repeat(childCount) { index ->
             getChildAt(index).findFirstFocusable()?.let { return it }

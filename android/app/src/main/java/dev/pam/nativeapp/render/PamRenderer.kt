@@ -3842,6 +3842,8 @@ class PamRenderer(
                 (view as? PamModalHost)?.setHardwareAccelerated(value.flag())
             PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setNavigationBarTranslucent(value.flag())
+            PropKey.MODAL_NAVIGATION_BAR_COLOR ->
+                (view as? PamModalHost)?.setNavigationBarColor(value.integer().toInt())
             PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setStatusBarTranslucent(value.flag())
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
@@ -4860,6 +4862,8 @@ class PamRenderer(
                 (view as? PamModalHost)?.setHardwareAccelerated(false)
             PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setNavigationBarTranslucent(false)
+            PropKey.MODAL_NAVIGATION_BAR_COLOR ->
+                (view as? PamModalHost)?.setNavigationBarColor(null)
             PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setStatusBarTranslucent(false)
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
