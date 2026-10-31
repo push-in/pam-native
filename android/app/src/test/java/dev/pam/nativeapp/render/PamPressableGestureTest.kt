@@ -8,6 +8,12 @@ import org.junit.Test
 
 class PamPressableGestureTest {
     @Test
+    fun aDoubleTapSurfaceNeverDimsOnPress() {
+        assertFalse(showsPressFeedback(hasDoubleTap = true))
+        assertTrue(showsPressFeedback(hasDoubleTap = false))
+    }
+
+    @Test
     fun recognizedGestureCancelsCompetingPressSemantics() {
         assertTrue(gestureRecognitionCancelsPress(recognized = true, pressActive = true))
         assertFalse(gestureRecognitionCancelsPress(recognized = false, pressActive = true))
