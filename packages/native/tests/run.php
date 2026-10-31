@@ -2023,6 +2023,7 @@ $modalElement = Modal::make(
     ->transparent()
     ->hardwareAccelerated()
     ->navigationBarTranslucent()
+    ->navigationBarColor(0xFF000000)
     ->statusBarTranslucent()
     ->allowSwipeDismissal()
     ->onRequestClose(static function () use (&$modalRequestedClose): void {
@@ -2059,6 +2060,8 @@ $assert(
             ->properties()[PropKey::ModalHardwareAccelerated->value] === true
         && $modalElement
             ->properties()[PropKey::ModalNavigationBarTranslucent->value] === true
+        && $modalElement
+            ->properties()[PropKey::ModalNavigationBarColor->value] === 0xFF000000
         && $modalElement
             ->properties()[PropKey::ModalStatusBarTranslucent->value] === true
         && $modalElement

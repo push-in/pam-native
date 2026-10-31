@@ -42,6 +42,23 @@ class PamBottomSheetSizingTest {
      * presentations keep fitting the system bars unless translucent.
      */
     @Test
+    fun anAuthoredNavigationBarColorIsPaintedWithoutScrimAndButtonsByContrast() {
+        val black = modalNavigationBarStyle(35, translucent = true, lightAppearance = true, windowBackground = -1, authoredColor = 0xFF000000.toInt())
+        assertEquals(0xFF000000.toInt(), black.color)
+        assertEquals(false, black.contrastEnforced)
+        assertEquals(false, black.lightAppearance)
+        val white = modalNavigationBarStyle(35, translucent = false, lightAppearance = false, windowBackground = 0, authoredColor = -1)
+        assertEquals(true, white.lightAppearance)
+    }
+
+    @Test
+    fun aModalOpeningWithoutAutoFocusNeverFocusesAnInput() {
+        assertEquals(false, isModalInitialFocusCandidate(isInput = true, focusable = true, enabled = true, visible = true))
+        assertEquals(true, isModalInitialFocusCandidate(isInput = false, focusable = true, enabled = true, visible = true))
+        assertEquals(false, isModalInitialFocusCandidate(isInput = false, focusable = true, enabled = false, visible = true))
+    }
+
+    @Test
     fun bottomSheetWindowIsAlwaysEdgeToEdgeLikeTheGorhomSheet() {
         assertEquals(true, modalWindowEdgeToEdge(presentation = 3, statusBarTranslucent = false, navigationBarTranslucent = false))
         assertEquals(false, modalWindowEdgeToEdge(presentation = 1, statusBarTranslucent = false, navigationBarTranslucent = false))

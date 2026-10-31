@@ -931,13 +931,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         if (pressInDispatched) return
         pressInDispatched = true
         isPressed = true
-        pressedBackground?.setPressed(true)
-        animate()
-            .alpha(pressOpacity)
-            .scaleX(targetScaleX * pressScale)
-            .scaleY(targetScaleY * pressScale)
-            .setDuration(PRESS_IN_ANIMATION_MS)
-            .start()
+        if (showsPressFeedback(hasDoubleTap = onDoubleTap != null)) {
+            pressedBackground?.setPressed(true)
+            animate()
+                .alpha(pressOpacity)
+                .scaleX(targetScaleX * pressScale)
+                .scaleY(targetScaleY * pressScale)
+                .setDuration(PRESS_IN_ANIMATION_MS)
+                .start()
+        }
         onPressedStateChanged?.invoke(true)
         onPressIn?.invoke(pointer)
     }
@@ -1214,3 +1216,10 @@ internal fun mapToParentSpace(target: View, vector: FloatArray): Boolean {
     inverse.mapVectors(vector)
     return true
 }
+
+/**
+ * A surface that also takes a double tap (like to heart, tap to zoom) shows
+ * no press dimming: each tap of the double tap would flash it, and RN's
+ * Pressable has no default feedback there.
+ */
+internal fun showsPressFeedback(hasDoubleTap: Boolean): Boolean = !hasDoubleTap

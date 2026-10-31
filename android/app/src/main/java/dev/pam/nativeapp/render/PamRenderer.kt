@@ -1004,7 +1004,8 @@ class PamRenderer(
         deferRowOrder = true
         pamTraceSection("PamCommit.mutations") {
             try {
-            batches.forEach { batch ->
+            batches.forEach { rawBatch ->
+                val batch = transitionSpecsFirst(rawBatch)
                 batch.forEach { mutation ->
                     when (mutation) {
                         is Mutation.Create -> {
@@ -3842,6 +3843,8 @@ class PamRenderer(
                 (view as? PamModalHost)?.setHardwareAccelerated(value.flag())
             PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setNavigationBarTranslucent(value.flag())
+            PropKey.MODAL_NAVIGATION_BAR_COLOR ->
+                (view as? PamModalHost)?.setNavigationBarColor(value.integer().toInt())
             PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setStatusBarTranslucent(value.flag())
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
@@ -4860,6 +4863,8 @@ class PamRenderer(
                 (view as? PamModalHost)?.setHardwareAccelerated(false)
             PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setNavigationBarTranslucent(false)
+            PropKey.MODAL_NAVIGATION_BAR_COLOR ->
+                (view as? PamModalHost)?.setNavigationBarColor(null)
             PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
                 (view as? PamModalHost)?.setStatusBarTranslucent(false)
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
@@ -11254,3 +11259,25 @@ private fun PropValue.protocolScalar(): WireValue? = when (this) {
     is PropValue.Flag -> WireValue.Flag(value)
     else -> null
 }
+
+/**
+ * A commit that turns a transition on and moves the property it animates
+ * (a class adding `transition: transform` with the first zoom) animates that
+ * very change: the transition rule (and its animate-changes switch) is applied before the batch's other
+ * updates. Order is otherwise kept; a batch without a transition spec is
+ * returned as is.
+ */
+internal fun transitionSpecsFirst(batch: List<Mutation>): List<Mutation> {
+    if (batch.none(::isTransitionSetup)) return batch
+    val (specs, rest) = batch.partition(::isTransitionSetup)
+    // Specs of nodes created in this batch must follow their Create.
+    val created = rest.mapNotNullTo(HashSet()) { (it as? Mutation.Create)?.node?.id }
+    val early = specs.filter { (it as Mutation.Update).id !in created }
+    if (early.isEmpty()) return batch
+    val earlySet = early.toHashSet()
+    return early + batch.filter { it !in earlySet }
+}
+
+private fun isTransitionSetup(mutation: Mutation): Boolean =
+    mutation is Mutation.Update &&
+        (mutation.key == PropKey.TRANSITION_SPEC || mutation.key == PropKey.ANIMATE_CHANGES)

@@ -739,6 +739,7 @@ pub enum PropKey {
     MediaAutoPlayGroup = 1007,
     PressBackgroundColor = 1008,
     KeyboardProgress = 1009,
+    ModalNavigationBarColor = 1010,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1298,6 +1299,7 @@ impl TryFrom<u16> for PropKey {
             1007 => Ok(Self::MediaAutoPlayGroup),
             1008 => Ok(Self::PressBackgroundColor),
             1009 => Ok(Self::KeyboardProgress),
+            1010 => Ok(Self::ModalNavigationBarColor),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2243,13 +2245,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1009 {
+        for value in EXTENSION_BASE..=1010 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1010).is_err());
+        assert!(PropKey::try_from(1011).is_err());
     }
 
     #[test]
