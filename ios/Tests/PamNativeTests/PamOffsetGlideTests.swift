@@ -33,6 +33,40 @@ final class PamOffsetGlideTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.x, 300, accuracy: 0.5)
     }
 
+    /// A commit that resets the duration to 0 (a geometry report or a data
+    /// refresh) while a page change glides must not snap it: the glide ends
+    /// on its own; only the next new target jumps.
+    func testDurationResetMidGlideKeepsTheGlideAndTheNextTargetJumps() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        let scroll = PamAnchoredScrollView(frame: window.bounds)
+        scroll.horizontal = true
+        scroll.contentSize = CGSize(width: 900, height: 600)
+        window.addSubview(scroll)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        scroll.pamOffsetAnimationMs = 280
+        scroll.pamRequestedContentOffsetX = 0
+        scroll.layoutIfNeeded()
+        scroll.pamRequestedContentOffsetX = 300
+        scroll.layoutIfNeeded()
+        guard let glide = scroll.pamOffsetGlide else { return XCTFail("no glide started") }
+        RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 30.0))
+        scroll.pamOffsetAnimationMs = 0
+        scroll.pamRequestedContentOffsetX = 300
+        scroll.layoutIfNeeded()
+        XCTAssertTrue(glide.isRunning, "resetting the duration left the page change gliding")
+        XCTAssertLessThan(scroll.contentOffset.x, 299.5, "the page change was not snapped")
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline, glide.isRunning {
+            RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60.0))
+        }
+        XCTAssertEqual(scroll.contentOffset.x, 300, accuracy: 0.5)
+        scroll.pamRequestedContentOffsetX = 600
+        scroll.layoutIfNeeded()
+        XCTAssertNil(scroll.pamOffsetGlide, "with duration 0 a new target jumps")
+        XCTAssertEqual(scroll.contentOffset.x, 600, accuracy: 0.5)
+    }
+
     func testCubeFacesFollowTheFinalOffsetOfAGlide() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
         let scroll = PamAnchoredScrollView(frame: window.bounds)

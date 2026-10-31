@@ -188,6 +188,19 @@ final class PamListNativeScrollTests: XCTestCase {
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: true, now: 10))
         XCTAssertNil(PamKeyboardFollow.animation(duration: 0, curve: 7, reduced: false, now: 10))
     }
+
+    /// A busy runtime that delivers the layout's response to the keyboard
+    /// after it settled: that first frame still eases in over the keyboard's
+    /// duration (it used to jump); later late frames apply at once.
+    func testLateFirstResponseToTheKeyboardStillEasesIn() throws {
+        let animation = try XCTUnwrap(PamKeyboardFollow.animation(duration: 0.25, curve: 7, reduced: false, now: 10))
+        let during = try XCTUnwrap(PamKeyboardFollow.commitDuration(animation, responsePending: true, now: 10.1))
+        XCTAssertEqual(during, 0.2, accuracy: 0.001, "the rest of the keyboard animation, at least the minimum")
+        let late = try XCTUnwrap(PamKeyboardFollow.commitDuration(animation, responsePending: true, now: 11.7))
+        XCTAssertEqual(late, 0.25, accuracy: 0.001, "a late first response follows the keyboard's whole duration")
+        XCTAssertNil(PamKeyboardFollow.commitDuration(animation, responsePending: false, now: 11.7), "only the first response")
+        XCTAssertNil(PamKeyboardFollow.commitDuration(animation, responsePending: true, now: 16.5), "past the late window it applies at once")
+    }
 }
 
 /// Visible autoplay (Android `PamAutoplayPolicyTest`, `PamVisibleAutoplayInstrumentedTest`).

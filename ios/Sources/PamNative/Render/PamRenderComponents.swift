@@ -383,10 +383,12 @@ final class PamAnchoredScrollView: PamContentScrollView {
     #endif
     /// `contentOffsetAnimationMs`: a changed requested offset glides there
     /// (one contentOffset per display frame, so layoutSubviews and the page
-    /// transform run during it) instead of jumping; 0 jumps.
-    var pamOffsetAnimationMs = 0 {
-        didSet { if pamOffsetAnimationMs <= 0 { pamOffsetGlide?.finish(jump: true) } }
-    }
+    /// transform run during it) instead of jumping; 0 makes the next
+    /// requested offset jump. Turning it off while a glide runs leaves that
+    /// glide alone: an unrelated commit (a geometry report, a data refresh)
+    /// that resets the duration must not snap a page change the reader just
+    /// started. A new target finishes the glide where it is applied.
+    var pamOffsetAnimationMs = 0
     private var pamOffsetAppliedOnce = false
     private(set) var pamOffsetGlide: PamOffsetGlide?
 
