@@ -56,6 +56,8 @@ internal class PamScrollContainer @JvmOverloads constructor(
     /** `contentOffsetAnimationMs`: a changed contentOffset glides instead of jumping. */
     private var offsetAnimationMs = 0L
     private var offsetAnimator: ValueAnimator? = null
+    private var glideTargetX = 0
+    private var glideTargetY = 0
     private var offsetAppliedOnce = false
     private var offsetAwaitsLayout = false
     private var previousPrimaryMaxOffset = 0
@@ -300,8 +302,9 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     fun setOffsetAnimationMs(value: Long) {
+        // A reset to 0 (a later commit, e.g. a geometry report) only makes the
+        // next new target jump; a glide already running ends on its own.
         offsetAnimationMs = value.coerceIn(0L, MAX_OFFSET_ANIMATION_MS)
-        if (offsetAnimationMs == 0L) finishOffsetAnimation(jump = true)
     }
 
     /**
@@ -314,6 +317,8 @@ internal class PamScrollContainer @JvmOverloads constructor(
         offsetAnimator?.cancel()
         val startX = scrollXOf(activeScroll)
         val startY = scrollYOf(activeScroll)
+        glideTargetX = x
+        glideTargetY = y
         offsetAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = offsetAnimationMs
             interpolator = AccelerateDecelerateInterpolator()
@@ -764,6 +769,18 @@ internal class PamScrollContainer @JvmOverloads constructor(
             return
         }
         offsetAwaitsLayout = false
+        if (offsetAnimator != null && pamRequestKeepsGlide(
+                hasRequestedOffsetX, requestedOffsetX,
+                hasRequestedOffsetY, requestedOffsetY,
+                glideTargetX, glideTargetY,
+            )
+        ) {
+            // The running glide already heads there: re-requesting its target
+            // (a re-render) neither restarts nor snaps it.
+            hasRequestedOffsetX = false
+            hasRequestedOffsetY = false
+            return
+        }
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
         val glide = offsetAnimationMs > 0L && offsetAppliedOnce && !pointerDown &&
@@ -1436,6 +1453,16 @@ internal fun pamOnePageTarget(
  * away by the next sticky margin box at [nextTop].
  */
 /** Offset at [fraction] of a glide from [from] to [to], rounded to whole pixels. */
+/** True when a pending offset request matches the running glide's target. */
+internal fun pamRequestKeepsGlide(
+    hasX: Boolean,
+    requestedX: Int,
+    hasY: Boolean,
+    requestedY: Int,
+    targetX: Int,
+    targetY: Int,
+): Boolean = (!hasX || requestedX == targetX) && (!hasY || requestedY == targetY)
+
 internal fun pamLerpOffset(from: Int, to: Int, fraction: Float): Int =
     (from + (to - from) * fraction.coerceIn(0f, 1f)).roundToInt()
 
