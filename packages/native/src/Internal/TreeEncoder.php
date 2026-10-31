@@ -128,7 +128,7 @@ final class TreeEncoder
     /** @var array<int, array<string|int, string>> unkeyed child segments by kind and slot */
     private static array $segmentNames = [];
 
-    /** @var array<int, string> encoded integers */
+    /** @var array<int, string> Encoded small integers; route IDs and timestamps are not memoized. */
     private static array $encodedIntegers = [];
 
     /**
@@ -1259,11 +1259,14 @@ final class TreeEncoder
     private static function encodeInteger(int $value): string
     {
         $encoded = "\x02".pack('P', $value);
-        if (count(self::$encodedIntegers) >= 4096) {
-            self::$encodedIntegers = [];
+        // Only the small, frequently reused values (flags, enums and sizes)
+        // benefit from interning. IDs and timestamps otherwise fill the cache
+        // on every navigation even though their encoded bytes never recur.
+        if ($value >= -1 && $value <= 255) {
+            self::$encodedIntegers[$value] = $encoded;
         }
 
-        return self::$encodedIntegers[$value] = $encoded;
+        return $encoded;
     }
 
     private static function encodeString(string $value): string

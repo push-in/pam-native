@@ -7645,6 +7645,9 @@ require __DIR__.'/launch_url.php';
 require __DIR__.'/handler_purity.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
+// Heap measurements need an isolated process, without prior tests' retained fixtures.
+passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg(__DIR__.'/navigation_memory.php'), $navigationMemoryStatus);
+$assert($navigationMemoryStatus === 0, 'Navigation memory regression harness must pass.');
 require __DIR__.'/media_idle_surface.php';
 require __DIR__.'/media_autoplay_visible.php';
 require __DIR__.'/arch_v2_signals.php';
