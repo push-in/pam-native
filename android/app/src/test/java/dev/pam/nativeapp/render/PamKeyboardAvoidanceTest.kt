@@ -284,4 +284,13 @@ class PamKeyboardAvoidanceTest {
         assertEquals(0, surfaceKeyboardInsetForHost(imeInset = 0, windowBottom = 2_340, hostBottom = 2_208))
         assertEquals(0, surfaceKeyboardInsetForHost(imeInset = 50, windowBottom = 2_340, hostBottom = 2_208))
     }
+
+    @Test
+    fun interactiveSheetRisesToTheSafeTopAndShrinksAboveTheKeyboard() {
+        // Fits: the whole sheet rides on the keyboard.
+        assertEquals(800 to -700f, interactiveSheetKeyboardLayout(800, 2000, 700))
+        // Too tall: the top stops at the safe edge and the sheet shrinks.
+        assertEquals(1000 to -1000f, interactiveSheetKeyboardLayout(1600, 2000, 1000))
+        assertEquals(1600 to 0f, interactiveSheetKeyboardLayout(1600, 2000, 0))
+    }
 }
