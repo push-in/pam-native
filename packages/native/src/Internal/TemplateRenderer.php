@@ -449,6 +449,8 @@ final class TemplateRenderer
         'thumbColor' => PropKey::SwitchThumbColor,
         'selected' => PropKey::Selected,
         'rippleColor' => PropKey::RippleColor,
+        'pressedBackgroundColor' => PropKey::PressBackgroundColor,
+        'keyboardProgress' => PropKey::KeyboardProgress,
         'pressedOpacity' => PropKey::PressOpacity,
         'pressedScale' => PropKey::PressScale,
         'collapsable' => PropKey::Collapsable,
@@ -4620,6 +4622,7 @@ final class TemplateRenderer
                 'dark' => ScrollIndicatorStyle::Dark->value,
                 'light' => ScrollIndicatorStyle::Light->value,
             ]),
+            PropKey::PressBackgroundColor,
             PropKey::BackgroundColor,
             PropKey::TextColor,
             PropKey::BorderColor,
@@ -5111,6 +5114,9 @@ final class TemplateRenderer
             PropKey::ScrollKeyboardInset,
             PropKey::ListFullSpan,
             => self::boolValue($value, "Template {$key->name}"),
+            PropKey::KeyboardProgress => $value instanceof \Pam\Native\Animation\KeyboardProgress
+                ? $value->encode()
+                : (is_string($value) && $value !== '' ? $value : null),
             PropKey::AnimationProgram => $value instanceof Animation
                 ? $value->encode()
                 : (is_string($value) && $value !== '' ? $value : null),

@@ -91,6 +91,11 @@ final class Pressable extends Element
             : $pressable->withProperty(PropKey::RippleRadius, max(0.0, $radius));
     }
 
+    public function pressedBackgroundColor(int $color): self
+    {
+        return $this->withProperty(PropKey::PressBackgroundColor, $color);
+    }
+
     public function pressedOpacity(float $opacity): self
     {
         return $this->withProperty(PropKey::PressOpacity, min(1.0, max(0.0, $opacity)));

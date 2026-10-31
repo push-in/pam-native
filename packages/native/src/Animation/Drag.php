@@ -58,6 +58,7 @@ final readonly class Drag implements Stringable
         private bool $snapOnRelease = true,
         private bool $unbounded = false,
         private array $holds = [],
+        private float $follow = 1.0,
     ) {
     }
 
@@ -97,6 +98,7 @@ final readonly class Drag implements Stringable
             $this->snapOnRelease,
             $this->unbounded,
             $this->holds,
+            $this->follow,
         );
     }
 
@@ -104,6 +106,16 @@ final readonly class Drag implements Stringable
     public function rubberBand(float $factor): self
     {
         return $this->with(rubber: max(0.0, min(1.0, $factor)));
+    }
+
+    /** Fraction of finger displacement and release velocity applied to the target (0..1). */
+    public function follow(float $factor): self
+    {
+        if (!is_finite($factor) || $factor < 0.0 || $factor > 1.0) {
+            throw new InvalidArgumentException('Drag follow must be finite and between 0 and 1.');
+        }
+
+        return $this->with(follow: $factor);
     }
 
     /** `nativeRef` of the view that moves; defaults to the detector's child. */
@@ -274,6 +286,7 @@ final readonly class Drag implements Stringable
         $lines = ['axis='.($this->horizontal ? 'x' : 'y')];
         if ($this->minimum !== null) $lines[] = 'min='.Motion::number($this->minimum);
         if ($this->maximum !== null) $lines[] = 'max='.Motion::number($this->maximum);
+        if ($this->follow !== 1.0) $lines[] = 'follow='.Motion::number($this->follow);
         if ($this->rubber > 0) $lines[] = 'rubber='.Motion::number($this->rubber);
         if ($this->target !== '') $lines[] = 'target='.$this->target;
         if ($this->touchInset !== null) $lines[] = 'touch='.Motion::number($this->touchInset);
@@ -371,6 +384,7 @@ final readonly class Drag implements Stringable
         ?bool $snapOnRelease = null,
         ?bool $unbounded = null,
         ?array $holds = null,
+        ?float $follow = null,
     ): self {
         return new self(
             $this->horizontal,
@@ -391,6 +405,7 @@ final readonly class Drag implements Stringable
             $snapOnRelease ?? $this->snapOnRelease,
             $unbounded ?? $this->unbounded,
             $holds ?? $this->holds,
+            $follow ?? $this->follow,
         );
     }
 }

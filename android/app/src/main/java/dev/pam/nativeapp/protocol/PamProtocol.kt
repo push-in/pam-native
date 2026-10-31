@@ -715,7 +715,9 @@ enum class PropKey(val value: Int) {
     MEDIA_IDLE_SURFACE(1004),
     SCROLL_OFFSET_ANIMATION_MS(1005),
     MEDIA_AUTO_PLAY_VISIBLE(1006),
-    MEDIA_AUTO_PLAY_GROUP(1007);
+    MEDIA_AUTO_PLAY_GROUP(1007),
+    PRESS_BACKGROUND_COLOR(1008),
+    KEYBOARD_PROGRESS(1009);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

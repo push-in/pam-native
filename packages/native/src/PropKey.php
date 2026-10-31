@@ -559,4 +559,6 @@ enum PropKey: int
     case ScrollOffsetAnimationMs = 1005;
     case MediaAutoPlayVisible = 1006;
     case MediaAutoPlayGroup = 1007;
+    case PressBackgroundColor = 1008;
+    case KeyboardProgress = 1009;
 }

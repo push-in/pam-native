@@ -46,6 +46,7 @@ internal fun imeAnimationFrameInset(frameInset: Int, current: Int): Int =
     if (frameInset <= 0 && current > 0) 1 else frameInset.coerceAtLeast(0)
 
 internal class PamRootHost(context: Context) : FrameLayout(context) {
+    internal val keyboardProgressSource by lazy(LazyThreadSafetyMode.NONE) { PamKeyboardProgressSource(this) }
     internal val legacyImeInsets by lazy(LazyThreadSafetyMode.NONE) { PamLegacyImeInsets(this) }
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()

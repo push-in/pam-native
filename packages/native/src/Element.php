@@ -297,6 +297,11 @@ abstract class Element implements Renderable
      * Plays a UI-thread animation program. It replays only when the
      * animation identity (program + `key()`) changes.
      */
+    final public function keyboardProgress(\Pam\Native\Animation\KeyboardProgress $driver): static
+    {
+        return $this->withProperty(PropKey::KeyboardProgress, $driver->encode());
+    }
+
     final public function animation(\Pam\Native\Animation\Animation $animation): static
     {
         return $this->withProperty(PropKey::AnimationProgram, $animation->encode());

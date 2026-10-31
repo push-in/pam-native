@@ -449,3 +449,18 @@ try {
     $invalidKeyframeEasing = true;
 }
 $assert($invalidKeyframeEasing, 'Keyframe easings must use native tokens (Easing::bezier() for curves).');
+
+// Proportional native following keeps the default wire unchanged.
+$default = Drag::vertical()->encode();
+$follow = Drag::vertical()->follow(0.92);
+$assert(!str_contains($default, 'follow='), 'Default drag wire must stay unchanged.');
+$assert(str_contains($follow->bounds(0, 300)->rubberBand(0.2)->encode(), 'follow=0.92'), 'follow survives immutable drag builders.');
+$assert(str_contains(Drag::horizontal()->follow(0)->encode(), 'follow=0'), 'Zero follow keeps the resting position.');
+foreach ([-0.1, 1.1, NAN, INF] as $invalid) {
+    try {
+        Drag::vertical()->follow($invalid);
+        $assert(false, 'Invalid follow must throw.');
+    } catch (InvalidArgumentException) {
+        $assert(true, 'Invalid follow rejected.');
+    }
+}

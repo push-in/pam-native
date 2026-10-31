@@ -78,6 +78,7 @@ internal data class PamDragConfig(
     val snapOnRelease: Boolean,
     /** Snaps a release keeps in place: reported at once, never animated to. */
     val holds: Set<Int> = emptySet(),
+    val follow: Double = 1.0,
 ) {
     fun settleFor(index: Int): PamDragSettle = snapSettles[index] ?: settle
 
@@ -120,6 +121,7 @@ internal data class PamDragConfig(
                 }
                 .toMap()
             return PamDragConfig(
+                follow = values["follow"]?.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: 1.0,
                 horizontal = horizontal,
                 min = values["min"]?.toDoubleOrNull()?.takeIf(Double::isFinite),
                 max = values["max"]?.toDoubleOrNull()?.takeIf(Double::isFinite),
@@ -158,6 +160,8 @@ internal data class PamDragConfig(
 
 /** Pure drag math so release decisions are unit-testable. */
 internal object PamDragMath {
+    fun follow(start: Double, displacement: Double, factor: Double): Double = start + displacement * factor
+
     fun bound(raw: Double, min: Double?, max: Double?, rubber: Double): Double =
         when {
             max != null && raw > max -> max + (raw - max) * rubber
@@ -291,7 +295,7 @@ internal class PamDragController(private val host: ViewGroup) {
         val target = target() ?: return
         val density = density()
         val delta = if (current.horizontal) translationX else translationY
-        val raw = startPx + delta
+        val raw = PamDragMath.follow(startPx, delta.toDouble(), current.follow)
         val bounded = PamDragMath.bound(
             raw,
             current.min?.times(density),
@@ -351,7 +355,7 @@ internal class PamDragController(private val host: ViewGroup) {
             settled(-1, position / density())
             return PamDragRelease(-1, false)
         }
-        val velocity = (if (current.horizontal) velocityX else velocityY).toDouble()
+        val velocity = (if (current.horizontal) velocityX else velocityY).toDouble() * current.follow
         val snaps = snapPixels(target, current)
         val index = if (cancelled) {
             origin

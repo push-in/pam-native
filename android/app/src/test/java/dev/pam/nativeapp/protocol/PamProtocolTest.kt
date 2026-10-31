@@ -11,7 +11,7 @@ class PamProtocolTest {
     fun protocolEnumsRemainSequentialAndAppendOnly() {
         assertEquals((1..31).toList(), NodeKind.entries.map(NodeKind::value))
         assertEquals((1..80).toList(), EventKind.entries.map(EventKind::value))
-        assertEquals((1..543).toList() + (1001..1007).toList(), PropKey.entries.map(PropKey::value))
+        assertEquals((1..543).toList() + (1001..1009).toList(), PropKey.entries.map(PropKey::value))
         assertEquals(543, PAM_CORE_PROPERTY_LIMIT)
         assertEquals(80, PAM_CORE_EVENT_LIMIT)
         assertEquals(1001, PAM_EXTENSION_BASE)
@@ -30,7 +30,7 @@ class PamProtocolTest {
         assertEquals(PropKey.LIST_FOLLOW_END_ON_RESIZE, (mutations.single() as Mutation.Update).key)
         assertThrows(Exception::class.java) {
             BatchDecoder.decode(
-                ByteBuffer.wrap("504e4231010001000000030700000000000000f003010401".hexBytes()),
+                ByteBuffer.wrap("504e4231010001000000030700000000000000f203010401".hexBytes()),
             )
         }
     }

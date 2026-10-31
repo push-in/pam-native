@@ -1974,6 +1974,8 @@ class PamRenderer(
             state.keyboardLayoutListener?.let(host::removeOnLayoutChangeListener)
             state.keyboardSelfLayoutListener?.let { view?.removeOnLayoutChangeListener(it) }
         }
+        state.keyboardProgressBinding?.close()
+        if (state.keyboardProgressBinding != null) state.keyboardProgressBinding = null
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
         children.remove(id)
@@ -3519,6 +3521,12 @@ class PamRenderer(
                 lastLayoutEvents.remove(state.id)
                 queueLayoutEvent(state.id)
             }
+            PropKey.KEYBOARD_PROGRESS -> {
+                state.keyboardProgressBinding?.close()
+                state.keyboardProgressBinding = PamKeyboardTrack.parse(value.text(key))?.let {
+                    PamKeyboardProgressBinding(view, it)
+                }
+            }
             PropKey.STICKY_HEADER -> applyStickyHeader(view, value.flag(), state)
             PropKey.SCROLL_KEYBOARD_INSET ->
                 (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, state, value.flag()) }
@@ -3529,6 +3537,7 @@ class PamRenderer(
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text(key)
             PropKey.SOURCE -> loadImage(view, state)
+            PropKey.PRESS_BACKGROUND_COLOR,
             PropKey.BACKGROUND_COLOR,
             PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE,
             PropKey.BORDER_RADIUS,
@@ -4472,6 +4481,10 @@ class PamRenderer(
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
         (view as? NativePropertyView)?.applyProtocolProperty(key.value, null)
         when (key) {
+            PropKey.KEYBOARD_PROGRESS -> {
+                state.keyboardProgressBinding?.close()
+                state.keyboardProgressBinding = null
+            }
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
             PropKey.TEXT -> (view as? TextView)?.let { text ->
                 state.baseText = ""
@@ -4484,6 +4497,7 @@ class PamRenderer(
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = null
             PropKey.SOURCE -> pamImageView(view)?.let(imageLoader::cancel)
+            PropKey.PRESS_BACKGROUND_COLOR,
             PropKey.BACKGROUND_COLOR,
             PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE,
             PropKey.BORDER_RADIUS,
@@ -7473,6 +7487,9 @@ class PamRenderer(
                 }
             }
         }
+        (view as? PamPressable)?.configurePressedBackground(
+            shape, color, state.properties[PropKey.PRESS_BACKGROUND_COLOR]?.integer()?.toInt(),
+        )
         val background = if (!imageHost && hasDirectionalBorder && borderGradient == null) {
             val borders = object : android.graphics.drawable.Drawable() {
                 private var drawableAlpha = 255
@@ -10436,6 +10453,10 @@ class PamRenderer(
 
         private fun extras(): NodeExtras = extras ?: NodeExtras().also { extras = it }
 
+        var keyboardProgressBinding: PamKeyboardProgressBinding?
+            get() = extras?.keyboardProgressBinding
+            set(value) { extras().keyboardProgressBinding = value }
+
         var initialTextUpdates: PamInitialTextUpdates?
             get() = extras?.initialTextUpdates
             set(value) { extras().initialTextUpdates = value }
@@ -10790,6 +10811,7 @@ class PamRenderer(
         var safeAreaBottomInset: Int = 0
         var safeAreaInsetsApplied: Boolean = false
         var keyboardInset: Int = 0
+        var keyboardProgressBinding: PamKeyboardProgressBinding? = null
         var keyboardAnimating: Boolean = false
         var keyboardBaseHeight: Int = 0
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null

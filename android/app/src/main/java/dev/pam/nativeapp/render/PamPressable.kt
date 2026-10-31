@@ -23,6 +23,18 @@ internal data class PamPressPointer(
 )
 
 internal class PamPressable(context: Context) : PamContainer(context) {
+    private var pressedBackground: PamPressedBackground? = null
+
+    internal fun configurePressedBackground(shape: android.graphics.drawable.GradientDrawable, base: Int, pressed: Int?) {
+        if (pressed == null) {
+            pressedBackground?.reset()
+            pressedBackground = null
+        } else {
+            val controller = pressedBackground ?: PamPressedBackground(this).also { pressedBackground = it }
+            controller.configure(shape, base, pressed)
+        }
+    }
+
     private val gestureRecognizer = PamGestureRecognizer(this)
     private var onPress: ((PamPressPointer) -> Unit)? = null
     private var localOnPress: (() -> Unit)? = null
@@ -133,6 +145,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         if (pressInDispatched) {
             pressInDispatched = false
             isPressed = false
+            pressedBackground?.setPressed(false)
             animate()
                 .alpha(targetOpacity)
                 .scaleX(targetScaleX)
@@ -163,7 +176,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     override fun setEnabled(enabled: Boolean) {
         super.setEnabled(enabled)
         isFocusable = enabled
-        if (!enabled && hasFocus()) clearFocus()
+        if (!enabled) {
+            pressedBackground?.reset()
+            if (hasFocus()) clearFocus()
+        }
     }
 
     fun configure(
@@ -744,6 +760,16 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         )
     }
 
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (visibility != View.VISIBLE) pressedBackground?.reset()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != View.VISIBLE) pressedBackground?.reset()
+    }
+
     override fun onDetachedFromWindow() {
         gestureRecognizer.cancel()
         cancelGesture(emitOut = false)
@@ -905,6 +931,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         if (pressInDispatched) return
         pressInDispatched = true
         isPressed = true
+        pressedBackground?.setPressed(true)
         animate()
             .alpha(pressOpacity)
             .scaleX(targetScaleX * pressScale)
@@ -934,6 +961,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             removeCallbacks(pressOutRunnable)
             pressInDispatched = false
             isPressed = false
+            pressedBackground?.reset()
             alpha = targetOpacity
             scaleX = targetScaleX
             scaleY = targetScaleY
