@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.46.12 - 2026-10-31
+
+iOS keyboard and pager glide follow-ups, on top of 1.46.11.
+
+- iOS keyboard: a list whose first layout response to the keyboard arrives
+  late eases in with the keyboard's curve instead of jumping.
+- iOS: resetting `contentOffsetAnimationMs` no longer snaps a page glide
+  that is already running. `PamOffsetGlideTests`.
+
 ## 1.46.11 - 2026-10-31
 
 Android gestures and keyboard, list content insets, navigation insets and
