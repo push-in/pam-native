@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 1.46.13 - 2026-10-31
+
+Android glide, modal and press follow-ups, on top of 1.46.12.
+
+- Android: resetting `contentOffsetAnimationMs` no longer cuts a page glide
+  that is already running; re-requesting the glide target keeps it (the
+  Android twin of the 1.46.12 iOS fix).
+- Modal: `navigationBarColor` (extension property 1010) paints the modal
+  window's navigation bar with that colour, no system scrim, buttons by
+  contrast. Android only; iOS has no navigation bar.
+- Android: a modal opening without autoFocus never focuses an input, so no
+  caret blinks without a keyboard; the modal container holds the idle focus.
+- Android: a Pressable that also takes a double tap shows no press dimming
+  or ripple (each tap of the double tap flashed it).
+- Android: a transition (and its animate-changes switch) turned on in the
+  same commit as the property it animates is applied first, so that first
+  change animates (the first double-tap zoom jumped).
+
 ## 1.46.12 - 2026-10-31
 
 iOS keyboard and pager glide follow-ups, on top of 1.46.11.
