@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.46.11 - 2026-10-31
+
+Android gestures and keyboard, list content insets, navigation insets and
+encoder memory, on top of 1.46.10.
+
+- Pressable: `pressedBackgroundColor` paints the pressed state natively
+  (extension property 1008), with no PHP round trip per touch.
+- Drag: `Drag::follow()` takes a proportional factor, so a dragged view can
+  follow the finger at a fraction of its travel (Android).
+- `KeyboardProgress` (extension property 1009): a native IME driver that
+  binds a view's translation to the keyboard's live progress on Android.
+- VirtualizedList and Scroll apply `paddingTop`/`paddingBottom` as native
+  scroll content padding (Android and iOS) while preserving keyed anchors;
+  the last row clears the padding at the end of the list.
+- Android navigation insets: when the window reports no bottom inset while
+  a navigation bar is present, a 48 dp fallback keeps content clear of it.
+- BottomSheet follows intermediate IME insets while the keyboard closes.
+- TreeEncoder: the integer encoding memo is bounded to recurring small
+  values, so long navigation sessions no longer grow it without limit.
+- iOS declares extension properties 1008 and 1009 (protocol parity).
+
 ## 1.46.10 - 2026-10-30
 
 iOS keyboard, cube pager, media and layout follow-ups to the 1.46.9 iOS port, on top of 1.46.9.
