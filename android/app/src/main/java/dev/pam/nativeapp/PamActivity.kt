@@ -1001,33 +1001,16 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
 
     private var dispatchedSafeArea: androidx.core.graphics.Insets? = null
 
-    /**
-     * Window safe area in pixels (system bars + cutout). When Android reports
-     * no bottom inset (some gesture/OEM configurations) the configured
-     * `safeArea.bottomFallback` dp is used, like React Native apps'
-     * `getBottomSafeInset()`.
-     */
+    /** Window bars/cutout, with a bounded fallback only for an existing bottom button bar. */
     private fun currentSafeAreaInsets(): androidx.core.graphics.Insets {
-        val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-        val reported = ViewCompat.getRootWindowInsets(window.decorView)
-            ?.getInsetsIgnoringVisibility(types)
+        val insets = ViewCompat.getRootWindowInsets(window.decorView)
             ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            androidx.core.graphics.Insets.toCompatInsets(
-                windowManager.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
-                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout(),
-                ),
-            )
-        } else {
-            androidx.core.graphics.Insets.NONE
-        }
-        val fallbackDp = resources.getInteger(R.integer.pam_safe_area_bottom_fallback_dp)
-        val bottom = if (reported.bottom == 0 && fallbackDp > 0) {
-            (fallbackDp * resources.displayMetrics.density + 0.5f).toInt()
-        } else {
-            reported.bottom
-        }
+                WindowInsetsCompat.toWindowInsetsCompat(windowManager.currentWindowMetrics.windowInsets)
+            } else null
+        val reported = insets?.let { windowSafeInsets(this, it) }
+            ?: androidx.core.graphics.Insets.NONE
         return retainedWhileUnfocused(
-            androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, bottom),
+            androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, reported.bottom),
         )
     }
 

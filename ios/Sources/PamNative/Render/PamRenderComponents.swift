@@ -275,7 +275,33 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
     }
 }
 
-final class PamAnchoredScrollView: UIScrollView {
+/// Authored padding lives in UIScrollView's native content insets. Keyboard
+/// avoidance adds its own delta, so changing padding never erases the IME.
+class PamContentScrollView: UIScrollView {
+    private(set) var pamContentPadding: UIEdgeInsets = .zero
+
+    var pamLogicalContentOffset: CGPoint {
+        CGPoint(x: contentOffset.x + pamContentPadding.left, y: contentOffset.y + pamContentPadding.top)
+    }
+
+    func setContentPadding(_ padding: UIEdgeInsets) {
+        guard padding != pamContentPadding else { return }
+        let previous = pamContentPadding
+        let atStartX = abs(contentOffset.x + previous.left) < 0.5
+        let atStartY = abs(contentOffset.y + previous.top) < 0.5
+        pamContentPadding = padding
+        contentInset = UIEdgeInsets(
+            top: contentInset.top + padding.top - previous.top,
+            left: contentInset.left + padding.left - previous.left,
+            bottom: contentInset.bottom + padding.bottom - previous.bottom,
+            right: contentInset.right + padding.right - previous.right
+        )
+        if atStartX { contentOffset.x = -padding.left }
+        if atStartY { contentOffset.y = -padding.top }
+    }
+}
+
+final class PamAnchoredScrollView: PamContentScrollView {
     var anchorToEnd = false {
         didSet {
             if anchorToEnd && !oldValue {
@@ -462,14 +488,14 @@ final class PamAnchoredScrollView: UIScrollView {
         var target = contentOffset
         var changed = false
         if let x = pamRequestedContentOffsetX, contentSize.width > 0 {
-            let maximum = max(0, contentSize.width - bounds.width + adjustedContentInset.right)
-            target.x = min(maximum, max(-adjustedContentInset.left, x))
+            let maximum = max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)
+            target.x = min(maximum, max(-adjustedContentInset.left, x - pamContentPadding.left))
             pamRequestedContentOffsetX = nil
             changed = true
         }
         if let y = pamRequestedContentOffsetY, contentSize.height > 0 {
-            let maximum = max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
-            target.y = min(maximum, max(-adjustedContentInset.top, y))
+            let maximum = max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
+            target.y = min(maximum, max(-adjustedContentInset.top, y - pamContentPadding.top))
             pamRequestedContentOffsetY = nil
             changed = true
         }
@@ -513,9 +539,9 @@ final class PamAnchoredScrollView: UIScrollView {
 
     private var primaryMaxOffset: CGFloat {
         if horizontal {
-            return max(0, contentSize.width - bounds.width + adjustedContentInset.right)
+            return max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)
         }
-        return max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        return max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
     }
 
     private func setPrimaryOffset(_ value: CGFloat) {
@@ -596,7 +622,7 @@ final class PamAnchoredScrollView: UIScrollView {
     }
 }
 
-final class PamVirtualListView: UIScrollView {
+final class PamVirtualListView: PamContentScrollView {
     var onViewportChange: (() -> Void)?
 
     /// Where a released fling will come to rest (UIScrollView's projected
@@ -771,10 +797,11 @@ final class PamVirtualListView: UIScrollView {
     /// Lands exactly on the target: deceleration in progress is stopped
     /// first (it otherwise kept moving after the jump). `animated` glides.
     func scrollToLogicalOffset(_ value: CGFloat, animated: Bool = false) {
-        let requested = max(0, value)
+        let leading = horizontal ? pamContentPadding.left : pamContentPadding.top
+        let requested = max(0, value) - leading
         let maximum = horizontal
-            ? max(0, contentSize.width - bounds.width + adjustedContentInset.right)
-            : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+            ? max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)
+            : max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
         let offset = min(requested, maximum)
         pamStopDeceleration()
         let target = horizontal
@@ -811,8 +838,8 @@ final class PamVirtualListView: UIScrollView {
 
     var primaryMaximumOffset: CGFloat {
         horizontal
-            ? max(0, contentSize.width - bounds.width + adjustedContentInset.right)
-            : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+            ? max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)
+            : max(-adjustedContentInset.top, contentSize.height - bounds.height + adjustedContentInset.bottom)
     }
 
     /// A list resting at its end stays there when its cells are re-measured

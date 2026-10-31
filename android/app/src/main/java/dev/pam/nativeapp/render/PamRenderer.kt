@@ -371,7 +371,8 @@ internal fun hostedContentExtent(
     .coerceAtLeast(0)
 
 internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
-    kind == NodeKind.CUSTOM_VIEW
+    kind == NodeKind.CUSTOM_VIEW || kind == NodeKind.LIST ||
+        kind == NodeKind.VIRTUAL_LIST || kind == NodeKind.SECTION_LIST
 
 /** Physical margins of a virtualized cell root (auto margins count as zero). */
 internal data class CellRootMargins(
@@ -2869,8 +2870,8 @@ class PamRenderer(
         }
         val density = resourcesDensity()
         scroll.setEngineContentExtent(
-            kotlin.math.ceil(right * density).toInt(),
-            kotlin.math.ceil(bottom * density).toInt(),
+            (kotlin.math.ceil(right * density).toInt() - scroll.contentInsetLeft).coerceAtLeast(0),
+            (kotlin.math.ceil(bottom * density).toInt() - scroll.contentInsetTop).coerceAtLeast(0),
         )
     }
 
@@ -3125,6 +3126,10 @@ class PamRenderer(
         }
         var leftPx = engineFrameMargin(horizontal.offset, paddedHost?.paddingLeft ?: 0) + safeLeft
         var topPx = engineFrameMargin(vertical.offset, paddedHost?.paddingTop ?: 0) + safeTop
+        (views[hostedParentState?.id ?: 0L] as? PamScrollContainer)?.let { scroll ->
+            leftPx -= scroll.contentInsetLeft
+            topPx -= scroll.contentInsetTop
+        }
         compensateFlexParentViewportReduction(
             state = state,
             parentState = parentState,
@@ -4485,6 +4490,14 @@ class PamRenderer(
                 state.keyboardProgressBinding?.close()
                 state.keyboardProgressBinding = null
             }
+            PropKey.PADDING,
+            PropKey.PADDING_HORIZONTAL,
+            PropKey.PADDING_VERTICAL,
+            PropKey.PADDING_LEFT,
+            PropKey.PADDING_TOP,
+            PropKey.PADDING_RIGHT,
+            PropKey.PADDING_BOTTOM,
+            -> applyLeafPadding(view, state)
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
             PropKey.TEXT -> (view as? TextView)?.let { text ->
                 state.baseText = ""
@@ -7293,7 +7306,7 @@ class PamRenderer(
         // padding would offset their content twice. Custom native ViewGroups
         // own descendant layout and must receive authored padding as real
         // View padding (for example Material list-item content insets).
-        if (view is ViewGroup && !usesNativeViewGroupPadding(state.kind)) {
+        if (view is ViewGroup && view !is PamScrollContainer && !usesNativeViewGroupPadding(state.kind)) {
             view.setPadding(0, 0, 0, state.safeBottomInset)
             return
         }
@@ -7314,6 +7327,11 @@ class PamRenderer(
             { value -> (value * resourcesDensity() + 0.001f).toInt() }
         } else {
             ::dp
+        }
+        if (view is PamScrollContainer) {
+            view.setContentInsets(inset(left), inset(top), inset(right), inset(bottom) + state.safeBottomInset)
+            updateScrollContentExtent(state.id)
+            return
         }
         view.setPadding(
             inset(left + edge(PropKey.BORDER_LEFT_WIDTH)),
@@ -8442,36 +8460,10 @@ class PamRenderer(
     }
 
     private fun windowSafeAreaInsets(insets: WindowInsets): SafeAreaInsets {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val safe = insets.getInsetsIgnoringVisibility(
-                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
-            )
-            return withStableRootInsets(
-                SafeAreaInsets(safe.left, safe.top, safe.right, safe.bottom),
-            )
-        }
-
-        @Suppress("DEPRECATION")
-        val systemLeft = insets.systemWindowInsetLeft
-        @Suppress("DEPRECATION")
-        val systemTop = insets.systemWindowInsetTop
-        @Suppress("DEPRECATION")
-        val systemRight = insets.systemWindowInsetRight
-        @Suppress("DEPRECATION")
-        val systemBottom = insets.systemWindowInsetBottom
-        val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            displayCutoutSafeArea(insets)
-        } else {
-            SafeAreaInsets(0, 0, 0, 0)
-        }
-        return withStableRootInsets(
-            SafeAreaInsets(
-                left = max(systemLeft, cutout.left),
-                top = max(systemTop, cutout.top),
-                right = max(systemRight, cutout.right),
-                bottom = max(systemBottom, cutout.bottom),
-            ),
+        val safe = dev.pam.nativeapp.windowSafeInsets(
+            context, androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets),
         )
+        return withStableRootInsets(SafeAreaInsets(safe.left, safe.top, safe.right, safe.bottom))
     }
 
     private fun withStableRootInsets(current: SafeAreaInsets): SafeAreaInsets {

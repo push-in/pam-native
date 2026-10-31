@@ -18,6 +18,18 @@ use Pam\Native\PropKey;
 $assert ??= static function (bool $condition, string $message): void {
     if (!$condition) throw new RuntimeException($message);
 };
+// Content padding keeps the existing wire keys and row identity.
+foreach ([
+    \Pam\Native\UI\ScrollView::make(\Pam\Native\UI\Text::make('Content')),
+    \Pam\Native\UI\VirtualizedList::make(\Pam\Native\UI\Text::make('Row')->key('stable')),
+] as $scrollable) {
+    $padding = new \Pam\Native\Style(paddingTop: 12.0, paddingBottom: 48.0);
+    $assert(
+        $scrollable->contentContainerStyle($padding)->properties() === $scrollable->style($padding)->properties(),
+        'Content padding must use the same protocol as authored padding.',
+    );
+}
+
 $scrollDirectory = sys_get_temp_dir().'/pam-native-list-native-scroll-'.getmypid();
 if (!is_dir($scrollDirectory) && !mkdir($scrollDirectory, 0o755, true) && !is_dir($scrollDirectory)) {
     throw new RuntimeException('Cannot create the native scroll fixture directory.');

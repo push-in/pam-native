@@ -19,6 +19,9 @@ class PamCustomViewPaddingTest {
     @Test
     fun customNativeViewGroupsOwnTheirAuthoredContentInsets() {
         assertTrue(usesNativeViewGroupPadding(NodeKind.CUSTOM_VIEW))
+        assertTrue(usesNativeViewGroupPadding(NodeKind.VIRTUAL_LIST))
+        assertTrue(usesNativeViewGroupPadding(NodeKind.LIST))
+        assertTrue(usesNativeViewGroupPadding(NodeKind.SECTION_LIST))
         assertFalse(usesNativeViewGroupPadding(NodeKind.VIEW))
         assertFalse(usesNativeViewGroupPadding(NodeKind.SCREEN))
     }

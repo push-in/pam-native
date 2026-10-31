@@ -98,11 +98,11 @@ internal fun sheetKeyboardLift(contentBottom: Int, windowHeight: Int, imeInset: 
     return (contentBottom - (windowHeight - imeInset)).coerceAtLeast(0)
 }
 
-/**
- * IME pixels (from the window bottom) a modal's own content must avoid:
- * everything over full-screen and dialog modals, what an interactive sheet's
- * lift leaves, nothing for pan/resize sheets (their window moves instead).
- */
+/** Intermediate IME frames remain valid while visibility already names the closing target. */
+internal fun animatedKeyboardInset(raw: Int, visible: Boolean, animating: Boolean): Int =
+    if (visible || animating) raw.coerceAtLeast(0) else 0
+
+/** IME pixels the content must avoid after the native sheet's own lift. */
 internal fun modalSurfaceKeyboardInset(
     imeInset: Int,
     presentation: Int,
@@ -922,8 +922,11 @@ internal class PamModalHost @JvmOverloads constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             onKeyboardVisibility?.invoke(desiredVisible && insets.isVisible(WindowInsetsCompat.Type.ime()))
         }
-        if (!desiredVisible || !insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
-        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
+        if (!desiredVisible) return 0
+        val ime = animatedKeyboardInset(
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom,
+            insets.isVisible(WindowInsetsCompat.Type.ime()), sheetImeAnimating,
+        )
         return modalSurfaceKeyboardInset(
             imeInset = ime,
             presentation = presentation,
@@ -971,8 +974,10 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     private fun sheetKeyboardLiftFor(insets: WindowInsetsCompat): Int {
-        if (!insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
-        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val ime = animatedKeyboardInset(
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom,
+            insets.isVisible(WindowInsetsCompat.Type.ime()), sheetImeAnimating,
+        )
         val root = content.rootView ?: return 0
         if (root.height <= 0 || content.height <= 0) return 0
         val location = IntArray(2)
@@ -1232,10 +1237,9 @@ internal class PamModalHost @JvmOverloads constructor(
      * covered activity window reports the same edges.
      */
     private fun sheetSystemBarInsets(): androidx.core.graphics.Insets {
-        val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
         val source = content.rootWindowInsets ?: rootWindowInsets
         return source?.let {
-            WindowInsetsCompat.toWindowInsetsCompat(it).getInsetsIgnoringVisibility(types)
+            dev.pam.nativeapp.windowSafeInsets(context, WindowInsetsCompat.toWindowInsetsCompat(it))
         } ?: androidx.core.graphics.Insets.NONE
     }
 
