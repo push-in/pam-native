@@ -11263,13 +11263,13 @@ private fun PropValue.protocolScalar(): WireValue? = when (this) {
 /**
  * A commit that turns a transition on and moves the property it animates
  * (a class adding `transition: transform` with the first zoom) animates that
- * very change: the transition rule is applied before the batch's other
+ * very change: the transition rule (and its animate-changes switch) is applied before the batch's other
  * updates. Order is otherwise kept; a batch without a transition spec is
  * returned as is.
  */
 internal fun transitionSpecsFirst(batch: List<Mutation>): List<Mutation> {
-    if (batch.none { it is Mutation.Update && it.key == PropKey.TRANSITION_SPEC }) return batch
-    val (specs, rest) = batch.partition { it is Mutation.Update && it.key == PropKey.TRANSITION_SPEC }
+    if (batch.none(::isTransitionSetup)) return batch
+    val (specs, rest) = batch.partition(::isTransitionSetup)
     // Specs of nodes created in this batch must follow their Create.
     val created = rest.mapNotNullTo(HashSet()) { (it as? Mutation.Create)?.node?.id }
     val early = specs.filter { (it as Mutation.Update).id !in created }
@@ -11277,3 +11277,7 @@ internal fun transitionSpecsFirst(batch: List<Mutation>): List<Mutation> {
     val earlySet = early.toHashSet()
     return early + batch.filter { it !in earlySet }
 }
+
+private fun isTransitionSetup(mutation: Mutation): Boolean =
+    mutation is Mutation.Update &&
+        (mutation.key == PropKey.TRANSITION_SPEC || mutation.key == PropKey.ANIMATE_CHANGES)
