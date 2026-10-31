@@ -89,6 +89,23 @@ internal fun interactiveBottomSheetLayout(
 }
 
 /**
+ * Settled interactive sheet over the IME (@gorhom `interactive`): its bottom
+ * rests on the keyboard top and, when the snap height no longer fits under
+ * the safe top edge, it rises to that edge and shrinks, so its footer stays
+ * above the keyboard instead of behind it.
+ */
+internal fun interactiveSheetKeyboardLayout(
+    baseHeight: Int,
+    availableHeight: Int,
+    keyboardLift: Int,
+): Pair<Int, Float> {
+    val lift = keyboardLift.coerceIn(0, availableHeight.coerceAtLeast(0))
+    val base = baseHeight.coerceAtLeast(1)
+    if (lift == 0) return base to 0f
+    return base.coerceAtMost(availableHeight - lift).coerceAtLeast(1) to -lift.toFloat()
+}
+
+/**
  * How far an interactive sheet resting at [contentBottom] (window
  * coordinates) must rise so its bottom edge sits on the IME top of a window
  * [windowHeight] tall whose bottom [imeInset] pixels are covered.
@@ -369,6 +386,7 @@ internal class PamModalHost @JvmOverloads constructor(
         }
     }
     private var lastSheetHeight = 0
+    private var lastBaseSheetHeight = 0
     private var sheetAvailableViewportHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
@@ -975,7 +993,11 @@ internal class PamModalHost @JvmOverloads constructor(
             imeInset = ime,
             presentation = presentation,
             interactiveSheet = usesInteractiveKeyboard(),
-            sheetLift = if (usesInteractiveKeyboard()) sheetKeyboardLiftFor(insets) else 0,
+            sheetLift = when {
+                !usesInteractiveKeyboard() -> 0
+                sheetImeAnimating -> boundedInteractiveLift(sheetKeyboardLiftFor(insets))
+                else -> sheetKeyboardLiftFor(insets)
+            },
             containedSheet = presentation == PRESENTATION_SHEET &&
                 bottomSheetKeyboardBehavior == KEYBOARD_CONTAIN,
         )
@@ -1027,12 +1049,16 @@ internal class PamModalHost @JvmOverloads constructor(
         val location = IntArray(2)
         content.getLocationInWindow(location)
         val contentBottom = location[1] - content.translationY.toInt() + content.height
-        return boundedSheetKeyboardLift(
-            sheetKeyboardLift(contentBottom, root.height, ime),
-            sheetAvailableViewportHeight,
-            lastSheetHeight,
-        )
+        return sheetKeyboardLift(contentBottom, root.height, ime)
+            .coerceAtMost(sheetAvailableViewportHeight.coerceAtLeast(0))
     }
+
+    /** While the IME animates the sheet keeps its snap height and stops at the safe top edge. */
+    private fun boundedInteractiveLift(lift: Int): Int = boundedSheetKeyboardLift(
+        lift,
+        sheetAvailableViewportHeight,
+        lastBaseSheetHeight.takeIf { it > 0 } ?: lastSheetHeight,
+    )
 
     private fun updateSheetKeyboardInset(lift: Int) {
         if (bottomSheetKeyboardInset == lift) return
@@ -1043,7 +1069,7 @@ internal class PamModalHost @JvmOverloads constructor(
     /** Moves the sheet with the IME frame by frame (gorhom `interactive`). */
     private fun followSheetKeyboard(lift: Int) {
         if (!usesInteractiveKeyboard()) return
-        sheetKeyboardTranslation = -lift.coerceAtLeast(0).toFloat()
+        sheetKeyboardTranslation = -boundedInteractiveLift(lift.coerceAtLeast(0)).toFloat()
         if (backdropAnimator?.isRunning == true || dragActive) return
         (sheetChildren() + handle).forEach { view ->
             view.animate().cancel()
@@ -1247,14 +1273,22 @@ internal class PamModalHost @JvmOverloads constructor(
             presentation == PRESENTATION_SHEET &&
             bottomSheetKeyboardBehavior == KEYBOARD_INTERACTIVE
         ) {
-            interactiveBottomSheetLayout(
-                baseHeight = baseSheetHeight,
-                keyboardInset = boundedSheetKeyboardLift(bottomSheetKeyboardInset, availableHeight, baseSheetHeight),
-            )
+            if (sheetImeAnimating) {
+                // The IME frames own the translation (followSheetKeyboard);
+                // the settled layout below applies once the animation ends.
+                (lastSheetHeight.takeIf { it > 0 } ?: baseSheetHeight) to sheetKeyboardTranslation
+            } else {
+                interactiveSheetKeyboardLayout(
+                    baseHeight = baseSheetHeight,
+                    availableHeight = availableHeight,
+                    keyboardLift = bottomSheetKeyboardInset,
+                )
+            }
         } else {
             baseSheetHeight to 0f
         }
         lastSheetHeight = sheetHeight
+        lastBaseSheetHeight = baseSheetHeight
         val sheetAnimating = presentation == PRESENTATION_SHEET && backdropAnimator?.isRunning == true
         sheetKeyboardTranslation = keyboardTranslation
         repeat(content.childCount) { index ->
