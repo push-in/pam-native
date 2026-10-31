@@ -217,6 +217,9 @@ internal fun resolvedKeyboardInset(
     return max(platformInset, resizedInset)
 }
 
+internal fun isLocalModalMarker(marker: String?): Boolean =
+    marker?.startsWith("pam:local-modal:") == true
+
 internal fun isLocalModalSelectionEvent(properties: PropValue?): Boolean {
     val host = (properties as? PropValue.Properties)?.value ?: return false
     val behavior = (host["behavior"] as? WireValue.Integer)?.value ?: return false
@@ -1353,12 +1356,13 @@ class PamRenderer(
         }
     }
 
-    private fun closeLocalModalAncestor(startId: Long) {
+    private fun closeLocalModalAncestor(startId: Long, localOnly: Boolean = false) {
         var currentId = nodes[startId]?.parent ?: 0L
         var depth = 0
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: return
             if (state.kind == NodeKind.MODAL) {
+                if (localOnly && !isLocalModalMarker(state.properties[PropKey.VALUE]?.textOrNull())) return
                 views[startId]?.let { source ->
                     val keyboard = source.context.getSystemService(
                         Context.INPUT_METHOD_SERVICE,
@@ -1905,7 +1909,10 @@ class PamRenderer(
                         ) {
                             updateLocalModalSelection(custom.id)
                         }
-                        closeLocalModalAncestor(custom.id)
+                        // Only an engine-local (select-like) Modal closes on a
+                        // native event (iOS parity): a camera, player or map
+                        // inside an app Modal reports ready/progress events.
+                        closeLocalModalAncestor(custom.id, localOnly = true)
                     }
                     val eventProperty = nativeEventProperty(kind)
                     if (eventProperty != null && custom.properties[eventProperty] != null) {

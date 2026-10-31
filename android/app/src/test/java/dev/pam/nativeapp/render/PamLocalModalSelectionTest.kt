@@ -25,4 +25,12 @@ class PamLocalModalSelectionTest {
         )
         assertFalse(isLocalModalSelectionEvent(null))
     }
+
+    @Test
+    fun nativeEventsCloseOnlyEngineLocalModals() {
+        assertTrue(isLocalModalMarker("pam:local-modal:language"))
+        // An app Modal (camera, player) has no local marker and stays open.
+        assertFalse(isLocalModalMarker(null))
+        assertFalse(isLocalModalMarker("loop-camera"))
+    }
 }
