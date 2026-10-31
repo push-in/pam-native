@@ -8853,9 +8853,12 @@ class PamRenderer(
                 applyViewportLayout()
             }
         }
+        // A BottomSheet root moves with the sheet's own keyboard lift
+        // (PamModalHost); resetting its translation here dropped that lift.
+        val sheetOwned = state.keyboardModalHost?.ownsTranslationOf(view) == true
         when (state.keyboardBehavior) {
             KEYBOARD_PAN -> {
-                view.translationY = -keyboard.toFloat()
+                if (!sheetOwned) view.translationY = -keyboard.toFloat()
                 view.setPadding(0, 0, 0, 0)
                 liftTranslatedKeyboardView(view, state, keyboard > 0)
                 // A panning container may extend into a system-inset region even
@@ -8885,7 +8888,7 @@ class PamRenderer(
                     originalTop = originalTop,
                     minimumTop = rootLocation[1] + safeTop + dp(16f),
                 )
-                view.translationY = -translation.toFloat()
+                if (!sheetOwned) view.translationY = -translation.toFloat()
                 view.setPadding(0, 0, 0, 0)
                 updateTranslatedTouchTarget(
                     view,
@@ -8894,12 +8897,12 @@ class PamRenderer(
                 )
             }
             KEYBOARD_PADDING -> {
-                view.translationY = 0f
+                if (!sheetOwned) view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
                 updateTranslatedTouchTarget(view, false)
             }
             else -> {
-                view.translationY = 0f
+                if (!sheetOwned) view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
                 updateTranslatedTouchTarget(view, false)
             }

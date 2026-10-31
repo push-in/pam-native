@@ -768,6 +768,10 @@ internal class PamModalHost @JvmOverloads constructor(
         dragVelocity = null
     }
 
+    /** A sheet root's translation is the sheet's (drag, entrance, keyboard lift), never a KAV's. */
+    internal fun ownsTranslationOf(view: View): Boolean =
+        presentation == PRESENTATION_SHEET && view.parent === content
+
     fun isPresented(): Boolean = dialog?.isPresentedWindow == true
 
     /**
