@@ -732,6 +732,10 @@ public final class PamRuntime {
     /// out for a modal's keyboard animate with the keyboard's own duration
     /// and curve (React Native's KeyboardAvoidingView LayoutAnimation).
     private var keyboardLayoutAnimation: (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)?
+    /// Set by a keyboard change until the first frame committed after it:
+    /// that frame is the layout's response to the keyboard and follows its
+    /// curve even when a busy runtime delivers it after the keyboard settled.
+    private var keyboardResponsePending = false
 
     /// Keyboard overlap in points from the bottom of the PAM root view over
     /// the presented Modal of node `surface` (0 when hidden). The engine lays
@@ -743,6 +747,7 @@ public final class PamRuntime {
         keyboardLayoutAnimation = PamKeyboardFollow.animation(
             duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
         )
+        keyboardResponsePending = keyboardLayoutAnimation != nil
         pam_native_runtime_set_surface_keyboard_inset(
             currentHandle,
             UInt64(surface),
@@ -832,6 +837,7 @@ public final class PamRuntime {
         keyboardLayoutAnimation = PamKeyboardFollow.animation(
             duration: duration, curve: curve, reduced: PamMotionPolicy.isReduced, now: CACurrentMediaTime()
         )
+        keyboardResponsePending = keyboardLayoutAnimation != nil
         #if DEBUG
         if PamListTrace.enabled {
             NSLog("PamKeyboard %@ overlap=%.1f durationMs=%.0f", hiding ? "hide" : "change", overlap, duration * 1_000)
@@ -1651,19 +1657,23 @@ public final class PamRuntime {
         let mutations = toProcess.map { $0.mutations }
 
         let now = CACurrentMediaTime()
-        if let animation = keyboardLayoutAnimation, now <= animation.expires {
+        let followDuration = keyboardLayoutAnimation.flatMap {
+            PamKeyboardFollow.commitDuration($0, responsePending: keyboardResponsePending, now: now)
+        }
+        if let animation = keyboardLayoutAnimation, let followDuration {
             // Every commit while the keyboard moves follows it, for the rest
             // of its animation: the engine's relayout and the application's
             // own response to the keyboard (PHP), which arrives a few frames
-            // later and used to jump to its end state.
-            let remaining = animation.expires - PamKeyboardFollow.settleSlack - now
+            // later and used to jump to its end state. The first response
+            // eases in with the keyboard's curve even when it arrives late.
+            keyboardResponsePending = false
             #if DEBUG
             if PamListTrace.enabled {
-                NSLog("PamKeyboard commit animated remainingMs=%.0f batches=%ld", remaining * 1_000, mutations.count)
+                NSLog("PamKeyboard commit animated remainingMs=%.0f batches=%ld", followDuration * 1_000, mutations.count)
             }
             #endif
             UIView.animate(
-                withDuration: max(PamKeyboardFollow.minimumDuration, remaining),
+                withDuration: followDuration,
                 delay: 0,
                 options: [
                     UIView.AnimationOptions(rawValue: animation.curve << 16),
@@ -1680,7 +1690,10 @@ public final class PamRuntime {
                 NSLog("PamKeyboard commit late byMs=%.0f", (now - animation.expires) * 1_000)
             }
             #endif
-            if let animation = keyboardLayoutAnimation, now > animation.expires { keyboardLayoutAnimation = nil }
+            if keyboardLayoutAnimation != nil {
+                keyboardLayoutAnimation = nil
+                keyboardResponsePending = false
+            }
             renderer.commit(mutations)
         }
         if !firstFrameLogged {
@@ -1854,5 +1867,28 @@ enum PamKeyboardFollow {
     ) -> (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)? {
         guard duration > 0, !reduced else { return nil }
         return (duration: duration, curve: curve, expires: now + max(0.1, duration) + settleSlack)
+    }
+
+    /// The first frame after a keyboard change that arrives this long after
+    /// the keyboard settled (a busy runtime) still eases in over the
+    /// keyboard's duration instead of jumping.
+    static let lateResponseWindow: TimeInterval = 5.0
+
+    /// Duration of the animation a frame committed at `now` follows, or nil
+    /// when it applies at once: the rest of the keyboard animation while it
+    /// moves (and `settleSlack` after); the keyboard's full duration for the
+    /// first, late, response to it within `lateResponseWindow`.
+    static func commitDuration(
+        _ animation: (duration: TimeInterval, curve: UInt, expires: CFTimeInterval),
+        responsePending: Bool,
+        now: CFTimeInterval
+    ) -> TimeInterval? {
+        if now <= animation.expires {
+            return max(minimumDuration, animation.expires - settleSlack - now)
+        }
+        if responsePending, now <= animation.expires + lateResponseWindow {
+            return max(minimumDuration, animation.duration)
+        }
+        return nil
     }
 }
