@@ -1,6 +1,8 @@
 package dev.pam.nativeapp.render
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Stories cube: same face math as the RN StoryCubePager (`cubeFace`). */
@@ -39,6 +41,17 @@ class PamPageTransformTest {
         assertEquals(540, pamLerpOffset(0, 1080, 0.5f))
         assertEquals(1080, pamLerpOffset(0, 1080, 1.4f))
         assertEquals(1080, pamLerpOffset(2160, 1080, 1f))
+    }
+
+    @Test
+    fun reRequestingTheGlideTargetKeepsTheGlideAndANewTargetDoesNot() {
+        // Same target re-sent (e.g. with the duration reset to 0): keep gliding.
+        assertTrue(pamRequestKeepsGlide(true, 1080, false, 0, 1080, 0))
+        // Nothing requested (a plain relayout): keep gliding.
+        assertTrue(pamRequestKeepsGlide(false, 0, false, 0, 1080, 0))
+        // A new page: the glide yields to the new request.
+        assertFalse(pamRequestKeepsGlide(true, 2160, false, 0, 1080, 0))
+        assertFalse(pamRequestKeepsGlide(true, 1080, true, 40, 1080, 0))
     }
 
     @Test
