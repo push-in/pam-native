@@ -4140,7 +4140,7 @@ class PamRenderer(
                     value.decimal().toFloat(),
                 )
             PropKey.SCROLL_ANCHOR_TO_END ->
-                (view as? PamScrollContainer)?.setAnchorToEnd(value.flag())
+                (view as? PamScrollContainer)?.setStackFromEnd(value.flag())
             PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
                 (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(
                     value.flag(),
@@ -4237,6 +4237,8 @@ class PamRenderer(
                 (view as? PamRecyclerList)?.setInverted(value.flag())
             PropKey.LIST_FOLLOW_END_ON_RESIZE ->
                 (view as? PamRecyclerList)?.setFollowEndOnResize(value.flag())
+            PropKey.LIST_STACK_FROM_END ->
+                (view as? PamRecyclerList)?.setStackFromEnd(value.flag())
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(value.integer().toInt())
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
@@ -4850,7 +4852,7 @@ class PamRenderer(
             PropKey.SCROLL_CONTENT_OFFSET_Y ->
                 (view as? PamScrollContainer)?.setContentOffsetY(0f)
             PropKey.SCROLL_ANCHOR_TO_END ->
-                (view as? PamScrollContainer)?.setAnchorToEnd(false)
+                (view as? PamScrollContainer)?.setStackFromEnd(false)
             PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
                 (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(false)
             PropKey.SCROLL_AUTO_SCROLL_TO_END_THRESHOLD ->
@@ -4913,6 +4915,7 @@ class PamRenderer(
             PropKey.LIST_NUM_COLUMNS -> (view as? PamRecyclerList)?.setColumns(1)
             PropKey.LIST_INVERTED -> (view as? PamRecyclerList)?.setInverted(false)
             PropKey.LIST_FOLLOW_END_ON_RESIZE -> (view as? PamRecyclerList)?.setFollowEndOnResize(true)
+            PropKey.LIST_STACK_FROM_END -> (view as? PamRecyclerList)?.setStackFromEnd(false)
             PropKey.LIST_INITIAL_SCROLL_INDEX ->
                 (view as? PamRecyclerList)?.setInitialIndex(0)
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
