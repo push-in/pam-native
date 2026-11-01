@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <malloc.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <android/log.h>
@@ -1798,6 +1799,15 @@ Java_dev_pam_nativeapp_PamRuntime_nativeDispatchModuleResult(
         Event{EventType::ModuleResult, request_id, status, std::move(bytes)},
         false
     );
+}
+
+// The app is hidden or short of memory: the native allocator hands the pages
+// of freed blocks back to the system (scudo otherwise keeps them for reuse).
+extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativePurgeAllocator(JNIEnv*, jclass) {
+#ifdef M_PURGE
+    mallopt(M_PURGE, 0);
+#endif
 }
 
 extern "C" JNIEXPORT void JNICALL

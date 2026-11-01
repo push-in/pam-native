@@ -1039,6 +1039,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         viewportChanged = listener
     }
 
+    /** App hidden: drop the offscreen rows waiting for reuse; budgets stay. */
+    fun releaseRecycledViews() {
+        recycledViewPool.clear()
+    }
+
     fun trimMemory(critical: Boolean) {
         if (!critical) return
         stopScroll()

@@ -1403,9 +1403,24 @@ class PamRenderer(
         return Color.TRANSPARENT
     }
 
-    fun trimMemory(critical: Boolean) {
+    /**
+     * [hidden]: no window of the app is visible (UI_HIDDEN or a background
+     * level). What only offscreen content holds goes: decoded images no view
+     * shows (shown bitmaps stay referenced by their views, so returning
+     * re-decodes nothing on screen), parked list cells and the recycled row
+     * pools. The lists keep their prefetch and view-cache budgets; only a
+     * critical trim lowers those.
+     */
+    fun trimMemory(critical: Boolean, hidden: Boolean = false) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        imageLoader.trimMemory(critical)
+        imageLoader.trimMemory(critical, hidden)
+        if (hidden && !critical) {
+            releaseParkedCells { true }
+            val recyclerLists = snapshotValues<PamRecyclerList>(views.size(), views::valueAt)
+            for (recyclerList in recyclerLists) {
+                recyclerList.releaseRecycledViews()
+            }
+        }
         if (critical) {
             releaseParkedCells { true }
             val recyclerLists = snapshotValues<PamRecyclerList>(views.size(), views::valueAt)

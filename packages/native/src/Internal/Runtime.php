@@ -686,6 +686,11 @@ final class Runtime
                 DependencyTracker::invalidateAll();
                 self::$memoryPressureHandler?->__invoke(MemoryPressure::from((int) $payload));
                 self::afterDispatch();
+                // Hidden or low on memory: what the handlers and the frame
+                // dropped goes back to the system (Zend MM keeps freed chunks
+                // cached for the next allocation otherwise).
+                gc_collect_cycles();
+                gc_mem_caches();
 
                 return;
             }

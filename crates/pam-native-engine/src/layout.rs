@@ -785,6 +785,60 @@ fn layout_node(
             let right = dimension(child, PropKey::Right, PropKey::RightPercent, inner.width);
             let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height);
             let bottom = dimension(child, PropKey::Bottom, PropKey::BottomPercent, inner.height);
+            // A growing child (`flex: 1`, React Native's modal root: a
+            // full-window backdrop or KeyboardAvoidingView) fills the dialog
+            // window like a Modal's content does in React Native (column,
+            // stretch). Compact cards keep the intrinsic centered contract.
+            if flex_grow(child) > 0.0 {
+                let width = constrained(
+                    dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
+                        .unwrap_or(inner.width),
+                    dimension(
+                        child,
+                        PropKey::MinWidth,
+                        PropKey::MinWidthPercent,
+                        inner.width,
+                    ),
+                    dimension(
+                        child,
+                        PropKey::MaxWidth,
+                        PropKey::MaxWidthPercent,
+                        inner.width,
+                    ),
+                )?
+                .min(inner.width);
+                let height = constrained(
+                    dimension(child, PropKey::Height, PropKey::HeightPercent, inner.height)
+                        .unwrap_or(inner.height),
+                    dimension(
+                        child,
+                        PropKey::MinHeight,
+                        PropKey::MinHeightPercent,
+                        inner.height,
+                    ),
+                    dimension(
+                        child,
+                        PropKey::MaxHeight,
+                        PropKey::MaxHeightPercent,
+                        inner.height,
+                    ),
+                )?
+                .min(inner.height);
+                layout_node(
+                    context,
+                    child.id,
+                    Layout {
+                        x: inner.x + (inner.width - width) / 2.0,
+                        y: inner.y + (inner.height - height) / 2.0,
+                        width,
+                        height,
+                    },
+                    false,
+                    depth + 1,
+                    output,
+                )?;
+                continue;
+            }
             let width = constrained(
                 dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
                     .or_else(|| match (left, right) {
@@ -6863,6 +6917,69 @@ mod tests {
         assert_eq!(layouts[&4].width, 360.0);
         assert_eq!(layouts[&4].height, 640.0);
         assert_eq!(layouts[&5].y, 30.0);
+    }
+
+    #[test]
+    fn dialog_modal_growing_child_fills_the_window_like_react_native() {
+        // RN: `<Modal transparent><View style={{flex: 1}}>` spans the window;
+        // a card inside it is placed by that full-window view (flex-end here).
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        [(PropKey::ModalPresentation, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                            (PropKey::JustifyContent, PropValue::Integer(3)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::Height, PropValue::Float(100.0))],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("dialog growing layout");
+        let scrim = layouts[&3];
+        assert_eq!(
+            (scrim.x, scrim.y, scrim.width, scrim.height),
+            (0.0, 0.0, 360.0, 640.0)
+        );
+        let card = layouts[&4];
+        assert_eq!(card.width, 360.0);
+        assert_eq!(card.height, 100.0);
+        assert_eq!(card.y, 540.0);
     }
 
     #[test]
