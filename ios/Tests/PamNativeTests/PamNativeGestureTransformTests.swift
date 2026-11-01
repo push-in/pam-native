@@ -168,4 +168,42 @@ final class PamNativeGestureTransformTests: XCTestCase {
         XCTAssertEqual(resting.translateX, 0, accuracy: 0.001)
         XCTAssertEqual(resting.translateY, 0, accuracy: 0.001)
     }
+
+    func testZoomedContentPanOwnsTheTouchOverAncestorPans() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        let renderer = PamRenderer(hostView: host, dispatchEvent: { _, _, _ in })
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .scroll, properties: [:])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .pressable, properties: [
+                PamConstants.gestureType: .integer(5),
+                PamConstants.gestureNativeTransform: .flag(true),
+                PamConstants.gestureNativeMaxScale: .decimal(4),
+            ])),
+            .create(NodeSpec(id: 4, parent: 3, index: 0, kind: .view, properties: [:])),
+            .setRoot(1),
+        ]])
+        defer { renderer.close() }
+        let detector = try XCTUnwrap(host.viewWithTag(3))
+        let content = try XCTUnwrap(host.viewWithTag(4))
+        let scroll = try XCTUnwrap(sequence(first: detector.superview, next: { $0?.superview })
+            .compactMap { $0 as? UIScrollView }.first)
+        let pan = try XCTUnwrap(detector.gestureRecognizers?.first { $0 is UIPanGestureRecognizer })
+        let delegate = try XCTUnwrap(pan.delegate)
+        let ancestorPan = scroll.panGestureRecognizer
+        let sibling = UIPanGestureRecognizer()
+        detector.addGestureRecognizer(sibling)
+
+        XCTAssertFalse(delegate.gestureRecognizer?(pan, shouldBeRequiredToFailBy: ancestorPan) ?? false,
+                       "at scale 1 a pager or swipe-back still takes the drag")
+        PamMotionTarget.write(content, .scale, 2)
+        XCTAssertTrue(delegate.gestureRecognizer?(pan, shouldBeRequiredToFailBy: ancestorPan) ?? false)
+        XCTAssertFalse(delegate.gestureRecognizer?(pan, shouldRecognizeSimultaneouslyWith: ancestorPan) ?? true)
+        XCTAssertFalse(delegate.gestureRecognizer?(pan, shouldBeRequiredToFailBy: sibling) ?? false,
+                       "recognizers on the same surface keep their composition")
+        PamMotionTarget.write(content, .scale, 1.01)
+        XCTAssertFalse(delegate.gestureRecognizer?(pan, shouldBeRequiredToFailBy: ancestorPan) ?? false)
+        XCTAssertTrue(PamNativeGestureTransform.zoomedContentOwnsPan(scale: 1.5))
+        XCTAssertFalse(PamNativeGestureTransform.zoomedContentOwnsPan(scale: 1.02))
+    }
 }

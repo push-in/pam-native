@@ -33,6 +33,12 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
     static let defaultPressRetention = UIEdgeInsets(top: 20, left: 20, bottom: 30, right: 20)
 
     var pamPressedOpacity: CGFloat = 0.72
+    /// A surface that also takes a double tap (like to heart, tap to zoom)
+    /// shows no press dimming: each tap of the double tap would flash it,
+    /// and RN's Pressable has no default feedback there (Android parity).
+    var pamTakesDoubleTap = false
+
+    var pamShowsPressFeedback: Bool { !pamTakesDoubleTap }
     var pamPressedScale: CGFloat = 1
     var pamHitSlop = UIEdgeInsets.zero
     /// Extra distance the finger may travel outside the touch target before
@@ -148,6 +154,7 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
                 if pamStateStyles[1] != nil {
                     transform = restingTransform ?? .identity
                 }
+                guard pamShowsPressFeedback else { return }
                 if PamMotionPolicy.isReduced {
                     layer.removeAllAnimations()
                     alpha = pamPressedOpacity

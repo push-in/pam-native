@@ -136,6 +136,16 @@ extension PamNativeGestureTransform {
     /// Resting transform of a bounded surface on release: below (or barely
     /// above) 1x the centred identity, otherwise the scale with its
     /// translation inside the content bounds.
+    /// Below this scale a native transform snaps back to identity; above it
+    /// the content shows zoomed in and its pan owns the touch.
+    static let zoomedPanMinimumScale: CGFloat = 1.02
+
+    /// A native transform zoomed past the identity snap owns the drag over
+    /// it: a navigator's swipe-back or a pager may not take that touch.
+    static func zoomedContentOwnsPan(scale: CGFloat) -> Bool {
+        scale > zoomedPanMinimumScale
+    }
+
     static func settled(
         _ transform: PamMotionTransform,
         in view: UIView,
@@ -143,7 +153,7 @@ extension PamNativeGestureTransform {
         maximumScale: CGFloat
     ) -> PamMotionTransform {
         var scale = min(max(1, maximumScale), max(1, transform.scaleX))
-        if scale <= 1.02 { scale = 1 }
+        if !zoomedContentOwnsPan(scale: scale) { scale = 1 }
         return bounded(transform, in: view, contentAspect: contentAspect, scale: scale)
     }
 
