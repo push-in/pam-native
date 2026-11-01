@@ -293,8 +293,8 @@ public final class PamRenderer: @unchecked Sendable {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
 
-        for batch in batches {
-            for mutation in batch {
+        for rawBatch in batches {
+            for mutation in Self.transitionSpecsFirst(rawBatch) {
                 switch mutation {
                 case let .create(node):
                     create(node)
@@ -2130,6 +2130,7 @@ public final class PamRenderer: @unchecked Sendable {
         let hasTapEffect = state.properties[PamConstants.pressTapEffect] != nil
 
         if let button = view as? UIButton {
+            (button as? PamPressButton)?.pamTakesDoubleTap = hasDoubleTap
             if eventProperties.contains(PamConstants.onPress) || hasDoubleTap {
                 let bridge = EventBridge(nodeId: nodeId, kind: EventKind.press.rawValue, dispatchEvent: dispatchEvent)
                 bridge.attachButtonPress(button)
@@ -4935,6 +4936,31 @@ public final class PamRenderer: @unchecked Sendable {
         view.layer.add(group, forKey: "pam.keyframes")
     }
 
+    /// A commit that turns a transition on and moves the property it animates
+    /// (a class adding `transition: transform` with the first zoom) animates
+    /// that very change: the transition rule and its animate-changes switch
+    /// are applied before the batch's other updates. Specs of nodes created in
+    /// the same batch stay after their create; order is otherwise kept.
+    static func transitionSpecsFirst(_ batch: [Mutation]) -> [Mutation] {
+        func isTransitionSetup(_ mutation: Mutation) -> Bool {
+            guard case let .update(_, key, _) = mutation else { return false }
+            return key == PamConstants.transitionSpec || key == PamConstants.animateChanges
+        }
+        guard batch.contains(where: isTransitionSetup) else { return batch }
+        var created = Set<Int64>()
+        for mutation in batch { if case let .create(node) = mutation { created.insert(node.id) } }
+        var early: [Mutation] = []
+        var rest: [Mutation] = []
+        for mutation in batch {
+            if isTransitionSetup(mutation), case let .update(id, _, _) = mutation, !created.contains(id) {
+                early.append(mutation)
+            } else {
+                rest.append(mutation)
+            }
+        }
+        return early.isEmpty ? batch : early + rest
+    }
+
     /// Gesture/animation properties added in 1.5.0 (`nil` = property removed).
     private static let motionPropertyOrder = [
         PamConstants.nativeRef,
@@ -7046,11 +7072,38 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
+        /// While a native transform shows its content zoomed in, a drag
+        /// over it pans the content for the whole touch: pans of ancestors
+        /// (a pager's scroll, a navigator's swipe-back) wait for it, even at
+        /// the content edge, so a zoomed photo never leaves the screen. At
+        /// scale 1 nothing changes (Android parity).
+        var zoomedPanOwnsTouch: Bool {
+            guard nativeGestureTransform, drag?.config == nil,
+                  semanticGesture is UIPanGestureRecognizer,
+                  let child = nativeTransformTarget?() ?? semanticGesture?.view?.subviews.first else { return false }
+            return PamNativeGestureTransform.zoomedContentOwnsPan(scale: PamMotionTarget.transform(of: child).scaleX)
+        }
+
+        private func isAncestorPan(_ other: UIGestureRecognizer, of recognizer: UIGestureRecognizer) -> Bool {
+            guard other is UIPanGestureRecognizer, let mine = recognizer.view,
+                  let theirs = other.view, theirs !== mine else { return false }
+            return mine.isDescendant(of: theirs)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            gestureRecognizer === semanticGesture && zoomedPanOwnsTouch &&
+                isAncestorPan(otherGestureRecognizer, of: gestureRecognizer)
+        }
+
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             if gestureRecognizer === semanticGesture {
+                if zoomedPanOwnsTouch, isAncestorPan(otherGestureRecognizer, of: gestureRecognizer) { return false }
                 return semanticGestureComposition == 2
             }
             if gestureRecognizer === pressPointer, pressMoveKind == nil {

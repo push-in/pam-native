@@ -33,6 +33,12 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
     static let defaultPressRetention = UIEdgeInsets(top: 20, left: 20, bottom: 30, right: 20)
 
     var pamPressedOpacity: CGFloat = 0.72
+    /// A surface that also takes a double tap (like to heart, tap to zoom)
+    /// shows no press dimming: each tap of the double tap would flash it,
+    /// and RN's Pressable has no default feedback there (Android parity).
+    var pamTakesDoubleTap = false
+
+    var pamShowsPressFeedback: Bool { !pamTakesDoubleTap }
     var pamPressedScale: CGFloat = 1
     var pamHitSlop = UIEdgeInsets.zero
     /// Extra distance the finger may travel outside the touch target before
@@ -148,6 +154,7 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
                 if pamStateStyles[1] != nil {
                     transform = restingTransform ?? .identity
                 }
+                guard pamShowsPressFeedback else { return }
                 if PamMotionPolicy.isReduced {
                     layer.removeAllAnimations()
                     alpha = pamPressedOpacity
@@ -298,6 +305,26 @@ class PamContentScrollView: UIScrollView {
         )
         if atStartX { contentOffset.x = -padding.left }
         if atStartY { contentOffset.y = -padding.top }
+    }
+
+    /// An animated scroll farther than two viewports (back to the top of a
+    /// long feed or chat) first jumps, without animation, to one viewport
+    /// short of its target and animates only that last stretch: the motion
+    /// stays short, and the content passed over is never shown blank or
+    /// skipped mid-flight. `nil` when the whole distance animates.
+    static func longScrollJumpStart(current: CGFloat, target: CGFloat, viewport: CGFloat) -> CGFloat? {
+        guard viewport > 0, abs(target - current) > viewport * 2 else { return nil }
+        return target + (current > target ? viewport : -viewport)
+    }
+
+    /// Applies the jump of `longScrollJumpStart` on the primary axis.
+    func jumpCloseBeforeAnimatedScroll(to target: CGPoint, horizontal: Bool) {
+        let viewport = horizontal ? bounds.width : bounds.height
+        let current = horizontal ? contentOffset.x : contentOffset.y
+        let goal = horizontal ? target.x : target.y
+        guard let start = Self.longScrollJumpStart(current: current, target: goal, viewport: viewport) else { return }
+        setContentOffset(horizontal ? CGPoint(x: start, y: contentOffset.y) : CGPoint(x: contentOffset.x, y: start), animated: false)
+        layoutIfNeeded()
     }
 }
 
@@ -572,10 +599,9 @@ final class PamAnchoredScrollView: PamContentScrollView {
         let bounded = horizontal
             ? min(primaryMaxOffset, max(-adjustedContentInset.left, value))
             : min(primaryMaxOffset, max(-adjustedContentInset.top, value))
-        setContentOffset(
-            horizontal ? CGPoint(x: bounded, y: contentOffset.y) : CGPoint(x: contentOffset.x, y: bounded),
-            animated: true
-        )
+        let target = horizontal ? CGPoint(x: bounded, y: contentOffset.y) : CGPoint(x: contentOffset.x, y: bounded)
+        jumpCloseBeforeAnimatedScroll(to: target, horizontal: horizontal)
+        setContentOffset(target, animated: true)
     }
 
     func requestScroll() {
@@ -813,6 +839,7 @@ final class PamVirtualListView: PamContentScrollView {
             setContentOffset(target, animated: false)
             return
         }
+        jumpCloseBeforeAnimatedScroll(to: target, horizontal: horizontal)
         // A previous UIScrollView animation stopped immediately above can be
         // coalesced with a new `setContentOffset(animated:)` in the same run
         // loop, leaving the list at the old offset. An explicit interruptible
