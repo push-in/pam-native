@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.46.16 - 2026-11-01
+
+Android text and sheet follow-ups, on top of 1.46.15.
+
+- Android: `onTextLayout` measures the full text of a tail-truncated text
+  view. It measured the copy shown on screen (already cut with the
+  ellipsis), so a caption limited to two lines never reported `truncated`
+  and its "more" affordance disappeared.
+- Android: a bottom sheet is placed below the window before its posted
+  entrance slide; its first frame was drawn at rest (a one-frame flash of
+  the open sheet before it slid in).
+- macOS CLIs are not attached to this release.
+
 ## 1.46.15 - 2026-10-31
 
 Android rendering and scrolling follow-ups, on top of 1.46.14.
