@@ -8669,11 +8669,18 @@ class PamRenderer(
     }
 
     /** Engine-laid-out avoidance: resize/padding inside a modal window. */
+    /**
+     * Resize/padding KeyboardAvoidingViews the engine lays out above the IME:
+     * inside a modal from that modal's IME feed, in the activity window from
+     * the root IME inset (Android 11+, the inset the engine receives every
+     * frame). Layout then sees the reduced frame like React Native's
+     * `behavior="height"` / `"padding"`: absolutely positioned children dock
+     * on the keyboard and onLayout reports the avoided size. Android 8-10
+     * (no root IME inset in the engine) keeps the native viewport reduction.
+     */
     private fun engineAvoidsKeyboard(state: NodeState): Boolean =
-        state.keyboardModalHost != null && (
-            state.keyboardBehavior == KEYBOARD_RESIZE ||
-                state.keyboardBehavior == KEYBOARD_PADDING
-            )
+        (state.keyboardBehavior == KEYBOARD_RESIZE || state.keyboardBehavior == KEYBOARD_PADDING) &&
+            (state.keyboardModalHost != null || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
 
     /**
      * Forwards a modal window's IME to the engine in root-window
