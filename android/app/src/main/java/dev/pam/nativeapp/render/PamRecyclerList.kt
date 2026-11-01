@@ -2610,7 +2610,13 @@ internal class RichRecyclerAdapter(
         if (params.width == width && params.height == height) return
         params.width = width
         params.height = height
-        container.requestLayout()
+        val cell = container as? RichCellContainer
+        cell?.resizing = true
+        try {
+            container.requestLayout()
+        } finally {
+            cell?.resizing = false
+        }
     }
 
     private fun dp(value: Float): Int =
@@ -2704,6 +2710,57 @@ internal class RichRecyclerAdapter(
  */
 internal class RichCellContainer(context: Context) : FrameLayout(context) {
     var pinned = false
+
+    /** Set while the adapter resizes this holder: that request must reach the list. */
+    var resizing = false
+
+    private var localLayoutPending = false
+    private val localLayout = object : android.view.ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            localLayoutPending = false
+            if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(this)
+            if (isLayoutRequested && isLaidOut && isAttachedToWindow && width > 0 && height > 0) {
+                measure(
+                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+                )
+                layout(left, top, right, bottom)
+            }
+            return true
+        }
+    }
+
+    /**
+     * A row's size never depends on its views (the engine sizes it), so a
+     * view added, removed or changed inside it (a cell slice building it over
+     * several frames, a text or image settling) lays out only this row, just
+     * before the next draw, instead of asking the list for a full layout pass
+     * of every row (5 to 9 ms per frame while a list moves). A resize from the
+     * adapter, a row not laid out yet or a list already laying out goes the
+     * normal way.
+     */
+    override fun requestLayout() {
+        if (!resizing && canLayOutLocally()) {
+            forceLayout()
+            if (!localLayoutPending) {
+                localLayoutPending = true
+                viewTreeObserver.addOnPreDrawListener(localLayout)
+                invalidate()
+            }
+            return
+        }
+        super.requestLayout()
+    }
+
+    private fun canLayOutLocally(): Boolean {
+        val list = parent as? RecyclerView ?: return false
+        if (!isAttachedToWindow || !isLaidOut || isInLayout || list.isInLayout || list.isLayoutRequested) return false
+        val params = layoutParams ?: return false
+        return fixedBy(params.width, width) && fixedBy(params.height, height)
+    }
+
+    private fun fixedBy(spec: Int, current: Int): Boolean =
+        spec == ViewGroup.LayoutParams.MATCH_PARENT || spec >= 0 && spec == current
 
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean = super.onTouchEvent(event) || pinned
