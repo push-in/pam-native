@@ -432,6 +432,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
 
     override fun onResume() {
         super.onResume()
+        hiddenTrimHandler.removeCallbacks(hiddenTrim)
         if (firstFrameUptimeMillis > 0L) DeferredBundleAssets.resume()
         HostEvents.foreground(true)
         if (runtimeStarted) {
@@ -461,8 +462,23 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         if (runtimeStarted) {
             runtime.onHostBackground()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_BACKGROUND.toString().toByteArray())
+            hiddenTrimHandler.removeCallbacks(hiddenTrim)
+            hiddenTrimHandler.postDelayed(hiddenTrim, HIDDEN_TRIM_DELAY_MS)
         }
         super.onStop()
+    }
+
+    /**
+     * Some devices never send TRIM_MEMORY_UI_HIDDEN (the process keeps level
+     * 0 in background): a stopped activity releases its offscreen content
+     * itself once the app stayed hidden briefly (a quick app switch keeps
+     * everything).
+     */
+    private val hiddenTrimHandler = Handler(Looper.getMainLooper())
+    private val hiddenTrim = Runnable {
+        if (!runtimeStarted || isChangingConfigurations) return@Runnable
+        runtime.trimMemory(critical = false, hidden = true)
+        runtime.dispatchLifecycle(EVENT_MEMORY_PRESSURE, MEMORY_PRESSURE_MODERATE.toString().toByteArray())
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -478,7 +494,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         super.onTrimMemory(level)
         if (!runtimeStarted) return
         val pressure = memoryPressureForTrimLevel(level)
-        runtime.trimMemory(pressure == MEMORY_PRESSURE_CRITICAL)
+        runtime.trimMemory(pressure == MEMORY_PRESSURE_CRITICAL, hidden = trimLevelHidesUi(level))
         runtime.dispatchLifecycle(EVENT_MEMORY_PRESSURE, pressure.toString().toByteArray())
     }
 
@@ -563,6 +579,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onDestroy() {
+        hiddenTrimHandler.removeCallbacks(hiddenTrim)
         dev.pam.nativeapp.render.PamSafeAreaInspector.detach(window)
         releaseSplash()
         recoveryRunnable?.let(window.decorView::removeCallbacks)
@@ -1121,6 +1138,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         const val APP_STATE_INACTIVE = 2
         const val APP_STATE_BACKGROUND = 3
         const val MEMORY_PRESSURE_MODERATE = 1
+        const val HIDDEN_TRIM_DELAY_MS = 5_000L
         const val DEVTOOLS_ACTION = "dev.pam.nativeapp.action.TOGGLE_DEVTOOLS"
         const val DIAGNOSTICS_ACTION = "dev.pam.nativeapp.action.CAPTURE_DIAGNOSTICS"
         const val DIAGNOSTICS_REQUEST_EXTRA = "requestId"
@@ -1143,6 +1161,11 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             } else {
                 MEMORY_PRESSURE_MODERATE
             }
+
+        /** UI_HIDDEN and the background levels: no window of the app is visible. */
+        @Suppress("DEPRECATION")
+        fun trimLevelHidesUi(level: Int): Boolean =
+            level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3

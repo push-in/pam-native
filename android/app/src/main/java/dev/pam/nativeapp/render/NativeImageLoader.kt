@@ -417,9 +417,12 @@ internal class NativeImageLoader(
         thumbnailSignals.remove(key)?.cancel()
     }
 
-    fun trimMemory(critical: Boolean) {
+    fun trimMemory(critical: Boolean, hidden: Boolean = false) {
         synchronized(cache) {
-            if (critical) {
+            // Hidden app: entries no view holds are only a return-time
+            // shortcut; a shown bitmap stays alive in its view (no recycle()
+            // on eviction), so nothing visible decodes again on return.
+            if (critical || hidden) {
                 cache.evictAll()
             } else {
                 cache.trimToSize(cache.maxSize() / 2)

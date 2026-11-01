@@ -4,13 +4,16 @@ import android.content.ComponentCallbacks2
 import dev.pam.nativeapp.PamActivity.Companion.MEMORY_PRESSURE_CRITICAL
 import dev.pam.nativeapp.PamActivity.Companion.MEMORY_PRESSURE_MODERATE
 import dev.pam.nativeapp.PamActivity.Companion.memoryPressureForTrimLevel
+import dev.pam.nativeapp.PamActivity.Companion.trimLevelHidesUi
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @Suppress("DEPRECATION")
 class MemoryTrimLevelTest {
     @Test
-    fun goingToBackgroundOnlyHalvesTheCaches() {
+    fun goingToBackgroundIsNotCriticalPressure() {
         for (level in listOf(
             ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN,
             ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
@@ -30,5 +33,24 @@ class MemoryTrimLevelTest {
     fun runningCriticalAndCompleteEmptyTheCaches() {
         assertEquals(MEMORY_PRESSURE_CRITICAL, memoryPressureForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL))
         assertEquals(MEMORY_PRESSURE_CRITICAL, memoryPressureForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_COMPLETE))
+    }
+
+    @Test
+    fun onlyHiddenLevelsReleaseOffscreenContent() {
+        for (level in listOf(
+            ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN,
+            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
+            ComponentCallbacks2.TRIM_MEMORY_MODERATE,
+            ComponentCallbacks2.TRIM_MEMORY_COMPLETE,
+        )) {
+            assertTrue("level $level", trimLevelHidesUi(level))
+        }
+        for (level in listOf(
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE,
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW,
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL,
+        )) {
+            assertFalse("level $level", trimLevelHidesUi(level))
+        }
     }
 }

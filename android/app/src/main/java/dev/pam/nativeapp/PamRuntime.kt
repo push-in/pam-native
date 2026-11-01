@@ -470,8 +470,9 @@ class PamRuntime(
         }
     }
 
-    fun trimMemory(critical: Boolean) {
-        renderer.trimMemory(critical)
+    fun trimMemory(critical: Boolean, hidden: Boolean = false) {
+        renderer.trimMemory(critical, hidden)
+        if (hidden || critical) purgeNativeAllocator()
     }
 
     fun invalidateSystemBars() {
@@ -1148,6 +1149,7 @@ class PamRuntime(
         private const val MAX_PENDING_EVENTS = 256
         private const val PERFORMANCE_LOG_TAG = "PamNativePerf"
         private const val HEAVY_COMMIT_MUTATIONS = 32
+        private const val NATIVE_PURGE_DELAY_MS = 1_500L
         /** A batch answering a user event within this window commits in-frame. */
         private const val INTERACTION_COMMIT_WINDOW_MS = 250L
         private val INTERACTION_EVENTS = setOf(
@@ -1168,6 +1170,21 @@ class PamRuntime(
 
         // The engine library is loaded off the UI thread by PamStartup
         // (start() waits for it); every JNI call below needs a live handle.
+
+        @JvmStatic
+        private external fun nativePurgeAllocator()
+    }
+
+    private val purgeAllocator = Runnable {
+        if (closed.get()) return@Runnable
+        // Off the UI thread: walking the allocator's regions takes a few ms.
+        Thread({ runCatching { nativePurgeAllocator() } }, "pam-trim").start()
+    }
+
+    /** After the trim's own releases (and the PHP collection it triggers) land. */
+    private fun purgeNativeAllocator() {
+        main.removeCallbacks(purgeAllocator)
+        main.postDelayed(purgeAllocator, NATIVE_PURGE_DELAY_MS)
     }
 }
 

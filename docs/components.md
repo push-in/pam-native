@@ -710,6 +710,10 @@ into a full-screen page. Percentage widths are resolved against the modal
 viewport before vertical intrinsic measurement, so wrapped copy and action rows
 produce the same compact centered card on Android and iOS. Explicit height,
 minimum/maximum constraints and edge-pinned portal content remain authoritative.
+A growing child (`flex: 1` / `flex-grow`), React Native's modal root such as a
+full-window backdrop or `KeyboardAvoidingView`, fills the dialog window like a
+React Native `Modal`'s content (width stretched, height grown), so it needs no
+`width: 100%`; explicit sizes and min/max constraints still apply to it.
 
 `ModalPresentation::FullScreen` continues to fill the available window, while
 `ModalPresentation::Sheet` fills the width and uses its selected snap-point
