@@ -6,7 +6,7 @@ namespace Pam\Native;
 
 final class Protocol
 {
-    public const string SDK_VERSION = '1.46.17';
+    public const string SDK_VERSION = '1.46.18';
     public const int ABI_VERSION = 1;
     public const int MINIMUM_VERSION = 1;
     public const int VERSION = 1;
