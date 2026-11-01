@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## 1.46.23 - 2026-11-01
+
+Android keyboard layout and navigation fixes on top of 1.46.22.
+
+- Android: a `KeyboardAvoidingView` with `behavior` `height` or `padding`
+  outside a modal is laid out above the keyboard by the engine (as on iOS and
+  inside modals) from the root IME inset, every frame. The native viewport
+  reduction was invisible to layout: absolutely positioned children docked
+  against the unreduced frame (a button meant 8 dp above the keyboard rested
+  48 dp above it) and `onLayout` reported the full height. Android 8-10 keeps
+  the native reduction.
+- Android: when the focused route changes, a focused input of the route left
+  behind is blurred and its keyboard hidden (React Navigation behavior), so the
+  keyboard no longer stays over a pushed screen or story viewer and the Back
+  key reaches the activity. An input of the incoming route keeps its focus.
+
+## 1.46.22 - 2026-11-01
+
+Android keyboard avoidance fix on top of 1.46.21.
+
+- Android: a `KeyboardAvoidingView` with `behavior` `height` or `padding`
+  outside a modal measures its keyboard overlap from the bottom it had before
+  giving the viewport up. Measured from the reduced bottom the overlap read 0,
+  so the viewport was restored and reduced again on the next layout: the
+  screen relaid out every frame while the keyboard was up (about 60 frames/s
+  of idle work) and a button docked above the keyboard flickered behind it.
+
+## 1.46.21 - 2026-11-01
+
+Engine wrap measurement fix and iOS transparent modal presentation on top of 1.46.20 (includes #212).
+
+- Engine: an item of a wrapping row (`flex-wrap`) measures its height at its
+  own resolved width, as the line layout does. A fixed-width cell with a
+  label that wraps to two lines was measured against the whole row (one
+  line), so a vertical `ScrollView` holding the wrap ended one label short:
+  the last line's labels stayed hidden under a footer and could not be
+  scrolled into view.
+- iOS (#212): a transparent modal opens and closes over the screen below (the
+  route still presented modally stays out of the stack sync, the screen on
+  display stays drawn until the navigation's transition runs, and a fading
+  transparent modal's container is clear), so a story opened over the feed no
+  longer shows the bare window background.
+
 ## 1.46.20 - 2026-11-01
 
 Dialog modal layout like React Native and lower background memory on Android, on top of 1.46.19 (includes the iOS fixes of #209 and #210).

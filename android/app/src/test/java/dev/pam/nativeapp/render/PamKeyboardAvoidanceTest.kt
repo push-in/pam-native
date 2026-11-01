@@ -161,6 +161,27 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun resizedViewportKeepsTheOverlapItGaveUp() {
+        val full = keyboardOverlapForBounds(
+            originalBottom = keyboardAvoidingUnreducedBottom(2_280f, 0),
+            windowBottom = 2_280,
+            keyboardInset = 991,
+            offset = 0,
+        )
+        val reducedBottom = 2_280f - keyboardAvoidingViewportHeight(2_168, full, true).let { 2_168 - it }
+        assertEquals(991, full)
+        assertEquals(
+            full,
+            keyboardOverlapForBounds(
+                originalBottom = keyboardAvoidingUnreducedBottom(reducedBottom, full),
+                windowBottom = 2_280,
+                keyboardInset = 991,
+                offset = 0,
+            ),
+        )
+    }
+
+    @Test
     fun resizeBehaviorReducesTheKeyboardAvoidingViewport() {
         assertEquals(
             1_280,

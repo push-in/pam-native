@@ -1349,13 +1349,14 @@ mod tests {
             "padding insets the content"
         );
 
-        // Android resizes the window (adjustResize) and the view natively.
+        // Android (adjustNothing window, root IME inset every frame) avoids
+        // it in layout too, like iOS.
         engine.set_surface_policy(SurfacePolicy::SystemWindows);
         engine
             .commit(&tree(1).encode().expect("tree"))
             .expect("android");
         engine.relayout(400.0, 800.0).expect("relayout");
-        assert_eq!(engine.layouts[&3].height, 800.0);
+        assert_eq!(engine.layouts[&3].height, 500.0);
     }
 
     #[test]
