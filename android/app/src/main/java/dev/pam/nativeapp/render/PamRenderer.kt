@@ -2051,8 +2051,13 @@ class PamRenderer(
                 // Only this node gains or loses its native view: the rest of
                 // the cell (decoded images, players, scroll offsets, running
                 // motions such as a double-tap heart) stays mounted.
-                VirtualCellHostingRepair.IN_PLACE ->
-                    if (shouldBeVirtual) demote(state) else promote(state)
+                VirtualCellHostingRepair.IN_PLACE -> when {
+                    shouldBeVirtual -> demote(state)
+                    // A cell built in slices has not reached this node's
+                    // host yet: the rest of the walk creates it in place.
+                    cellHostPending(state, cellRoot) -> state.virtual = false
+                    else -> promote(state)
+                }
                 VirtualCellHostingRepair.REMOUNT_CELL -> {
                     state.virtual = shouldBeVirtual
                     dematerializeSubtree(cellRoot)
@@ -2364,6 +2369,7 @@ class PamRenderer(
             ids = itemIds,
             extents = itemExtents,
             mount = { cell, holder -> materializeCell(cell, holder) },
+            mountSlice = { cell, holder, deadline -> materializeCell(cell, holder, deadline) },
             unmount = { cell, _ ->
                 val section = listSectionOf(cell)
                 val listState = nodes[nodes[cell]?.parent ?: 0L]
@@ -2515,25 +2521,48 @@ class PamRenderer(
         return null
     }
 
-    private fun materializeCell(id: Long, holder: FrameLayout) {
-        val slotFrame = cellSlotFrame(id) ?: return
+    /**
+     * Builds the views of list cell [id] into [holder]. With a [deadline]
+     * (System.nanoTime) the walk stops before creating a view once it is
+     * past, after at least one view, and returns false: the cell is resumed
+     * by a later call (nodes that already have views are skipped), so a row
+     * of 150 views bound ahead of a moving list is built over a few frames
+     * instead of blocking one frame for 20-50 ms. Returns true when every
+     * view of the cell exists.
+     */
+    private fun materializeCell(id: Long, holder: FrameLayout, deadline: Long = Long.MAX_VALUE): Boolean {
+        val slotFrame = cellSlotFrame(id) ?: return true
         if (parkedCells.remove(id)) unparkCell(id, holder)
-        val profile = cellProfile
-        if (profile == null) {
-            materializeCellNode(id, id, slotFrame, holder)
-            return
+        // A nested list's cells mount inside this walk: restore the outer slice.
+        val outerDeadline = cellSliceDeadline
+        val outerCreated = cellSliceCreated
+        cellSliceDeadline = deadline
+        cellSliceCreated = 0
+        try {
+            val profile = cellProfile ?: return materializeCellNode(id, id, slotFrame, holder)
+            profile.reset()
+            val started = System.nanoTime()
+            val complete = materializeCellNode(id, id, slotFrame, holder)
+            Log.d(
+                CELL_PROFILE_TAG,
+                "cell=$id totalUs=${(System.nanoTime() - started) / 1000} nodes=${profile.nodes} pooled=${profile.pooled} " +
+                    "createUs=${profile.createNs / 1000} attachUs=${profile.attachNs / 1000} " +
+                    "propsUs=${profile.propsNs / 1000} eventsUs=${profile.eventsNs / 1000} layoutUs=${profile.layoutNs / 1000}" +
+                    if (complete) "" else " partial",
+            )
+            if (++cellsProfiled % 50 == 0) logCellKeyProfile()
+            return complete
+        } finally {
+            cellSliceDeadline = outerDeadline
+            cellSliceCreated = outerCreated
         }
-        profile.reset()
-        val started = System.nanoTime()
-        materializeCellNode(id, id, slotFrame, holder)
-        Log.d(
-            CELL_PROFILE_TAG,
-            "cell=$id totalUs=${(System.nanoTime() - started) / 1000} nodes=${profile.nodes} pooled=${profile.pooled} " +
-                "createUs=${profile.createNs / 1000} attachUs=${profile.attachNs / 1000} " +
-                "propsUs=${profile.propsNs / 1000} eventsUs=${profile.eventsNs / 1000} layoutUs=${profile.layoutNs / 1000}",
-        )
-        if (++cellsProfiled % 50 == 0) logCellKeyProfile()
     }
+
+    /** Deadline of the cell slice being built ([materializeCell]). */
+    private var cellSliceDeadline = Long.MAX_VALUE
+
+    /** Views created by the cell slice being built. */
+    private var cellSliceCreated = 0
 
     /**
      * Debug builds with `setprop log.tag.PamCellPerf DEBUG` (set before the
@@ -2629,10 +2658,12 @@ class PamRenderer(
         rootId: Long,
         rootFrame: Frame,
         holder: FrameLayout,
-    ) {
-        val state = nodes[id] ?: return
+    ): Boolean {
+        val state = nodes[id] ?: return true
         val created = !state.virtual && views[id] == null
         if (created) {
+            if (cellSliceCreated > 0 && System.nanoTime() >= cellSliceDeadline) return false
+            cellSliceCreated++
             val profile = cellProfile
             if (profile == null) {
                 val view = takePooledCellView(state) ?: createView(state.kind, state)
@@ -2666,11 +2697,12 @@ class PamRenderer(
             // when it was created while binding an outer list's header cell.
             // It may materialize after the commit's global list-sync pass.
             if (created) syncVirtualList(id)
-            return
+            return true
         }
         children[id]?.forEach { child ->
-            materializeCellNode(child, rootId, rootFrame, holder)
+            if (!materializeCellNode(child, rootId, rootFrame, holder)) return false
         }
+        return true
     }
 
     private fun attachCellView(
@@ -2918,6 +2950,18 @@ class PamRenderer(
             check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual native hierarchy is too deep" }
         }
         return parent
+    }
+
+    /** Whether [state]'s native host inside cell [cellRoot] has no view yet (a partly built cell). */
+    private fun cellHostPending(state: NodeState, cellRoot: Long): Boolean {
+        var parent = state.parent
+        while (parent != 0L) {
+            val parentState = nodes[parent] ?: return false
+            if (!parentState.virtual) return views[parent] == null
+            if (parent == cellRoot) return false
+            parent = parentState.parent
+        }
+        return false
     }
 
     private fun promote(state: NodeState) {
@@ -3463,8 +3507,10 @@ class PamRenderer(
     /** Hands an off-screen bound cell's view build to its list's mount budget. */
     private fun deferOffscreenCell(cellRoot: Long): Boolean {
         val list = nodes[cellRoot]?.parent?.let { views[it] } as? PamRecyclerList ?: return false
-        return list.deferCellRepair(cellRoot) {
-            if (nodes[cellRoot] != null) virtualCellHolder(cellRoot)?.let { materializeCell(cellRoot, it) }
+        return list.deferCellRepairSliced(cellRoot) { deadline ->
+            if (nodes[cellRoot] == null) return@deferCellRepairSliced true
+            val holder = virtualCellHolder(cellRoot) ?: return@deferCellRepairSliced true
+            materializeCell(cellRoot, holder, deadline)
         }
     }
 
