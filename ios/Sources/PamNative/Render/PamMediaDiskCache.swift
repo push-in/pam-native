@@ -285,6 +285,64 @@ public final class PamMediaDiskCache: @unchecked Sendable {
         )
         for index in evicted {
             try? FileManager.default.removeItem(at: media[index])
+            Self.removePlayableLinks(of: media[index])
+        }
+    }
+
+    // MARK: Playable name
+
+    /// Container extensions a player link may carry (see `playableURL`).
+    static let playableExtensions = ["mp4", "mov", "m4a", "mp3", "wav"]
+
+    /// AVFoundation picks the demuxer by the file extension: a `.media` cache
+    /// file fails with -11828 "Cannot Open" (Android's ExoPlayer sniffs the
+    /// bytes). Players get a relative symlink named after the sniffed
+    /// container next to it (no extra bytes on disk); anything else, or a
+    /// file that cannot be read, is returned unchanged.
+    static func playableURL(for file: URL) -> URL {
+        guard file.isFileURL, file.pathExtension == "media",
+              let ext = sniffedExtension(of: file) else { return file }
+        let link = file.deletingPathExtension().appendingPathExtension(ext)
+        let manager = FileManager.default
+        if (try? manager.destinationOfSymbolicLink(atPath: link.path)) != file.lastPathComponent {
+            try? manager.removeItem(at: link)
+            guard (try? manager.createSymbolicLink(
+                atPath: link.path,
+                withDestinationPath: file.lastPathComponent
+            )) != nil else { return file }
+        }
+        return link
+    }
+
+    static func sniffedExtension(of file: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 12) else { return nil }
+        return sniffedExtension(head: head)
+    }
+
+    /// ISO BMFF (`ftyp`: QuickTime, M4A or MP4), MP3 (ID3 tag or frame
+    /// sync) and RIFF/WAVE; nil for anything else.
+    static func sniffedExtension(head: Data) -> String? {
+        let bytes = [UInt8](head)
+        if bytes.count >= 12, bytes[4] == 0x66, bytes[5] == 0x74, bytes[6] == 0x79, bytes[7] == 0x70 {
+            switch String(decoding: bytes[8..<12], as: UTF8.self) {
+            case "qt  ": return "mov"
+            case "M4A ", "M4B ": return "m4a"
+            default: return "mp4"
+            }
+        }
+        if bytes.count >= 3, bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 { return "mp3" }
+        if bytes.count >= 2, bytes[0] == 0xFF, bytes[1] & 0xE0 == 0xE0 { return "mp3" }
+        if bytes.count >= 12, bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46,
+           bytes[8] == 0x57, bytes[9] == 0x41, bytes[10] == 0x56, bytes[11] == 0x45 { return "wav" }
+        return nil
+    }
+
+    static func removePlayableLinks(of file: URL) {
+        let base = file.deletingPathExtension()
+        for ext in playableExtensions {
+            try? FileManager.default.removeItem(at: base.appendingPathExtension(ext))
         }
     }
 

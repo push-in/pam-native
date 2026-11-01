@@ -108,6 +108,45 @@ final class PamMediaParityTests: XCTestCase {
         XCTAssertFalse(media.isReadyPendingFirstFrame)
     }
 
+    /// A `.media` cache file: AVFoundation chooses the demuxer by extension
+    /// and failed with -11828 "Cannot Open" (Loops never played on iOS).
+    func testCachedMediaFilePlaysThroughAContainerNamedLink() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pam-playable-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cached = dir.appendingPathComponent("abc.media")
+        try FileManager.default.copyItem(at: try Self.makeVideo(), to: cached)
+
+        let playable = PamMediaDiskCache.playableURL(for: cached)
+        XCTAssertEqual(playable.lastPathComponent, "abc.mp4")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: playable.path), "abc.media",
+                       "a relative link, no copy of the bytes")
+        XCTAssertEqual(PamMediaDiskCache.playableURL(for: cached), playable, "reused")
+        XCTAssertEqual(Self.itemStatus(playable), .readyToPlay)
+
+        PamMediaDiskCache.removePlayableLinks(of: cached)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: playable.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cached.path))
+
+        XCTAssertEqual(PamMediaDiskCache.sniffedExtension(head: Data([0, 0, 0, 0x14, 0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20])), "mov")
+        XCTAssertEqual(PamMediaDiskCache.sniffedExtension(head: Data("ID3\u{3}\u{0}".utf8)), "mp3")
+        XCTAssertNil(PamMediaDiskCache.sniffedExtension(head: Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBP".utf8)), "images keep .media")
+        let image = dir.appendingPathComponent("img.media")
+        try Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVP8 ".utf8).write(to: image)
+        XCTAssertEqual(PamMediaDiskCache.playableURL(for: image), image)
+    }
+
+    private static func itemStatus(_ url: URL) -> AVPlayerItem.Status {
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        let deadline = Date().addingTimeInterval(20)
+        while item.status == .unknown && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        _ = player
+        return item.status
+    }
+
     func testHiddenPlayerIsReleasedAfterTheDelayAndRestored() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         window.isHidden = false

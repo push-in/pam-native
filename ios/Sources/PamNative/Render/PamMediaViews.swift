@@ -407,6 +407,9 @@ final class PamMediaView: UIView {
                 pinned: cachePinned,
                 cacheOnly: cachePolicy == 7
             ) { [weak self] result in
+                // Off the main thread: the cache file gets a name AVFoundation
+                // can open (`.media` alone fails with "Cannot Open").
+                let playable = (try? result.get()).map { PamMediaDiskCache.playableURL(for: $0.url) }
                 DispatchQueue.main.async {
                     guard let self, self.sourceGeneration == generation else { return }
                     switch result {
@@ -419,7 +422,7 @@ final class PamMediaView: UIView {
                         let size = (try? resolution.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                         self.onCacheReady?(identity, Int64(size))
                         if !self.streamingCache && !self.downloadWhilePlaying {
-                            self.installPlayer(resolution.url)
+                            self.installPlayer(playable ?? resolution.url)
                         }
                     case let .failure(error):
                         if self.cachePolicy == 7 {
