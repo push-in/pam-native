@@ -4,7 +4,7 @@ import XCTest
 
 /// UIKit regressions; requires an iOS test destination (not executable on Linux).
 @MainActor
-final class PamDoubleTapPressFeedbackTests: XCTestCase {
+final class PamPressScrollParityTests: XCTestCase {
     func testADoubleTapSurfaceNeverDimsOnPressWhileAPlainPressableDoes() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
         let renderer = PamRenderer(hostView: host, dispatchEvent: { _, _, _ in })
@@ -59,5 +59,21 @@ final class PamDoubleTapPressFeedbackTests: XCTestCase {
         ])
         let plain: [Mutation] = [.update(id: 7, key: PamConstants.scaleX, value: .decimal(2))]
         XCTAssertEqual(PamRenderer.transitionSpecsFirst(plain).map(describe), plain.map(describe))
+    }
+
+    func testALongAnimatedScrollJumpsToOneViewportBeforeItsTarget() {
+        XCTAssertEqual(PamContentScrollView.longScrollJumpStart(current: 9_000, target: 0, viewport: 800), 800)
+        XCTAssertEqual(PamContentScrollView.longScrollJumpStart(current: 0, target: 5_000, viewport: 800), 4_200)
+        XCTAssertNil(PamContentScrollView.longScrollJumpStart(current: 1_500, target: 0, viewport: 800),
+                     "within two viewports the whole distance animates")
+        XCTAssertNil(PamContentScrollView.longScrollJumpStart(current: 1_500, target: 0, viewport: 0))
+
+        let scroll = PamContentScrollView(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
+        scroll.contentSize = CGSize(width: 320, height: 20_000)
+        scroll.contentOffset = CGPoint(x: 0, y: 12_000)
+        scroll.jumpCloseBeforeAnimatedScroll(to: .zero, horizontal: false)
+        XCTAssertEqual(scroll.contentOffset.y, 600, accuracy: 0.5)
+        scroll.jumpCloseBeforeAnimatedScroll(to: .zero, horizontal: false)
+        XCTAssertEqual(scroll.contentOffset.y, 600, accuracy: 0.5, "the last stretch is left to the animation")
     }
 }
