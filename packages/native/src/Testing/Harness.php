@@ -15,6 +15,7 @@ use Pam\Native\Internal\DependencyTracker;
 use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Renderable;
+use Pam\Native\RendererContract;
 use Pam\Native\Route;
 use Pam\Native\Routing\MiddlewareRegistry;
 use Pam\Native\Routing\RouteCollection;
@@ -143,6 +144,12 @@ final class Harness
         if ($current !== null && $current === self::$root) return;
         if ($current !== null) {
             throw new LogicException('Testing\mount() needs the runtime for itself, but an app is already running; call Testing\reset() first.');
+        }
+        // Mounted screens render against the renderer this SDK ships (its
+        // extension properties included) unless the environment or the test
+        // declares another host contract.
+        if (getenv(RendererContract::ENVIRONMENT) === false && !RendererContract::current()->declared) {
+            RendererContract::use(RendererContract::local());
         }
         self::$root = static function (): Element {
             $children = [];
