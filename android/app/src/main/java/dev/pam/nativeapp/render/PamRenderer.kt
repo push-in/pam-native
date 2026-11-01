@@ -1904,7 +1904,10 @@ class PamRenderer(
             }
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context).also {
                 it.onActiveRouteChanged = ::applyMergedStatusBar
-                it.onRouteVisibilityChanged = ::scheduleRouteListenerSync
+                it.onRouteVisibilityChanged = {
+                    scheduleRouteListenerSync()
+                    retryHiddenAutoFocus()
+                }
             }
             NodeKind.WEB_VIEW -> nativeViews.create("webview") { kind, payload ->
                 state?.let { dispatchBytes(it.id, kind, payload) }
@@ -9242,6 +9245,19 @@ class PamRenderer(
         }
     }
 
+    /** autoFocus inputs mounted inside a hidden route, focused when it is shown. */
+    private val hiddenAutoFocusInputs: MutableSet<View> =
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+    private fun retryHiddenAutoFocus() {
+        if (hiddenAutoFocusInputs.isEmpty()) return
+        val shown = hiddenAutoFocusInputs.filter { it.isAttachedToWindow && it.isShown }
+        shown.forEach { view ->
+            hiddenAutoFocusInputs.remove(view)
+            attemptAutoFocus(view, attempt = 0)
+        }
+    }
+
     private fun attemptAutoFocus(view: View, attempt: Int) {
         val deadline = SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS
         attemptAutoFocus(view, deadline, retry = attempt > 0)
@@ -9259,8 +9275,14 @@ class PamRenderer(
             // Hidden editors must never acquire focus or restart the IME.
             if (view.isAttachedToWindow && !view.isShown) {
                 (view as? PamEditText)?.onInputConnectionCreated = null
+                // A pushed route mounts hidden until its transition starts:
+                // its autoFocus input focuses once that route is shown
+                // (React Native focuses it on mount, the keyboard rising with
+                // the push), never while it stays hidden.
+                hiddenAutoFocusInputs.add(view)
                 return@postDelayed
             }
+            hiddenAutoFocusInputs.remove(view)
             if (!view.isAttachedToWindow || !view.hasFocus() && !view.requestFocus()) {
                 if (SystemClock.uptimeMillis() < deadline) {
                     attemptAutoFocus(view, deadline, retry = true)
