@@ -47,12 +47,15 @@ data class PamSafeAreaViolation(
  *
  * Enabled in debuggable builds (opt out: `adb shell setprop
  * debug.pam.safearea 0`). `adb shell setprop debug.pam.safearea.overlay 1`
- * also paints the inset areas and outlines offending views. Release builds
+ * also paints the inset areas and outlines offending views (read when the
+ * window attaches). Scans are lazy: after the window has been still for a
+ * moment, at most every 2 s, on an idle main looper. Release builds
  * never attach it, and nothing runs while a window is hidden.
  */
 object PamSafeAreaInspector {
     const val TAG = "PamSafeArea"
-    private const val SETTLE_DELAY_MS = 300L
+    private const val SETTLE_DELAY_MS = 600L
+    private const val MIN_INTERVAL_MS = 2_000L
 
     private val attached = WeakHashMap<Window, Attachment>()
 
@@ -111,6 +114,17 @@ object PamSafeAreaInspector {
                 }
             }
             if (view is ViewGroup) {
+                // A clipping group that stays clear of every inset band cannot
+                // show a descendant inside one: skip its subtree (most of a
+                // long list's rows), so a scan stays cheap.
+                if (view !== decor && view.clipChildren && view.width > 0 && view.height > 0) {
+                    view.getLocationOnScreen(location)
+                    val clear = location[0] - window.left >= bands[0] &&
+                        location[1] - window.top >= bands[1] &&
+                        window.right - (location[0] + view.width) >= bands[2] &&
+                        window.bottom - (location[1] + view.height) >= bands[3]
+                    if (clear) return
+                }
                 for (index in 0 until view.childCount) visit(view.getChildAt(index))
             }
         }
@@ -174,23 +188,40 @@ object PamSafeAreaInspector {
         private val decor = window.decorView
         private var overlay: Overlay? = null
         private var lastReport = ""
-        private val inspect = Runnable { run() }
-        private val schedule = ViewTreeObserver.OnGlobalLayoutListener {
-            decor.removeCallbacks(inspect)
-            decor.postDelayed(inspect, SETTLE_DELAY_MS)
+        private var overlayOn = false
+
+        // Layout and scroll only stamp the time (no per-frame posting); one
+        // check runs after the window has been still for SETTLE_DELAY_MS and
+        // at most every MIN_INTERVAL_MS, and the scan itself waits for an idle
+        // main looper so it never shares a frame with drawing or input.
+        private var dirty = false
+        private var lastChange = 0L
+        private var lastScan = 0L
+        private var checkPosted = false
+        private var idleQueued = false
+        private var started = false
+        private val check = Runnable { checkPosted = false; maybeScan() }
+        private val idle = android.os.MessageQueue.IdleHandler {
+            idleQueued = false
+            if (started && dirty && settled()) run() else if (started && dirty) post()
+            false
         }
-        private val scrolled = ViewTreeObserver.OnScrollChangedListener {
-            decor.removeCallbacks(inspect)
-            decor.postDelayed(inspect, SETTLE_DELAY_MS)
-        }
+        private val schedule = ViewTreeObserver.OnGlobalLayoutListener { touch() }
+        private val scrolled = ViewTreeObserver.OnScrollChangedListener { touch() }
 
         fun start() {
+            started = true
+            overlayOn = overlayEnabled()
             decor.viewTreeObserver.addOnGlobalLayoutListener(schedule)
             decor.viewTreeObserver.addOnScrollChangedListener(scrolled)
         }
 
         fun stop() {
-            decor.removeCallbacks(inspect)
+            started = false
+            decor.removeCallbacks(check)
+            checkPosted = false
+            if (idleQueued) android.os.Looper.myQueue().removeIdleHandler(idle)
+            idleQueued = false
             if (decor.viewTreeObserver.isAlive) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(schedule)
                 decor.viewTreeObserver.removeOnScrollChangedListener(scrolled)
@@ -199,7 +230,38 @@ object PamSafeAreaInspector {
             overlay = null
         }
 
+        private fun touch() {
+            dirty = true
+            lastChange = android.os.SystemClock.uptimeMillis()
+            post()
+        }
+
+        private fun settled(): Boolean {
+            val now = android.os.SystemClock.uptimeMillis()
+            return now - lastChange >= SETTLE_DELAY_MS && now - lastScan >= MIN_INTERVAL_MS
+        }
+
+        private fun post() {
+            if (checkPosted || idleQueued || !started) return
+            val now = android.os.SystemClock.uptimeMillis()
+            val wait = maxOf(lastChange + SETTLE_DELAY_MS, lastScan + MIN_INTERVAL_MS) - now
+            checkPosted = true
+            decor.postDelayed(check, wait.coerceAtLeast(16L))
+        }
+
+        private fun maybeScan() {
+            if (!started || !dirty) return
+            if (!settled()) {
+                post()
+                return
+            }
+            idleQueued = true
+            android.os.Looper.myQueue().addIdleHandler(idle)
+        }
+
         private fun run() {
+            dirty = false
+            lastScan = android.os.SystemClock.uptimeMillis()
             if (!decor.isShown || decor.windowVisibility != View.VISIBLE) return
             val violations = scan(decor)
             val report = violations.joinToString("\n") {
@@ -210,7 +272,7 @@ object PamSafeAreaInspector {
                 if (report.isNotEmpty()) report.lines().forEach { Log.w(TAG, it) }
                 else Log.i(TAG, "$label: no content inside the system-bar insets")
             }
-            if (overlayEnabled()) showOverlay(violations) else hideOverlay()
+            if (overlayOn) showOverlay(violations) else hideOverlay()
         }
 
         private fun pxToDp(px: Int): String =

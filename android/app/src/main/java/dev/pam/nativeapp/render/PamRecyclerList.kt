@@ -1282,7 +1282,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         motionTrace = if (dev.pam.nativeapp.BuildConfig.DEBUG &&
             android.util.Log.isLoggable(MOTION_TRACE_TAG, android.util.Log.DEBUG)
         ) {
-            HashMap()
+            MotionTrace()
         } else {
             null
         }
@@ -1295,15 +1295,62 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      * present in both frames, by stable id), so a jump, a snap or a content
      * swap shows exactly, without a screen recording. Off otherwise.
      */
-    private var motionTrace: HashMap<Long, Int>? = null
+    private var motionTrace: MotionTrace? = null
 
-    /** Rows the adapter held at the last traced frame (a page landing logs its frame). */
-    private var motionTraceCount = -1
+    /**
+     * Rows on screen at the last traced frame, in reused arrays (no per-frame
+     * allocation), and the pending log lines: they go out as one multi-line
+     * log record every ~250 ms or when the list stops (one logger write per
+     * frame was most of the trace's own UI-thread cost).
+     */
+    private class MotionTrace {
+        var ids = LongArray(32)
+        var tops = IntArray(32)
+        var size = 0
+        var nextIds = LongArray(32)
+        var nextTops = IntArray(32)
+        var deltas = IntArray(32)
+        var count = -1
+        val pending = StringBuilder()
+        var pendingSince = 0L
+
+        fun ensure(capacity: Int) {
+            if (nextIds.size >= capacity) return
+            val grown = maxOf(capacity, nextIds.size * 2)
+            nextIds = LongArray(grown)
+            nextTops = IntArray(grown)
+            deltas = IntArray(grown)
+            ids = ids.copyOf(grown)
+            tops = tops.copyOf(grown)
+        }
+
+        fun topOf(id: Long): Int {
+            for (index in 0 until size) if (ids[index] == id) return tops[index]
+            return Int.MIN_VALUE
+        }
+
+        fun swap(newSize: Int) {
+            val swapIds = ids
+            ids = nextIds
+            nextIds = swapIds
+            val swapTops = tops
+            tops = nextTops
+            nextTops = swapTops
+            size = newSize
+        }
+
+        fun flush() {
+            if (pending.isEmpty()) return
+            android.util.Log.d(MOTION_TRACE_TAG, pending.toString())
+            pending.setLength(0)
+        }
+    }
 
     private fun traceMotion() {
-        val previous = motionTrace ?: return
-        val current = HashMap<Long, Int>(childCount * 2)
-        val deltas = ArrayList<Int>(childCount)
+        val trace = motionTrace ?: return
+        trace.ensure(childCount)
+        var shown = 0
+        var common = 0
         var above = Int.MAX_VALUE
         for (index in 0 until childCount) {
             val child = getChildAt(index)
@@ -1313,22 +1360,44 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             val id = getChildItemId(child)
             if (id == NO_ID) continue
             val top = if (horizontal) child.left else child.top
-            current[id] = top
-            previous[id]?.let { deltas += top - it }
+            trace.nextIds[shown] = id
+            trace.nextTops[shown] = top
+            shown++
+            val before = trace.topOf(id)
+            if (before != Int.MIN_VALUE) trace.deltas[common++] = top - before
         }
-        if (current.isEmpty()) return
-        deltas.sort()
-        val moved = if (deltas.isEmpty()) null else deltas[deltas.size / 2]
+        if (shown == 0) return
+        java.util.Arrays.sort(trace.deltas, 0, common)
+        val moved: Int? = if (common == 0) null else trace.deltas[common / 2]
         val count = adapter?.itemCount ?: 0
-        if (moved != 0 || previous.keys != current.keys || count != motionTraceCount) {
-            android.util.Log.d(
-                MOTION_TRACE_TAG,
-                "t=${android.os.SystemClock.uptimeMillis()} dy=${moved ?: "swap"} common=${deltas.size} " +
-                    "shown=${current.size} state=$scrollState above=${if (above == Int.MAX_VALUE) -1 else above} count=$count",
-            )
+        val sameRows = common == shown && shown == trace.size
+        val now = android.os.SystemClock.uptimeMillis()
+        if (moved != 0 || !sameRows || count != trace.count) {
+            if (trace.pending.isEmpty()) trace.pendingSince = now
+            else trace.pending.append('\n')
+            trace.pending.append("t=").append(now).append(" dy=").append(moved ?: "swap")
+                .append(" common=").append(common).append(" shown=").append(shown)
+                .append(" state=").append(scrollState)
+                .append(" above=").append(if (above == Int.MAX_VALUE) -1 else above)
+                .append(" count=").append(count)
         }
-        motionTraceCount = count
-        motionTrace = current
+        trace.count = count
+        trace.swap(shown)
+        if (trace.pending.isNotEmpty() &&
+            (scrollState == SCROLL_STATE_IDLE || now - trace.pendingSince >= 250L || trace.pending.length > 3000)
+        ) {
+            trace.flush()
+        }
+    }
+
+    override fun onScrollStateChanged(state: Int) {
+        super.onScrollStateChanged(state)
+        if (state == SCROLL_STATE_IDLE) motionTrace?.flush()
+    }
+
+    override fun onDetachedFromWindow() {
+        motionTrace?.flush()
+        super.onDetachedFromWindow()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
