@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.46.21 - 2026-11-01
+
+Engine wrap measurement fix and iOS transparent modal presentation on top of 1.46.20 (includes #212).
+
+- Engine: an item of a wrapping row (`flex-wrap`) measures its height at its
+  own resolved width, as the line layout does. A fixed-width cell with a
+  label that wraps to two lines was measured against the whole row (one
+  line), so a vertical `ScrollView` holding the wrap ended one label short:
+  the last line's labels stayed hidden under a footer and could not be
+  scrolled into view.
+- iOS (#212): a transparent modal opens and closes over the screen below (the
+  route still presented modally stays out of the stack sync, the screen on
+  display stays drawn until the navigation's transition runs, and a fading
+  transparent modal's container is clear), so a story opened over the feed no
+  longer shows the bare window background.
+
 ## 1.46.20 - 2026-11-01
 
 Dialog modal layout like React Native and lower background memory on Android, on top of 1.46.19 (includes the iOS fixes of #209 and #210).

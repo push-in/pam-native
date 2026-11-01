@@ -2835,10 +2835,14 @@ fn wrapped_intrinsic_cross(
                 depth + 1,
             )?,
         };
-        let (measure_width, measure_height) = match (basis, flow_axis) {
-            (Some(basis), Axis::Horizontal) => (basis, available_height),
-            (Some(basis), Axis::Vertical) => (available_width, basis),
-            (None, _) => (available_width, available_height),
+        // Measure the cross extent at the item's resolved main size, as the
+        // final line layout does: a fixed-width cell measured against the
+        // whole row kept its labels on one line, so a scroller holding the
+        // wrap ended one label short of its last line.
+        let resolved_main = basis.unwrap_or(main);
+        let (measure_width, measure_height) = match flow_axis {
+            Axis::Horizontal => (resolved_main, available_height),
+            Axis::Vertical => (available_width, resolved_main),
         };
         let cross = constrained_intrinsic_extent(
             children_index,
@@ -6517,6 +6521,100 @@ mod tests {
         assert_eq!(layouts[&4].height, 90.0);
         assert_eq!(layouts[&15].y, 50.0);
         assert_eq!(layouts[&3].height, 106.0, "the content covers both lines");
+    }
+
+    #[test]
+    fn scroll_content_covers_wrapped_cells_with_two_line_labels() {
+        use PropValue::{Float as F, Integer as I};
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Screen, [])),
+            (
+                2,
+                node(2, 1, 0, NodeKind::Scroll, [(PropKey::Height, F(100.0))]),
+            ),
+            (
+                3,
+                node(
+                    3,
+                    2,
+                    0,
+                    NodeKind::Column,
+                    [
+                        (PropKey::PaddingTop, F(14.0)),
+                        (PropKey::PaddingHorizontal, F(16.0)),
+                        (PropKey::PaddingBottom, F(12.0)),
+                    ],
+                ),
+            ),
+            (4, node(4, 3, 0, NodeKind::Row, [(PropKey::FlexWrap, I(2))])),
+        ]);
+        for index in 0..8_u64 {
+            let cell = 10 + index * 3;
+            nodes.insert(
+                cell,
+                node(
+                    cell,
+                    4,
+                    index as u32,
+                    NodeKind::Pressable,
+                    [
+                        (PropKey::Width, F(82.0)),
+                        (PropKey::AlignItems, I(2)),
+                        (PropKey::Gap, F(6.0)),
+                        (PropKey::MarginBottom, F(14.0)),
+                        (PropKey::PaddingHorizontal, F(3.0)),
+                    ],
+                ),
+            );
+            nodes.insert(
+                cell + 1,
+                node(
+                    cell + 1,
+                    cell,
+                    0,
+                    NodeKind::View,
+                    [(PropKey::Width, F(66.0)), (PropKey::Height, F(66.0))],
+                ),
+            );
+            nodes.insert(
+                cell + 2,
+                node(
+                    cell + 2,
+                    cell,
+                    1,
+                    NodeKind::Text,
+                    [
+                        (
+                            PropKey::Text,
+                            PropValue::String("Sofie Lollipop VIP".into()),
+                        ),
+                        (PropKey::FontSize, F(12.0)),
+                        (PropKey::LineHeight, F(16.0)),
+                        (PropKey::NumberOfLines, I(2)),
+                    ],
+                ),
+            );
+        }
+        let layouts = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
+        let label = layouts[&(10 + 7 * 3 + 2)];
+        let last = layouts[&(10 + 7 * 3)];
+        // Both lines are 66 + 6 + two 16 dp label lines tall (+14 margin).
+        assert_eq!(layouts[&10].height, 104.0);
+        assert_eq!(last.height, 104.0);
+        assert_eq!(label.y + label.height, last.y + last.height);
+        assert_eq!(layouts[&4].height, 236.0);
+        assert_eq!(
+            layouts[&3].height,
+            14.0 + 236.0 + 12.0,
+            "the content ends below the last labels"
+        );
     }
 
     #[test]
