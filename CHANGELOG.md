@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.46.23 - 2026-11-01
+
+Android keyboard layout and navigation fixes on top of 1.46.22.
+
+- Android: a `KeyboardAvoidingView` with `behavior` `height` or `padding`
+  outside a modal is laid out above the keyboard by the engine (as on iOS and
+  inside modals) from the root IME inset, every frame. The native viewport
+  reduction was invisible to layout: absolutely positioned children docked
+  against the unreduced frame (a button meant 8 dp above the keyboard rested
+  48 dp above it) and `onLayout` reported the full height. Android 8-10 keeps
+  the native reduction.
+- Android: when the focused route changes, a focused input of the route left
+  behind is blurred and its keyboard hidden (React Navigation behavior), so the
+  keyboard no longer stays over a pushed screen or story viewer and the Back
+  key reaches the activity. An input of the incoming route keeps its focus.
+
 ## 1.46.22 - 2026-11-01
 
 Android keyboard avoidance fix on top of 1.46.21.
