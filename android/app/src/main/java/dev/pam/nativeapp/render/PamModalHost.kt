@@ -1294,6 +1294,9 @@ internal class PamModalHost @JvmOverloads constructor(
         lastSheetHeight = sheetHeight
         lastBaseSheetHeight = baseSheetHeight
         val sheetAnimating = presentation == PRESENTATION_SHEET && backdropAnimator?.isRunning == true
+        // Between the entrance's offscreen start and its posted slide, a
+        // relayout (insets, dynamic height) must not draw the sheet at rest.
+        val entrancePending = presentation == PRESENTATION_SHEET && sheetEntranceOffset != null
         sheetKeyboardTranslation = keyboardTranslation
         repeat(content.childCount) { index ->
             val child = content.getChildAt(index)
@@ -1303,9 +1306,11 @@ internal class PamModalHost @JvmOverloads constructor(
             // here stretched a short bottom-anchored child over the window.
             if (usesWindowSizedContent()) return@repeat
             child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
-            if (!sheetAnimating) child.translationY = keyboardTranslation
+            if (entrancePending) child.translationY = sheetEntranceOffset!!
+            else if (!sheetAnimating) child.translationY = keyboardTranslation
         }
-        if (!sheetAnimating) handle.translationY = keyboardTranslation
+        if (entrancePending) handle.translationY = sheetEntranceOffset!!
+        else if (!sheetAnimating) handle.translationY = keyboardTranslation
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1502,7 +1507,11 @@ internal class PamModalHost @JvmOverloads constructor(
      * Sheets animate like @gorhom/bottom-sheet: the backdrop fades while the
      * sheet (and its handle) slide by their own height, independently.
      */
+    /** Offscreen start of a posted sheet entrance (null once it slides). */
+    private var sheetEntranceOffset: Float? = null
+
     private fun animateSheet(entering: Boolean, endAction: (() -> Unit)? = null) {
+        sheetEntranceOffset = null
         // Shared elements set the entrance (a fade in step with the flights).
         if (entering && shared.running) return
         val distance = (lastSheetHeight.takeIf { it > 0 } ?: sheetChild()?.height ?: 0).toFloat() + dp(24f)
@@ -1622,6 +1631,7 @@ internal class PamModalHost @JvmOverloads constructor(
                 view.animate().cancel()
                 view.translationY = offscreen
             }
+            sheetEntranceOffset = offscreen
             content.post { animateSheet(entering = true) }
             backdropDrawable.alpha = 0
             return
@@ -1854,6 +1864,7 @@ internal class PamModalHost @JvmOverloads constructor(
      * flags travel to the window manager with the same traversal as `hide()`.
      */
     private fun hideWindow(modal: Dialog) {
+        sheetEntranceOffset = null
         setHiddenWindowInput(modal, hidden = true)
         modal.hide()
     }
