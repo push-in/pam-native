@@ -273,6 +273,15 @@ internal fun keyboardAvoidingViewportHeight(
     baseHeight.coerceAtLeast(0)
 }
 
+/**
+ * A resize/padding KeyboardAvoidingView measures its IME overlap from the
+ * bottom it had before giving the viewport up: from the reduced bottom the
+ * overlap reads 0, the viewport is restored and the next layout reduces it
+ * again (a relayout every frame while the keyboard is up).
+ */
+internal fun keyboardAvoidingUnreducedBottom(bottom: Float, viewportInset: Int): Float =
+    bottom + viewportInset.coerceAtLeast(0)
+
 internal fun keyboardAvoidingBehaviorReducesViewport(behavior: Int): Boolean =
     behavior == 1 || behavior == 3
 
@@ -8869,12 +8878,21 @@ class PamRenderer(
         val offset = dp(
             state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat(),
         )
+        val engineManaged = engineAvoidsKeyboard(state)
         val keyboard = if (enabled) {
-            keyboardOverlap(view, state.keyboardInset, offset, state.keyboardModalHost)
+            keyboardOverlap(
+                view,
+                state.keyboardInset,
+                offset,
+                state.keyboardModalHost,
+                // The viewport this KAV already gave up is measured back: its
+                // reduced bottom no longer reaches the IME, which read as no
+                // overlap, restored the viewport and flipped every frame.
+                viewportInset = if (engineManaged) 0 else state.keyboardAvoidingViewportInset,
+            )
         } else {
             0
         }
-        val engineManaged = engineAvoidsKeyboard(state)
         if (engineManaged && enabled) state.keyboardModalHost?.setEngineKeyboardAvoidance(true)
         if (keyboard > 0) {
             ((host.findFocus() as? EditText) ?: lastFocusedInput)
@@ -9019,6 +9037,7 @@ class PamRenderer(
         keyboardInset: Int,
         offset: Int,
         modal: PamModalHost? = null,
+        viewportInset: Int = 0,
     ): Int {
         if (keyboardInset <= 0) return 0
         if (modal != null) {
@@ -9038,7 +9057,10 @@ class PamRenderer(
         val viewLocation = IntArray(2)
         root.getLocationOnScreen(rootLocation)
         view.getLocationOnScreen(viewLocation)
-        val originalBottom = viewLocation[1] - view.translationY + view.height
+        val originalBottom = keyboardAvoidingUnreducedBottom(
+            viewLocation[1] - view.translationY + view.height,
+            viewportInset,
+        )
         val pamActivity = activity() as? PamActivity
         val windowBottom = if (pamActivity != null && !pamActivity.isInMultiWindowMode) {
             @Suppress("DEPRECATION")

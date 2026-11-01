@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.46.22 - 2026-11-01
+
+Android keyboard avoidance fix on top of 1.46.21.
+
+- Android: a `KeyboardAvoidingView` with `behavior` `height` or `padding`
+  outside a modal measures its keyboard overlap from the bottom it had before
+  giving the viewport up. Measured from the reduced bottom the overlap read 0,
+  so the viewport was restored and reduced again on the next layout: the
+  screen relaid out every frame while the keyboard was up (about 60 frames/s
+  of idle work) and a button docked above the keyboard flickered behind it.
+
 ## 1.46.21 - 2026-11-01
 
 Engine wrap measurement fix and iOS transparent modal presentation on top of 1.46.20 (includes #212).
