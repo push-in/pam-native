@@ -190,9 +190,40 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 scrolledToEnd = restingAtEnd() && canScrollTowardStart()
             }
             updateAccessibilityVisibility()
+            scheduleRampAhead()
         } finally {
             android.os.Trace.endSection()
         }
+    }
+
+    private var rampAheadPosted = false
+
+    /** Rows ahead kept at rest: the configured prefetch, not a fast fling's adaptive extent. */
+    private fun restAheadSpace(): Int = dp(rowHeight) * prefetchItems
+    private val rampAhead = Runnable {
+        rampAheadPosted = false
+        val manager = layoutManager as? PrefetchLayoutManager
+        if (manager != null && scrollState == SCROLL_STATE_IDLE && isAttachedToWindow &&
+            windowVisibility == VISIBLE && !manager.extraLayoutRamped(restAheadSpace())
+        ) {
+            requestLayout()
+        }
+    }
+
+    /**
+     * A list at rest grows its laid-out off-screen space (the rows ahead) one
+     * row per frame, as a scroll does, so the rows next to the viewport are
+     * bound (in slices) before the next drag instead of inside its first
+     * frames: a row bound in the drag's first frame made it late, and a late
+     * frame while the list moves leaves the window buffer-stuffed until it
+     * stops.
+     */
+    private fun scheduleRampAhead() {
+        if (rampAheadPosted || scrollState != SCROLL_STATE_IDLE) return
+        val manager = layoutManager as? PrefetchLayoutManager ?: return
+        if (manager.extraLayoutRamped(restAheadSpace())) return
+        rampAheadPosted = true
+        postOnAnimation(rampAhead)
     }
 
     /**
@@ -1095,9 +1126,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             val rate = display?.refreshRate ?: 60f
             if (rate >= 20f) (1000f / rate).toLong().coerceAtLeast(4L) else 16L
         }
-        adapter.offscreenWhileMoving = { position ->
-            scrollState != SCROLL_STATE_IDLE && !adapter.shown(position)
-        }
+        // At rest too: the rows ahead grown by scheduleRampAhead.
+        adapter.offscreenWhileMoving = { position -> !adapter.shown(position) }
     }
 
     fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {
@@ -1396,7 +1426,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     override fun onScrollStateChanged(state: Int) {
         super.onScrollStateChanged(state)
-        if (state == SCROLL_STATE_IDLE) motionTrace?.flush()
+        if (state == SCROLL_STATE_IDLE) {
+            motionTrace?.flush()
+            scheduleRampAhead()
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -1767,6 +1800,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
          * by row. The other side keeps its laid-out rows.
          */
         fun restartExtraLayoutRamp(start: Boolean = true, end: Boolean = true)
+
+        /** Whether both sides already reached [extraLayoutSpace] (or [limit]). */
+        fun extraLayoutRamped(limit: Int = Int.MAX_VALUE): Boolean
     }
 
     private class PamLinearLayoutManager(
@@ -1821,6 +1857,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             if (start) rampedStartSpace = 0
             if (end) rampedEndSpace = 0
         }
+
+        override fun extraLayoutRamped(limit: Int): Boolean =
+            minOf(extraLayoutSpace, limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
 
         override fun calculateExtraLayoutSpace(
             state: State,
@@ -1890,6 +1929,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             if (start) rampedStartSpace = 0
             if (end) rampedEndSpace = 0
         }
+
+        override fun extraLayoutRamped(limit: Int): Boolean =
+            minOf(extraLayoutSpace, limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
 
         override fun calculateExtraLayoutSpace(
             state: State,
