@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.46.14 - 2026-10-31
+
+Android sheet keyboard, zoom and camera follow-ups, on top of 1.46.13.
+
+- Android: an interactive BottomSheet over the IME rises to the safe top
+  and shrinks so its footer stays above the keyboard (gorhom `interactive`);
+  a KeyboardAvoidingView that is the sheet's root no longer resets that lift.
+- Android: while a native transform shows its content zoomed in (scale above
+  the identity snap), a drag over it pans the content for the whole touch:
+  a navigator's swipe-back or a pager never intercepts it. At scale 1
+  nothing changes.
+- Android: a custom view's native event closes only an engine-local Modal
+  ancestor (iOS parity); a camera inside an app Modal no longer dismisses it
+  when it becomes ready.
+- macOS CLIs are not attached to this release.
+
 ## 1.46.13 - 2026-10-31
 
 Android glide, modal and press follow-ups, on top of 1.46.12.

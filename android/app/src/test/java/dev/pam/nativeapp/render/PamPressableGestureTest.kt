@@ -8,6 +8,13 @@ import org.junit.Test
 
 class PamPressableGestureTest {
     @Test
+    fun aZoomedSurfaceOwnsItsPan() {
+        assertFalse(zoomedContentOwnsPan(1f))
+        assertFalse(zoomedContentOwnsPan(1.01f))
+        assertTrue(zoomedContentOwnsPan(2.4f))
+    }
+
+    @Test
     fun aDoubleTapSurfaceNeverDimsOnPress() {
         assertFalse(showsPressFeedback(hasDoubleTap = true))
         assertTrue(showsPressFeedback(hasDoubleTap = false))

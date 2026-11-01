@@ -75,6 +75,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var pendingMove: PamPressPointer? = null
     private var moveScheduled = false
     private var nativeTransformEnabled = false
+    /** A zoomed native surface owns its pan: ancestors (navigator swipe-back, pagers) may not intercept it. */
+    private var zoomedPanOwnsParent = false
     private var nativeMinScale = 1f
     private var nativeMaxScale = 4f
     private var nativeTranslationLimitX = 0f
@@ -562,6 +564,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         ) {
             parent?.requestDisallowInterceptTouchEvent(true)
         }
+        claimZoomedPan(event)
         gestureRecognizer.onTouch(event)
         if (gestureRecognitionCancelsPress(
                 recognized = gestureRecognizer.hasRecognized(),
@@ -577,8 +580,23 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             event.actionMasked == MotionEvent.ACTION_CANCEL
         ) {
             parent?.requestDisallowInterceptTouchEvent(false)
+            if (event.actionMasked != MotionEvent.ACTION_POINTER_UP) zoomedPanOwnsParent = false
         }
         return handled
+    }
+
+    /**
+     * While the native transform shows its content zoomed in, a drag pans
+     * the content for the whole touch: the parent chain (a navigator's
+     * swipe-back, a pager) may not intercept it, even at the content edge,
+     * so a zoomed photo never leaves the screen. At scale 1 nothing changes.
+     */
+    private fun claimZoomedPan(event: MotionEvent) {
+        if (!nativeTransformEnabled || drag.config != null) return
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return
+        val child = nativeTransformTarget()
+        zoomedPanOwnsParent = child != null && zoomedContentOwnsPan(child.scaleX)
+        if (zoomedPanOwnsParent) parent?.requestDisallowInterceptTouchEvent(true)
     }
 
     private fun traceGesture(message: String) {
@@ -1132,6 +1150,12 @@ internal fun gestureRequiresParentInterception(
     actionMasked: Int,
     multiPointerGesture: Boolean,
 ): Boolean = multiPointerGesture && actionMasked == MotionEvent.ACTION_POINTER_DOWN
+
+/** A native transform zoomed past the identity snap owns the drag over it. */
+internal fun zoomedContentOwnsPan(scale: Float): Boolean = scale > ZOOMED_PAN_MIN_SCALE
+
+/** Same as the bounded identity snap: below it a release springs back to 1x. */
+internal const val ZOOMED_PAN_MIN_SCALE = 1.02f
 
 internal fun gestureRecognitionCancelsPress(
     recognized: Boolean,
