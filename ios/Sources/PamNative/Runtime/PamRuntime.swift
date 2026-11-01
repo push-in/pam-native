@@ -843,6 +843,7 @@ public final class PamRuntime {
             NSLog("PamKeyboard %@ overlap=%.1f durationMs=%.0f", hiding ? "hide" : "change", overlap, duration * 1_000)
         }
         #endif
+        renderer.followKeyboard(overlap: overlap, duration: duration, curve: curve)
         updateKeyboardInset(bottom: Float(overlap))
     }
 
@@ -1853,6 +1854,20 @@ struct PamFramePump {
 
 /// The keyboard animation that the next committed frames follow.
 enum PamKeyboardFollow {
+    /// How long after the keyboard settles a natively followed view waits
+    /// for its engine relayout before easing back.
+    static let engineSlack: TimeInterval = 2.0
+
+    /// Next residual translation of a view whose bottom (with its current
+    /// `offset`) rests on `edge`: it moves to `target`; nil when it does not
+    /// rest on the keyboard edge (the engine alone places it).
+    static func residual(offset: CGFloat, bottom: CGFloat, edge: CGFloat, target: CGFloat) -> CGFloat? {
+        guard abs(bottom - edge) <= 1 else { return nil }
+        return settled(offset + (target - bottom))
+    }
+
+    static func settled(_ value: CGFloat) -> CGFloat { abs(value) < 0.5 ? 0 : value }
+
     /// A commit arriving this long after the keyboard settled (the
     /// application's response to it) still eases in instead of jumping.
     static let settleSlack: TimeInterval = 1.0

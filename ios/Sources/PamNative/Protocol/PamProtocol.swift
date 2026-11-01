@@ -681,6 +681,10 @@ public enum PamConstants {
     /// `keyboardVerticalOffset`: extra clearance above the keyboard
     /// (KeyboardAvoidingView, and `<ScrollView keyboardInset>` like Android).
     public static let keyboardVerticalOffset = 155
+    /// KeyboardAvoidingView `behavior` (2 = pan: the engine lays a trailing
+    /// view directly above the keyboard) and `enabled`.
+    public static let keyboardBehavior = 62
+    public static let keyboardAvoidingEnabled = 156
     public static let textAllowFontScaling = 163
     public static let textMaxFontSizeMultiplier = 164
     public static let textAdjustsFontSizeToFit = 165

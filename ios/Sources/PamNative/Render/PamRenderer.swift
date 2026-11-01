@@ -51,6 +51,11 @@ public final class PamRenderer: @unchecked Sendable {
     private var views: [Int64: UIView] = [:]
     internal func mountedView(_ id: Int64) -> UIView? { views[id] }
     private var nodes: [Int64: NodeState] = [:]
+    /// Keyboard follow state (see `followKeyboard`).
+    fileprivate var keyboardFollowOffsets: [Int64: CGFloat] = [:]
+    fileprivate var keyboardFollowAwaitingEngine = Set<Int64>()
+    fileprivate var keyboardFollowOverlap: CGFloat = 0
+    fileprivate var keyboardFollowGeneration: UInt64 = 0
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
     private var dirtyStackingParents = Set<Int64>()
@@ -280,6 +285,7 @@ public final class PamRenderer: @unchecked Sendable {
             return
         }
 
+        let followedBefore = keyboardFollowPositions()
         var dirtyLayouts = Set<Int64>()
         // Lists whose subtree, frames or own configuration changed; clean
         // lists are not re-windowed and modal triggers are only re-bound when
@@ -349,6 +355,7 @@ public final class PamRenderer: @unchecked Sendable {
             navigations.forEach { $0.host.navigate($0.revision) }
         }
         flushStackingOrder()
+        if !followedBefore.isEmpty { reconcileKeyboardFollow(followedBefore) }
         if needsModalSync {
             syncLocalModalTriggers()
         }
@@ -7829,6 +7836,113 @@ private final class ResidentImage {
         self.source = source
         self.imageView = imageView
         self.decodedKey = decodedKey
+    }
+}
+
+// MARK: - Keyboard follow (panning KeyboardAvoidingView)
+
+extension PamRenderer {
+    /// The keyboard overlap over the host changed to `overlap` points: every
+    /// panning KeyboardAvoidingView resting on the old keyboard edge (or the
+    /// screen bottom) starts moving to the new one now, in the keyboard's own
+    /// animation, as a residual translation. The engine relayout of the same
+    /// inset lands frames later; until then the composer stayed under the
+    /// rising keyboard (Android 1.46.18 follows every IME frame natively).
+    func followKeyboard(overlap: CGFloat, duration: TimeInterval, curve: UInt) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let previous = keyboardFollowOverlap
+        keyboardFollowOverlap = overlap
+        guard let host = hostView, abs(overlap - previous) >= 0.5 else { return }
+        let height = host.bounds.height
+        for (id, state) in nodes where state.kind == .keyboardAvoidingView {
+            guard state.properties[PamConstants.keyboardBehavior]?.integerOrNil() == 2,
+                  state.properties[PamConstants.keyboardAvoidingEnabled]?.boolOrNil() ?? true,
+                  let view = views[id], let parent = view.superview, view.window != nil,
+                  !Self.isInsideModalHost(view) else { continue }
+            let offset = keyboardFollowOffsets[id] ?? 0
+            guard offset != 0 || CATransform3DIsIdentity(view.layer.transform) else { continue }
+            let extra = CGFloat(state.properties[PamConstants.keyboardVerticalOffset]?.decimalOrNil() ?? 0)
+            let bottom = parent.convert(view.center, to: host).y + view.bounds.height / 2 + offset
+            let edge = height - previous - (previous > 0 ? extra : 0)
+            guard let next = PamKeyboardFollow.residual(
+                offset: offset, bottom: bottom, edge: edge,
+                target: height - overlap - (overlap > 0 ? extra : 0)
+            ) else { continue }
+            keyboardFollowOffsets[id] = next
+            keyboardFollowAwaitingEngine.insert(id)
+            let apply = { view.transform = next == 0 ? .identity : CGAffineTransform(translationX: 0, y: next) }
+            if duration > 0, !PamMotionPolicy.isReduced {
+                UIView.animate(
+                    withDuration: duration, delay: 0,
+                    options: [UIView.AnimationOptions(rawValue: curve << 16), .beginFromCurrentState, .allowUserInteraction],
+                    animations: apply
+                )
+            } else {
+                apply()
+            }
+        }
+        scheduleKeyboardFollowExpiry(after: max(0, duration) + PamKeyboardFollow.engineSlack)
+    }
+
+    /// Host-space y of each followed view's laid out bottom (no transform):
+    /// a composer growing upwards keeps its bottom and is not compensated.
+    fileprivate func keyboardFollowPositions() -> [Int64: CGFloat] {
+        guard !keyboardFollowOffsets.isEmpty, let host = hostView else { return [:] }
+        var positions: [Int64: CGFloat] = [:]
+        for id in keyboardFollowOffsets.keys {
+            guard let view = views[id], let parent = view.superview else { continue }
+            positions[id] = parent.convert(view.center, to: host).y + view.bounds.height / 2
+        }
+        return positions
+    }
+
+    /// The engine moved a followed view: its translation gives back exactly
+    /// that distance, so the view never moves twice (inside the keyboard's
+    /// animation when the commit follows it).
+    fileprivate func reconcileKeyboardFollow(_ before: [Int64: CGFloat]) {
+        guard let host = hostView else { return }
+        for (id, offset) in keyboardFollowOffsets {
+            guard let view = views[id], let parent = view.superview, let previous = before[id] else {
+                keyboardFollowOffsets[id] = nil
+                keyboardFollowAwaitingEngine.remove(id)
+                continue
+            }
+            let moved = parent.convert(view.center, to: host).y + view.bounds.height / 2 - previous
+            guard abs(moved) >= 0.5 else { continue }
+            keyboardFollowAwaitingEngine.remove(id)
+            let next = PamKeyboardFollow.settled(offset - moved)
+            keyboardFollowOffsets[id] = next == 0 ? nil : next
+            view.transform = next == 0 ? .identity : CGAffineTransform(translationX: 0, y: next)
+        }
+    }
+
+    /// A followed view the engine never moved (it does not ride the
+    /// keyboard after all) eases back to its laid out place.
+    private func scheduleKeyboardFollowExpiry(after delay: TimeInterval) {
+        keyboardFollowGeneration &+= 1
+        let generation = keyboardFollowGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.keyboardFollowGeneration == generation else { return }
+            for id in self.keyboardFollowAwaitingEngine {
+                self.keyboardFollowOffsets[id] = nil
+                guard let view = self.views[id] else { continue }
+                UIView.animate(withDuration: PamKeyboardFollow.minimumDuration, delay: 0, options: [.beginFromCurrentState]) {
+                    view.transform = .identity
+                }
+            }
+            self.keyboardFollowAwaitingEngine.removeAll()
+        }
+    }
+
+    var keyboardFollowTranslations: [Int64: CGFloat] { keyboardFollowOffsets }
+
+    private static func isInsideModalHost(_ view: UIView) -> Bool {
+        var current = view.superview
+        while let node = current {
+            if node is PamModalHost { return true }
+            current = node.superview
+        }
+        return false
     }
 }
 
