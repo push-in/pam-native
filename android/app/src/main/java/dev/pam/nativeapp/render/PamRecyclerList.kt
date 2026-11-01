@@ -279,6 +279,17 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      * it is bound off screen; false when the caller must repair it now.
      */
     fun deferCellRepair(id: Long, repair: () -> Unit): Boolean =
+        deferCellRepairSliced(id) { _ ->
+            repair()
+            true
+        }
+
+    /**
+     * [deferCellRepair] whose [repair] builds the cell until a deadline
+     * (System.nanoTime) and returns whether it is complete; an incomplete
+     * repair resumes on a later frame (or at once when the row is shown).
+     */
+    fun deferCellRepairSliced(id: Long, repair: (Long) -> Boolean): Boolean =
         (adapter as? RichRecyclerAdapter)?.deferRepair(id, repair) == true
 
     /** Holder container bound to virtual cell [id], or null when it is off screen. */
@@ -302,6 +313,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         mount: (Long, FrameLayout) -> Unit,
         unmount: (Long, FrameLayout) -> Unit,
         sectionSwitch: ListSectionSwitch? = null,
+        mountSlice: ((Long, FrameLayout, Long) -> Boolean)? = null,
     ) {
         val sectionRestore = sectionSwitch?.let(::leaveSection)
         val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(0f)) }
@@ -353,6 +365,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 mount,
                 unmount,
                 deferMounts = { !isShown },
+                mountSlice = mountSlice,
             ).also(::installOffscreenMounts)
         } else {
             current.submit(ids, pixelExtents)
@@ -1920,6 +1933,12 @@ internal class RichRecyclerAdapter(
     private val mount: (Long, FrameLayout) -> Unit,
     private val unmount: (Long, FrameLayout) -> Unit,
     private val deferMounts: () -> Boolean = { false },
+    /**
+     * Builds part of a cell until a deadline (System.nanoTime), returning
+     * whether it is complete; a later call resumes it. Without it a budgeted
+     * row mounts whole, however long that takes.
+     */
+    private val mountSlice: ((Long, FrameLayout, Long) -> Boolean)? = null,
 ) : RecyclerView.Adapter<RichRecyclerAdapter.RichHolder>() {
     /**
      * Rows of a list nobody sees yet (a screen mounted ahead, under the
@@ -1954,13 +1973,13 @@ internal class RichRecyclerAdapter(
      * their views are built within the per-frame budget instead of inside
      * the commit, and always before the row is drawn on screen.
      */
-    private val pendingRepairs = LinkedHashMap<Long, Pair<RichHolder, () -> Unit>>()
+    private val pendingRepairs = LinkedHashMap<Long, Pair<RichHolder, (Long) -> Boolean>>()
 
     /**
      * Defers [repair] of cell [id] when it is bound off screen. Returns false
      * (the caller repairs now) when it is on screen or not bound.
      */
-    fun deferRepair(id: Long, repair: () -> Unit): Boolean {
+    fun deferRepair(id: Long, repair: (Long) -> Boolean): Boolean {
         val holder = boundHolders.firstOrNull { it.boundId == id } ?: return false
         val position = holder.bindingAdapterPosition
         if (position == RecyclerView.NO_POSITION || shown(position)) return false
@@ -1985,7 +2004,7 @@ internal class RichRecyclerAdapter(
             val position = holder.bindingAdapterPosition
             if (position == RecyclerView.NO_POSITION || !shown(position)) continue
             iterator.remove()
-            repair()
+            repair(Long.MAX_VALUE)
         }
     }
 
@@ -1999,7 +2018,10 @@ internal class RichRecyclerAdapter(
             val position = holder.bindingAdapterPosition
             if (position == RecyclerView.NO_POSITION || !shown(position)) continue
             iterator.remove()
-            if (holder.boundId == id && holder.container.childCount == 0) mount(id, holder.container)
+            // Pending rows are empty or partly built (a slice): finish them.
+            if (holder.boundId == id && (mountSlice != null || holder.container.childCount == 0)) {
+                mount(id, holder.container)
+            }
         }
     }
 
@@ -2019,9 +2041,22 @@ internal class RichRecyclerAdapter(
             return false
         }
         val started = System.nanoTime()
-        mountNow(holder, id)
+        val complete = mountPart(holder, id, started + MOUNT_BUDGET_NANOS - mountWindowUsed)
         mountWindowUsed += System.nanoTime() - started
-        return true
+        if (!complete) {
+            pendingMounts[holder] = id
+            scheduleDrain()
+        }
+        return complete
+    }
+
+    /** Mounts [holder]'s cell until [deadline] when slices are supported; true once complete. */
+    private fun mountPart(holder: RichHolder, id: Long, deadline: Long): Boolean {
+        val slice = mountSlice ?: run {
+            if (holder.container.childCount == 0) mount(id, holder.container)
+            return true
+        }
+        return slice(id, holder.container, deadline)
     }
 
     private fun mountNow(holder: RichHolder, id: Long): Boolean {
@@ -2036,17 +2071,25 @@ internal class RichRecyclerAdapter(
         android.view.Choreographer.getInstance().postFrameCallback {
             drainScheduled = false
             mountShown()
-            mountWindowStart = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
-            mountWindowUsed = 0L
-            val budget = if (deferMounts()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
+            // Rows bound earlier in this frame (a scroll) share its budget.
+            val frame = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+            if (frame != mountWindowStart) {
+                mountWindowStart = frame
+                mountWindowUsed = 0L
+            }
+            // While the list moves its frames are already busy: the small budget.
+            val budget = if (deferMounts() || moving()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
             val iterator = pendingMounts.entries.iterator()
             while (iterator.hasNext() && mountWindowUsed < budget) {
                 val (holder, id) = iterator.next()
-                iterator.remove()
-                if (holder.boundId != id || holder.container.childCount > 0) continue
+                if (holder.boundId != id) {
+                    iterator.remove()
+                    continue
+                }
                 val started = System.nanoTime()
-                mount(id, holder.container)
+                val complete = mountPart(holder, id, started + budget - mountWindowUsed)
                 mountWindowUsed += System.nanoTime() - started
+                if (complete) iterator.remove()
             }
             // Off-screen repairs: within the smaller budget, at most one
             // cell per frame while the list moves (they are ahead of it).
@@ -2055,12 +2098,15 @@ internal class RichRecyclerAdapter(
             while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS) {
                 if (repaired > 0 && moving()) break
                 val (id, entry) = repairs.next()
-                repairs.remove()
-                if (entry.first.boundId != id) continue
+                if (entry.first.boundId != id) {
+                    repairs.remove()
+                    continue
+                }
                 val started = System.nanoTime()
-                entry.second()
+                val complete = entry.second(started + MOUNT_BUDGET_NANOS - mountWindowUsed)
                 repaired++
                 mountWindowUsed += System.nanoTime() - started
+                if (complete) repairs.remove()
             }
             if (pendingMounts.isNotEmpty() || pendingRepairs.isNotEmpty()) scheduleDrain()
         }
