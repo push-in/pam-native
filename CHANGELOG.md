@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.46.18 - 2026-11-01
+
+Android keyboard, sheet and video follow-ups plus responsive signals, on top of 1.46.17.
+
+- Android: a panning KeyboardAvoidingView (a chat composer) follows every
+  IME animation frame natively: its residual translation is applied in
+  `onProgress` and again when the trailing engine frame lands. It used to
+  hide under the rising keyboard until the animation ended.
+- Android: a bottom sheet's posted entrance keeps its offscreen start
+  through relayouts that land before the slide; one frame was drawn open.
+- Android: a video player reports ready once its first frame is on the
+  surface (400 ms fallback), so a poster faded out on ready no longer
+  reveals a black surface.
+- Responsive (#206): window, insets and font-scale readers re-render only
+  for the property they read, Material height class, `useFontScale()`
+  clamp/scaled, `AdaptiveLayout::clamp()`, docs/responsive.md; Android lint
+  clean on minSdk 26 (the root insets animation callback is set only on
+  Android 11+, a crash on Android 8-10).
+
 ## 1.46.17 - 2026-11-01
 
 Touch follow-ups, on top of 1.46.16.

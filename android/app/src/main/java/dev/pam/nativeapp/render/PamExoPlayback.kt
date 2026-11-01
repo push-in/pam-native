@@ -114,6 +114,21 @@ internal class PamExoPlayback(
     private var player: ExoPlayer? = null
     private var prepared = false
     private var buffering = false
+    // A video is reported prepared once its first frame is on the surface
+    // (or after a short fallback): STATE_READY lands before that frame, and
+    // a reveal (poster fade) at that moment showed a black surface.
+    private var firstFrameRendered = false
+    private var preparedAnnounced = false
+    private val preparedFallback = Runnable { player?.let(::announcePrepared) }
+
+    private fun announcePrepared(current: ExoPlayer) {
+        if (preparedAnnounced || released.get()) return
+        preparedAnnounced = true
+        owner.removeCallbacks(preparedFallback)
+        val size = current.videoSize
+        val duration = snapshot.duration
+        dispatch { listener.onPrepared(size.width, size.height, duration) }
+    }
     private val clock = object : Runnable {
         override fun run() {
             if (released.get()) return
@@ -159,9 +174,12 @@ internal class PamExoPlayback(
                                 setBuffering(false)
                                 if (!prepared) {
                                     prepared = true
-                                    val size = current.videoSize
-                                    val duration = snapshot.duration
-                                    dispatch { listener.onPrepared(size.width, size.height, duration) }
+                                    val video = current.currentTracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
+                                    if (!video || firstFrameRendered) {
+                                        announcePrepared(current)
+                                    } else {
+                                        owner.postDelayed(preparedFallback, FIRST_FRAME_FALLBACK_MS)
+                                    }
                                 }
                             }
                             Player.STATE_BUFFERING -> if (prepared) setBuffering(true)
@@ -169,7 +187,15 @@ internal class PamExoPlayback(
                                 setBuffering(false)
                                 dispatch { listener.onCompletion() }
                             }
+                            // Idle follows stop()/release() or an error, both reported elsewhere.
+                            Player.STATE_IDLE -> Unit
                         }
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        if (released.get()) return
+                        firstFrameRendered = true
+                        if (prepared) announcePrepared(current)
                     }
 
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -321,3 +347,4 @@ internal fun mediaContext(context: android.content.Context): android.content.Con
 
 /** How long a released player's owner thread outlives it (late codec events). */
 private const val OWNER_QUIT_DELAY_MS = 3_000L
+private const val FIRST_FRAME_FALLBACK_MS = 400L

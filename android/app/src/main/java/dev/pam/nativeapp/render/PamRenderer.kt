@@ -8698,7 +8698,8 @@ class PamRenderer(
         host.addOnLayoutChangeListener(layoutListener)
         // The engine lays a trailing panning KAV out above the IME. When that
         // frame lands, recompute the native residual translation from the new
-        // position so the view is never moved twice.
+        // position so the view is never moved twice (also mid-animation: the
+        // engine frame trails the IME by one frame).
         val selfLayoutListener = View.OnLayoutChangeListener {
                 _,
                 _,
@@ -8712,10 +8713,9 @@ class PamRenderer(
             ->
             if (
                 (top != oldTop || bottom != oldBottom) &&
-                !state.keyboardAnimating &&
                 (state.keyboardInset > 0 || view.translationY != 0f)
             ) {
-                applyKeyboardAvoidance(view, state)
+                if (state.keyboardAnimating) followKeyboardFrame(view, state) else applyKeyboardAvoidance(view, state)
             }
         }
         state.keyboardSelfLayoutListener = selfLayoutListener
@@ -8754,6 +8754,9 @@ class PamRenderer(
                     ): WindowInsets {
                         val nextInset = insets.getInsets(WindowInsets.Type.ime()).bottom
                         state.keyboardInset = ownWindowImeInset(view, nextInset, state.keyboardInset)
+                        if (runningAnimations.any { it.typeMask and WindowInsets.Type.ime() != 0 }) {
+                            followKeyboardFrame(view, state)
+                        }
                         return insets
                     }
 
@@ -8812,6 +8815,23 @@ class PamRenderer(
         }
         view.postOnAnimation(::reconcile)
         view.postDelayed(::reconcile, 300L)
+    }
+
+    /**
+     * One IME animation frame of a panning KeyboardAvoidingView: only its
+     * residual translation over the keyboard, in the same frame as the IME
+     * surface (WindowInsetsAnimation.onProgress). The engine relayout of the
+     * same inset lands a frame later; waiting for it left the composer under
+     * the rising keyboard for a frame. Touch targets, scroll insets and focus
+     * are reconciled once in onEnd (applyKeyboardAvoidance).
+     */
+    private fun followKeyboardFrame(view: View, state: NodeState) {
+        if (state.keyboardBehavior != KEYBOARD_PAN || state.keyboardModalHost != null) return
+        if (!state.flag(PropKey.KEYBOARD_AVOIDING_ENABLED, true)) return
+        val offset = dp(state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat())
+        val keyboard = keyboardOverlap(view, state.keyboardInset, offset, null)
+        view.translationY = -keyboard.toFloat()
+        if (keyboard > 0) liftTranslatedKeyboardView(view, state, true)
     }
 
     private fun applyKeyboardAvoidance(view: View, state: NodeState) {
@@ -9505,7 +9525,6 @@ class PamRenderer(
     @Suppress("DEPRECATION")
     private fun applyNavigationBarAppearance(config: StatusBarConfig) {
         val decor = activity()?.window?.decorView ?: return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val darkIcons = useDarkNavigationBarIcons(
             authoredDarkIcons = if (config.styleAuthored) config.appearance == STATUS_BAR_DARK else null,
             themeDarkIcons = PamAppearance.bool(

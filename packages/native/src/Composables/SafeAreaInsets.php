@@ -28,13 +28,11 @@ final class SafeAreaInsets extends ReactiveObject
 
     protected function read(string $name): mixed
     {
-        $metrics = $this->source->signal->get();
-
-        return match ($name) {
-            'top' => $metrics->safeAreaTop,
-            'right' => $metrics->safeAreaRight,
-            'bottom' => $metrics->safeAreaBottom,
-            default => $metrics->safeAreaLeft,
-        };
+        return $this->source->field('insets.'.$name, match ($name) {
+            'top' => static fn (WindowMetrics $m): float => $m->safeAreaTop,
+            'right' => static fn (WindowMetrics $m): float => $m->safeAreaRight,
+            'bottom' => static fn (WindowMetrics $m): float => $m->safeAreaBottom,
+            default => static fn (WindowMetrics $m): float => $m->safeAreaLeft,
+        })->get();
     }
 }

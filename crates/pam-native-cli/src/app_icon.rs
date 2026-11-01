@@ -36,7 +36,11 @@ const ANDROID_LAYERS: [&str; 3] = [
     "pam_launcher_background",
     "pam_launcher_monochrome",
 ];
-const ANDROID_ADAPTIVE: &str = "drawable-anydpi-v26/pam_launcher.xml";
+/// minSdk is 26, so the adaptive icon needs no `-v26` qualifier (lint
+/// ObsoleteSdkInt); `anydpi` still wins over the bundled `drawable` icon.
+const ANDROID_ADAPTIVE: &str = "drawable-anydpi/pam_launcher.xml";
+/// Where releases before 1.46.18 wrote it; removed so two variants never coexist.
+const ANDROID_ADAPTIVE_LEGACY: &str = "drawable-anydpi-v26/pam_launcher.xml";
 const ANDROID_COLOR: &str = "values/pam_launcher.xml";
 
 impl AndroidIcon {
@@ -69,7 +73,7 @@ impl AndroidIcon {
 /// Writes (or removes) the adaptive launcher icon resources under `res`.
 /// The manifest always points at `@drawable/pam_launcher`; the bundled
 /// `drawable/pam_launcher.xml` is the PAM icon and the generated
-/// `drawable-anydpi-v26` variant replaces it on every supported release.
+/// `drawable-anydpi` variant replaces it on every supported release.
 pub fn sync_android_icon(
     icon: Option<&AndroidIcon>,
     project_root: &Path,
@@ -82,6 +86,7 @@ pub fn sync_android_icon(
         }
     }
     remove_if_present(&res.join(ANDROID_ADAPTIVE))?;
+    remove_if_present(&res.join(ANDROID_ADAPTIVE_LEGACY))?;
     remove_if_present(&res.join(ANDROID_COLOR))?;
     let Some(icon) = icon else {
         return Ok(());

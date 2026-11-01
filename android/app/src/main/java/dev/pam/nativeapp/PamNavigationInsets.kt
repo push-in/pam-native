@@ -1,5 +1,6 @@
 package dev.pam.nativeapp
 
+import android.annotation.SuppressLint
 import android.content.Context
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
@@ -15,6 +16,9 @@ internal fun navigationBottomInset(
     if (it == 0 && bottomBarExists) fallback.coerceAtLeast(0) else it
 }
 
+// The navigation mode and bar visibility are framework-internal resources
+// with no public id; looking them up by name is the only way to read them.
+@SuppressLint("DiscouragedApi")
 internal fun windowSafeInsets(context: Context, insets: WindowInsetsCompat): Insets {
     val safe = insets.getInsetsIgnoringVisibility(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),

@@ -40,4 +40,5 @@
     <string name="pam_accessibility_role_tablist">Lista de guias</string>
     <string name="pam_accessibility_role_timer">Temporizador</string>
     <string name="pam_accessibility_role_toolbar">Barra de ferramentas</string>
+    <string name="pam_media_attribution">Reprodução de mídia</string>
 </resources>
