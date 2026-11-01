@@ -30,6 +30,9 @@ internal class PamTextView(context: Context) : TextView(context) {
     private var settingTruncated = false
     private var truncatedFor: List<Any?>? = null
 
+    /** The full text the renderer set (what `onTextLayout` measures), not the tail-truncated copy on screen. */
+    internal fun sourceContent(): CharSequence? = sourceText
+
     override fun setText(text: CharSequence?, type: BufferType?) {
         if (!settingTruncated) {
             sourceText = text

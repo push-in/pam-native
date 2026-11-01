@@ -5808,7 +5808,8 @@ class PamRenderer(
         val visible = text.layout ?: return
         val width = (text.width - text.totalPaddingLeft - text.totalPaddingRight).coerceAtLeast(0)
         if (width == 0) return
-        val content = text.text ?: ""
+        // A PamTextView shows its tail-truncated copy: lines/truncation are measured on the full text.
+        val content = (text as? PamTextView)?.sourceContent() ?: text.text ?: ""
         val full = android.text.StaticLayout.Builder
             .obtain(content, 0, content.length, text.paint, width)
             .setLineSpacing(text.lineSpacingExtra, text.lineSpacingMultiplier)
@@ -5821,7 +5822,8 @@ class PamRenderer(
         val maxLines = text.maxLines.takeIf { it in 1 until Int.MAX_VALUE } ?: Int.MAX_VALUE
         val visibleLines = min(visible.lineCount, maxLines)
         val truncated = totalLines > visibleLines ||
-            (visibleLines > 0 && visible.getEllipsisCount(visibleLines - 1) > 0)
+            (visibleLines > 0 && visible.getEllipsisCount(visibleLines - 1) > 0) ||
+            (text is PamTextView && content.length > (text.text?.length ?: 0) && text.text?.toString() != content.toString())
         val density = resourcesDensity().coerceAtLeast(0.01f)
         val widths = (0 until min(totalLines, MAX_TEXT_LAYOUT_LINES)).joinToString(",", "[", "]") {
             "%.2f".format(java.util.Locale.ROOT, full.getLineWidth(it) / density)
