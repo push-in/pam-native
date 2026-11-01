@@ -40,4 +40,18 @@ final class PamTextScalePolicyTests: XCTestCase {
         XCTAssertEqual(invalidLowCap.pointSize, base.pointSize, accuracy: 0.000_1)
         XCTAssertEqual(optedOut.pointSize, base.pointSize, accuracy: 0.000_1)
     }
+
+    /// Larger Text below the accessibility sizes reaches the app (React
+    /// Native `RCTFontSizeMultiplier`); `UIFontMetrics.scaledValue(for: 1)`
+    /// rounded XL/XXL/XXXL to 1.
+    func testDynamicTypeCategoriesUseReactNativeMultipliers() {
+        XCTAssertEqual(PamTextScale.systemMultiplier(.large), 1)
+        XCTAssertEqual(PamTextScale.systemMultiplier(.extraLarge), 1.118, accuracy: 0.0001)
+        XCTAssertEqual(PamTextScale.systemMultiplier(.extraExtraExtraLarge), 1.353, accuracy: 0.0001)
+        XCTAssertEqual(PamTextScale.systemMultiplier(.small), 0.882, accuracy: 0.0001)
+        XCTAssertEqual(PamTextScale.systemMultiplier(.accessibilityMedium), 1.786, accuracy: 0.0001)
+        let traits = UITraitCollection(preferredContentSizeCategory: .extraLarge)
+        XCTAssertEqual(PamTextScale.systemMultiplier(traits: traits), 1.118, accuracy: 0.0001)
+        XCTAssertGreaterThan(PamRuntime.deviceTextScale(traits: traits), 1.0)
+    }
 }

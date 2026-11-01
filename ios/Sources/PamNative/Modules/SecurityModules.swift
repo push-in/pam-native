@@ -43,6 +43,45 @@ enum PamTextScale {
         return true
     }
 
+    /// React Native `RCTFontSizeMultiplier`: the Dynamic Type multiplier of
+    /// each content size category. `UIFontMetrics.scaledValue(for: 1)` rounds
+    /// to whole points, so every category below the accessibility sizes read
+    /// 1 and Larger Text (XL, XXL, XXXL) never reached the app.
+    static func systemMultiplier(_ category: UIContentSizeCategory) -> Float {
+        switch category {
+        case .extraSmall: return 0.823
+        case .small: return 0.882
+        case .medium: return 0.941
+        case .large: return 1.0
+        case .extraLarge: return 1.118
+        case .extraExtraLarge: return 1.235
+        case .extraExtraExtraLarge: return 1.353
+        case .accessibilityMedium: return 1.786
+        case .accessibilityLarge: return 2.143
+        case .accessibilityExtraLarge: return 2.643
+        case .accessibilityExtraExtraLarge: return 3.143
+        case .accessibilityExtraExtraExtraLarge: return 3.571
+        default: return 1.0
+        }
+    }
+
+    /// The device multiplier for `traits` (the screen's when nil).
+    static func systemMultiplier(traits: UITraitCollection? = nil) -> Float {
+        systemMultiplier((traits ?? UIScreen.main.traitCollection).preferredContentSizeCategory)
+    }
+}
+
+public extension PamRuntime {
+    /// Text scale a host passes to `start`/`updateViewport`: the Dynamic Type
+    /// multiplier of `traits` (React Native's table) with the application's
+    /// stored multiplier and cap applied.
+    static func deviceTextScale(traits: UITraitCollection? = nil) -> Float {
+        PamTextScale.effective(system: PamTextScale.systemMultiplier(traits: traits))
+    }
+}
+
+extension PamTextScale {
+
     static func combine(multiplier: Float, cap: Float, system: Float) -> Float {
         let base = system.isFinite && system > 0 ? system : 1
         return multiplier * (cap > 0 ? min(base, cap) : base)
