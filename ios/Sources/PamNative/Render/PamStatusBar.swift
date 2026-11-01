@@ -59,12 +59,21 @@ struct PamStatusBarDeclaration: Equatable {
 }
 
 /// The band behind the status bar. Android paints the window's status bar
-/// with `StatusBar.backgroundColor`; iOS has no such surface, so the renderer
-/// pins this view to the top safe-area inset of its host, above the content
-/// (which `SafeAreaView` already starts below the inset). Auto Layout follows
-/// the inset through rotation, notch, split view and bar visibility changes.
+/// with `StatusBar.backgroundColor`; iOS has no such surface. Like React
+/// Native, where `backgroundColor` is Android-only, iOS paints nothing by
+/// default: the screen's own background (a `SafeAreaView` padding the inset)
+/// shows behind the bar. An app that wants Android's band on iOS opts in with
+/// the Info.plist key `PamStatusBarPaintsBackground` = YES; the renderer then
+/// pins this view to the top safe-area inset of its host, above the content.
+/// Auto Layout follows the inset through rotation, notch, split view and bar
+/// visibility changes.
 final class PamStatusBarBand: UIView {
     static let animationDuration: TimeInterval = 0.25
+    static let infoPlistKey = "PamStatusBarPaintsBackground"
+
+    /// Whether `StatusBar.backgroundColor` paints a band on iOS (opt-in,
+    /// read once from Info.plist; tests may override it).
+    static var paintsBackground: Bool = Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? Bool ?? false
 
     init() {
         super.init(frame: .zero)

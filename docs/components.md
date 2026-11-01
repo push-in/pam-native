@@ -557,6 +557,10 @@ drive the status bar like React Native (`backgroundColor` and `translucent`
 are Android-only): the active `StatusBar` nodes of the visible route and open
 modals stack in mount order, the latest winning, and the PAM controllers
 report the result through `preferredStatusBarStyle`/`prefersStatusBarHidden`.
+The screen's own background shows behind the bar, as in React Native. An app
+that wants Android's opaque band on iOS too sets the Info.plist key
+`PamStatusBarPaintsBackground` to YES: the opaque `backgroundColor` then
+paints the top safe-area inset above the content.
 With `UIViewControllerBasedStatusBarAppearance` NO in Info.plist the
 application-level status bar is used instead.
 Set `navigationBarHidden="true"` to enter Android immersive navigation mode

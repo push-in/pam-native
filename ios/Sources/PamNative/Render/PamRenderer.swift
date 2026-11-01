@@ -161,7 +161,8 @@ public final class PamRenderer: @unchecked Sendable {
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
     /// The band behind the status bar, mounted on the host while the
-    /// resolved `StatusBar` config paints one (`backgroundColor`, opaque).
+    /// resolved `StatusBar` config paints one (`backgroundColor`, opaque) and
+    /// the app opted in (`PamStatusBarBand.paintsBackground`).
     private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
     private var imageResidencyObserver: NSObjectProtocol?
@@ -405,7 +406,7 @@ public final class PamRenderer: @unchecked Sendable {
     /// window status bar (and a modal's own window there), it covers the
     /// screen and any in-tree modal alike, with the colour the stack resolved.
     private func syncStatusBarBand(_ config: PamStatusBarConfig) {
-        guard let color = config.bandColor else {
+        guard PamStatusBarBand.paintsBackground, let color = config.bandColor else {
             statusBarBand?.removeFromSuperview()
             statusBarBand = nil
             return
