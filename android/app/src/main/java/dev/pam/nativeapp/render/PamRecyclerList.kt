@@ -1091,6 +1091,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             first == NO_POSITION || position in (first - 1)..(last + 1)
         }
         adapter.moving = { scrollState != SCROLL_STATE_IDLE }
+        adapter.frameIntervalMs = {
+            val rate = display?.refreshRate ?: 60f
+            if (rate >= 20f) (1000f / rate).toLong().coerceAtLeast(4L) else 16L
+        }
         adapter.offscreenWhileMoving = { position ->
             scrollState != SCROLL_STATE_IDLE && !adapter.shown(position)
         }
@@ -2084,6 +2088,25 @@ internal class RichRecyclerAdapter(
     /** Whether the list is moving (set by the list). */
     var moving: () -> Boolean = { false }
 
+    /** Display frame interval in ms (set by the list). */
+    var frameIntervalMs: () -> Long = { 16L }
+
+    /**
+     * Nanoseconds of the current frame still free for off-screen cell slices:
+     * they may use up to half of the frame interval, counted from the frame's
+     * vsync, minus what input, scrolling and layout already took. A frame that
+     * started late or did heavy input work leaves nothing, so the slice waits
+     * for a lighter frame instead of pushing this one past its deadline (one
+     * late frame while the list moves leaves the window buffer-stuffed until
+     * the list stops).
+     */
+    private fun frameRoomNanos(budget: Long): Long {
+        val frame = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+        val elapsedMs = android.os.SystemClock.uptimeMillis() - frame
+        val roomMs = frameIntervalMs() / 2 + 1 - elapsedMs
+        return minOf(budget, roomMs * 1_000_000L).coerceAtLeast(0L)
+    }
+
     /** Whether the row at a position is on screen (set by the list). */
     var shown: (Int) -> Boolean = { true }
 
@@ -2140,7 +2163,12 @@ internal class RichRecyclerAdapter(
             iterator.remove()
             // Pending rows are empty or partly built (a slice): finish them.
             if (holder.boundId == id && (mountSlice != null || holder.container.childCount == 0)) {
-                mount(id, holder.container)
+                android.os.Trace.beginSection("PamList.mountShown")
+                try {
+                    mount(id, holder.container)
+                } finally {
+                    android.os.Trace.endSection()
+                }
             }
         }
     }
@@ -2155,13 +2183,14 @@ internal class RichRecyclerAdapter(
             mountWindowStart = frame
             mountWindowUsed = 0L
         }
-        if (mountWindowUsed >= MOUNT_BUDGET_NANOS) {
+        val room = frameRoomNanos(MOUNT_BUDGET_NANOS - mountWindowUsed)
+        if (mountWindowUsed >= MOUNT_BUDGET_NANOS || room <= 0L) {
             pendingMounts[holder] = id
             scheduleDrain()
             return false
         }
         val started = System.nanoTime()
-        val complete = mountPart(holder, id, started + MOUNT_BUDGET_NANOS - mountWindowUsed)
+        val complete = mountPart(holder, id, started + room)
         mountWindowUsed += System.nanoTime() - started
         if (!complete) {
             pendingMounts[holder] = id
@@ -2189,6 +2218,17 @@ internal class RichRecyclerAdapter(
         if (drainScheduled) return
         drainScheduled = true
         android.view.Choreographer.getInstance().postFrameCallback {
+            android.os.Trace.beginSection("PamList.slice")
+            try {
+                drain()
+            } finally {
+                android.os.Trace.endSection()
+            }
+        }
+    }
+
+    private fun drain() {
+        run {
             drainScheduled = false
             mountShown()
             // Rows bound earlier in this frame (a scroll) share its budget.
@@ -2199,15 +2239,20 @@ internal class RichRecyclerAdapter(
             }
             // While the list moves its frames are already busy: the small budget.
             val budget = if (deferMounts() || moving()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
+            // While the list moves the slice also fits in what the frame has left.
+            val frameEnd = if (moving()) System.nanoTime() + frameRoomNanos(budget) else Long.MAX_VALUE
             val iterator = pendingMounts.entries.iterator()
-            while (iterator.hasNext() && mountWindowUsed < budget) {
+            // At least one view per frame, so a slow stretch still makes progress.
+            var sliced = false
+            while (iterator.hasNext() && mountWindowUsed < budget && (!sliced || System.nanoTime() < frameEnd)) {
                 val (holder, id) = iterator.next()
                 if (holder.boundId != id) {
                     iterator.remove()
                     continue
                 }
                 val started = System.nanoTime()
-                val complete = mountPart(holder, id, started + budget - mountWindowUsed)
+                val complete = mountPart(holder, id, minOf(started + budget - mountWindowUsed, frameEnd))
+                sliced = true
                 mountWindowUsed += System.nanoTime() - started
                 if (complete) iterator.remove()
             }
@@ -2215,7 +2260,7 @@ internal class RichRecyclerAdapter(
             // cell per frame while the list moves (they are ahead of it).
             val repairs = pendingRepairs.entries.iterator()
             var repaired = 0
-            while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS) {
+            while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS && System.nanoTime() < frameEnd) {
                 if (repaired > 0 && moving()) break
                 val (id, entry) = repairs.next()
                 if (entry.first.boundId != id) {
@@ -2223,7 +2268,7 @@ internal class RichRecyclerAdapter(
                     continue
                 }
                 val started = System.nanoTime()
-                val complete = entry.second(started + MOUNT_BUDGET_NANOS - mountWindowUsed)
+                val complete = entry.second(minOf(started + MOUNT_BUDGET_NANOS - mountWindowUsed, frameEnd))
                 repaired++
                 mountWindowUsed += System.nanoTime() - started
                 if (complete) repairs.remove()
