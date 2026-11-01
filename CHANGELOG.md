@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.46.25 - 2026-11-01
+
+Android list scrolling fix and iOS Switch parity on top of 1.46.24.
+
+- Android: a list cell bound ahead of a moving list (a fling laying out rows
+  beyond the screen, a window slide repairing an off-screen row) is built in
+  slices within the per-frame mount budget and resumed on the next frames,
+  instead of all at once once the budget allowed it to start. A feed row of
+  40 to 150 views took 20 to 50 ms in one frame (debug builds); the late frame
+  left the window buffer-stuffed (each following frame waiting a whole vsync
+  for a buffer) for the rest of the fling, which showed as 5 to 11% janky
+  frames in a third of the feed scrolls. A row reaching the screen is always
+  completed before it draws. A node gaining a native view inside a row whose
+  slices have not built its host yet is created by the remaining slices.
 - iOS: `Switch` is the system `UISwitch` (React Native parity) instead of a
   drawn Android-style track and thumb. The engine gives a `Switch` without
   explicit dimensions the UISwitch size reported by the host
