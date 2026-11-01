@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.46.17 - 2026-11-01
+
+Touch follow-ups, on top of 1.46.16.
+
+- Android: a pending long press is cancelled once the finger travels more
+  than 10 dp from the touch-down point (React Native Pressability
+  deactivation distance). A quick horizontal swipe across a full-width row
+  used to turn into a long press; it now presses on release.
+- iOS: a zoomed native transform owns its pan, a double-tap surface never
+  dims on press, a transition turned on with its first change animates it,
+  and an animated scroll farther than two viewports glides only the last
+  stretch (#203).
+
 ## 1.46.16 - 2026-11-01
 
 Android text and sheet follow-ups, on top of 1.46.15.
