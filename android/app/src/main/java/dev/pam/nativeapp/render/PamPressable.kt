@@ -71,6 +71,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var eligibleForPress = false
     private var pressInDispatched = false
     private var longPressDispatched = false
+    /** RN Pressability: travel past 10 dp from the touch-down point cancels the pending long press. */
+    private var longPressCancelledByMove = false
+    private var downX = 0f
+    private var downY = 0f
     private var lastPointer = PamPressPointer(0f, 0f, 0f, 0f, 0L, 0)
     private var pendingMove: PamPressPointer? = null
     private var moveScheduled = false
@@ -807,6 +811,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         eligibleForPress = true
         activePointerId = event.getPointerId(pointerIndex)
         lastPointer = pointer(event, pointerIndex)
+        longPressCancelledByMove = false
+        downX = lastPointer.pageX
+        downY = lastPointer.pageY
         if (delayPressInMs == 0L) {
             emitPressIn(lastPointer)
         } else {
@@ -905,6 +912,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private fun moveGesture(event: MotionEvent, pointerIndex: Int) {
         lastPointer = pointer(event, pointerIndex)
         scheduleMove(lastPointer)
+        if (
+            !longPressCancelledByMove && !longPressDispatched &&
+            moveCancelsLongPress(lastPointer.pageX - downX, lastPointer.pageY - downY, resources.displayMetrics.density)
+        ) {
+            // A swipe across the row is not a hold: release still presses (RN).
+            longPressCancelledByMove = true
+            removeCallbacks(longPressRunnable)
+        }
         val wasEligible = eligibleForPress
         eligibleForPress = containsWithRetention(lastPointer.x, lastPointer.y)
         if (wasEligible && !eligibleForPress) {
@@ -913,7 +928,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             emitPressOut()
         } else if (!wasEligible && eligibleForPress) {
             emitPressIn(lastPointer)
-            if (!longPressDispatched) {
+            if (!longPressDispatched && !longPressCancelledByMove) {
                 postDelayed(longPressRunnable, effectiveLongPressDelayMs())
             }
         }
@@ -1143,6 +1158,12 @@ internal fun nestedLongPressTarget(chain: List<NestedLongPressNode>): Int {
 }
 
 /** The child's own delay when it handles long presses, else the receiver's. */
+/** RN Pressability LONG_PRESS_DEACTIVATION_DISTANCE: 10 dp of travel ends a pending long press. */
+internal const val LONG_PRESS_DEACTIVATION_DP = 10f
+
+internal fun moveCancelsLongPress(dxPx: Float, dyPx: Float, density: Float): Boolean =
+    kotlin.math.hypot(dxPx, dyPx) > LONG_PRESS_DEACTIVATION_DP * density.coerceAtLeast(0.01f)
+
 internal fun nestedLongPressDelay(own: Long, hasOwnLongPress: Boolean, ancestorDelay: Long?): Long =
     if (hasOwnLongPress || ancestorDelay == null) own else ancestorDelay
 
