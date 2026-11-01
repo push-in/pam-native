@@ -632,6 +632,7 @@ public final class PamRuntime {
         PamTextEnvironment.textScale = CGFloat(textScale)
         PamTextEnvironment.displayScale = UIScreen.main.scale
         PamTextMeasurer.install()
+        PamVuetifySwitch.installHostSize()
         PamCrypto.install()
         let insets = currentSafeAreaInsets()
         pam_native_ios_set_boot_safe_area_insets(

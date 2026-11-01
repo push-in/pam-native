@@ -148,6 +148,9 @@ PamStatus pam_native_engine_set_refresh_rate(
     PamNativeEngineHandle *handle,
     double refresh_rate_hz
 );
+/* Process-wide intrinsic size of a Switch without explicit width/height (the
+ * host's native control); non-positive restores the default 46.5 x 27. */
+PamStatus pam_native_engine_set_switch_size(float width, float height);
 PamStatus pam_native_engine_set_text_scale(
     PamNativeEngineHandle *handle,
     float text_scale

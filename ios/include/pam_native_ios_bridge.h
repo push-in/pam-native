@@ -111,6 +111,9 @@ uint64_t pam_native_runtime_start(
 
 /* Installs the host text measurer for runtimes started afterwards. */
 void pam_native_ios_set_text_measurer(PamNativeMeasureTextCallback callback);
+/* Intrinsic size of a Switch without explicit width/height: the UISwitch size
+ * (React Native iOS measures the native control). */
+void pam_native_ios_set_switch_size(float width, float height);
 
 /* Installs the CryptoKit provider behind PHP's pam_native_crypto(). Without
  * one, pam_native_crypto() returns null and Pam\Native\Crypto raises

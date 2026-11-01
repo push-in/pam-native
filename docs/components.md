@@ -1393,6 +1393,12 @@ pixels. Explicit `width` or `height` still wins, and a parent `max-width` or
 `max-height` constraint is respected.
 Track and thumb colors remain configurable through `trackColorFalse`,
 `trackColorTrue`, and `thumbColor`.
+On iOS a `Switch` is the system `UISwitch`, as in React Native: without explicit
+dimensions the engine sizes it by the UISwitch (`51 × 31` pt, `63 × 28` pt since
+iOS 26; the host reports it with `pam_native_engine_set_switch_size`), and the
+colors map to `onTintColor` (`trackColorTrue`), `tintColor` (`trackColorFalse`)
+and `thumbTintColor` (`thumbColor`) only when set, so an app that passes no
+colors gets the system switch.
 On Android the track and thumb are React Native's AppCompat 9-patches (the
 thumb is a 20 dp disc with a baked drop shadow and 3.5 dp optical insets),
 tinted with MULTIPLY like `ReactSwitch`, so both positions and the shadow match

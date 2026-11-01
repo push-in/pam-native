@@ -324,6 +324,18 @@ pub unsafe extern "C" fn pam_native_engine_set_refresh_rate(
 }
 
 #[unsafe(no_mangle)]
+/// Sets the intrinsic size of a Switch without explicit width/height to the
+/// host's native control (iOS: the UISwitch `sizeThatFits`). Process-wide; a
+/// non-positive or non-finite size restores the default (React Native Android,
+/// 46.5 x 27).
+pub extern "C" fn pam_native_engine_set_switch_size(width: f32, height: f32) -> PamStatus {
+    match catch_unwind(|| crate::layout::set_host_switch_size(width, height)) {
+        Ok(()) => PamStatus::Success,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Changes the text scale used by subsequent commits.
 ///
 /// # Safety

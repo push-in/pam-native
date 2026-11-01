@@ -3259,16 +3259,16 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.navigationGestureThreshold:
             configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.switchTrackColorFalse:
-            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
-                switchView.trackOffColor = UIColor(argb: color)
+            if let switchView = view as? PamVuetifySwitch {
+                switchView.trackOffColor = value.integerOrNil().map { UIColor(argb: $0) }
             }
         case PamConstants.switchTrackColorTrue:
-            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
-                switchView.trackOnColor = UIColor(argb: color)
+            if let switchView = view as? PamVuetifySwitch {
+                switchView.trackOnColor = value.integerOrNil().map { UIColor(argb: $0) }
             }
         case PamConstants.switchThumbColor:
-            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
-                switchView.thumbColor = UIColor(argb: color)
+            if let switchView = view as? PamVuetifySwitch {
+                switchView.thumbColor = value.integerOrNil().map { UIColor(argb: $0) }
             }
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(Int(value.integerOrNil() ?? 2))

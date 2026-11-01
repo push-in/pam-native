@@ -28,4 +28,42 @@ final class PamSwitchCheckedTests: XCTestCase {
         renderer.commit([[.update(id: 2, key: PamConstants.checked, value: nil)]])
         XCTAssertFalse(toggle.isOn)
     }
+    /// `<Switch>` is the system UISwitch, like React Native iOS: its size is the
+    /// UISwitch size (the engine box), and the colors map to onTintColor /
+    /// tintColor / thumbTintColor only when set; removing one restores the system color.
+    func testSwitchIsTheSystemControl() throws {
+        let toggle = PamVuetifySwitch()
+        let native = try XCTUnwrap(toggle.subviews.compactMap { $0 as? UISwitch }.first)
+        XCTAssertEqual(toggle.intrinsicContentSize, UISwitch().intrinsicContentSize)
+        XCTAssertNil(native.onTintColor)
+        XCTAssertNil(native.thumbTintColor)
+        toggle.trackOnColor = .green
+        toggle.thumbColor = .red
+        XCTAssertEqual(native.onTintColor, .green)
+        XCTAssertEqual(native.thumbTintColor, .red)
+        toggle.thumbColor = nil
+        XCTAssertNil(native.thumbTintColor)
+
+        toggle.frame = CGRect(x: 0, y: 0, width: 80, height: 40)
+        toggle.layoutIfNeeded()
+        XCTAssertEqual(native.center.x, 40, accuracy: 0.5)
+        XCTAssertEqual(native.center.y, 20, accuracy: 0.5)
+
+        var changes = 0
+        let target = ChangeCounter { changes += 1 }
+        toggle.addTarget(target, action: #selector(ChangeCounter.fire), for: .valueChanged)
+        native.setOn(true, animated: false)
+        native.sendActions(for: .valueChanged)
+        XCTAssertTrue(toggle.isOn)
+        XCTAssertEqual(changes, 1)
+        toggle.isOn = false
+        XCTAssertFalse(native.isOn)
+        XCTAssertEqual(changes, 1)
+    }
+}
+
+private final class ChangeCounter: NSObject {
+    let body: () -> Void
+    init(_ body: @escaping () -> Void) { self.body = body }
+    @objc func fire() { body() }
 }

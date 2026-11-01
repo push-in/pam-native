@@ -9,6 +9,34 @@ const DEFAULT_TEXT_HEIGHT: f32 = 28.0;
 const DEFAULT_CONTROL_HEIGHT: f32 = 48.0;
 const DEFAULT_SWITCH_WIDTH: f32 = 46.5;
 const DEFAULT_SWITCH_HEIGHT: f32 = 27.0;
+// Host switch control size (bits of f32; 0 = the default above). React Native
+// sizes a Switch by the platform control: Android 46.5 x 27 dp, iOS the
+// UISwitch `sizeThatFits` (51 x 31 pt, 63 x 28 pt since iOS 26). The control is
+// the same for every engine of the process, so the host sets it once.
+static HOST_SWITCH_WIDTH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static HOST_SWITCH_HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Sets the intrinsic Switch size measured by the host (non-positive or
+/// non-finite values restore the default).
+pub fn set_host_switch_size(width: f32, height: f32) {
+    let valid = |value: f32| value.is_finite() && value > 0.0;
+    let (width, height) = if valid(width) && valid(height) {
+        (width, height)
+    } else {
+        (0.0, 0.0)
+    };
+    HOST_SWITCH_WIDTH.store(width.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    HOST_SWITCH_HEIGHT.store(height.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn switch_extent(axis: Axis) -> f32 {
+    let (cell, default) = match axis {
+        Axis::Horizontal => (&HOST_SWITCH_WIDTH, DEFAULT_SWITCH_WIDTH),
+        Axis::Vertical => (&HOST_SWITCH_HEIGHT, DEFAULT_SWITCH_HEIGHT),
+    };
+    let host = f32::from_bits(cell.load(std::sync::atomic::Ordering::Relaxed));
+    if host > 0.0 { host } else { default }
+}
 const DEFAULT_IMAGE_HEIGHT: f32 = 160.0;
 const DEFAULT_LIST_HEIGHT: f32 = 240.0;
 const MAX_LAYOUT_DEPTH: usize = 512;
@@ -3058,7 +3086,7 @@ fn leaf_intrinsic(
         (Axis::Horizontal, NodeKind::Text) => {
             text_extent(node, axis, f32::INFINITY, text_scale, glyph_advances)
         }
-        (Axis::Horizontal, NodeKind::Switch) => DEFAULT_SWITCH_WIDTH,
+        (Axis::Horizontal, NodeKind::Switch) => switch_extent(Axis::Horizontal),
         (Axis::Horizontal, NodeKind::ActivityIndicator) => DEFAULT_CONTROL_HEIGHT,
         (Axis::Horizontal, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (Axis::Horizontal, NodeKind::Spacer) => 8.0,
@@ -3067,7 +3095,7 @@ fn leaf_intrinsic(
         (Axis::Vertical, NodeKind::Button | NodeKind::Pressable | NodeKind::ActivityIndicator) => {
             DEFAULT_CONTROL_HEIGHT
         }
-        (Axis::Vertical, NodeKind::Switch) => DEFAULT_SWITCH_HEIGHT,
+        (Axis::Vertical, NodeKind::Switch) => switch_extent(Axis::Vertical),
         (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (
             Axis::Vertical,
@@ -7968,6 +7996,20 @@ mod tests {
         assert_eq!(
             leaf_intrinsic(&switch, Axis::Vertical, 1.0, None),
             DEFAULT_SWITCH_HEIGHT,
+        );
+
+        // iOS: the host reports the UISwitch size; invalid values restore the default.
+        set_host_switch_size(63.0, 28.0);
+        assert_eq!(leaf_intrinsic(&switch, Axis::Horizontal, 1.0, None), 63.0);
+        assert_eq!(leaf_intrinsic(&switch, Axis::Vertical, 1.0, None), 28.0);
+        set_host_switch_size(f32::NAN, 28.0);
+        assert_eq!(
+            leaf_intrinsic(&switch, Axis::Horizontal, 1.0, None),
+            DEFAULT_SWITCH_WIDTH
+        );
+        assert_eq!(
+            leaf_intrinsic(&switch, Axis::Vertical, 1.0, None),
+            DEFAULT_SWITCH_HEIGHT
         );
     }
 
