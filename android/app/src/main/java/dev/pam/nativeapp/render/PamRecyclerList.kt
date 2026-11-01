@@ -743,13 +743,31 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (richIds.isEmpty()) {
             val dx = if (horizontal) targetPx - computeHorizontalScrollOffset() else 0
             val dy = if (horizontal) 0 else targetPx - computeVerticalScrollOffset()
-            if (animated) smoothScrollBy(dx, dy) else scrollBy(dx, dy)
+            if (animated) {
+                val current = if (horizontal) computeHorizontalScrollOffset() else computeVerticalScrollOffset()
+                val viewport = if (horizontal) width else height
+                val start = longGlideStart(current, targetPx, viewport)
+                if (start != current) {
+                    if (horizontal) scrollBy(start - current, 0) else scrollBy(0, start - current)
+                }
+                smoothScrollBy(if (horizontal) targetPx - start else 0, if (horizontal) 0 else targetPx - start)
+            } else {
+                scrollBy(dx, dy)
+            }
             return
         }
-        val position = virtualScrollPosition(
-            richIds.map { richExtents[it] ?: dp(rowHeight) },
-            targetPx,
-        )
+        val extents = richIds.map { richExtents[it] ?: dp(rowHeight) }
+        if (animated && isLaidOut) {
+            val current = if (horizontal) computeHorizontalScrollOffset() else computeVerticalScrollOffset()
+            val start = longGlideStart(current, targetPx, if (horizontal) width else height)
+            if (start != current) {
+                // Jump to one screen from the target; glide only that screen.
+                val near = virtualScrollPosition(extents, start)
+                (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(near.index, -near.offset)
+                dispatchViewport()
+            }
+        }
+        val position = virtualScrollPosition(extents, targetPx)
         scrollToVirtualPosition(position.index, -position.offset, animated)
     }
 

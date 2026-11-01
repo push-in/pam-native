@@ -403,6 +403,11 @@ internal class PamScrollContainer @JvmOverloads constructor(
             return
         }
         val bounded = offset.coerceIn(0, primaryMaxOffset())
+        val viewport = if (horizontal) activeScroll.width else activeScroll.height
+        // A long glide (the top of a long feed) jumps to one screen from the
+        // target and animates only that last screen.
+        val start = longGlideStart(primaryCurrentOffset(), bounded, viewport)
+        if (start != primaryCurrentOffset()) scrollToPrimary(start)
         when (val scroll = activeScroll) {
             is HorizontalScrollView -> scroll.smoothScrollTo(bounded, scroll.scrollY)
             is ScrollView -> scroll.smoothScrollTo(scroll.scrollX, bounded)
@@ -1476,4 +1481,17 @@ internal fun stickyPinOffset(
     if (horizontal || scrollOffset <= top) return 0
     val limit = nextTop?.let { (it - top - extent).coerceAtLeast(0) } ?: Int.MAX_VALUE
     return minOf(scrollOffset - top, limit)
+}
+
+/**
+ * Where an animated scroll from [current] to [target] starts gliding: more
+ * than two viewports away it first jumps to one viewport short of the target
+ * (Instagram/RN-like scroll-to-top), so the animation crosses one screen of
+ * rows instead of every row in between.
+ */
+internal fun longGlideStart(current: Int, target: Int, viewport: Int): Int {
+    if (viewport <= 0) return current
+    val distance = target - current
+    if (kotlin.math.abs(distance) <= 2 * viewport) return current
+    return if (distance < 0) target + viewport else target - viewport
 }

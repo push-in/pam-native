@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.46.15 - 2026-10-31
+
+Android rendering and scrolling follow-ups, on top of 1.46.14.
+
+- Android: `overflow: hidden` clips the subtree to the container's box only
+  (React Native semantics). The container no longer sets `clipChildren`,
+  which also clipped every child to its own bounds and cut a descendant
+  that overflows a smaller child (an animated tap effect past its
+  Pressable was cut off mid-shape).
+- Android: an animated scroll request more than two viewports away (scroll
+  to top of a long list) jumps to one viewport from the target and glides
+  only that last screen, instead of animating across every row
+  (ScrollView-based lists and the recycler list).
+- macOS CLIs are not attached to this release.
+
 ## 1.46.14 - 2026-10-31
 
 Android sheet keyboard, zoom and camera follow-ups, on top of 1.46.13.
