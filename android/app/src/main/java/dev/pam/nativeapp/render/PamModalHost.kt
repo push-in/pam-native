@@ -1614,6 +1614,14 @@ internal class PamModalHost @JvmOverloads constructor(
             animationType != ANIMATION_NONE &&
             !PamMotionPolicy.isReduced(context)
         ) {
+            // The sheet starts below the window: posting the slide left its
+            // first frame drawn at rest (a one-frame flash of the open sheet).
+            val offscreen = sheetKeyboardTranslation +
+                (lastSheetHeight.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels).toFloat() + dp(24f)
+            (sheetChildren() + handle).forEach { view ->
+                view.animate().cancel()
+                view.translationY = offscreen
+            }
             content.post { animateSheet(entering = true) }
             backdropDrawable.alpha = 0
             return
