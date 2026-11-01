@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.46.24 - 2026-11-01
+
+Android autoFocus fix and iOS parity on top of 1.46.23.
+
+- Android: an `autoFocus` input mounted in a pushed route focuses and opens
+  the keyboard once the route is shown. A pushed route mounts hidden until its
+  transition starts, and the focus attempt for a hidden input was dropped
+  without a retry, so the keyboard never opened on screens whose only input
+  auto-focuses (React Native focuses it on mount, the keyboard rising with the
+  push). Inputs of retained routes still never focus while hidden.
+- iOS: a route change releases the focused input of the routes left behind and
+  hides its keyboard (as on Android since 1.46.23); the incoming route's input
+  keeps its focus.
+- iOS: `StatusBar` `backgroundColor` paints no band by default, as in React
+  Native where it is Android-only; `PamStatusBarPaintsBackground` in
+  Info.plist opts back in. UI driver bundle target for host UI tests.
+
 ## 1.46.23 - 2026-11-01
 
 Android keyboard layout and navigation fixes on top of 1.46.22.
