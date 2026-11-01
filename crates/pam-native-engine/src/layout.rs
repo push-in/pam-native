@@ -4465,10 +4465,11 @@ fn surface_keyboard_avoidance(node: &Node, frame: Layout) -> Option<SurfaceKeybo
     })
 }
 
-/// A resize/padding `KeyboardAvoidingView` outside any modal, where the host
-/// window does not shrink for the IME (surfaces in the window, iOS): the
-/// root keyboard inset avoids it like React Native's `behavior="height"` /
-/// `"padding"`. Android resizes these views natively (`adjustResize`), and a
+/// A resize/padding `KeyboardAvoidingView` outside any modal: the root
+/// keyboard inset avoids it like React Native's `behavior="height"` /
+/// `"padding"`, on iOS and on Android (the window keeps `adjustNothing` and
+/// the host feeds the IME every frame), so absolutely positioned children
+/// dock on the keyboard and layout events report the avoided frame. A
 /// trailing panning view is kept above the IME by [`reserve_keyboard_space`].
 fn root_keyboard_avoidance(
     context: &LayoutContext<'_>,
@@ -4476,7 +4477,6 @@ fn root_keyboard_avoidance(
     frame: Layout,
 ) -> Option<SurfaceKeyboardAvoidance> {
     if node.kind != NodeKind::KeyboardAvoidingView
-        || crate::text_measure::surface_policy() != crate::surface::SurfacePolicy::InWindow
         || crate::text_measure::surface_keyboard_top().is_some()
     {
         return None;
@@ -9518,9 +9518,8 @@ mod css_flex_tests {
         )
         .unwrap();
         assert_eq!(
-            resize[&5].y + resize[&5].height,
-            800.0,
-            "Android keeps its native viewport reduction for resize/padding"
+            resize[&5].height, 0.0,
+            "Android (adjustNothing window) avoids a root resize view in layout like iOS"
         );
         let mut disabled = pan.clone();
         disabled.push((PropKey::KeyboardAvoidingEnabled, off.clone()));
