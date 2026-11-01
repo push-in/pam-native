@@ -165,7 +165,7 @@ final class AccessibilityModule: NativeModule {
             }
         case "textScale":
             DispatchQueue.main.async {
-                completion(.success, PamTextScale.snapshot(system: Float(UIFontMetrics.default.scaledValue(for: 1))))
+                completion(.success, PamTextScale.snapshot(system: PamTextScale.systemMultiplier()))
             }
         case "setTextScale":
             guard let values = try? WireMap.decode(payload), case let .decimal(multiplier)? = values["multiplier"] else {
@@ -179,7 +179,7 @@ final class AccessibilityModule: NativeModule {
                 return
             }
             DispatchQueue.main.async {
-                completion(.success, PamTextScale.snapshot(system: Float(UIFontMetrics.default.scaledValue(for: 1))))
+                completion(.success, PamTextScale.snapshot(system: PamTextScale.systemMultiplier()))
             }
         default:
             completion(.failure, Data("Unknown accessibility method \(method)".utf8))
