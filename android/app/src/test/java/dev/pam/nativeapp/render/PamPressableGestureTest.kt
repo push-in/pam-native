@@ -15,6 +15,14 @@ class PamPressableGestureTest {
     }
 
     @Test
+    fun travelPastTenDpCancelsAPendingLongPress() {
+        assertFalse(moveCancelsLongPress(0f, 0f, 3f))
+        assertFalse(moveCancelsLongPress(18f, 24f, 3f))
+        assertTrue(moveCancelsLongPress(-40f, 0f, 3f))
+        assertTrue(moveCancelsLongPress(0f, 11f, 1f))
+    }
+
+    @Test
     fun aDoubleTapSurfaceNeverDimsOnPress() {
         assertFalse(showsPressFeedback(hasDoubleTap = true))
         assertTrue(showsPressFeedback(hasDoubleTap = false))
