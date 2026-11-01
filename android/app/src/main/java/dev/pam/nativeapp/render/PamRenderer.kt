@@ -3161,6 +3161,20 @@ class PamRenderer(
         // heights differ). Only content spanning the modal fills the window;
         // a shorter child (a bottom-anchored options sheet inside a flattened
         // full-height Column) keeps its frame and its anchoring edge.
+        if (parentView is PamModalHost && parentView.isDialogPresentation()) {
+            val modalWidth = parentFrame?.let { snappedPixelSpan(it.x, it.width, 0f, density).extent } ?: 0
+            val modalHeight = parentFrame?.let { snappedPixelSpan(it.y, it.height, 0f, density).extent } ?: 0
+            val spans = modalWidth > 0 && modalHeight > 0 && leftPx <= 1 && topPx <= 1 &&
+                width >= modalWidth - 1 && height >= modalHeight - 1
+            parentView.markWindowSpanningChild(view, spans)
+            if (spans) {
+                // Fills the dialog (see PamModalHost.windowSpanningChildren).
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+                leftPx = 0
+                topPx = 0
+            }
+        }
         if (parentView is PamModalHost && parentView.usesWindowSizedContent()) {
             val placement = windowSizedModalChildPlacement(
                 left = leftPx,
@@ -8600,6 +8614,7 @@ class PamRenderer(
      */
     private fun installModalKeyboardInsets(view: View, state: NodeState, modal: PamModalHost) {
         state.keyboardModalHost = modal
+        if (engineAvoidsKeyboard(state)) modal.setEngineKeyboardAvoidance(true)
         state.modalKeyboardSubscription = modal.addSurfaceKeyboardListener { inset, animating ->
             if (nodes[state.id] !== state) return@addSurfaceKeyboardListener
             state.keyboardInset = inset
@@ -8845,6 +8860,7 @@ class PamRenderer(
             0
         }
         val engineManaged = engineAvoidsKeyboard(state)
+        if (engineManaged && enabled) state.keyboardModalHost?.setEngineKeyboardAvoidance(true)
         if (keyboard > 0) {
             ((host.findFocus() as? EditText) ?: lastFocusedInput)
                 ?.let { state.keyboardFocusedInput = it }

@@ -30,6 +30,25 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun engineAvoidedModalWindowDoesNotResizeForTheIme() {
+        for (focus in listOf(false, true)) {
+            assertEquals(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,
+                modalSoftInputAdjustMode(
+                    focusKeyboard = focus,
+                    presentation = 2,
+                    bottomSheetKeyboardBehavior = 1,
+                    engineAvoidsKeyboard = true,
+                ),
+            )
+        }
+        assertEquals(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+            modalSoftInputAdjustMode(focusKeyboard = false, presentation = 2, bottomSheetKeyboardBehavior = 1),
+        )
+    }
+
+    @Test
     fun interactiveBottomSheetKeepsAStableFullWindowForInsets() {
         assertEquals(
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,

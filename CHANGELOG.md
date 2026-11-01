@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.46.19 - 2026-11-01
+
+Android modal keyboard fix on top of 1.46.18.
+
+- Android: a dialog `Modal`'s child whose frame spans the whole modal (a
+  full-window backdrop or `KeyboardAvoidingView`) fills the window. It was
+  wrapped and centered, so with the keyboard up its padded content shrank
+  and the sheet inside slid down by half the IME, under the keyboard.
+- Android: a modal whose `KeyboardAvoidingView` (resize/padding) the engine
+  lays out above the IME keeps `adjustNothing`; `adjustResize` shrank the
+  window a second time (Android 14 and older, non edge-to-edge dialogs).
+
 ## 1.46.18 - 2026-11-01
 
 Android keyboard, sheet and video follow-ups plus responsive signals, on top of 1.46.17.
