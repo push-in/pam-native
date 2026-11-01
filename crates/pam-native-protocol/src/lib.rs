@@ -740,6 +740,7 @@ pub enum PropKey {
     PressBackgroundColor = 1008,
     KeyboardProgress = 1009,
     ModalNavigationBarColor = 1010,
+    ListStackFromEnd = 1011,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1300,6 +1301,7 @@ impl TryFrom<u16> for PropKey {
             1008 => Ok(Self::PressBackgroundColor),
             1009 => Ok(Self::KeyboardProgress),
             1010 => Ok(Self::ModalNavigationBarColor),
+            1011 => Ok(Self::ListStackFromEnd),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2245,13 +2247,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1010 {
+        for value in EXTENSION_BASE..=1011 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1011).is_err());
+        assert!(PropKey::try_from(1012).is_err());
     }
 
     #[test]

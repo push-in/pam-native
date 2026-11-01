@@ -286,16 +286,36 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
 /// avoidance adds its own delta, so changing padding never erases the IME.
 class PamContentScrollView: UIScrollView {
     private(set) var pamContentPadding: UIEdgeInsets = .zero
+    /// `stackFromEnd` (extension property 1011): extra top inset that rests
+    /// rows which all fit against the viewport end. It is not content: the
+    /// logical offset (scroll events, scroll requests) ignores it.
+    private(set) var pamEndAnchorGap: CGFloat = 0
 
     var pamLogicalContentOffset: CGPoint {
-        CGPoint(x: contentOffset.x + pamContentPadding.left, y: contentOffset.y + pamContentPadding.top)
+        CGPoint(
+            x: contentOffset.x + pamContentPadding.left,
+            y: contentOffset.y + pamContentPadding.top + pamEndAnchorGap
+        )
+    }
+
+    /// Applies the anchor gap; rows that fit have a single resting offset
+    /// (the start of the gap), kept unless a finger is on the list.
+    func setEndAnchorGap(_ gap: CGFloat) {
+        let gap = max(0, gap)
+        guard abs(gap - pamEndAnchorGap) >= 0.5 else { return }
+        let previous = pamEndAnchorGap
+        pamEndAnchorGap = gap
+        contentInset.top += gap - previous
+        if gap > 0, !isTracking {
+            contentOffset.y = -adjustedContentInset.top
+        }
     }
 
     func setContentPadding(_ padding: UIEdgeInsets) {
         guard padding != pamContentPadding else { return }
         let previous = pamContentPadding
         let atStartX = abs(contentOffset.x + previous.left) < 0.5
-        let atStartY = abs(contentOffset.y + previous.top) < 0.5
+        let atStartY = abs(contentOffset.y + previous.top + pamEndAnchorGap) < 0.5
         pamContentPadding = padding
         contentInset = UIEdgeInsets(
             top: contentInset.top + padding.top - previous.top,
@@ -304,7 +324,7 @@ class PamContentScrollView: UIScrollView {
             right: contentInset.right + padding.right - previous.right
         )
         if atStartX { contentOffset.x = -padding.left }
-        if atStartY { contentOffset.y = -padding.top }
+        if atStartY { contentOffset.y = -padding.top - pamEndAnchorGap }
     }
 
     /// An animated scroll farther than two viewports (back to the top of a
@@ -809,6 +829,9 @@ final class PamVirtualListView: PamContentScrollView {
     /// the item starts (Android `applyInitialPosition`); an explicit scroll
     /// request of the same commit wins.
     var pamInitialScrollIndex = 0
+    /// `stackFromEnd` (extension property 1011): vertical rows that all fit
+    /// rest against the viewport end (`setEndAnchorGap`).
+    var pamStackFromEnd = false
     /// `followEndOnResize` (extension property 1001), on by default.
     var pamFollowEndOnResize = true
     var pamInitialScrollIndexApplied = false
@@ -825,7 +848,7 @@ final class PamVirtualListView: PamContentScrollView {
     /// Lands exactly on the target: deceleration in progress is stopped
     /// first (it otherwise kept moving after the jump). `animated` glides.
     func scrollToLogicalOffset(_ value: CGFloat, animated: Bool = false) {
-        let leading = horizontal ? pamContentPadding.left : pamContentPadding.top
+        let leading = horizontal ? pamContentPadding.left : pamContentPadding.top + pamEndAnchorGap
         let requested = max(0, value) - leading
         let maximum = horizontal
             ? max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)

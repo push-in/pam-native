@@ -488,6 +488,7 @@ final class TemplateRenderer
         'numColumns' => PropKey::ListNumColumns,
         'inverted' => PropKey::ListInverted,
         'followEndOnResize' => PropKey::ListFollowEndOnResize,
+        'stackFromEnd' => PropKey::ListStackFromEnd,
         'initialScrollIndex' => PropKey::ListInitialScrollIndex,
         'removeClippedSubviews' => PropKey::ListRemoveClippedSubviews,
         'endReachedThreshold' => PropKey::EndReachedThreshold,

@@ -1023,12 +1023,27 @@ public final class PamRenderer: @unchecked Sendable {
         let contentWidth = localFrames.reduce(max(0, list.bounds.width - padding.left - padding.right)) {
             max($0, $1.1.maxX)
         }
-        let contentHeight = localFrames.reduce(max(0, list.bounds.height - padding.top - padding.bottom)) {
+        // `stackFromEnd`: rows that all fit rest against the viewport end
+        // through an extra top inset (Android `restRowsAtEnd`); a list that
+        // rested anchored and now overflows lands on its end.
+        let rowsExtent = localFrames.reduce(CGFloat(0)) { max($0, $1.1.maxY) }
+        var anchorGap: CGFloat = 0
+        if list.pamStackFromEnd, !horizontal, !list.pamInverted, !localFrames.isEmpty {
+            let insets = list.adjustedContentInset
+            let available = list.bounds.height - (insets.top - list.pamEndAnchorGap) - insets.bottom
+            anchorGap = max(0, (available - rowsExtent).rounded(.down))
+        }
+        let wasAnchored = list.pamEndAnchorGap > 0
+        list.setEndAnchorGap(anchorGap)
+        let contentHeight = anchorGap > 0 ? rowsExtent : localFrames.reduce(max(0, list.bounds.height - padding.top - padding.bottom)) {
             max($0, $1.1.maxY)
         }
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
         if list.contentSize != contentSize {
             list.contentSize = contentSize
+            if wasAnchored, anchorGap == 0, !list.isTracking, !list.isDecelerating {
+                list.contentOffset.y = list.primaryMaximumOffset
+            }
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
@@ -3411,6 +3426,11 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamVirtualListView)?.pamInverted = value.boolOrNil() ?? false
         case PamConstants.listFollowEndOnResize:
             (view as? PamVirtualListView)?.pamFollowEndOnResize = value.boolOrNil() ?? true
+        case PamConstants.listStackFromEnd:
+            if let list = view as? PamVirtualListView {
+                list.pamStackFromEnd = value.boolOrNil() ?? false
+                syncVirtualList(nodeId)
+            }
         case PamConstants.listInitialScrollIndex:
             if let list = view as? PamVirtualListView {
                 let index = max(0, Int(value.integerOrNil() ?? 0))
@@ -3961,6 +3981,11 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamVirtualListView)?.pamInverted = false
         case PamConstants.listFollowEndOnResize:
             (view as? PamVirtualListView)?.pamFollowEndOnResize = true
+        case PamConstants.listStackFromEnd:
+            if let list = view as? PamVirtualListView {
+                list.pamStackFromEnd = false
+                syncVirtualList(nodeId)
+            }
         case PamConstants.listInitialScrollIndex:
             (view as? PamVirtualListView)?.pamInitialScrollIndex = 0
         case PamConstants.listPrefetch:

@@ -562,4 +562,5 @@ enum PropKey: int
     case PressBackgroundColor = 1008;
     case KeyboardProgress = 1009;
     case ModalNavigationBarColor = 1010;
+    case ListStackFromEnd = 1011;
 }

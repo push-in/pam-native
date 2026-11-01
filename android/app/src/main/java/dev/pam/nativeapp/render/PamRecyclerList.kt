@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.OrientationHelper
 import androidx.recyclerview.widget.PagerSnapHelper
 import androidx.recyclerview.widget.RecyclerView
 import dev.pam.nativeapp.protocol.PackedSectionList
@@ -51,6 +52,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var columns = 1
     private var inverted = false
     private var followEndOnResize = true
+    /** `stackFromEnd` (extension property 1011): rows that fit rest at the end. */
+    private var stackRowsFromEnd = false
+    /** The last layout found every row fitting and laid them against the end. */
+    private var restingStacked = false
     // Set only by a real scroll (a drag, fling or scroll request) that left
     // the list at its end, never by a resize or a re-layout: a list whose
     // viewport grows under its last row (a sheet animating its height) is
@@ -853,6 +858,49 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         followEndOnResize = value
     }
 
+    fun setStackFromEnd(value: Boolean) {
+        if (stackRowsFromEnd == value) return
+        stackRowsFromEnd = value
+        restingStacked = false
+        requestLayout()
+    }
+
+    /**
+     * `stackFromEnd`, in the same layout pass that placed the rows: when every
+     * row fits, they are offset to rest against the viewport end (an inverted
+     * React Native list); scrolling is unchanged because nothing overflows.
+     * A list that rested anchored and now overflows (a new row) keeps its
+     * last row on the end instead of growing past it. A finger on the list
+     * is never overridden.
+     */
+    private fun restRowsAtEnd(manager: LinearLayoutManager, recycler: Recycler, state: State) {
+        if (!stackRowsFromEnd || horizontal || inverted || state.isPreLayout ||
+            manager.reverseLayout || manager.stackFromEnd
+        ) {
+            restingStacked = false
+            return
+        }
+        val count = state.itemCount
+        val helper = OrientationHelper.createVerticalHelper(manager)
+        val last = if (count > 0) manager.findViewByPosition(count - 1) else null
+        val first = if (count > 0) manager.findViewByPosition(0) else null
+        if (first != null && last != null) {
+            val top = helper.getDecoratedStart(first)
+            val bottom = helper.getDecoratedEnd(last)
+            if (top >= helper.startAfterPadding - 1 && bottom - top <= helper.totalSpace) {
+                val gap = helper.endAfterPadding - bottom
+                if (gap != 0) manager.offsetChildrenVertical(gap)
+                restingStacked = true
+                return
+            }
+        }
+        if (restingStacked && last != null && !isUserScrolling()) {
+            val overflow = helper.getDecoratedEnd(last) - helper.endAfterPadding
+            if (overflow > 0) manager.scrollVerticallyBy(overflow, recycler, state)
+        }
+        restingStacked = false
+    }
+
     fun setInverted(value: Boolean) {
         if (inverted == value) return
         inverted = value
@@ -1333,6 +1381,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 inverted,
                 stickyPins,
                 ::takePendingInitialPosition,
+                ::restRowsAtEnd,
             )
         }
         (layoutManager as LinearLayoutManager).stackFromEnd = inverted
@@ -1653,6 +1702,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         reverseLayout: Boolean,
         private val pins: StickyPins,
         private val beforeLayout: (LinearLayoutManager) -> Unit,
+        private val afterLayout: (LinearLayoutManager, Recycler, State) -> Unit,
     ) : LinearLayoutManager(context, orientation, reverseLayout), PrefetchLayoutManager {
         override fun getChildCount(): Int {
             val raw = super.getChildCount()
@@ -1673,6 +1723,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             // this only seeds the anchor the fill below starts from.
             if (!state.isPreLayout) beforeLayout(this)
             super.onLayoutChildren(recycler, state)
+            afterLayout(this, recycler, state)
             pins.place(this, recycler, state)
         }
 

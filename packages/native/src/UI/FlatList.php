@@ -116,6 +116,17 @@ final class FlatList extends Element
         return $this->withProperty(PropKey::ListFollowEndOnResize, $follow);
     }
 
+    /**
+     * Rows that do not fill the viewport rest against its end (the content
+     * sits flush with the bottom, next to a composer), like an inverted React
+     * Native list. Scrolling, follow-end and windowing are unchanged; once the
+     * rows overflow the viewport the list behaves as without the flag.
+     */
+    public function stackFromEnd(bool $stack = true): self
+    {
+        return $this->withProperty(PropKey::ListStackFromEnd, $stack);
+    }
+
     public function initialScrollIndex(int $index): self
     {
         return $this->withProperty(

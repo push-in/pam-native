@@ -95,6 +95,27 @@ final class PamListScrollPropParityTests: XCTestCase {
         XCTAssertEqual(list.transform, CGAffineTransform(scaleX: -1, y: 1))
     }
 
+    func testStackFromEndRestsRowsThatFitAgainstTheViewportEnd() throws {
+        let (renderer, list) = try renderList([PamConstants.listStackFromEnd: .flag(true)], cells: 3)
+        defer { renderer.close() }
+        let available = list.bounds.height - list.adjustedContentInset.top + list.pamEndAnchorGap
+            - list.adjustedContentInset.bottom
+        XCTAssertEqual(list.pamEndAnchorGap, available - 300, accuracy: 1)
+        XCTAssertEqual(list.contentSize.height, 300, accuracy: 0.5)
+        XCTAssertEqual(list.contentOffset.y, -list.adjustedContentInset.top, accuracy: 0.5)
+        XCTAssertEqual(list.pamLogicalContentOffset.y, 0, accuracy: 0.5, "the gap is not content")
+        let lastCell = try XCTUnwrap(list.viewWithTag(12))
+        let bottom = list.convert(lastCell.frame, to: list.superview).maxY
+        XCTAssertEqual(bottom, list.frame.maxY - list.adjustedContentInset.bottom, accuracy: 1)
+    }
+
+    func testStackFromEndIsInertWhenRowsOverflow() throws {
+        let (renderer, list) = try renderList([PamConstants.listStackFromEnd: .flag(true)], cells: 10)
+        defer { renderer.close() }
+        XCTAssertEqual(list.pamEndAnchorGap, 0)
+        XCTAssertEqual(list.contentSize.height, 1_000, accuracy: 0.5)
+    }
+
     func testInitialScrollIndexLandsOnTheItemOnFirstSync() throws {
         let (renderer, list) = try renderList([PamConstants.listInitialScrollIndex: .integer(5)])
         defer { renderer.close() }

@@ -183,6 +183,7 @@
                 { "name": "numColumns" },
                 { "name": "horizontal", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "inverted", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "stackFromEnd", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "initialScrollIndex" },
                 { "name": "scrollEnabled", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "on:scroll" },
@@ -198,6 +199,7 @@
                 { "name": "rowHeight", "description": "Compatibility alias of estimatedRowHeight." },
                 { "name": "prefetch" },
                 { "name": "inverted", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "stackFromEnd", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "initialScrollIndex" },
                 { "name": "on:endReached" }
             ]
