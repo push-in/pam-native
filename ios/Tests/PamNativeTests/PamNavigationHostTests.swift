@@ -120,6 +120,44 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertEqual(second.transform, .identity)
     }
 
+    func testTransparentModalKeepsTheScreenBelowDrawnBeforeAndAfterItsFade() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = PamNavigationHost(frame: window.bounds)
+        window.addSubview(host)
+        host.operation = 2
+        host.transition = 5
+        host.duration = 0.05
+        let below = UIView(frame: window.bounds)
+        let modal = UIView(frame: window.bounds)
+        host.insert(below, index: 0)
+        host.screenPresentation = 5
+        host.insert(modal, index: 1)
+        // Mounted, not yet navigated: the screen on display stays.
+        XCTAssertFalse(below.isHidden)
+        XCTAssertTrue(modal.isHidden)
+        host.navigate(1)
+        XCTAssertFalse(modal.isHidden)
+        XCTAssertEqual(below.alpha, 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(below.isHidden)
+        XCTAssertFalse(modal.isHidden)
+        XCTAssertEqual(modal.alpha, 1)
+    }
+
+    func testARouteMountedWithoutANavigationShowsByTheNextRunLoop() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = PamNavigationHost(frame: window.bounds)
+        window.addSubview(host)
+        let first = UIView(frame: window.bounds)
+        let second = UIView(frame: window.bounds)
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        XCTAssertTrue(second.isHidden)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(first.isHidden)
+        XCTAssertFalse(second.isHidden)
+    }
+
     func testReorderingAPrewarmedRouteKeepsItInTheWindow() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let host = PamNavigationHost(frame: window.bounds)
