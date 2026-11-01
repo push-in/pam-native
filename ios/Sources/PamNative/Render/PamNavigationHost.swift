@@ -306,6 +306,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
 
     private func runTransition() {
         transitionGeneration += 1
+        releaseInput(outside: incomingView())
         if navigationController != nil {
             runControllerTransition()
             return
@@ -552,6 +553,27 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         default:
             break
         }
+    }
+
+    /// React Navigation blurs the focused TextInput and dismisses the
+    /// keyboard whenever the focused route changes: an input of a route left
+    /// behind (a search field under a pushed profile or a story viewer) must
+    /// not keep the keyboard over the new route. An input of the incoming
+    /// route (autoFocus) keeps the focus and the keyboard.
+    private func releaseInput(outside incoming: UIView?) {
+        for route in routeViews where route !== incoming {
+            guard let focused = Self.firstResponder(in: route) else { continue }
+            focused.resignFirstResponder()
+            return
+        }
+    }
+
+    private static func firstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
+        for subview in view.subviews {
+            if let found = firstResponder(in: subview) { return found }
+        }
+        return nil
     }
 
     private func incomingView() -> UIView? {

@@ -120,6 +120,36 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertEqual(second.transform, .identity)
     }
 
+    func testRouteChangeReleasesTheInputOfTheScreenBelowAModalAtOnce() {
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer { window.isHidden = true }
+        let host = PamNavigationHost(frame: window.bounds)
+        controller.view.addSubview(host)
+        host.operation = 2
+        host.transition = 5
+        host.duration = 0.2
+        let below = UIView(frame: window.bounds)
+        let modal = UIView(frame: window.bounds)
+        let search = PamInputField(frame: CGRect(x: 0, y: 100, width: 300, height: 44))
+        search.text = "draft"
+        below.addSubview(search)
+        host.insert(below, index: 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(search.becomeFirstResponder())
+        host.screenPresentation = 5
+        host.insert(modal, index: 1)
+        host.navigate(1)
+        // React Navigation: blur + Keyboard.dismiss on the focus change, not
+        // at the end of the transition (the screen below stays drawn).
+        XCTAssertFalse(search.isFirstResponder)
+        XCTAssertFalse(below.isHidden)
+        XCTAssertEqual(search.text, "draft")
+    }
+
     func testTransparentModalKeepsTheScreenBelowDrawnBeforeAndAfterItsFade() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let host = PamNavigationHost(frame: window.bounds)

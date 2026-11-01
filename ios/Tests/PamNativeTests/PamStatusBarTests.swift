@@ -209,7 +209,35 @@ final class PamStatusBarTests: XCTestCase {
         renderer.close()
     }
 
-    func testRendererPaintsTheStatusBarBandLikeAndroid() {
+    func testRendererPaintsNoStatusBarBandByDefaultLikeReactNative() {
+        XCTAssertFalse(PamStatusBarBand.paintsBackground, "no Info.plist opt-in in the test host")
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let host = UIView(frame: root.view.bounds)
+        root.view.addSubview(host)
+        let renderer = PamRenderer(hostView: host, dispatchEvent: { _, _, _ in })
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .statusBar, properties: [
+                PamConstants.statusBarColor: .integer(0xFFFFFFFF),
+                PamConstants.statusBarStyle: .integer(2),
+            ])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 360, height: 720)),
+            .setRoot(1),
+        ]])
+        XCTAssertNil(renderer.statusBarBand, "RN: backgroundColor is Android-only, the screen shows behind the bar")
+        XCTAssertFalse(host.subviews.contains { $0 is PamStatusBarBand })
+        XCTAssertEqual(PamStatusBarCoordinator.shared.config.style, .lightContent, "the bar style still applies")
+        renderer.commit([[.remove(2)]])
+    }
+
+    func testRendererPaintsTheStatusBarBandLikeAndroidWhenOptedIn() {
+        PamStatusBarBand.paintsBackground = true
+        defer { PamStatusBarBand.paintsBackground = false }
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 720))
         let root = UIViewController()
         // The simulator's inset is device-dependent; grow it so the band has
