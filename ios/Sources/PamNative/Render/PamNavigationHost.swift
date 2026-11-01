@@ -206,7 +206,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        showOnlyTop()
+        showTopAfterNavigation(view)
         syncControllerStack()
     }
 
@@ -223,20 +223,28 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         if navigationController == nil, view.superview === self {
             insertSubview(view, at: min(max(index, 0), max(subviews.count - 1, 0)))
         }
-        showOnlyTop()
+        showTopAfterNavigation(view)
         syncControllerStack()
     }
 
     func removeRoute(_ view: UIView) {
+        trace("remove route=\(routeViews.firstIndex(where: { $0 === view }) ?? -1)")
         routeViews.removeAll { $0 === view }
         routeControllers.removeValue(forKey: ObjectIdentifier(view))
         view.removeFromSuperview()
         syncControllerStack()
     }
 
+    /// DEBUG trace (`PamListTrace` default): route visibility and navigations.
+    private func trace(_ message: @autoclosure () -> String) {
+        guard PamListTrace.enabled else { return }
+        NSLog("PamNavTrace %@ routes=%d op=%d presentation=%d", message(), routeViews.count, operation, screenPresentation)
+    }
+
     func navigate(_ value: Int64) {
         guard revision != value else { return }
         revision = value
+        trace("navigate \(value)")
         runTransition()
     }
 
@@ -399,7 +407,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             }
             outgoing?.alpha = 1 - progress * 0.12
         case 5:
-            if !sharedFadeOnlyTop {
+            if [5, 6].contains(screenPresentation) {
+                // A transparent modal fades alone over the screen below,
+                // which stays drawn (no cross-fade to the window background).
+                if popping { outgoing?.alpha = 1 - progress } else { incoming.alpha = progress }
+            } else if !sharedFadeOnlyTop {
                 incoming.alpha = progress
                 outgoing?.alpha = 1 - progress
             } else if popping {
@@ -567,12 +579,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         sharedElements.finish()
         sharedFadeOnlyTop = false
+        trace("finish")
         incoming.alpha = 1
         incoming.transform = .identity
         setRouteHidden(incoming, false)
         outgoing?.alpha = 1
         outgoing?.transform = .identity
-        if let outgoing { setRouteHidden(outgoing, true) }
+        if let outgoing { setRouteHidden(outgoing, !keepsPreviousRouteVisible()) }
         onTransitionEnd?()
         PamStatusBarCoordinator.invalidate()
     }
@@ -582,8 +595,37 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private func setRouteHidden(_ view: UIView, _ hidden: Bool) {
         if hidden { view.endEditing(true) }
         guard view.isHidden != hidden else { return }
+        trace("hidden=\(hidden) route=\(routeViews.firstIndex(where: { $0 === view }) ?? -1)")
         view.isHidden = hidden
         PamRouteCoverage.notifyChanged()
+    }
+
+    /// A route that becomes the top of an attached host (pushed, or mounted
+    /// ahead and moved up) stays hidden, and the route on screen stays
+    /// visible, until the navigation of the same commit runs its transition,
+    /// as on Android. Showing it at once hid the screen below behind a route
+    /// whose content and presentation land frames later: a transparent modal
+    /// (stories) opened on the bare window background before its fade.
+    /// Nothing navigating by the end of this run loop shows the top as before.
+    private func showTopAfterNavigation(_ view: UIView) {
+        trace("mount route=\(routeViews.firstIndex(where: { $0 === view }) ?? -1)")
+        guard window != nil, routeViews.count > 1, routeViews.last === view,
+              routeViews.dropLast().contains(where: { !$0.isHidden }) else {
+            showOnlyTop()
+            return
+        }
+        setRouteHidden(view, true)
+        let generation = transitionGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.transitionGeneration == generation else { return }
+            self.showOnlyTop()
+        }
+    }
+
+    /// A modal presentation keeps the screen below drawn (RN transparent
+    /// modal: the dismiss drag reveals it), like Android.
+    private func keepsPreviousRouteVisible() -> Bool {
+        operation != 3 && (3...7).contains(screenPresentation)
     }
 
     private func showOnlyTop() {
@@ -618,9 +660,20 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private func syncControllerStack() {
         guard let navigationController else { return }
         let controllers = controllerStack()
-        let baseControllers = screenPresentation == 1 || controllers.count <= 1
-            ? controllers
-            : Array(controllers.dropLast())
+        let baseControllers: [UIViewController]
+        if let presented = presentedNavigationController?.viewControllers.first,
+           controllers.contains(where: { $0 === presented }) {
+            // A route still presented modally stays in its modal: a pop sets
+            // the card presentation of the route below before the dismiss
+            // runs, and pushing the modal's controller into the stack here
+            // moved its view out of the modal (the screen below vanished
+            // behind an empty black modal until the dismiss finished).
+            baseControllers = controllers.filter { $0 !== presented }
+        } else {
+            baseControllers = screenPresentation == 1 || controllers.count <= 1
+                ? controllers
+                : Array(controllers.dropLast())
+        }
         navigationController.setViewControllers(baseControllers, animated: false)
         applyControllerChrome()
     }
@@ -638,6 +691,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         guard let navigation = navigationController,
               let incoming = incomingView() else { return }
         let outgoing = outgoingView()
+        // Mounted hidden until now (showTopAfterNavigation).
+        setRouteHidden(incoming, false)
         let allControllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
         if interactivePopCommitted && operation == 3 {
             interactivePopCommitted = false
@@ -674,6 +729,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                 fade.incoming = incoming
                 modal.transitioningDelegate = fade
                 modal.modalPresentationStyle = .custom
+                // Transparent like the non-fading transparent modal: the
+                // container's own background hid the screen below (black
+                // behind a story dragged down to dismiss).
+                modal.view.backgroundColor = .clear
                 modalFade = fade
                 if let outgoing {
                     sharedElements.capture(outgoing: outgoing, defaultDuration: duration, popping: false)
