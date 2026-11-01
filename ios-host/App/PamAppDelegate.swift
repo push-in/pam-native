@@ -96,7 +96,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
             runtime.updateViewport(
                 widthDp: Float(controller.view.bounds.width),
                 heightDp: Float(controller.view.bounds.height),
-                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
         }
@@ -105,7 +105,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
             runtime.updateViewport(
                 widthDp: Float(controller.view.bounds.width),
                 heightDp: Float(controller.view.bounds.height),
-                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
         }
@@ -120,7 +120,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
                 entry: entry.path,
                 widthDp: Float(controller.view.bounds.width),
                 heightDp: Float(controller.view.bounds.height),
-                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
 #if DEBUG
