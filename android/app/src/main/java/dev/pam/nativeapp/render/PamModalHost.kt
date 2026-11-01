@@ -43,7 +43,13 @@ internal fun modalSoftInputAdjustMode(
     focusKeyboard: Boolean,
     presentation: Int,
     bottomSheetKeyboardBehavior: Int,
+    engineAvoidsKeyboard: Boolean = false,
 ): Int = when {
+    // A resize/padding KeyboardAvoidingView in a non-sheet modal is laid out
+    // above the IME by the engine (surface keyboard inset). A window resized
+    // by adjustResize as well shrank the view natively a second time: the
+    // content landed under the keyboard and its frames flip-flopped.
+    engineAvoidsKeyboard && presentation != 3 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
     focusKeyboard -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
     presentation != 3 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
     bottomSheetKeyboardBehavior == 2 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
@@ -713,6 +719,25 @@ internal class PamModalHost @JvmOverloads constructor(
         focusKeyboard = value
     }
 
+    private var engineKeyboardAvoidance = false
+    private val windowSpanningChildren = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+
+    /** The renderer reports whether a dialog child's engine frame spans this modal. */
+    internal fun markWindowSpanningChild(child: View, spans: Boolean): Boolean =
+        if (spans) windowSpanningChildren.add(child) else windowSpanningChildren.remove(child)
+
+    internal fun isDialogPresentation(): Boolean = presentation == PRESENTATION_DIALOG
+
+    /**
+     * A KeyboardAvoidingView of this modal avoids the IME through the engine
+     * (resize/padding): the window must not resize for it too.
+     */
+    internal fun setEngineKeyboardAvoidance(value: Boolean) {
+        if (engineKeyboardAvoidance == value) return
+        engineKeyboardAvoidance = value
+        dialog?.let(::applySoftInputMode)
+    }
+
     /**
      * An `autoFocus` input is about to take focus in this window. The window
      * keeps `adjustNothing` (interactive sheets), so with an unspecified
@@ -1187,6 +1212,23 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     @Suppress("DEPRECATION")
+    private fun applySoftInputMode(modal: Dialog) {
+        val adjustMode = modalSoftInputAdjustMode(
+            focusKeyboard = focusKeyboard,
+            presentation = presentation,
+            bottomSheetKeyboardBehavior = bottomSheetKeyboardBehavior,
+            engineAvoidsKeyboard = engineKeyboardAvoidance,
+        )
+        modal.window?.setSoftInputMode(
+            adjustMode or
+                if (focusKeyboard || autoFocusKeyboardPending) {
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                } else {
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+                },
+        )
+    }
+
     private fun applyWindowConfiguration(modal: Dialog) {
         modal.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -1194,19 +1236,7 @@ internal class PamModalHost @JvmOverloads constructor(
             decorView.setBackgroundColor(Color.TRANSPARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             attributes = attributes.apply { dimAmount = 0f }
-            val adjustMode = modalSoftInputAdjustMode(
-                focusKeyboard = focusKeyboard,
-                presentation = presentation,
-                bottomSheetKeyboardBehavior = bottomSheetKeyboardBehavior,
-            )
-            setSoftInputMode(
-                adjustMode or
-                    if (focusKeyboard || autoFocusKeyboardPending) {
-                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-                    } else {
-                        WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
-                    },
-            )
+            applySoftInputMode(modal)
             setGravity(
                 if (presentation == PRESENTATION_SHEET) {
                     Gravity.BOTTOM
@@ -1305,6 +1335,17 @@ internal class PamModalHost @JvmOverloads constructor(
             // frames (windowSizedModalChildPlacement): forcing MATCH_PARENT
             // here stretched a short bottom-anchored child over the window.
             if (usesWindowSizedContent()) return@repeat
+            // A dialog child whose frame spans the whole modal (a full-window
+            // backdrop + KeyboardAvoidingView) fills it: wrapped and centered,
+            // it shrank with its keyboard-padded content and slid down by
+            // half the IME.
+            if (presentation == PRESENTATION_DIALOG && child in windowSpanningChildren) {
+                child.layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                return@repeat
+            }
             child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
             if (entrancePending) child.translationY = sheetEntranceOffset!!
             else if (!sheetAnimating) child.translationY = keyboardTranslation
