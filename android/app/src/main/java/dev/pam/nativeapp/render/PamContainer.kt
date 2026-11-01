@@ -190,7 +190,11 @@ internal open class PamContainer(context: Context) :
             !overflowClipRadii.contentEquals(sanitizedRadii)
         overflowClipEnabled = enabled
         overflowClipRadii = sanitizedRadii
-        clipChildren = enabled
+        // dispatchDraw clips the subtree to this container's box (CSS/RN
+        // overflow). clipChildren would also clip every child to the child's
+        // OWN bounds, cutting a descendant that overflows a smaller child (a
+        // like burst drawn past its touch layer was cut off mid-heart).
+        clipChildren = false
         clipToPadding = false
         if (changed) {
             overflowClipPathDirty = true
