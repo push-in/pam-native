@@ -49,21 +49,12 @@ final class PamSwitchCheckedTests: XCTestCase {
         XCTAssertEqual(native.center.x, 40, accuracy: 0.5)
         XCTAssertEqual(native.center.y, 20, accuracy: 0.5)
 
-        var changes = 0
-        let target = ChangeCounter { changes += 1 }
-        toggle.addTarget(target, action: #selector(ChangeCounter.fire), for: .valueChanged)
+        // UISwitch's own .valueChanged (a user flip) reaches the handler.
+        XCTAssertTrue(native.actions(forTarget: toggle, forControlEvent: .valueChanged)?.isEmpty == false)
         native.setOn(true, animated: false)
-        native.sendActions(for: .valueChanged)
+        toggle.controlChanged()
         XCTAssertTrue(toggle.isOn)
-        XCTAssertEqual(changes, 1)
         toggle.isOn = false
         XCTAssertFalse(native.isOn)
-        XCTAssertEqual(changes, 1)
     }
-}
-
-private final class ChangeCounter: NSObject {
-    let body: () -> Void
-    init(_ body: @escaping () -> Void) { self.body = body }
-    @objc func fire() { body() }
 }

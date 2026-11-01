@@ -1053,7 +1053,7 @@ final class PamVuetifySwitch: UIControl {
         return true
     }
 
-    @objc private func controlChanged() {
+    @objc func controlChanged() {
         guard control.isOn != isOn else { return }
         isOn = control.isOn
         sendActions(for: .valueChanged)
