@@ -7861,13 +7861,21 @@ extension PamRenderer {
                   !Self.isInsideModalHost(view) else { continue }
             let offset = keyboardFollowOffsets[id] ?? 0
             guard offset != 0 || CATransform3DIsIdentity(view.layer.transform) else { continue }
-            let extra = CGFloat(state.properties[PamConstants.keyboardVerticalOffset]?.decimalOrNil() ?? 0)
+            // The engine lays a trailing panning view's bottom on the keyboard
+            // edge (`keyboardVerticalOffset` is consumed inside its layout, not
+            // by this move), so the residual tracks the overlap alone.
             let bottom = parent.convert(view.center, to: host).y + view.bounds.height / 2 + offset
-            let edge = height - previous - (previous > 0 ? extra : 0)
-            guard let next = PamKeyboardFollow.residual(
-                offset: offset, bottom: bottom, edge: edge,
-                target: height - overlap - (overlap > 0 ? extra : 0)
-            ) else { continue }
+            let edge = height - previous
+            let residual = PamKeyboardFollow.residual(
+                offset: offset, bottom: bottom, edge: edge, target: height - overlap
+            )
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamKeyboard follow id=%lld overlap=%.1f previous=%.1f bottom=%.1f edge=%.1f offset=%.1f next=%@ durationMs=%.0f",
+                      id, overlap, previous, bottom, edge, offset, residual.map { String(format: "%.1f", $0) } ?? "skip", duration * 1_000)
+            }
+            #endif
+            guard let next = residual else { continue }
             keyboardFollowOffsets[id] = next
             keyboardFollowAwaitingEngine.insert(id)
             let apply = { view.transform = next == 0 ? .identity : CGAffineTransform(translationX: 0, y: next) }
@@ -7911,19 +7919,30 @@ extension PamRenderer {
             guard abs(moved) >= 0.5 else { continue }
             keyboardFollowAwaitingEngine.remove(id)
             let next = PamKeyboardFollow.settled(offset - moved)
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamKeyboard reconcile id=%lld moved=%.1f offset=%.1f next=%.1f", id, moved, offset, next)
+            }
+            #endif
             keyboardFollowOffsets[id] = next == 0 ? nil : next
             view.transform = next == 0 ? .identity : CGAffineTransform(translationX: 0, y: next)
         }
     }
 
-    /// A followed view the engine never moved (it does not ride the
-    /// keyboard after all) eases back to its laid out place.
+    /// Once the keyboard settled (plus slack) the engine layout is the
+    /// truth: any residual left (a view the engine never moved, or a move
+    /// that differed from the keyboard's) eases back to its laid out place.
     private func scheduleKeyboardFollowExpiry(after delay: TimeInterval) {
         keyboardFollowGeneration &+= 1
         let generation = keyboardFollowGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, self.keyboardFollowGeneration == generation else { return }
-            for id in self.keyboardFollowAwaitingEngine {
+            for id in Array(self.keyboardFollowOffsets.keys) {
+                #if DEBUG
+                if PamListTrace.enabled {
+                    NSLog("PamKeyboard follow expired id=%lld offset=%.1f", id, self.keyboardFollowOffsets[id] ?? 0)
+                }
+                #endif
                 self.keyboardFollowOffsets[id] = nil
                 guard let view = self.views[id] else { continue }
                 UIView.animate(withDuration: PamKeyboardFollow.minimumDuration, delay: 0, options: [.beginFromCurrentState]) {

@@ -101,11 +101,14 @@ final class PamMediaParityTests: XCTestCase {
         let saved = PamMediaView.firstFrameReadyFallback
         PamMediaView.firstFrameReadyFallback = 0.05
         defer { PamMediaView.firstFrameReadyFallback = saved }
+        // A view without a player: its own readyToPlay cannot replace the
+        // pending announcement while the run loop spins.
+        let idle = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
         let fallback = expectation(description: "fallback")
-        media.announceReadyAfterFirstFrame(hasVideo: true) { announced += 1; fallback.fulfill() }
+        idle.announceReadyAfterFirstFrame(hasVideo: true) { announced += 1; fallback.fulfill() }
         wait(for: [fallback], timeout: 2)
         XCTAssertEqual(announced, 4, "the fallback announces when no frame arrives")
-        XCTAssertFalse(media.isReadyPendingFirstFrame)
+        XCTAssertFalse(idle.isReadyPendingFirstFrame)
     }
 
     /// A `.media` cache file: AVFoundation chooses the demuxer by extension

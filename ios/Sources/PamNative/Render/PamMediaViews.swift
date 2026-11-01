@@ -426,6 +426,9 @@ final class PamMediaView: UIView {
                         }
                     case let .failure(error):
                         if self.cachePolicy == 7 {
+                            #if DEBUG
+                            if PamListTrace.enabled { NSLog("PamMedia cache-only miss error=%@", String(describing: error)) }
+                            #endif
                             self.onError?(error.localizedDescription)
                         } else if !self.streamingCache && !self.downloadWhilePlaying {
                             self.installPlayer(url)
@@ -546,6 +549,13 @@ final class PamMediaView: UIView {
                 case .failed:
                     self.videoReadyForDisplay = false
                     self.updatePoster()
+                    #if DEBUG
+                    if PamListTrace.enabled {
+                        let asset = (item.asset as? AVURLAsset)?.url
+                        NSLog("PamMedia failed url=%@ error=%@", asset.map { $0.isFileURL ? $0.lastPathComponent : ($0.host ?? "") + $0.path } ?? "?",
+                              String(describing: item.error))
+                    }
+                    #endif
                     self.onError?(item.error?.localizedDescription ?? "Media could not be loaded")
                 case .unknown:
                     break

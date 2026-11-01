@@ -55,6 +55,29 @@ final class PamKeyboardFollowTests: XCTestCase {
         XCTAssertEqual(composer.frame.maxY, 844, accuracy: 0.5)
     }
 
+    /// `keyboardVerticalOffset` is applied by the engine layout, never by
+    /// the native move: a residual left by it would stay after the keyboard
+    /// hid (the composer stuck mid-screen).
+    func testVerticalOffsetDoesNotLeaveAResidual() {
+        let (window, renderer, composer) = render(behavior: 2)
+        defer { renderer.close(); window.isHidden = true }
+        renderer.commit([[.update(id: 3, key: PamConstants.keyboardVerticalOffset, value: .decimal(-30))]])
+        renderer.followKeyboard(overlap: 335, duration: 0, curve: 7)
+        renderer.commit([[
+            .layout(id: 2, frame: Frame(x: 0, y: 0, width: 390, height: 449)),
+            .layout(id: 3, frame: Frame(x: 0, y: 449, width: 390, height: 60)),
+        ]])
+        XCTAssertEqual(composer.transform, .identity)
+        renderer.followKeyboard(overlap: 0, duration: 0, curve: 7)
+        XCTAssertEqual(composer.transform.ty, 335)
+        renderer.commit([[
+            .layout(id: 2, frame: Frame(x: 0, y: 0, width: 390, height: 784)),
+            .layout(id: 3, frame: Frame(x: 0, y: 784, width: 390, height: 60)),
+        ]])
+        XCTAssertEqual(composer.transform, .identity)
+        XCTAssertTrue(renderer.keyboardFollowTranslations.isEmpty)
+    }
+
     func testOnlyAPanningViewOnTheKeyboardEdgeFollows() {
         let (window, renderer, view) = render(behavior: 1)
         defer { renderer.close(); window.isHidden = true }
