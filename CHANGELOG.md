@@ -4,7 +4,7 @@
 
 ## 1.46.20 - 2026-11-01
 
-Dialog modal layout like React Native and lower background memory on Android, on top of 1.46.19 (includes the iOS fixes of #209).
+Dialog modal layout like React Native and lower background memory on Android, on top of 1.46.19 (includes the iOS fixes of #209 and #210).
 
 - Engine: a dialog `Modal`'s growing child (`flex: 1` / `flex-grow`), React
   Native's modal root such as a full-window backdrop or
@@ -16,6 +16,11 @@ Dialog modal layout like React Native and lower background memory on Android, on
   allocator's cached chunks and the native allocator's free pages. It runs
   5 s after `onStop` (cancelled on resume), because some devices never send
   `TRIM_MEMORY_UI_HIDDEN`, and on the UI_HIDDEN/background trim levels.
+- iOS (#209): a cached video plays (the player gets a symlink named after the
+  sniffed container), a video is ready on its first frame, and a panning
+  `KeyboardAvoidingView` resting on the keyboard follows it natively.
+- iOS (#210): Dynamic Type Larger Text reaches the app with React Native's
+  per-category multipliers.
 
 ## 1.46.19 - 2026-11-01
 
