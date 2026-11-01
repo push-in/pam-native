@@ -18,6 +18,8 @@ import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.SearchView
 import android.widget.Toolbar
@@ -1061,9 +1063,44 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     private fun setActiveRoute(view: View) {
         if (activeRoute === view) return
+        val previous = activeRoute
         activeRoute = view
+        if (previous != null) releaseInputOutside(view)
         updateControllerLifecycles()
         onActiveRouteChanged?.invoke()
+    }
+
+    /**
+     * React Navigation blurs the focused TextInput and dismisses the keyboard
+     * whenever the focused route changes: an input of the route left behind
+     * (a search field under a pushed profile or a story viewer) must not keep
+     * the IME over the new route, nor receive its Back key. An input of the
+     * incoming route (autoFocus) keeps the focus and the keyboard.
+     */
+    private fun releaseInputOutside(route: View) {
+        val focused = rootView?.findFocus() as? EditText ?: return
+        if (isDescendantOf(focused, route) || !isDescendantOf(focused, this)) return
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(focused.windowToken, 0)
+        // The root absorbs the focus (see PamRootHost.blurInputAfterImeHidden);
+        // clearing it alone would make Android refocus the first input.
+        val root = generateSequence(parent) { it.parent }.filterIsInstance<PamRootHost>().firstOrNull()
+        if (root != null) {
+            root.isFocusableInTouchMode = true
+            if (!root.requestFocus()) focused.clearFocus()
+            root.isFocusableInTouchMode = false
+        } else {
+            focused.clearFocus()
+        }
+    }
+
+    private fun isDescendantOf(view: View, ancestor: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun ensureRouteController(view: View) {
