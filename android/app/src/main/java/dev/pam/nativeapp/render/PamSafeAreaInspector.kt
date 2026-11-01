@@ -272,6 +272,9 @@ object PamSafeAreaInspector {
             invalidate()
         }
 
+        // A passive debug overlay: touches fall through to the app below, so
+        // it never clicks and has no performClick to call.
+        @android.annotation.SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: android.view.MotionEvent?): Boolean = false
 
         override fun onDraw(canvas: Canvas) {

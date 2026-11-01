@@ -216,11 +216,15 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     }
 
     init {
-        if (rootInsetsAnimation != null) super.setWindowInsetsAnimationCallback(rootInsetsAnimation)
+        // rootInsetsAnimation exists only on Android 11+; the explicit check
+        // keeps Android 8-10 off the API 30 call (lint NewApi).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && rootInsetsAnimation != null) {
+            super.setWindowInsetsAnimationCallback(rootInsetsAnimation)
+        }
         // The root absorbs the focus of a blurred input (below). Back leaves
         // touch mode, and Android 8+ would then paint its default focus
         // highlight (~8% black) over the whole screen until the next touch.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) defaultFocusHighlightEnabled = false
+        defaultFocusHighlightEnabled = false
     }
 
     private fun imeInsetOf(insets: WindowInsets): Int =

@@ -9505,7 +9505,6 @@ class PamRenderer(
     @Suppress("DEPRECATION")
     private fun applyNavigationBarAppearance(config: StatusBarConfig) {
         val decor = activity()?.window?.decorView ?: return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val darkIcons = useDarkNavigationBarIcons(
             authoredDarkIcons = if (config.styleAuthored) config.appearance == STATUS_BAR_DARK else null,
             themeDarkIcons = PamAppearance.bool(
