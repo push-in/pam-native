@@ -31,8 +31,8 @@ pub use ffi::{
     pam_native_engine_set_keyboard_inset, pam_native_engine_set_native_child_visibility,
     pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
     pam_native_engine_set_surface_keyboard_inset, pam_native_engine_set_surface_policy,
-    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
-    pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_switch_size, pam_native_engine_set_text_measurer,
+    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 pub use surface::SurfacePolicy;
 pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};

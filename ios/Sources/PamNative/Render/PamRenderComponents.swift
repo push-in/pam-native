@@ -969,39 +969,54 @@ enum PamVirtualWindow {
     }
 }
 
+@_silgen_name("pam_native_ios_set_switch_size")
+func pam_native_ios_set_switch_size(_ width: Float, _ height: Float)
+
+/// `<Switch>` on iOS is the system UISwitch, like React Native's Switch
+/// (RCTSwitch): the engine sizes it by the UISwitch `sizeThatFits` and the
+/// colors map to `onTintColor` (track on), `tintColor` (track off) and
+/// `thumbTintColor`, only when the app sets them (system colors otherwise).
 final class PamVuetifySwitch: UIControl {
-    private let trackLayer = CALayer()
-    private let thumbLayer = CALayer()
+    private let control = UISwitch()
 
-    var trackOffColor = UIColor(white: 0.55, alpha: 0.60) {
-        didSet { updateAppearance(animated: false) }
+    /// Reports the UISwitch size to the layout engine (51 x 31 pt; 63 x 28 pt
+    /// since iOS 26). Main thread.
+    static func installHostSize() {
+        let size = UISwitch().sizeThatFits(.zero)
+        pam_native_ios_set_switch_size(Float(size.width), Float(size.height))
     }
 
-    var trackOnColor = UIColor.systemBlue {
-        didSet { updateAppearance(animated: false) }
+    var trackOffColor: UIColor? {
+        didSet { control.tintColor = trackOffColor }
     }
 
-    var thumbColor = UIColor.white {
-        didSet { updateAppearance(animated: false) }
+    var trackOnColor: UIColor? {
+        didSet { control.onTintColor = trackOnColor }
+    }
+
+    var thumbColor: UIColor? {
+        didSet { control.thumbTintColor = thumbColor }
     }
 
     var isOn = false {
         didSet {
             guard oldValue != isOn else { return }
-            updateAppearance(animated: window != nil)
+            if control.isOn != isOn {
+                control.setOn(isOn, animated: window != nil)
+            }
             accessibilityValue = isOn ? "On" : "Off"
         }
     }
 
     override var isEnabled: Bool {
         didSet {
-            alpha = isEnabled ? 1.0 : 0.38
+            control.isEnabled = isEnabled
             accessibilityTraits = isEnabled ? [.button] : [.button, .notEnabled]
         }
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: 40, height: 40)
+        control.intrinsicContentSize
     }
 
     override init(frame: CGRect) {
@@ -1009,16 +1024,9 @@ final class PamVuetifySwitch: UIControl {
         isAccessibilityElement = true
         accessibilityTraits = [.button]
         accessibilityValue = "Off"
-        layer.addSublayer(trackLayer)
-        layer.addSublayer(thumbLayer)
-        trackLayer.cornerRadius = 7
-        thumbLayer.cornerRadius = 10
-        thumbLayer.shadowColor = UIColor.black.cgColor
-        thumbLayer.shadowOpacity = 0.24
-        thumbLayer.shadowRadius = 2
-        thumbLayer.shadowOffset = CGSize(width: 0, height: 1)
-        addTarget(self, action: #selector(toggle), for: .touchUpInside)
-        updateAppearance(animated: false)
+        control.isAccessibilityElement = false
+        control.addTarget(self, action: #selector(controlChanged), for: .valueChanged)
+        addSubview(control)
     }
 
     required init?(coder: NSCoder) {
@@ -1027,55 +1035,28 @@ final class PamVuetifySwitch: UIControl {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        updateFrames(animated: false)
+        // UISwitch keeps its own size; the engine box is that size unless the
+        // app sets width/height, then the control sits centered like RCTSwitch.
+        let size = control.sizeThatFits(.zero)
+        control.frame = CGRect(
+            x: (bounds.width - size.width) / 2,
+            y: (bounds.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 
-    @objc private func toggle() {
-        guard isEnabled else { return }
-        isOn.toggle()
+    override func accessibilityActivate() -> Bool {
+        guard isEnabled, isUserInteractionEnabled else { return false }
+        control.setOn(!control.isOn, animated: true)
+        controlChanged()
+        return true
+    }
+
+    @objc func controlChanged() {
+        guard control.isOn != isOn else { return }
+        isOn = control.isOn
         sendActions(for: .valueChanged)
-    }
-
-    private func updateAppearance(animated: Bool) {
-        let changes = {
-            self.trackLayer.backgroundColor = (
-                self.isOn ? self.trackOnColor : self.trackOffColor
-            ).cgColor
-            self.thumbLayer.backgroundColor = self.thumbColor.cgColor
-            self.updateFrames(animated: false)
-        }
-        if animated {
-            CATransaction.begin()
-            CATransaction.setAnimationDuration(0.20)
-            CATransaction.setAnimationTimingFunction(
-                CAMediaTimingFunction(name: .easeInEaseOut)
-            )
-            changes()
-            CATransaction.commit()
-        } else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            changes()
-            CATransaction.commit()
-        }
-    }
-
-    private func updateFrames(animated _: Bool) {
-        let centerY = bounds.midY
-        let trackFrame = CGRect(
-            x: bounds.midX - 18,
-            y: centerY - 7,
-            width: 36,
-            height: 14
-        )
-        trackLayer.frame = trackFrame
-        let thumbCenterX = isOn ? trackFrame.maxX - 10 : trackFrame.minX + 10
-        thumbLayer.frame = CGRect(
-            x: thumbCenterX - 10,
-            y: centerY - 10,
-            width: 20,
-            height: 20
-        )
     }
 }
 

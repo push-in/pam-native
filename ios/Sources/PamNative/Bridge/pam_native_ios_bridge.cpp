@@ -1380,6 +1380,10 @@ void pam_native_ios_set_text_measurer(PamNativeMeasureTextCallback callback) {
     host_text_measurer.store(callback);
 }
 
+void pam_native_ios_set_switch_size(float width, float height) {
+    pam_native_engine_set_switch_size(width, height);
+}
+
 void pam_native_ios_set_crypto_provider(PamNativeCryptoCallback callback) {
     host_crypto_provider.store(callback);
 }

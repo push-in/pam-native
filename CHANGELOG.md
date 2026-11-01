@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- iOS: `Switch` is the system `UISwitch` (React Native parity) instead of a
+  drawn Android-style track and thumb. The engine gives a `Switch` without
+  explicit dimensions the UISwitch size reported by the host
+  (`pam_native_engine_set_switch_size`; Android keeps `46.5 × 27`), and
+  `trackColorTrue`/`trackColorFalse`/`thumbColor` map to
+  `onTintColor`/`tintColor`/`thumbTintColor` only when set; removing one
+  restores the system color.
+
 ## 1.46.24 - 2026-11-01
 
 Android autoFocus fix and iOS parity on top of 1.46.23.
