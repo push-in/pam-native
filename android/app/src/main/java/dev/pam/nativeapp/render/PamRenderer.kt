@@ -4140,7 +4140,7 @@ class PamRenderer(
                     value.decimal().toFloat(),
                 )
             PropKey.SCROLL_ANCHOR_TO_END ->
-                (view as? PamScrollContainer)?.setStackFromEnd(value.flag())
+                (view as? PamScrollContainer)?.setAnchorToEnd(value.flag())
             PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
                 (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(
                     value.flag(),
@@ -4852,7 +4852,7 @@ class PamRenderer(
             PropKey.SCROLL_CONTENT_OFFSET_Y ->
                 (view as? PamScrollContainer)?.setContentOffsetY(0f)
             PropKey.SCROLL_ANCHOR_TO_END ->
-                (view as? PamScrollContainer)?.setStackFromEnd(false)
+                (view as? PamScrollContainer)?.setAnchorToEnd(false)
             PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
                 (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(false)
             PropKey.SCROLL_AUTO_SCROLL_TO_END_THRESHOLD ->
