@@ -76,6 +76,38 @@ final class PamMediaParityTests: XCTestCase {
         XCTAssertNil(media.posterView.image)
     }
 
+    /// `onReady` waits for the first drawn frame (Android 1.46.18): a reveal
+    /// at `readyToPlay` faded the poster out over a black surface.
+    func testReadyWaitsForTheFirstFrameOrTheFallback() throws {
+        let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        media.setControls(false)
+        media.setSource(try Self.makeVideo().absoluteString)
+        var announced = 0
+        media.announceReadyAfterFirstFrame(hasVideo: true) { announced += 1 }
+        XCTAssertEqual(announced, 0, "no frame yet: ready waits")
+        XCTAssertTrue(media.isReadyPendingFirstFrame)
+        media.setVideoReadyForDisplay(true)
+        XCTAssertEqual(announced, 1, "the first frame announces ready once")
+        media.setVideoReadyForDisplay(true)
+        XCTAssertEqual(announced, 1)
+
+        media.announceReadyAfterFirstFrame(hasVideo: true) { announced += 1 }
+        XCTAssertEqual(announced, 2, "a frame already drawn announces at once")
+
+        media.setVideoReadyForDisplay(false)
+        media.announceReadyAfterFirstFrame(hasVideo: false) { announced += 1 }
+        XCTAssertEqual(announced, 3, "audio only: no frame to wait for")
+
+        let saved = PamMediaView.firstFrameReadyFallback
+        PamMediaView.firstFrameReadyFallback = 0.05
+        defer { PamMediaView.firstFrameReadyFallback = saved }
+        let fallback = expectation(description: "fallback")
+        media.announceReadyAfterFirstFrame(hasVideo: true) { announced += 1; fallback.fulfill() }
+        wait(for: [fallback], timeout: 2)
+        XCTAssertEqual(announced, 4, "the fallback announces when no frame arrives")
+        XCTAssertFalse(media.isReadyPendingFirstFrame)
+    }
+
     func testHiddenPlayerIsReleasedAfterTheDelayAndRestored() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         window.isHidden = false

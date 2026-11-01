@@ -22,6 +22,12 @@ final class PamMediaView: UIView {
     private var gravity: AVLayerVideoGravity = .resizeAspect
     private var readyForDisplayObservation: NSKeyValueObservation?
     private(set) var videoReadyForDisplay = false
+    /// `onReady` waits for the first frame on the surface (or a short
+    /// fallback): `readyToPlay` lands before that frame, and a reveal (poster
+    /// fade) at that moment showed a black surface (Android 1.46.18).
+    private var pendingReady: (() -> Void)?
+    private var pendingReadyFallback: DispatchWorkItem?
+    static var firstFrameReadyFallback: TimeInterval = 0.4
     private var hiddenSince: CFTimeInterval?
     private var thumbnail: PamMediaThumbnail?
     private var thumbnailLoaded = false
@@ -520,11 +526,15 @@ final class PamMediaView: UIView {
                     }
                     let size = item.presentationSize
                     let duration = item.duration.seconds
-                    self.onReady?(
-                        Int(size.width.rounded()),
-                        Int(size.height.rounded()),
-                        duration.isFinite ? max(0, duration) : 0
-                    )
+                    self.announceReadyAfterFirstFrame(
+                        hasVideo: size.width > 0 && size.height > 0
+                    ) { [weak self] in
+                        self?.onReady?(
+                            Int(size.width.rounded()),
+                            Int(size.height.rounded()),
+                            duration.isFinite ? max(0, duration) : 0
+                        )
+                    }
                     self.updateBindings(position: startAt, duration: duration, animated: false)
                     if self.autoPlay || (resuming && self.resumePlaying),
                        self.autoplayFraction == 0 || self.autoplayGrant {
@@ -652,7 +662,37 @@ final class PamMediaView: UIView {
         guard player != nil else { return }
         videoReadyForDisplay = ready
         updatePoster()
+        if ready { flushPendingReady() }
     }
+
+    /// Runs `announce` now when the first frame is already drawn (or there is
+    /// no video track), else once the surface reports it or after the fallback.
+    func announceReadyAfterFirstFrame(hasVideo: Bool, _ announce: @escaping () -> Void) {
+        cancelPendingReady()
+        guard hasVideo, !videoReadyForDisplay else {
+            announce()
+            return
+        }
+        pendingReady = announce
+        let fallback = DispatchWorkItem { [weak self] in self?.flushPendingReady() }
+        pendingReadyFallback = fallback
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.firstFrameReadyFallback, execute: fallback)
+    }
+
+    private func flushPendingReady() {
+        guard let announce = pendingReady else { return }
+        cancelPendingReady()
+        announce()
+    }
+
+    private func cancelPendingReady() {
+        pendingReadyFallback?.cancel()
+        pendingReadyFallback = nil
+        pendingReady = nil
+    }
+
+    /// True while `onReady` waits for the first drawn frame (tests).
+    var isReadyPendingFirstFrame: Bool { pendingReady != nil }
 
     /// The poster covers the video until its first frame (Android hides it in
     /// `onSurfaceTextureUpdated`) and comes back when the player is released.
@@ -942,6 +982,7 @@ final class PamMediaView: UIView {
         readyForDisplayObservation?.invalidate()
         readyForDisplayObservation = nil
         videoReadyForDisplay = false
+        cancelPendingReady()
         // The surface lets go first, then the player is torn down off the
         // main thread (Android releases on the player's own thread): pausing
         // or freeing an AVPlayer whose item is still loading over the network
