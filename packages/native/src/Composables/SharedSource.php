@@ -30,6 +30,9 @@ final class SharedSource
     private int $references = 0;
     private ?Closure $stop = null;
 
+    /** @var array<string, array{0: Closure(T): mixed, 1: Signal<mixed>}> */
+    private array $fields = [];
+
     /**
      * @param Closure(): T $read current value, read when the source starts
      * @param Closure(Closure(T): void): (Closure(): void) $start subscribes; returns the unsubscribe
@@ -75,11 +78,35 @@ final class SharedSource
         if ($this->references++ > 0) {
             return;
         }
-        $this->signal->set(($this->read)());
-        $signal = $this->signal;
-        $this->stop = ($this->start)(static function (mixed $value) use ($signal): void {
-            $signal->set($value);
+        $this->push(($this->read)());
+        $this->stop = ($this->start)(function (mixed $value): void {
+            $this->push($value);
         });
+    }
+
+    /**
+     * One projection of the value as its own signal (Flutter's
+     * `MediaQuery.sizeOf`): a reader of `width` re-renders when the width
+     * changes, not when the font scale or the insets do. Projections are
+     * compared with `===`, so return scalars, enums or shared instances.
+     *
+     * @param Closure(T): mixed $project
+     * @return Signal<mixed>
+     */
+    public function field(string $key, Closure $project): Signal
+    {
+        $field = $this->fields[$key] ??= [$project, new Signal($project($this->signal->peek()))];
+
+        return $field[1];
+    }
+
+    /** @param T $value */
+    private function push(mixed $value): void
+    {
+        foreach ($this->fields as [$project, $signal]) {
+            $signal->set($project($value));
+        }
+        $this->signal->set($value);
     }
 
     public function release(): void

@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.PorterDuff
 import android.view.View
 import android.widget.Switch
+import androidx.core.content.ContextCompat
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -31,8 +32,8 @@ internal class PamSwitch(context: Context) : Switch(context) {
         // and shrink the track exactly like SwitchCompat (Switch applies them
         // the same way). RN colors both with MULTIPLY filters, which keep the
         // shadow black; SRC_IN tinting would paint it in the thumb color.
-        trackDrawable = context.getDrawable(dev.pam.nativeapp.R.drawable.pam_switch_track)
-        thumbDrawable = context.getDrawable(dev.pam.nativeapp.R.drawable.pam_switch_thumb)
+        trackDrawable = ContextCompat.getDrawable(context, dev.pam.nativeapp.R.drawable.pam_switch_track)
+        thumbDrawable = ContextCompat.getDrawable(context, dev.pam.nativeapp.R.drawable.pam_switch_thumb)
         trackTintMode = PorterDuff.Mode.MULTIPLY
         thumbTintMode = PorterDuff.Mode.MULTIPLY
         trackTintList = defaultTrackTint

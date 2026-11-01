@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
@@ -2122,6 +2123,7 @@ internal class RichRecyclerAdapter(
         extents = replacementExtents
         if (runs > MAX_RANGE_UPDATES) {
             reboundAll = true
+            @SuppressLint("NotifyDataSetChanged") // more range updates than a full rebind costs
             notifyDataSetChanged()
             return true
         }
@@ -2215,6 +2217,7 @@ internal class RichRecyclerAdapter(
             ids = replacement
             extents = replacementExtents
             reboundAll = true
+            @SuppressLint("NotifyDataSetChanged") // long reorders: rebinding by stable id beats Myers
             notifyDataSetChanged()
             return
         }

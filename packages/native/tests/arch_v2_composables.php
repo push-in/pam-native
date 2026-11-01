@@ -113,6 +113,37 @@ $assert(
 );
 $assert($font->value === 1.8 && $font->effective === 1.5 && $font->display === 1.2 && $font->for(12.0) === 1.5, 'useFontScale() must apply TextScalePolicy caps.');
 TextScalePolicy::reset();
+$assert(
+    $window->heightClass === DeviceClass::Medium && $font->clamp(1.0, 1.3) === 1.3 && $font->scaled(10.0, 1.5) === 15.0 && $font->clamp(2.0) === 2.0,
+    'heightClass and useFontScale()->clamp()/scaled() must follow the Material classes and Flutter TextScaler.clamp.',
+);
+
+// Each window property is its own signal (Flutter MediaQuery.sizeOf): a
+// reader of the width is not re-run when only the height or the insets change.
+$widthRuns = 0;
+$heightRuns = 0;
+$widthReader = computed(static function () use ($window, &$widthRuns): float {
+    $widthRuns++;
+
+    return $window->width;
+});
+$heightReader = computed(static function () use ($window, &$heightRuns): float {
+    $heightRuns++;
+
+    return $window->height;
+});
+$widthReader->value;
+$heightReader->value;
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 820.0, 'height' => 340.0, 'density' => 2.0, 'fontScale' => 1.8,
+    'safeAreaTop' => 24.0, 'safeAreaBottom' => 0.0, 'safeAreaLeft' => 0.0, 'safeAreaRight' => 0.0,
+]));
+$widthReader->value;
+$heightReader->value;
+$assert(
+    $widthRuns === 1 && $heightRuns === 2 && $window->heightClass === DeviceClass::Compact && $insets->bottom === 0.0,
+    'Window readers must re-run only for the property they read: '.json_encode([$widthRuns, $heightRuns]),
+);
 
 // useKeyboard(): settled show/hide/resize.
 $keyboard = $values['keyboard'];

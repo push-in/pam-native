@@ -169,6 +169,8 @@ internal class PamExoPlayback(
                                 setBuffering(false)
                                 dispatch { listener.onCompletion() }
                             }
+                            // Idle follows stop()/release() or an error, both reported elsewhere.
+                            Player.STATE_IDLE -> Unit
                         }
                     }
 
