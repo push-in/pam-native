@@ -4,7 +4,8 @@ import XCTest
 ///
 /// `xcodebuild test -scheme PamNativeUITests` runs the JSON step list in
 /// `TEST_RUNNER_PAM_UI_SCRIPT` against the already installed application and
-/// writes every requested screenshot to `TEST_RUNNER_PAM_UI_SHOT_DIR`. It never
+/// writes every requested screenshot to `TEST_RUNNER_PAM_UI_SHOT_DIR`
+/// (`TEST_RUNNER_PAM_UI_BUNDLE` targets another installed app by bundle id). It never
 /// relaunches the application unless a `launch` step asks for it, so the
 /// captured state is the one a user would see. Steps:
 ///
@@ -35,7 +36,11 @@ final class PamUIDriverTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         let environment = ProcessInfo.processInfo.environment
-        app = XCUIApplication()
+        if let bundle = environment["PAM_UI_BUNDLE"], !bundle.isEmpty {
+            app = XCUIApplication(bundleIdentifier: bundle)
+        } else {
+            app = XCUIApplication()
+        }
         if let directory = environment["PAM_UI_SHOT_DIR"], !directory.isEmpty {
             let url = URL(fileURLWithPath: directory, isDirectory: true)
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

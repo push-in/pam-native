@@ -22,6 +22,10 @@ to the `.xcresult`). Pass `-parallel-testing-enabled NO`: with clones enabled
 Xcode runs the test on a *clone* of the simulator, so `simctl` commands, logs
 and app containers of the booted device never see the app under test.
 
+`TEST_RUNNER_PAM_UI_BUNDLE` (optional) drives another installed application by
+bundle identifier instead of the host, e.g. a reference build of the same app
+for side-by-side screenshots.
+
 Steps:
 
 | Step | Effect |
