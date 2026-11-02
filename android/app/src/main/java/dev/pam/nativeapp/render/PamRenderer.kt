@@ -2852,6 +2852,7 @@ class PamRenderer(
             textRounding = textRounding,
             flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, false, density, textRounding) else null,
         )
+        traceFrame(id, state, hostedParent, frame, horizontal, vertical)
         val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
             views[hostedParent] as? FrameLayout
         } else {
@@ -3039,6 +3040,25 @@ class PamRenderer(
     }
 
     /**
+     * Debug builds with `setprop log.tag.PamFrameTrace DEBUG` (read once per
+     * process): each applied frame with its engine floats and the snapped
+     * pixels, to compare a screen's pixel grid with another renderer's.
+     */
+    private fun traceFrame(id: Long, state: NodeState, host: Long, frame: Frame, horizontal: SnappedPixelSpan, vertical: SnappedPixelSpan) {
+        if (!frameTraceEnabled) return
+        Log.d(
+            FRAME_TRACE_TAG,
+            "id=$id kind=${state.kind} parent=${state.parent} host=$host " +
+                "x=${frame.x} y=${frame.y} w=${frame.width} h=${frame.height} " +
+                "px=${horizontal.offset},${vertical.offset} ${horizontal.extent}x${vertical.extent}",
+        )
+    }
+
+    private val frameTraceEnabled: Boolean by lazy(LazyThreadSafetyMode.NONE) {
+        BuildConfig.DEBUG && Log.isLoggable(FRAME_TRACE_TAG, Log.DEBUG)
+    }
+
+    /**
      * Yoga rounds every position relative to its own parent and React
      * Native's view flattening sums the rounded origins of the flattened
      * (layout-only) ancestors. Same sum from [id] up to its native [host];
@@ -3164,6 +3184,7 @@ class PamRenderer(
             textRounding = textRounding,
             flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, false, density, textRounding) else null,
         )
+        traceFrame(id, state, effectiveParentId, frame, horizontal, vertical)
         val hostedParentState = nodes[effectiveParent(state.parent)]
         val safeAreaParentState = when {
             parentState?.kind == NodeKind.SAFE_AREA_VIEW -> parentState
@@ -11143,6 +11164,7 @@ class PamRenderer(
 
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
+        const val FRAME_TRACE_TAG = "PamFrameTrace"
 
         /** Debug: `setprop log.tag.PamListWindow DEBUG` logs each window request. */
         const val LIST_WINDOW_TAG = "PamListWindow"
