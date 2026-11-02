@@ -1024,6 +1024,15 @@ class PamRuntime(
         }
     }
 
+    /**
+     * Debug builds log every commit (`PamNativePerf`: sizes, node counts,
+     * engine totals) only with `setprop log.tag.PamNativePerf DEBUG` set
+     * before the app starts: the line and the engine statistics behind it
+     * ran on the UI thread for each commit and skewed debug frame timings.
+     */
+    private val commitLogEnabled =
+        BuildConfig.DEBUG && Log.isLoggable(PERFORMANCE_LOG_TAG, Log.DEBUG)
+
     private fun flushBatches() {
         if (closed.get()) {
             while (pendingBatches.isNotEmpty()) {
@@ -1078,14 +1087,15 @@ class PamRuntime(
         // once from the retained tree; a failing remount is not retried.
         if (!committed && !remount) resynchronize()
         // Engine statistics cross JNI under the handle lock (milliseconds
-        // while PHP renders): read only when the dev tools or a debug log ask.
+        // while PHP renders): read only when the dev tools or the per-commit
+        // debug log (`setprop log.tag.PamNativePerf DEBUG`) ask.
         val metrics = RuntimeFrameMetrics(
             batches = current.size,
             decodeNanos = current.sumOf(PendingBatch::decodeNanos),
             mountNanos = System.nanoTime() - started,
             statsProvider = ::stats,
         )
-        if (BuildConfig.DEBUG) {
+        if (commitLogEnabled) {
             val runtimeStats = metrics.stats
             // full/patch/inBytes/outBytes are totals since the engine started;
             // frame/frameIn/frameOut are this commit's own kind and sizes.

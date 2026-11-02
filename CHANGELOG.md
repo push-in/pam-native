@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.46.27 - 2026-11-02
+
+iOS video audio session like expo-video (#223) and a lighter Android debug
+commit path on top of 1.46.26.
+
+- Android debug builds: the per-commit `PamNativePerf` line (frame kind,
+  sizes, node counts, engine totals) is written only with
+  `setprop log.tag.PamNativePerf DEBUG` set before the app starts. The line
+  and the engine statistics read behind it (JNI under the handle lock) ran on
+  the UI thread for every commit and skewed debug frame timings.
 - iOS: video players configure the shared `AVAudioSession` like React Native
   expo-video (`audioMixingMode: 'auto'`): `.playback`/`.moviePlayback` while a
   video plays, so sound plays with the silent switch on; `.mixWithOthers`
