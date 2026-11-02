@@ -19,4 +19,14 @@ class PamListCellStepTest {
     @Test fun anEmptyCellKeepsOnePixel() {
         assertEquals(1, listCellPixels(0f, 2.625f))
     }
+
+    @Test fun anEndAnchoredRowHangsTheRoundingPixelAboveItsSlot() {
+        // 165.7 dp = 434.96 px: Yoga rounds the cell to 435, the list steps 434.
+        assertEquals(1, cellEndHang(165.7f, 2.625f))
+        // 165.6 dp = 434.7 px -> 435 vs 434: still one.
+        assertEquals(1, cellEndHang(165.6f, 2.625f))
+        // 165.4 dp = 434.18 px rounds down: no hang.
+        assertEquals(0, cellEndHang(165.4f, 2.625f))
+        assertEquals(0, cellEndHang(16f, 2.625f))
+    }
 }

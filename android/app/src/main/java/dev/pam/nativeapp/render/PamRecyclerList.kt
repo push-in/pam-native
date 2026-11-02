@@ -937,6 +937,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         restingStacked = false
     }
 
+    /**
+     * Rows rest against the end (an inverted React Native list): each cell
+     * hangs from its slot's end edge (see cellEndHang).
+     */
+    val rowsHangFromEnd: Boolean
+        get() = !horizontal && (stackRowsFromEnd || inverted)
+
     fun setInverted(value: Boolean) {
         if (inverted == value) return
         inverted = value

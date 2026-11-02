@@ -576,6 +576,15 @@ internal fun windowSizedModalChildPlacement(
     }
 }
 
+/**
+ * Pixels a row of an end-anchored list rises above its slot: Yoga rounds the
+ * cell [slotExtent] dp tall (half up) while the list steps by the floored
+ * height (see listCellPixels), so the cell overhangs the slot's top by the
+ * difference (0 or 1).
+ */
+internal fun cellEndHang(slotExtent: Float, density: Float): Int =
+    (kotlin.math.floor(slotExtent * density + 0.5f).toInt() - listCellPixels(slotExtent, density)).coerceAtLeast(0)
+
 /** A list cell root spanning its whole slot on one axis (no margins there). */
 internal fun cellRootFillsSlot(start: Float, extent: Float, slotStart: Float, slotExtent: Float): Boolean =
     kotlin.math.abs(start - slotStart) < 0.01f && kotlin.math.abs(extent - slotExtent) < 0.01f
@@ -2875,9 +2884,18 @@ class PamRenderer(
         // are snapped cumulatively; rounding the root alone left a 1 px seam).
         val fillWidth = id == rootId && cellRootFillsSlot(frame.x, frame.width, rootFrame.x, rootFrame.width)
         val fillHeight = id == rootId && cellRootFillsSlot(frame.y, frame.height, rootFrame.y, rootFrame.height)
+        // Rows of a list anchored at its end hang from the slot's bottom edge,
+        // like an inverted FlashList's cell: that cell is as tall as Yoga
+        // rounds it while the rows step by their floored height, so its top
+        // (and everything in it) sits the rounding pixel higher.
+        val hang = if (id == rootId || rootless) endAnchoredCellHang(rootId, rootFrame.height, density) else 0
         view.layoutParams = FrameLayout.LayoutParams(
             if (fillWidth) ViewGroup.LayoutParams.MATCH_PARENT else horizontal.extent,
-            if (fillHeight) ViewGroup.LayoutParams.MATCH_PARENT else vertical.extent,
+            when {
+                fillHeight && hang > 0 -> listCellPixels(rootFrame.height, density) + hang
+                fillHeight -> ViewGroup.LayoutParams.MATCH_PARENT
+                else -> vertical.extent
+            },
         ).apply {
             // Cell frames are physical engine coordinates too; START would
             // mirror them a second time inside an RTL holder.
@@ -2891,10 +2909,16 @@ class PamRenderer(
             leftMargin = if (id == rootId) horizontal.offset else engineFrameMargin(
                 horizontal.offset, paddedHost?.paddingLeft ?: 0,
             ) - (scrollHost?.contentInsetLeft ?: 0)
-            topMargin = if (id == rootId) vertical.offset else engineFrameMargin(
+            topMargin = if (id == rootId) vertical.offset - hang else engineFrameMargin(
                 vertical.offset, paddedHost?.paddingTop ?: 0,
-            ) - (scrollHost?.contentInsetTop ?: 0)
+            ) - (scrollHost?.contentInsetTop ?: 0) - hang
         }
+    }
+
+    /** [cellEndHang] of a row of an end-anchored vertical list; 0 elsewhere. */
+    private fun endAnchoredCellHang(rootId: Long, slotExtent: Float, density: Float): Int {
+        val list = nodes[rootId]?.parent?.let { views[it] } as? PamRecyclerList ?: return 0
+        return if (list.rowsHangFromEnd) cellEndHang(slotExtent, density) else 0
     }
 
     private fun dematerializeSubtree(id: Long) {
