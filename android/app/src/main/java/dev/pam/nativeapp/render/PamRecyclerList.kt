@@ -362,7 +362,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // floored to the pixel grid. Rounding instead added a pixel for every
         // row whose height ends past half a pixel, so a list drifted down by
         // one more pixel per such row (+3/+4 px a few rows in).
-        val pixelExtents = extents.mapValues { (_, value) -> listCellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density) }
+        val pixelExtents = extents.mapValues { (_, value) -> listCellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density, pixelOrigin) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -949,6 +949,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     val rowsHangFromEnd: Boolean
         get() = !horizontal && (stackRowsFromEnd || inverted)
+
+    /**
+     * Fractional pixel of the content origin (first row slot) in window
+     * coordinates; rows step by whole pixels from it (see listCellPixels).
+     */
+    var pixelOrigin: Double = DEFAULT_LIST_PIXEL_ORIGIN
 
     /** First row of the list (its Yoga origin anchors every slot), if any. */
     val firstRowId: Long?
@@ -2024,12 +2030,50 @@ internal fun rampExtraLayoutSpace(current: Int, target: Int, step: Int): Int =
     if (step <= 0 || target <= current) target else minOf(target, current + step)
 
 /**
- * Pixel step of a list cell [extentDp] high (or wide): floored like
- * FlashList's measured item size; the epsilon keeps a whole pixel that float
- * math left a hair short (358.99997) on that pixel.
+ * Pixel step of a list cell [extentDp] high (or wide) whose slot starts
+ * [originPx] (its fraction) into the pixel grid; the tolerance keeps a whole
+ * pixel that float math left a hair short (358.99997) on that pixel.
  */
-internal fun listCellPixels(extentDp: Float, density: Float): Int =
-    max(1, floor(extentDp * density + 0.001f).toInt())
+internal fun listCellPixels(extentDp: Float, density: Float, originPx: Double = DEFAULT_LIST_PIXEL_ORIGIN): Int {
+    // FlashList places each cell at a whole-pixel offset from the list's
+    // content origin and Fabric rounds the cell's absolute edges (half up),
+    // so a row steps by round(origin + h) - round(origin): the floored height
+    // when the origin sits on a half pixel, the rounded one on a whole pixel.
+    // An empty cell (measured or authored 0) takes no space, like an empty
+    // FlashList item; any other cell keeps at least one pixel.
+    if (extentDp <= 0f) return 0
+    val origin = originPx - floor(originPx)
+    val step = roundListPixel(origin + extentDp.toDouble() * density) - roundListPixel(origin)
+    return max(1, step)
+}
+
+/** The half-pixel origin of the lists measured so far (steps = floored heights). */
+internal const val DEFAULT_LIST_PIXEL_ORIGIN = 0.5
+
+/** Yoga's half-up pixel rounding with its float tolerance. */
+internal fun roundListPixel(px: Double): Int {
+    val base = floor(px)
+    val fraction = px - base
+    return when {
+        fraction < 0.001 -> base.toInt()
+        fraction > 0.999 -> base.toInt() + 1
+        fraction >= 0.5 - 0.001 -> base.toInt() + 1
+        else -> base.toInt()
+    }
+}
+
+/** An extent (dp) that [listCellPixels] steps by exactly [step] pixels from [originPx]. */
+internal fun extentForPixelStep(step: Int, density: Float, originPx: Double = DEFAULT_LIST_PIXEL_ORIGIN): Float {
+    val origin = originPx - floor(originPx)
+    return ((step + roundListPixel(origin) - origin) / density).toFloat()
+}
+
+/** Fractional pixel of a list's content origin ([startDp] of its first row slot). */
+internal fun listPixelOrigin(startDp: Float, density: Float): Double {
+    val px = startDp.toDouble() * density
+    val fraction = px - floor(px)
+    return if (fraction < 0.001 || fraction > 0.999) 0.0 else fraction
+}
 
 /** True when [next] keeps every id of a non-empty [previous] in order and adds rows after them. */
 internal fun isAppend(previous: List<Long>, next: List<Long>): Boolean =

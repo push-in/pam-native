@@ -582,8 +582,8 @@ internal fun windowSizedModalChildPlacement(
  * height (see listCellPixels), so the cell overhangs the slot's top by the
  * difference (0 or 1).
  */
-internal fun cellEndHang(slotExtent: Float, density: Float): Int =
-    (yogaCellPixels(slotExtent, density) - listCellPixels(slotExtent, density)).coerceAtLeast(0)
+internal fun cellEndHang(slotExtent: Float, density: Float, originPx: Double = DEFAULT_LIST_PIXEL_ORIGIN): Int =
+    (yogaCellPixels(slotExtent, density) - listCellPixels(slotExtent, density, originPx)).coerceAtLeast(0)
 
 /** A cell [extent] dp long as Yoga rounds it from a whole-pixel origin (half up). */
 internal fun yogaCellPixels(extent: Float, density: Float): Int =
@@ -2413,7 +2413,7 @@ class PamRenderer(
      * floored height like a FlashList item (a header split into rows lost a
      * pixel per row). Their extents are replaced by that whole-pixel step.
      */
-    private fun withHeaderRunSteps(ids: List<Long>, extents: Map<Long, Float>, horizontal: Boolean): Map<Long, Float> {
+    private fun withHeaderRunSteps(ids: List<Long>, extents: Map<Long, Float>, horizontal: Boolean, originPx: Double): Map<Long, Float> {
         val run = ids.takeWhile { nodes[it]?.flag(PropKey.LIST_FULL_SPAN, false) == true }
         if (run.isEmpty()) return extents
         val density = resourcesDensity()
@@ -2425,8 +2425,8 @@ class PamRenderer(
         starts[run.size] = starts[run.size - 1] + (extents[run.last()] ?: return extents).toDouble()
         val steps = headerRunPixelSteps(starts, density)
         val adjusted = HashMap(extents)
-        // An extent whose floor (listCellPixels) is exactly that step.
-        for ((index, row) in run.withIndex()) adjusted[row] = ((steps[index] + 0.5) / density).toFloat()
+        // An extent that listCellPixels steps by exactly that many pixels.
+        for ((index, row) in run.withIndex()) adjusted[row] = extentForPixelStep(steps[index], density, originPx)
         return adjusted
     }
 
@@ -2467,7 +2467,13 @@ class PamRenderer(
                     frame.height + margins.top + margins.bottom
                 }
             }?.coerceAtLeast(0f) ?: fallbackExtent
-        }.let { extents -> withHeaderRunSteps(itemIds, extents, horizontal) }
+        }
+        // FlashList cells sit at whole-pixel offsets from the content origin;
+        // Fabric rounds their edges against that origin's pixel fraction.
+        list.pixelOrigin = itemIds.firstOrNull()?.let(::cellSlotFrame)?.let { slot ->
+            listPixelOrigin(if (horizontal) slot.x else slot.y, resourcesDensity())
+        } ?: DEFAULT_LIST_PIXEL_ORIGIN
+        val steppedExtents = withHeaderRunSteps(itemIds, itemExtents, horizontal, list.pixelOrigin)
         // Windowed list: rows are known by index; a placeholder run stands
         // for LIST_PLACEHOLDER_ROWS rows. The row at the top stays put while
         // runs split into rows around it.
@@ -2484,7 +2490,7 @@ class PamRenderer(
         val rowAnchor = if (windowed && list.isLaidOut) list.rowAnchor() else null
         list.setRichItems(
             ids = itemIds,
-            extents = itemExtents,
+            extents = steppedExtents,
             mount = { cell, holder -> materializeCell(cell, holder) },
             mountSlice = { cell, holder, deadline -> materializeCell(cell, holder, deadline) },
             unmount = { cell, _ ->
@@ -2979,7 +2985,7 @@ class PamRenderer(
         } else {
             null
         }
-        val hang = if (cellList?.rowsHangFromEnd == true) cellEndHang(rootFrame.height, density) else 0
+        val hang = if (cellList?.rowsHangFromEnd == true) cellEndHang(rootFrame.height, density, cellList.pixelOrigin) else 0
         // On the list's axis a filling root keeps the extent Yoga rounds it
         // to, like a FlashList cell: the slot steps by the floored extent, so
         // the root may overrun it by the rounding pixel (drawn, not clipped).

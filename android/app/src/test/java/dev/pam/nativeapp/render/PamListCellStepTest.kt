@@ -16,8 +16,10 @@ class PamListCellStepTest {
         assertEquals(359, listCellPixels(358.99997f, 1f))
     }
 
-    @Test fun anEmptyCellKeepsOnePixel() {
-        assertEquals(1, listCellPixels(0f, 2.625f))
+    @Test fun anEmptyCellTakesNoPixelButATinyOneKeepsOne() {
+        assertEquals(0, listCellPixels(0f, 2.625f))
+        assertEquals(0, listCellPixels(0f, 2.625f, 0.0))
+        assertEquals(1, listCellPixels(0.1f, 2.625f, 0.0))
     }
 
     @Test fun anEndAnchoredRowHangsTheRoundingPixelAboveItsSlot() {
@@ -47,5 +49,32 @@ class PamListCellStepTest {
         assertEquals(870, steps[0] + steps[1])
         // The step survives listCellPixels' floor.
         assertEquals(624, listCellPixels(((steps[0] + 0.5) / 2.625f).toFloat(), 2.625f))
+    }
+
+    @Test fun aWholePixelOriginRoundsTheStepLikeFabric() {
+        // Notifications list content at 411.25 px: 135.5 px header -> 136,
+        // 215.875 px row -> 216, 260.5 px row -> 261 (RN on the S10).
+        val origin = listPixelOrigin(156.66667f, 2.625f)
+        assertEquals(0.25, origin, 0.001)
+        assertEquals(136, listCellPixels(51.619048f, 2.625f, origin))
+        assertEquals(216, listCellPixels(82.2381f, 2.625f, origin))
+        assertEquals(261, listCellPixels(99.2381f, 2.625f, origin))
+        assertEquals(216, listCellPixels(82.2381f, 2.625f, 0.0))
+    }
+
+    @Test fun aHalfPixelOriginKeepsTheFlooredStep() {
+        // Chat/profile lists start at 94.67 dp = 248.5 px.
+        val origin = listPixelOrigin(94.666664f, 2.625f)
+        assertEquals(0.5, origin, 0.001)
+        assertEquals(358, listCellPixels(136.67f, 2.625f, origin))
+        assertEquals(215, listCellPixels(82.2381f, 2.625f, origin))
+    }
+
+    @Test fun aPixelStepRoundTripsThroughItsExtent() {
+        for (origin in doubleArrayOf(0.0, 0.25, 0.5, 0.75)) {
+            for (step in intArrayOf(1, 42, 135, 330)) {
+                assertEquals(step, listCellPixels(extentForPixelStep(step, 2.625f, origin), 2.625f, origin))
+            }
+        }
     }
 }

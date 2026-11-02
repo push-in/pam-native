@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.46.33 - 2026-11-02
+
+Android list rows on the React Native pixel grid for any list origin, and
+empty list rows that take no space, on top of 1.46.32.
+
+- Android: a list row steps by `round(origin + height) - round(origin)` from
+  the pixel fraction of the list's content origin, like a FlashList cell whose
+  edges Fabric rounds. The floored step of 1.46.31 is the half-pixel-origin
+  case; a list starting on a whole pixel (a notifications screen) lost one
+  pixel per row against React Native.
+- Layout engine: a list row with an authored height of 0 measures 0, not 1 dp.
+- Android: an empty list cell takes no pixel (an empty FlashList item), so
+  hidden header cards no longer push the rows below them down.
+
 ## 1.46.32 - 2026-11-02
 
 iOS pixel grid like React Native and a keyboard fix for end-anchored lists on
