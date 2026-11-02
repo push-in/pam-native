@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Android: frames snap to the pixel grid like Yoga's
+  `roundLayoutResultsToPixelGrid`, as React Native mounts them: positions are
+  rounded relative to the parent (a text floors its own), sizes come from the
+  rounded absolute edges (a text ceils a fractional trailing edge), and a
+  child of layout-only (flattened) ancestors adds each ancestor's rounded
+  origin. Rounding absolute edges moved centered children one pixel to the
+  right/bottom at fractional densities (2.625: tab bar items, grid rows).
+
 ## 1.46.27 - 2026-11-02
 
 iOS video audio session like expo-video (#223) and a lighter Android debug
