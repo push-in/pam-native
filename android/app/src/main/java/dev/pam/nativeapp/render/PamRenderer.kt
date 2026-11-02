@@ -587,6 +587,7 @@ internal fun snappedPixelSpan(
     density: Float,
     preserveContentExtent: Boolean = false,
     flattenedOffset: Int? = null,
+    textRounding: Boolean = preserveContentExtent,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
     val safeExtent = extent.coerceAtLeast(0f)
@@ -596,7 +597,7 @@ internal fun snappedPixelSpan(
     // ceils a fractional size and floors a whole one). Rounding absolute
     // edges for the position moved children by a pixel against RN and
     // grids drifted per row.
-    val text = preserveContentExtent
+    val text = textRounding
     val fractionalExtent = !pixelGridWhole(safeExtent.toDouble() * safeDensity)
     // Layout-only ancestors between the node and its native host: React
     // Native's view flattening adds their rounded origins ([flattenedOffset]).
@@ -625,6 +626,16 @@ internal fun snappedPixelSpan(
 }
 
 /**
+ * Yoga gives every node with a measure function the Text node type and its
+ * floor/ceil rounding; in React Native that is Text, TextInput, Switch and
+ * ActivityIndicator (Fabric measurable shadow nodes).
+ */
+internal fun yogaTextRounding(kind: NodeKind): Boolean = when (kind) {
+    NodeKind.TEXT, NodeKind.INPUT, NodeKind.SWITCH, NodeKind.ACTIVITY_INDICATOR -> true
+    else -> false
+}
+
+/**
  * Pixel offset of a node inside its native host through flattened ancestors:
  * the sum of each Yoga-rounded relative position, node first (a text floors
  * only its own position).
@@ -637,7 +648,9 @@ internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Flo
     return sum
 }
 
-private const val PIXEL_GRID_EPSILON = 0.0001
+// Yoga compares the scaled fraction with 0.0001; frames here are absolute
+// float sums, so a whole pixel can arrive a few 1e-4 px short of it.
+private const val PIXEL_GRID_EPSILON = 0.001
 
 private fun pixelGridWhole(px: Double): Boolean {
     var fraction = px % 1.0
@@ -2817,6 +2830,7 @@ class PamRenderer(
         }
         val density = resourcesDensity()
         val text = state.kind == NodeKind.TEXT
+        val textRounding = yogaTextRounding(state.kind)
         // Layout-only ancestors up to a hosted parent (not the slot itself).
         val flattened = id != rootId && hostedParent != state.parent && hostedParent != 0L &&
             (hostedParent != rootId || views[rootId] != null)
@@ -2826,7 +2840,8 @@ class PamRenderer(
             parentFrame.x,
             density,
             preserveContentExtent = text,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, true, density, text) else null,
+            textRounding = textRounding,
+            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, true, density, textRounding) else null,
         )
         val vertical = snappedPixelSpan(
             frame.y,
@@ -2834,7 +2849,8 @@ class PamRenderer(
             parentFrame.y,
             density,
             preserveContentExtent = text,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, false, density, text) else null,
+            textRounding = textRounding,
+            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, false, density, textRounding) else null,
         )
         val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
             views[hostedParent] as? FrameLayout
@@ -3128,6 +3144,7 @@ class PamRenderer(
         val parentView = views[effectiveParentId]
         val density = resourcesDensity()
         val text = state.kind == NodeKind.TEXT
+        val textRounding = yogaTextRounding(state.kind)
         val flattened = parentFrame != null && effectiveParentId != state.parent
         val horizontal = snappedPixelSpan(
             frame.x,
@@ -3135,7 +3152,8 @@ class PamRenderer(
             parentFrame?.x ?: 0f,
             density,
             preserveContentExtent = text,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, true, density, text) else null,
+            textRounding = textRounding,
+            flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, true, density, textRounding) else null,
         )
         val vertical = snappedPixelSpan(
             frame.y,
@@ -3143,7 +3161,8 @@ class PamRenderer(
             parentFrame?.y ?: 0f,
             density,
             preserveContentExtent = text,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, false, density, text) else null,
+            textRounding = textRounding,
+            flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, false, density, textRounding) else null,
         )
         val hostedParentState = nodes[effectiveParent(state.parent)]
         val safeAreaParentState = when {
