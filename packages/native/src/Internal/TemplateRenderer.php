@@ -1450,6 +1450,7 @@ final class TemplateRenderer
         ?CompiledTemplateNode $planNode = null,
         string|false|null $knownClass = false,
     ): Element {
+        $authoredAttributes = $attributes;
         $factory = TemplateRegistry::factory($tag);
         $plan = null;
         $variant = $factory === null ? 'n' : 'f';
@@ -2208,7 +2209,7 @@ final class TemplateRenderer
             };
 
         if ($factory !== null) {
-            $values = self::rootValues($tag, $values);
+            $values = self::componentRootValues($tag, $values, $data, $authoredAttributes);
         }
         $decorationKey = null;
         if (
@@ -3423,7 +3424,7 @@ final class TemplateRenderer
                         return $call->decorated;
                     }
 
-                    return self::decorateComponent($call, $element, $resolvedClass, self::rootValues($tag, $values), $sheet, $data);
+                    return self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
                 }
             }
         }
@@ -3505,7 +3506,7 @@ final class TemplateRenderer
         $element = $component->toElement();
         self::$freshElement = null;
 
-        return self::decorateComponent($call, $element, $resolvedClass, self::rootValues($tag, $values), $sheet, $data);
+        return self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
     }
 
     /**
@@ -7303,6 +7304,40 @@ final class TemplateRenderer
         $props = PamPhpRegistry::propNames($tag);
 
         return $props === [] ? $values : array_diff_key($values, $props);
+    }
+
+    /**
+     * Call-site values applied over a component's root element, minus the
+     * text styles the call site only inherited from an ancestor (a `color`
+     * on a dark container): those reach the component through its inherited
+     * styles, below the root's own attributes. Decorating the root with them
+     * overrode the root's own text colour (an icon glyph drawn in the
+     * container's text colour).
+     *
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $authored the call site's own attributes
+     * @return array<string, mixed>
+     */
+    private static function componentRootValues(string $tag, array $values, array $data, array $authored): array
+    {
+        $values = self::rootValues($tag, $values);
+        $inherited = $data['__pamInheritedStyles'] ?? null;
+        if (!is_array($inherited) || $inherited === []) {
+            return $values;
+        }
+        foreach ($inherited as $attribute => $value) {
+            if (
+                array_key_exists($attribute, $values)
+                && $values[$attribute] === $value
+                && !array_key_exists($attribute, $authored)
+                && !array_key_exists(':'.$attribute, $authored)
+            ) {
+                unset($values[$attribute]);
+            }
+        }
+
+        return $values;
     }
 
     /** @var \WeakMap<Closure, true>|null */

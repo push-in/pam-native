@@ -135,3 +135,42 @@ $zoomTemplate = TemplateRenderer::render(
 )->toElement();
 $zoomChecks($zoomTemplate->children()[0] ?? null, 'template');
 echo "COMPONENT_ROOT_PROPS_OK height-prop=not-root-height attribute-props=component-only\n";
+
+// A text style a component's call site only inherited (a `color` on a dark
+// container) reaches the component as an inherited style, below its root's
+// own attributes: a root Text keeps its own colour (an icon glyph was drawn
+// in the container's text colour).
+$inheritDirectory = sys_get_temp_dir().'/pam-native-root-inherit-'.getmypid();
+if (!is_dir($inheritDirectory) && !mkdir($inheritDirectory, 0o755, true) && !is_dir($inheritDirectory)) {
+    throw new RuntimeException('Cannot create the root inherit fixture directory.');
+}
+file_put_contents($inheritDirectory.'/RootInheritGlyph.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\RootInherit;
+
+use Pam\Native\Component;
+
+final class RootInheritGlyph extends Component
+{
+    public function __construct(public int|string $tint = 0xFF8A958B)
+    {
+    }
+}
+?>
+
+<template>
+    <Text :textColor="$tint">g</Text>
+</template>
+PAM);
+App::components($inheritDirectory, $inheritDirectory.'/.cache');
+$inheritRoot = TemplateRenderer::render(
+    TemplateCompiler::compile('<View textColor="#F1F3EE"><RootInheritGlyph tint="#8A958B" /><Text>plain</Text></View>', 'root-inherit.pam.php'),
+    new stdClass(),
+    [],
+)->toElement();
+$inheritChildren = array_map(static fn ($child) => $child->toElement()->properties()[PropKey::TextColor->value] ?? null, $inheritRoot->children());
+$assert($inheritChildren[0] === 0xFF8A958B, 'A component root Text keeps its own colour over an inherited one.');
+$assert($inheritChildren[1] === 0xFFF1F3EE, 'A plain Text still inherits the container colour.');
