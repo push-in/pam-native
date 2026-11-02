@@ -2492,6 +2492,27 @@ fn intrinsic_extent(
     if let Some(explicit) = explicit {
         return finite_non_negative(explicit);
     }
+    // Yoga: an aspect-ratio box with a definite cross dimension takes the
+    // ratio's extent on this axis, as its final layout will. Callers pass a
+    // child's resolved width (point or percentage of the containing block) as
+    // `available_width`. Counting it as an unsized leaf (48) measured a
+    // `width: 100%; aspectRatio` map card at the map alone and clipped the
+    // siblings below it.
+    if let Some(ratio) = aspect_ratio(node) {
+        let derived = match requested_axis {
+            Axis::Vertical => number(node, PropKey::Width)
+                .or_else(|| {
+                    number(node, PropKey::WidthPercent)
+                        .filter(|percent| percent.is_finite())
+                        .map(|_| available_width)
+                })
+                .map(|width| width / ratio),
+            Axis::Horizontal => number(node, PropKey::Height).map(|height| height * ratio),
+        };
+        if let Some(derived) = derived.filter(|value| value.is_finite()) {
+            return finite_non_negative(derived);
+        }
+    }
 
     // Inputs contribute their text line box plus authored insets, just like
     // Text. Single-line clipping and multiline wrapping are measured below;
@@ -4810,6 +4831,40 @@ mod tests {
 
     fn size_of(frame: Layout) -> (f32, f32) {
         (frame.width, frame.height)
+    }
+
+    /// A fixed-width card (column) holding a `width: 100%; aspectRatio`
+    /// map and a fixed footer, under parents of every sizing mode. Yoga
+    /// sizes the card as map + footer; the footer is never clipped.
+    #[test]
+    fn aspect_ratio_percent_child_counts_with_its_siblings_in_a_content_sized_parent() {
+        let card = vec![f(PropKey::Width, 248.0), i(PropKey::Overflow, 1)];
+        let map = vec![f(PropKey::WidthPercent, 100.0), f(PropKey::AspectRatio, 248.0 / 140.0)];
+        let footer = vec![f(PropKey::Height, 56.0)];
+        let parents: Vec<(&str, Vec<(PropKey, PropValue)>, Vec<(PropKey, PropValue)>)> = vec![
+            ("stretch column", vec![], vec![]),
+            ("start column", vec![i(PropKey::AlignItems, 1)], vec![]),
+            ("row", vec![i(PropKey::FlexDirection, 2)], vec![]),
+            ("start column > padded bubble", vec![i(PropKey::AlignItems, 1)], vec![f(PropKey::PaddingTop, 4.0), f(PropKey::PaddingBottom, 4.0), f(PropKey::PaddingLeft, 4.0), f(PropKey::PaddingRight, 4.0), f(PropKey::MaxWidthPercent, 80.0)]),
+            ("row > padded bubble", vec![i(PropKey::FlexDirection, 2)], vec![f(PropKey::PaddingTop, 4.0), f(PropKey::PaddingBottom, 4.0), f(PropKey::PaddingLeft, 4.0), f(PropKey::PaddingRight, 4.0), f(PropKey::MaxWidthPercent, 80.0)]),
+            ("row > shrinking bubble", vec![i(PropKey::FlexDirection, 2)], vec![f(PropKey::FlexShrink, 1.0), f(PropKey::MaxWidthPercent, 80.0)]),
+        ];
+        for (label, root, bubble) in parents {
+            let tree = Tree {
+                root: 1,
+                nodes: BTreeMap::from([
+                    (1, node(1, 0, 0, NodeKind::View, root.clone())),
+                    (2, node(2, 1, 0, NodeKind::View, bubble.clone())),
+                    (3, node(3, 2, 0, NodeKind::View, card.clone())),
+                    (4, node(4, 3, 0, NodeKind::View, map.clone())),
+                    (5, node(5, 3, 1, NodeKind::View, footer.clone())),
+                ]),
+            };
+            let layouts = calculate(&tree, Size { width: 411.0, height: 800.0 }).expect("layout");
+            assert_eq!(size_of(layouts[&4]), (248.0, 140.0), "{label}: map");
+            assert_eq!(layouts[&5].y - layouts[&3].y, 140.0, "{label}: footer below the map");
+            assert_eq!(size_of(layouts[&3]), (248.0, 196.0), "{label}: card = map + footer");
+        }
     }
 
     /// Yoga `YGAspectRatioTest` reference cases (100x100 root).
