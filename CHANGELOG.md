@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.46.32 - 2026-11-02
+
+iOS pixel grid like React Native and a keyboard fix for end-anchored lists on
+top of 1.46.31.
+
+- iOS: frames mount on Yoga's pixel grid like React Native
+  (`roundLayoutResultsToPixelGrid`): the position is rounded relative to the
+  parent, the size comes from the rounded absolute edges, and measured nodes
+  (Text, TextInput, Switch, ActivityIndicator) floor their position and ceil a
+  fractional size. Engine floats were mounted as-is, so edges fell between
+  pixels (soft borders and text) and fractions accumulated one pixel off
+  React Native.
+- iOS: a `stackFromEnd` list whose rows rested against the end and stop
+  fitting because only the viewport shrank (the keyboard opening over a short
+  chat) lands on its end, and such a list follows its end on resize. It
+  stayed at the top of the gap it lost, hiding the newest rows behind the
+  composer.
+- iOS (debug): `PamFrameTrace` logs every applied frame (engine floats and the
+  mounted pixels), enabled with `PAM_FRAME_TRACE=1` or the `PamFrameTrace`
+  user default, like the Android log tag.
+
 ## 1.46.31 - 2026-11-02
 
 Android list pixel grid like FlashList and an empty-container fix in the

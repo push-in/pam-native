@@ -1039,11 +1039,18 @@ public final class PamRenderer: @unchecked Sendable {
             max($0, $1.1.maxY)
         }
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
-        if list.contentSize != contentSize {
+        let contentSizeChanged = list.contentSize != contentSize
+        if contentSizeChanged {
             list.contentSize = contentSize
-            if wasAnchored, anchorGap == 0, !list.isTracking, !list.isDecelerating {
-                list.contentOffset.y = list.primaryMaximumOffset
-            }
+        }
+        // Rows that rested against the end and no longer fit land on the
+        // end, also when only the viewport shrank (a keyboard opening over a
+        // short chat): the content size is the same rows then, and the list
+        // stayed at the top of the gap it just lost.
+        if wasAnchored, anchorGap == 0, !list.isTracking, !list.isDecelerating {
+            list.contentOffset.y = list.primaryMaximumOffset
+        }
+        if contentSizeChanged {
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
@@ -1358,14 +1365,25 @@ public final class PamRenderer: @unchecked Sendable {
             height: Float(host.bounds.height),
         )
 
-        var left = CGFloat(frame.x - parentFrame.x)
-        var top = CGFloat(frame.y - parentFrame.y)
+        // React Native mounts Yoga's pixel-grid rounding of every frame.
+        let gridScale = Double(PamTextEnvironment.displayScale)
+        let textRounding = PamPixelGrid.roundsAsText(state.kind)
+        let horizontalSpan = PamPixelGrid.span(
+            start: Double(frame.x), extent: Double(frame.width),
+            parentStart: Double(parentFrame.x), scale: gridScale, text: textRounding
+        )
+        let verticalSpan = PamPixelGrid.span(
+            start: Double(frame.y), extent: Double(frame.height),
+            parentStart: Double(parentFrame.y), scale: gridScale, text: textRounding
+        )
+        var left = horizontalSpan.offset
+        var top = verticalSpan.offset
         if let parentScroll = views[effectiveParent] as? PamContentScrollView {
             left -= parentScroll.pamContentPadding.left
             top -= parentScroll.pamContentPadding.top
         }
-        var width = CGFloat(max(0, frame.width))
-        var height = CGFloat(max(0, frame.height))
+        var width = horizontalSpan.extent
+        var height = verticalSpan.extent
 
         if !engineManagedSafeArea,
            let parentState = nodes[effectiveParent],
@@ -1397,9 +1415,10 @@ public final class PamRenderer: @unchecked Sendable {
                 || parentState.kind == .safeAreaView
                 || parentState.kind == .keyboardAvoidingView
             if horizontal || vertical {
-                let engineExtent = horizontal
-                    ? CGFloat(parentFrame.width)
-                    : CGFloat(parentFrame.height)
+                // The parent's own extent on the pixel grid (what it mounted
+                // with when nothing reduced it).
+                let engineExtent = pixelGridExtent(effectiveParent, horizontal: horizontal)
+                    ?? (horizontal ? CGFloat(parentFrame.width) : CGFloat(parentFrame.height))
                 let renderedExtent = horizontal
                     ? parentView.bounds.width
                     : parentView.bounds.height
@@ -1494,6 +1513,15 @@ public final class PamRenderer: @unchecked Sendable {
         // bounds/center instead. The layer's 3D transform counts: a cube face
         // laid out through `frame` mid-turn kept a shifted position once it
         // faced the viewer again.
+        #if DEBUG
+        if PamFrameTrace.enabled {
+            PamFrameTrace.log(
+                id: id, kind: state.kind, parent: effectiveParent,
+                engine: (frame.x, frame.y, frame.width, frame.height),
+                mounted: nextFrame, scale: CGFloat(gridScale)
+            )
+        }
+        #endif
         let layoutChanged: Bool
         if CATransform3DIsIdentity(view.layer.transform) {
             layoutChanged = view.frame != nextFrame
@@ -1537,6 +1565,22 @@ public final class PamRenderer: @unchecked Sendable {
         if state.properties[PamConstants.onLayout] != nil {
             layoutEvents.queue(id)
         }
+    }
+
+    /// A node's extent as `applyLayout` mounts it on the pixel grid (before
+    /// safe-area or viewport reductions); nil without an engine frame.
+    private func pixelGridExtent(_ id: Int64, horizontal: Bool) -> CGFloat? {
+        guard let frame = frames[id], let state = nodes[id] else { return nil }
+        let parentId = state.parent == 0 ? rootId : state.parent
+        let parentFrame = parentId == id ? nil : frames[parentId]
+        let span = PamPixelGrid.span(
+            start: Double(horizontal ? frame.x : frame.y),
+            extent: Double(horizontal ? frame.width : frame.height),
+            parentStart: Double(horizontal ? (parentFrame?.x ?? 0) : (parentFrame?.y ?? 0)),
+            scale: Double(PamTextEnvironment.displayScale),
+            text: PamPixelGrid.roundsAsText(state.kind)
+        )
+        return span.extent
     }
 
     /// React Native onLayout frame: relative to the parent, in points.
