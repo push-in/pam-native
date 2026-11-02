@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.46.29 - 2026-11-02
+
+Layout engine aspect-ratio measurement on top of 1.46.28.
+
+- Engine: an `aspectRatio` box with a definite width (points or a percentage
+  of its containing block) contributes its ratio height when a content-sized
+  parent measures itself, as in Yoga. It counted as an unsized leaf (48), so a
+  fixed-width card holding a `width: 100%; aspect-ratio` map was measured at
+  the map alone and clipped the footer below it.
+- Android (debug builds): `adb shell setprop log.tag.PamFrameTrace DEBUG`
+  logs every applied frame with its engine floats and snapped pixels, to
+  compare a screen's pixel grid with another renderer.
+
 ## 1.46.28 - 2026-11-02
 
 Android pixel grid like React Native's Yoga rounding on top of 1.46.27.
