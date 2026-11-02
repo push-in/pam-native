@@ -49,6 +49,8 @@ final class PamMediaView: UIView {
     private var buffering = false
     private var playbackRate: Float = 1
     private var resumeAfterPause = false
+    /// Playing when an audio interruption (call, alarm) began.
+    private var resumeAfterInterruption = false
     private var sourceGeneration: UInt64 = 0
     private var photoVideoRequestId: PHImageRequestID = PHInvalidImageRequestID
     private var cachePolicy = 1
@@ -498,6 +500,7 @@ final class PamMediaView: UIView {
         attachSurface()
         next.isMuted = muted
         next.volume = volume
+        PamAudioSession.shared.register(self)
         onLoadStart?()
         buffering = false
         bufferingObservation = next.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
@@ -549,6 +552,17 @@ final class PamMediaView: UIView {
                 case .failed:
                     self.videoReadyForDisplay = false
                     self.updatePoster()
+                    if Self.isAudioRenderFailure(item.error) {
+                        // The audio renderer failed (-12746, e.g. a simulator
+                        // without audio output): the poster stays, no error
+                        // card, the same as React Native expo-video.
+                        if self.buffering {
+                            self.buffering = false
+                            self.onBuffering?(false)
+                        }
+                        NSLog("PamMedia audio render failed; poster kept: %@", String(describing: item.error))
+                        return
+                    }
                     #if DEBUG
                     if PamListTrace.enabled {
                         let asset = (item.asset as? AVURLAsset)?.url
@@ -863,10 +877,15 @@ final class PamMediaView: UIView {
         return releasedForCover
     }
     func setLoop(_ value: Bool) { looping = value }
-    func setMuted(_ value: Bool) { muted = value; player?.isMuted = value }
+    func setMuted(_ value: Bool) {
+        muted = value
+        player?.isMuted = value
+        PamAudioSession.shared.update()
+    }
     func setVolume(_ value: Float) {
         volume = min(max(value, 0), 1)
         player?.volume = volume
+        PamAudioSession.shared.update()
     }
     func seek(_ seconds: Double) {
         currentTime = max(seconds, 0)
@@ -898,7 +917,7 @@ final class PamMediaView: UIView {
                 < startBufferSeconds,
               !item.isPlaybackBufferFull else {
             cancelStartBuffer()
-            player.playImmediately(atRate: playbackRate)
+            startPlayback(player)
             return
         }
         // Wait for the start buffer (event-driven, no polling); the stall is
@@ -914,9 +933,14 @@ final class PamMediaView: UIView {
                 let ahead = pamBufferedAhead(item.loadedTimeRanges.map(\.timeRangeValue), at: item.currentTime().seconds)
                 guard ahead >= self.startBufferSeconds || item.isPlaybackBufferFull else { return }
                 self.cancelStartBuffer()
-                self.player?.playImmediately(atRate: self.playbackRate)
+                if let player = self.player { self.startPlayback(player) }
             }
         }
+    }
+
+    private func startPlayback(_ player: AVPlayer) {
+        player.playImmediately(atRate: playbackRate)
+        PamAudioSession.shared.update()
     }
 
     /// Pauses the player (and a play still waiting for its start buffer).
@@ -927,7 +951,23 @@ final class PamMediaView: UIView {
         }
         cancelStartBuffer()
         player?.pause()
+        PamAudioSession.shared.update()
     }
+
+    /// An item failure caused by the audio renderer (OSStatus -12746, usually
+    /// wrapped in AVFoundation -11800), not by the network or the file.
+    static func isAudioRenderFailure(_ error: Error?) -> Bool {
+        var current = error.map { $0 as NSError }
+        var depth = 0
+        while let nsError = current, depth < 8 {
+            if nsError.code == -12746 { return true }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        return false
+    }
+
+    var hasPendingStartBuffer: Bool { startBufferObservation != nil }
 
     private func cancelStartBuffer() {
         startBufferObservation?.invalidate()
@@ -1007,7 +1047,16 @@ final class PamMediaView: UIView {
             player = nil
             Self.retire(doomed)
         }
-        if restoresPoster { updatePoster() }
+        resumeAfterInterruption = false
+        // Not while deallocating (`restoresPoster == false`): the weak
+        // registry drops this view by itself, and `self` must not escape deinit.
+        if restoresPoster {
+            PamAudioSession.shared.unregister(self)
+            PamAudioSession.shared.update()
+            updatePoster()
+        } else {
+            DispatchQueue.main.async { PamAudioSession.shared.update() }
+        }
     }
 
     /// Serial queue where released players are paused, emptied and freed.
@@ -1256,5 +1305,34 @@ extension PamMediaView: PamSharedContentView {
         posterView.image = image
         posterView.isHidden = false
         return true
+    }
+}
+
+// MARK: Audio session (expo-video `auto` mixing, interruptions, route)
+
+extension PamMediaView: PamAudioParticipant {
+    var audioPlaying: Bool {
+        guard let player else { return false }
+        return player.rate != 0 || hasPendingStartBuffer
+    }
+
+    var audioAudible: Bool { !muted && volume > 0 }
+
+    func audioInterruptionBegan() {
+        resumeAfterInterruption = resumeAfterInterruption || audioPlaying
+        pause()
+    }
+
+    func audioInterruptionEnded(shouldResume: Bool) {
+        let resume = resumeAfterInterruption && shouldResume
+        resumeAfterInterruption = false
+        guard resume, player != nil, !Self.appInBackground else { return }
+        play()
+    }
+
+    func audioOutputLost() {
+        resumeAfterPause = false
+        resumeAfterInterruption = false
+        pause()
     }
 }
