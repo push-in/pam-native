@@ -248,3 +248,105 @@ enum PamARGB {
         return Int64(bitPattern: (byte(a) << 24) | (byte(r) << 16) | (byte(g) << 8) | byte(b))
     }
 }
+
+/// Yoga's `roundLayoutResultsToPixelGrid`, which React Native applies to every
+/// frame it mounts: a node's position is rounded RELATIVE to its parent and
+/// its size comes from the rounded absolute edges. Nodes with a measure
+/// function (Text, TextInput, Switch, ActivityIndicator) floor their position
+/// and ceil a fractional size. Engine frames are absolute floats; mounting
+/// them unrounded put edges between pixels (blurred, and one pixel off React
+/// Native where fractions accumulate).
+enum PamPixelGrid {
+    /// Yoga compares the scaled fraction with 0.0001; frames here are absolute
+    /// float sums, so a whole pixel can arrive a few 1e-4 px short of it.
+    static let epsilon = 0.001
+
+    static func isWhole(_ pixels: Double) -> Bool {
+        var fraction = pixels.truncatingRemainder(dividingBy: 1)
+        if fraction < 0 { fraction += 1 }
+        return fraction < epsilon || fraction > 1 - epsilon
+    }
+
+    /// Yoga's roundValueToPixelGrid, in whole pixels.
+    static func pixels(_ points: Double, scale: Double, forceCeil: Bool = false, forceFloor: Bool = false) -> Double {
+        let scaled = points * scale
+        var fraction = scaled.truncatingRemainder(dividingBy: 1)
+        if fraction < 0 { fraction += 1 }
+        let base = scaled - fraction
+        let snapped: Double
+        if fraction < epsilon {
+            snapped = base
+        } else if fraction > 1 - epsilon {
+            snapped = base + 1
+        } else if forceCeil {
+            snapped = base + 1
+        } else if forceFloor {
+            snapped = base
+        } else if fraction > 0.5 || abs(fraction - 0.5) < epsilon {
+            snapped = base + 1
+        } else {
+            snapped = base
+        }
+        return snapped.rounded()
+    }
+
+    /// Position relative to the parent and extent, in points on the pixel grid.
+    /// `start`/`parentStart` are absolute engine coordinates.
+    static func span(
+        start: Double,
+        extent: Double,
+        parentStart: Double,
+        scale: Double,
+        text: Bool
+    ) -> (offset: CGFloat, extent: CGFloat) {
+        guard scale > 0, start.isFinite, extent.isFinite, parentStart.isFinite else {
+            return (CGFloat(start - parentStart), CGFloat(max(0, extent)))
+        }
+        let size = max(0, extent)
+        let fractional = !isWhole(size * scale)
+        let offset = pixels(start - parentStart, scale: scale, forceFloor: text)
+        let absoluteStart = pixels(start, scale: scale, forceFloor: text)
+        let absoluteEnd = pixels(
+            start + size,
+            scale: scale,
+            forceCeil: text && fractional,
+            forceFloor: text && !fractional
+        )
+        var snapped = max(0, absoluteEnd - absoluteStart)
+        if text {
+            // Text is measured in whole (ceiled) pixels: never clip it.
+            snapped = max(snapped, (size * scale - epsilon).rounded(.up))
+        }
+        return (CGFloat(offset / scale), CGFloat(snapped / scale))
+    }
+
+    static func roundsAsText(_ kind: NodeKind) -> Bool {
+        switch kind {
+        case .text, .input, .toggle, .activityIndicator: return true
+        default: return false
+        }
+    }
+}
+
+#if DEBUG
+/// Debug-only trace of every applied frame (Android `PamFrameTrace`): engine
+/// floats and the frame mounted on the pixel grid, to compare a screen with
+/// another renderer's. Enable with the launch environment `PAM_FRAME_TRACE=1`
+/// or `xcrun simctl spawn booted defaults write <bundle id> PamFrameTrace
+/// -bool YES`; read with `log stream --predicate 'eventMessage CONTAINS
+/// "PamFrameTrace"'`.
+enum PamFrameTrace {
+    static let enabled: Bool = ProcessInfo.processInfo.environment["PAM_FRAME_TRACE"] == "1"
+        || UserDefaults.standard.bool(forKey: "PamFrameTrace")
+
+    static func log(id: Int64, kind: NodeKind, parent: Int64, engine: (x: Float, y: Float, w: Float, h: Float), mounted: CGRect, scale: CGFloat) {
+        NSLog(
+            "PamFrameTrace id=%lld kind=%@ parent=%lld x=%.3f y=%.3f w=%.3f h=%.3f px=%.0f,%.0f %.0fx%.0f",
+            id, String(describing: kind), parent,
+            Double(engine.x), Double(engine.y), Double(engine.w), Double(engine.h),
+            Double(mounted.minX * scale), Double(mounted.minY * scale),
+            Double(mounted.width * scale), Double(mounted.height * scale)
+        )
+    }
+}
+#endif
