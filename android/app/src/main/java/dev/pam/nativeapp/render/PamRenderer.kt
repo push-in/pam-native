@@ -2870,12 +2870,17 @@ class PamRenderer(
             // mirror them a second time inside an RTL holder.
             gravity = PAM_PHYSICAL_FRAME_GRAVITY
             // The root sits at its margins inside the holder (the slot).
+            // A scroll host pads its content by its authored insets, which the
+            // engine frames already include (as in applyLayout): a horizontal
+            // ScrollView with paddingHorizontal inside a list row otherwise
+            // drew its items one padding further in.
+            val scrollHost = if (id == rootId) null else views[hostedParent] as? PamScrollContainer
             leftMargin = if (id == rootId) horizontal.offset else engineFrameMargin(
                 horizontal.offset, paddedHost?.paddingLeft ?: 0,
-            )
+            ) - (scrollHost?.contentInsetLeft ?: 0)
             topMargin = if (id == rootId) vertical.offset else engineFrameMargin(
                 vertical.offset, paddedHost?.paddingTop ?: 0,
-            )
+            ) - (scrollHost?.contentInsetTop ?: 0)
         }
     }
 
