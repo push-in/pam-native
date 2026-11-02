@@ -203,6 +203,8 @@ $assert(
 );
 $between = StyleQueryCompiler::compile('(400px <= width <= 700px)', 'CssComplete.pam.php');
 $assert(StyleQueryCompiler::matches($between, ['width' => 500.0]) && !StyleQueryCompiler::matches($between, ['width' => 800.0]), 'Range media syntax must compile.');
+$platform = StyleQueryCompiler::compile('(platform: ios)', 'CssComplete.pam.php');
+$assert(StyleQueryCompiler::matches($platform, ['platform' => 'ios']) && !StyleQueryCompiler::matches($platform, ['platform' => 'android']), 'The platform media feature must select iOS or Android like Platform.OS.');
 $either = StyleQueryCompiler::compile('(prefers-color-scheme: dark), (prefers-reduced-motion: reduce)', 'CssComplete.pam.php');
 $assert(
     StyleQueryCompiler::matches($either, ['colorScheme' => 'light', 'reducedMotion' => 'reduce'])

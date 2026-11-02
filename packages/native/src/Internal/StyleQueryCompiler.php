@@ -207,7 +207,7 @@ final class StyleQueryCompiler
             );
         }
         if (preg_match(
-            '/^\((orientation|prefers-color-scheme|prefers-reduced-motion|pointer|device-type|dynamic-range|display-mode|fold-posture|input-mode):\s*([a-z][a-z0-9-]*)\)$/Di',
+            '/^\((orientation|prefers-color-scheme|prefers-reduced-motion|pointer|device-type|dynamic-range|display-mode|fold-posture|input-mode|platform):\s*([a-z][a-z0-9-]*)\)$/Di',
             $condition,
             $match,
         ) === 1) {
@@ -314,6 +314,7 @@ final class StyleQueryCompiler
             'input-mode' => StyleQueryFeature::InputMode,
             'memory-class' => StyleQueryFeature::MemoryClass,
             'performance-tier' => StyleQueryFeature::PerformanceTier,
+            'platform' => StyleQueryFeature::Platform,
             default => throw new RuntimeException("Unknown native style query feature {$feature}."),
         };
     }
@@ -335,6 +336,7 @@ final class StyleQueryCompiler
             StyleQueryFeature::InputMode => 'inputMode',
             StyleQueryFeature::MemoryClass => 'memoryClass',
             StyleQueryFeature::PerformanceTier => 'performanceTier',
+            StyleQueryFeature::Platform => 'platform',
         };
     }
 }
