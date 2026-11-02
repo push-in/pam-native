@@ -2039,6 +2039,9 @@ internal fun listCellPixels(extentDp: Float, density: Float, originPx: Double = 
     // content origin and Fabric rounds the cell's absolute edges (half up),
     // so a row steps by round(origin + h) - round(origin): the floored height
     // when the origin sits on a half pixel, the rounded one on a whole pixel.
+    // An empty cell (measured or authored 0) takes no space, like an empty
+    // FlashList item; any other cell keeps at least one pixel.
+    if (extentDp <= 0f) return 0
     val origin = originPx - floor(originPx)
     val step = roundListPixel(origin + extentDp.toDouble() * density) - roundListPixel(origin)
     return max(1, step)

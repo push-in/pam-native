@@ -16,8 +16,10 @@ class PamListCellStepTest {
         assertEquals(359, listCellPixels(358.99997f, 1f))
     }
 
-    @Test fun anEmptyCellKeepsOnePixel() {
-        assertEquals(1, listCellPixels(0f, 2.625f))
+    @Test fun anEmptyCellTakesNoPixelButATinyOneKeepsOne() {
+        assertEquals(0, listCellPixels(0f, 2.625f))
+        assertEquals(0, listCellPixels(0f, 2.625f, 0.0))
+        assertEquals(1, listCellPixels(0.1f, 2.625f, 0.0))
     }
 
     @Test fun anEndAnchoredRowHangsTheRoundingPixelAboveItsSlot() {

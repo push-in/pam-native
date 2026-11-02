@@ -1159,7 +1159,8 @@ fn layout_node(
                     })
                     .reduce(f32::max);
                 let item_height = match (authored, retained) {
-                    (Some(height), _) => height.max(1.0),
+                    // An authored height of 0 is an empty row (Yoga/FlashList: no space).
+                    (Some(height), _) => height.max(0.0),
                     // A clean row keeps its measured extent: re-laying out a
                     // list (a section switch, one changed row) measures only
                     // the rows that changed.
@@ -8494,6 +8495,24 @@ mod tests {
         assert_eq!(layout[&3].y, 0.0);
         assert_eq!(layout[&4].x, 0.0);
         assert_eq!(layout[&4].y, 160.0);
+    }
+
+    #[test]
+    fn virtual_list_row_with_authored_zero_height_takes_no_space() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(1, 0, 0, NodeKind::VirtualList, [(PropKey::ListRowHeight, PropValue::Float(120.0))]),
+        );
+        nodes.insert(2, node(2, 1, 0, NodeKind::Column, [(PropKey::Height, PropValue::Float(40.0))]));
+        nodes.insert(3, node(3, 1, 1, NodeKind::Column, [(PropKey::Height, PropValue::Float(0.0))]));
+        nodes.insert(4, node(4, 1, 2, NodeKind::Column, [(PropKey::Height, PropValue::Float(60.0))]));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(&tree, Size { width: 360.0, height: 640.0 }).expect("zero row");
+
+        assert_eq!(layout[&3].y, 40.0);
+        assert_eq!(layout[&3].height, 0.0);
+        assert_eq!(layout[&4].y, 40.0);
     }
 
     #[test]
