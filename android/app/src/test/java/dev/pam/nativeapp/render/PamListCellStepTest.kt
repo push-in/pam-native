@@ -37,4 +37,15 @@ class PamListCellStepTest {
         assertEquals(435, yogaCellPixels(165.7f, 2.625f))
         assertEquals(434, listCellPixels(165.7f, 2.625f))
     }
+
+    @Test fun headerRowsStepToTheirYogaRoundedOffsetsNotFlooredHeights() {
+        // Summary 237.67 dp then highlights 93.76 dp at 2.625: floored steps
+        // 623 + 246 end the header at 869 px; one Yoga view puts the rows at
+        // round(623.88) = 624 and round(870.0) = 870.
+        val steps = headerRunPixelSteps(doubleArrayOf(0.0, 237.6667, 331.4267), 2.625f)
+        assertEquals(624, steps[0])
+        assertEquals(870, steps[0] + steps[1])
+        // The step survives listCellPixels' floor.
+        assertEquals(624, listCellPixels(((steps[0] + 0.5) / 2.625f).toFloat(), 2.625f))
+    }
 }

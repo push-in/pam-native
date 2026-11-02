@@ -653,6 +653,17 @@ internal fun yogaTextRounding(kind: NodeKind): Boolean = when (kind) {
  * the sum of each Yoga-rounded relative position, node first (a text floors
  * only its own position).
  */
+/**
+ * Whole-pixel steps of header rows starting at [starts] (dp; the last entry
+ * is the header's end): each row sits at its Yoga-rounded offset from the
+ * header's top, as children of one ListHeaderComponent view.
+ */
+internal fun headerRunPixelSteps(starts: DoubleArray, density: Float): IntArray {
+    val origin = starts.firstOrNull() ?: return IntArray(0)
+    val rounded = IntArray(starts.size) { yogaPixelGrid(starts[it] - origin, density, forceCeil = false, forceFloor = false) }
+    return IntArray((starts.size - 1).coerceAtLeast(0)) { rounded[it + 1] - rounded[it] }
+}
+
 internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Float, text: Boolean): Int {
     var sum = 0
     relativesFromNodeUp.forEachIndexed { index, relative ->
@@ -2395,6 +2406,30 @@ class PamRenderer(
         }
     }
 
+    /**
+     * Leading full-span rows are the list's header (ListHeaderComponent):
+     * React Native lays them out as one Yoga subtree, so each sits at its
+     * Yoga-rounded offset from the header's top instead of stepping by a
+     * floored height like a FlashList item (a header split into rows lost a
+     * pixel per row). Their extents are replaced by that whole-pixel step.
+     */
+    private fun withHeaderRunSteps(ids: List<Long>, extents: Map<Long, Float>, horizontal: Boolean): Map<Long, Float> {
+        val run = ids.takeWhile { nodes[it]?.flag(PropKey.LIST_FULL_SPAN, false) == true }
+        if (run.isEmpty()) return extents
+        val density = resourcesDensity()
+        val starts = DoubleArray(run.size + 1)
+        for ((index, row) in run.withIndex()) {
+            val slot = cellSlotFrame(row) ?: return extents
+            starts[index] = (if (horizontal) slot.x else slot.y).toDouble()
+        }
+        starts[run.size] = starts[run.size - 1] + (extents[run.last()] ?: return extents).toDouble()
+        val steps = headerRunPixelSteps(starts, density)
+        val adjusted = HashMap(extents)
+        // An extent whose floor (listCellPixels) is exactly that step.
+        for ((index, row) in run.withIndex()) adjusted[row] = ((steps[index] + 0.5) / density).toFloat()
+        return adjusted
+    }
+
     private fun syncVirtualLists(dirty: Set<Long>? = null) {
         for (id in virtualListIds) syncVirtualList(id, dirty)
     }
@@ -2432,7 +2467,7 @@ class PamRenderer(
                     frame.height + margins.top + margins.bottom
                 }
             }?.coerceAtLeast(0f) ?: fallbackExtent
-        }
+        }.let { extents -> withHeaderRunSteps(itemIds, extents, horizontal) }
         // Windowed list: rows are known by index; a placeholder run stands
         // for LIST_PLACEHOLDER_ROWS rows. The row at the top stays put while
         // runs split into rows around it.
@@ -2852,7 +2887,38 @@ class PamRenderer(
         val rootless = hostedParent == rootId && views[rootId] == null
         val flattened = id != rootId && hostedParent != state.parent && hostedParent != 0L
         val rootFrameOfRoot = if (rootless) frames[rootId] else null
+        val slotList = nodes[rootId]?.parent?.let { views[it] } as? PamRecyclerList
+        val headerRow = rootless && id != rootId && nodes[rootId]?.flag(PropKey.LIST_FULL_SPAN, false) == true
+        // A header row's layout-only root is a ListHeaderComponent fragment:
+        // its content is rounded from the header's origin as direct children
+        // of one Yoga view, then placed against the row's whole-pixel start.
+        fun headerRowOffset(horizontal: Boolean): Int? {
+            val list = slotList ?: return null
+            if (!headerRow || list.horizontalRows != horizontal) return null
+            val rowStart = list.rowSlotStartPx(rootId) ?: return null
+            val origin = list.firstRowId?.let(::cellSlotFrame) ?: return null
+            val relatives = ArrayList<Double>(4)
+            var node = id
+            while (node != rootId) {
+                val parent = nodes[node]?.parent ?: return null
+                val nodeFrame = frames[node] ?: return null
+                val parentFrame = if (parent == rootId) {
+                    origin
+                } else {
+                    frames[parent] ?: return null
+                }
+                relatives += if (horizontal) {
+                    nodeFrame.x.toDouble() - parentFrame.x.toDouble()
+                } else {
+                    nodeFrame.y.toDouble() - parentFrame.y.toDouble()
+                }
+                node = parent
+                if (relatives.size > MAX_VIRTUAL_DEPTH) return null
+            }
+            return flattenedYogaOffset(relatives, density, textRounding) - rowStart
+        }
         fun cellFlattenedOffset(horizontal: Boolean): Int? {
+            headerRowOffset(horizontal)?.let { return it }
             if (!flattened) return null
             val inner = flattenedPixelOffset(id, hostedParent, horizontal, density, textRounding) ?: return null
             if (!rootless) return inner
@@ -2860,19 +2926,35 @@ class PamRenderer(
             val rootOffset = if (horizontal) root.x.toDouble() - rootFrame.x.toDouble() else root.y.toDouble() - rootFrame.y.toDouble()
             return inner + yogaPixelGrid(rootOffset, density, forceCeil = false, forceFloor = false)
         }
+        // Yoga rounds a FlashList cell's content from the cell's own origin:
+        // the first row's origin plus the whole-pixel steps before it. The
+        // engine's list coordinates also carry each earlier row's fraction,
+        // which rounded a card's edges a pixel off React Native's.
+        val slotShift = slotList?.let { list ->
+            // A header row is part of one Yoga subtree: no slot shift.
+            if (nodes[rootId]?.flag(PropKey.LIST_FULL_SPAN, false) == true) return@let null
+            val slotPx = list.rowSlotStartPx(rootId) ?: return@let null
+            val firstFrame = list.firstRowId?.let(::cellSlotFrame) ?: return@let null
+            val alongX = list.horizontalRows
+            val first = if (alongX) firstFrame.x else firstFrame.y
+            val own = if (alongX) rootFrame.x else rootFrame.y
+            first + slotPx / density - own
+        } ?: 0f
+        val shiftX = if (slotList?.horizontalRows == true) slotShift else 0f
+        val shiftY = if (slotList?.horizontalRows == true) 0f else slotShift
         val horizontal = snappedPixelSpan(
-            frame.x,
+            frame.x + shiftX,
             frame.width,
-            parentFrame.x,
+            parentFrame.x + shiftX,
             density,
             preserveContentExtent = text,
             textRounding = textRounding,
             flattenedOffset = cellFlattenedOffset(true),
         )
         val vertical = snappedPixelSpan(
-            frame.y,
+            frame.y + shiftY,
             frame.height,
-            parentFrame.y,
+            parentFrame.y + shiftY,
             density,
             preserveContentExtent = text,
             textRounding = textRounding,
@@ -3203,7 +3285,15 @@ class PamRenderer(
         nodes[id]?.let { state ->
             if (nodes[state.parent]?.kind == NodeKind.SCROLL) updateScrollContentExtent(state.parent)
         }
-        if (views[id] == null) return
+        if (views[id] == null) {
+            // A layout-only node's rounded origin is part of every hosted
+            // descendant's pixel offset (flattenedPixelOffset). When only
+            // this node moves, the engine resends no descendant frame, so
+            // re-apply them here (a header action kept the pixel of the
+            // narrower row after a sibling button widened it).
+            if (nodes[id]?.virtual == true && frames[id] != null) applyHostedChildLayouts(id)
+            return
+        }
         virtualCellRoot(id)?.let { rootId ->
             val slotFrame = cellSlotFrame(rootId) ?: return
             applyCellLayout(id, rootId, slotFrame)

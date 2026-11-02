@@ -99,6 +99,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var releaseVelocityY = 0f
     private var richIds: List<Long> = emptyList()
     private var richExtents: Map<Long, Int> = emptyMap()
+
+    /** Whole-pixel start of each row along the list axis (lazy, per submit). */
+    private var richSlotStarts: HashMap<Long, Int>? = null
     private val accessibilityModes = IdentityHashMap<View, Int>()
     private var stickyIds: Set<Long> = emptySet()
     private val stickyPins = StickyPins()
@@ -393,6 +396,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
         richIds = ids
         richExtents = pixelExtents
+        richSlotStarts = null
         richSpans = rowSpan?.let { span ->
             HashMap<Long, IntArray>(ids.size * 2).also { spans ->
                 for (id in ids) span(id)?.let { spans[id] = it }
@@ -945,6 +949,28 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     val rowsHangFromEnd: Boolean
         get() = !horizontal && (stackRowsFromEnd || inverted)
+
+    /** First row of the list (its Yoga origin anchors every slot), if any. */
+    val firstRowId: Long?
+        get() = richIds.firstOrNull()
+
+    /**
+     * Start of row [id] along the list axis, in whole pixels from the first
+     * row: the sum of the floored steps before it, as FlashList places a
+     * cell. Null for grids, windowed spans and rows hanging from the end.
+     */
+    fun rowSlotStartPx(id: Long): Int? {
+        if (rowsHangFromEnd || richSpans.isNotEmpty() || layoutManager is GridLayoutManager) return null
+        val starts = richSlotStarts ?: HashMap<Long, Int>(richIds.size * 2).also { map ->
+            var offset = 0
+            for (row in richIds) {
+                map[row] = offset
+                offset += richExtents[row] ?: 0
+            }
+            richSlotStarts = map
+        }
+        return starts[id]
+    }
 
     /** True when rows run along the horizontal axis. */
     val horizontalRows: Boolean
