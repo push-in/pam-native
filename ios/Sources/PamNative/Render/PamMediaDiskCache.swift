@@ -16,12 +16,21 @@ public final class PamMediaDiskCache: @unchecked Sendable {
     public static let shared = PamMediaDiskCache()
 
     private let root: URL
-    private let queue = DispatchQueue(label: "dev.pam.media-cache", qos: .utility)
+    /// Lookups gate on-screen pictures: same QoS as their decode, or a grid of
+    /// concurrent decodes starves the queue the next lookup waits on.
+    private let queue = DispatchQueue(label: "dev.pam.media-cache", qos: .userInitiated)
+    /// Directory scans run here so lookups on `queue` never wait for one.
+    private let trimQueue = DispatchQueue(label: "dev.pam.media-cache.trim", qos: .background)
     private let memory = NSCache<NSString, NSData>()
     /// Insertion order of `memory` (touched only on `queue`) so a moderate
     /// trim can drop the oldest half; NSCache cannot be halved by itself.
     private var memoryOrder = PamMemoryCostOrder()
     private var downloads: [String: [(Result<Resolution, Error>) -> Void]] = [:]
+    /// One directory scan for a burst of stores (a grid of thumbnails stored
+    /// one by one scanned and sorted the whole cache per file, and every
+    /// lookup queued behind those scans waited seconds before its download).
+    private var pendingTrimLimit: Int64?
+    private static let trimDelay: DispatchTimeInterval = .milliseconds(1_500)
 
     private init() {
         root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -102,7 +111,7 @@ public final class PamMediaDiskCache: @unchecked Sendable {
                 try? Data([1]).write(to: self.pin(identity), options: .atomic)
             }
             self.remember(data, identity: identity)
-            self.trim(limit: limit)
+            self.scheduleTrim(limit: limit)
             completion?(FileManager.default.fileExists(atPath: target.path))
         }
     }
@@ -167,7 +176,7 @@ public final class PamMediaDiskCache: @unchecked Sendable {
                     do {
                         try FileManager.default.moveItem(at: temporary, to: target)
                         if pinned { try? Data([1]).write(to: self.pin(identity), options: .atomic) }
-                        self.trim(limit: 0)
+                        self.scheduleTrim(limit: 0)
                         self.finish(identity, .success(Resolution(url: target, hit: false)))
                     } catch {
                         self.finish(identity, .failure(error))
@@ -268,24 +277,43 @@ public final class PamMediaDiskCache: @unchecked Sendable {
         return Date().timeIntervalSince(modified) * 1_000 <= Double(maxAgeMs)
     }
 
+    /// On `queue`: the strictest budget asked during the burst wins.
+    private func scheduleTrim(limit: Int64) {
+        if let pending = pendingTrimLimit {
+            if Self.diskBudget(limit: limit) < Self.diskBudget(limit: pending) { pendingTrimLimit = limit }
+            return
+        }
+        pendingTrimLimit = limit
+        queue.asyncAfter(deadline: .now() + Self.trimDelay) {
+            guard let limit = self.pendingTrimLimit else { return }
+            self.pendingTrimLimit = nil
+            self.trimQueue.async { self.trim(limit: limit) }
+        }
+    }
+
     private func trim(limit: Int64) {
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let files = (try? FileManager.default.contentsOfDirectory(
             at: root,
-            includingPropertiesForKeys: Array(keys)
+            includingPropertiesForKeys: keys
         )) ?? []
+        // Attributes read once per file (prefetched by the listing), not
+        // per comparison; pins come from the same listing.
+        let pins = Set(files.filter { $0.pathExtension == "pin" }.map { $0.deletingPathExtension().lastPathComponent })
         let media = files.filter { $0.pathExtension == "media" }
-            .sorted {
-                ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast)
+            .map { file -> (url: URL, size: Int64, date: Date) in
+                let values = try? file.resourceValues(forKeys: Set(keys))
+                return (file, Int64(values?.fileSize ?? 0), values?.contentModificationDate ?? .distantPast)
             }
+            .sorted { $0.date > $1.date }
         let evicted = Self.evictions(
-            sizesNewestFirst: media.map { Int64($0.fileSize ?? 0) },
-            pinned: media.map { FileManager.default.fileExists(atPath: pinForFile($0).path) },
+            sizesNewestFirst: media.map(\.size),
+            pinned: media.map { pins.contains($0.url.deletingPathExtension().lastPathComponent) },
             limit: limit
         )
         for index in evicted {
-            try? FileManager.default.removeItem(at: media[index])
-            Self.removePlayableLinks(of: media[index])
+            try? FileManager.default.removeItem(at: media[index].url)
+            Self.removePlayableLinks(of: media[index].url)
         }
     }
 
@@ -414,15 +442,5 @@ public final class PamMediaDiskCache: @unchecked Sendable {
         case tooLarge
         case checksum
         case cacheMiss
-    }
-}
-
-private extension URL {
-    var fileSize: Int? {
-        try? resourceValues(forKeys: [.fileSizeKey]).fileSize
-    }
-
-    var modificationDate: Date? {
-        try? resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 }
