@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## 1.46.31 - 2026-11-02
+
+Android list pixel grid like FlashList and an empty-container fix in the
+layout engine on top of 1.46.30.
+
+- Layout engine: an empty container with no authored size measures its
+  padding and border like Yoga (0 when it has none), not a 48 dp control
+  placeholder. An empty Row (a badge strip with no badges) pushed the content
+  below it 48 dp down.
+- Android: list cells step by their extent floored to the pixel grid, like
+  FlashList's measured item size. Rounding added one pixel for every row whose
+  height ends past half a pixel, so a list drifted down a pixel per such row.
+- Android: rows of a list anchored at its end hang from their slot's end edge
+  like an inverted FlashList cell; a row keeps the extent Yoga rounds it to
+  and may draw one pixel past its floored step (a card's bottom border was
+  clipped).
+- Android: a list cell's content is rounded from the cell's Yoga origin (the
+  first row's origin plus the whole-pixel steps before it) instead of the
+  engine's list coordinates, which carried each earlier row's fraction and
+  rounded a card's edges one pixel off.
+- Android: leading `fullSpan` rows are the list's header (ListHeaderComponent):
+  they sit at their Yoga-rounded offset from the header's top and their
+  layout-only roots are flattened like a fragment, instead of stepping by
+  floored heights (a header split into rows lost a pixel per row).
+- Android: when only a layout-only node moves (a header actions row widened
+  by a new button), its hosted descendants are re-applied; their pixel
+  offsets include its rounded origin and the engine resends no frame for them.
+
 ## 1.46.30 - 2026-11-02
 
 Android list-cell pixel grid and component-root text styles on top of

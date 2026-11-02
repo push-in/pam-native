@@ -25,6 +25,7 @@ import dev.pam.nativeapp.protocol.PackedStringList
 import java.util.Collections
 import java.util.IdentityHashMap
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -98,6 +99,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var releaseVelocityY = 0f
     private var richIds: List<Long> = emptyList()
     private var richExtents: Map<Long, Int> = emptyMap()
+
+    /** Whole-pixel start of each row along the list axis (lazy, per submit). */
+    private var richSlotStarts: HashMap<Long, Int>? = null
     private val accessibilityModes = IdentityHashMap<View, Int>()
     private var stickyIds: Set<Long> = emptySet()
     private val stickyPins = StickyPins()
@@ -107,7 +111,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // PamScrollContainer coordinates ownership explicitly so a bounded
         // list and its page never consume the same drag simultaneously.
         isNestedScrollingEnabled = false
-        clipChildren = true
+        // Rows may overrun their floored step by a rounding pixel (see
+        // RichCellContainer); draw() still clips everything to the list.
+        clipChildren = false
         clipToPadding = false
         setHasFixedSize(true)
         updateLayoutManager()
@@ -352,7 +358,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         mountSlice: ((Long, FrameLayout, Long) -> Boolean)? = null,
     ) {
         val sectionRestore = sectionSwitch?.let(::leaveSection)
-        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(0f)) }
+        // FlashList (React Native) steps each item by its measured height
+        // floored to the pixel grid. Rounding instead added a pixel for every
+        // row whose height ends past half a pixel, so a list drifted down by
+        // one more pixel per such row (+3/+4 px a few rows in).
+        val pixelExtents = extents.mapValues { (_, value) -> listCellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -386,6 +396,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
         richIds = ids
         richExtents = pixelExtents
+        richSlotStarts = null
         richSpans = rowSpan?.let { span ->
             HashMap<Long, IntArray>(ids.size * 2).also { spans ->
                 for (id in ids) span(id)?.let { spans[id] = it }
@@ -931,6 +942,39 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
         restingStacked = false
     }
+
+    /**
+     * Rows rest against the end (an inverted React Native list): each cell
+     * hangs from its slot's end edge (see cellEndHang).
+     */
+    val rowsHangFromEnd: Boolean
+        get() = !horizontal && (stackRowsFromEnd || inverted)
+
+    /** First row of the list (its Yoga origin anchors every slot), if any. */
+    val firstRowId: Long?
+        get() = richIds.firstOrNull()
+
+    /**
+     * Start of row [id] along the list axis, in whole pixels from the first
+     * row: the sum of the floored steps before it, as FlashList places a
+     * cell. Null for grids, windowed spans and rows hanging from the end.
+     */
+    fun rowSlotStartPx(id: Long): Int? {
+        if (rowsHangFromEnd || richSpans.isNotEmpty() || layoutManager is GridLayoutManager) return null
+        val starts = richSlotStarts ?: HashMap<Long, Int>(richIds.size * 2).also { map ->
+            var offset = 0
+            for (row in richIds) {
+                map[row] = offset
+                offset += richExtents[row] ?: 0
+            }
+            richSlotStarts = map
+        }
+        return starts[id]
+    }
+
+    /** True when rows run along the horizontal axis. */
+    val horizontalRows: Boolean
+        get() = horizontal
 
     fun setInverted(value: Boolean) {
         if (inverted == value) return
@@ -1979,6 +2023,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 internal fun rampExtraLayoutSpace(current: Int, target: Int, step: Int): Int =
     if (step <= 0 || target <= current) target else minOf(target, current + step)
 
+/**
+ * Pixel step of a list cell [extentDp] high (or wide): floored like
+ * FlashList's measured item size; the epsilon keeps a whole pixel that float
+ * math left a hair short (358.99997) on that pixel.
+ */
+internal fun listCellPixels(extentDp: Float, density: Float): Int =
+    max(1, floor(extentDp * density + 0.001f).toInt())
+
 /** True when [next] keeps every id of a non-empty [previous] in order and adds rows after them. */
 internal fun isAppend(previous: List<Long>, next: List<Long>): Boolean =
     previous.isNotEmpty() && next.size > previous.size && next.subList(0, previous.size) == previous
@@ -2562,7 +2614,10 @@ internal class RichRecyclerAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RichHolder =
         RichHolder(RichCellContainer(context).apply {
-            clipChildren = true
+            // A React Native cell does not clip: a row Yoga rounds one pixel
+            // past its floored step still draws that pixel (a card's bottom
+            // border), under the next row.
+            clipChildren = false
             clipToPadding = true
             importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
         })
@@ -2730,6 +2785,18 @@ internal class RichRecyclerAdapter(
  */
 internal class RichCellContainer(context: Context) : FrameLayout(context) {
     var pinned = false
+
+    /**
+     * Like a React Native cell, a row draws past its slot by the pixel its
+     * Yoga-rounded extent overruns the floored step (a card's bottom border,
+     * an end-anchored row's top); anything further out stays clipped.
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        val checkpoint = canvas.save()
+        canvas.clipRect(-1f, -1f, width + 1f, height + 1f)
+        super.dispatchDraw(canvas)
+        canvas.restoreToCount(checkpoint)
+    }
 
     /** Set while the adapter resizes this holder: that request must reach the list. */
     var resizing = false
