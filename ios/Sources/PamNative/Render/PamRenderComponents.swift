@@ -909,8 +909,11 @@ final class PamVirtualListView: PamContentScrollView {
         // then shrinks the viewport keeps the newest rows visible; a list
         // scrolled to its end follows it too. An inverted list keeps its
         // newest rows natively.
+        // A `stackFromEnd` list rests at its end by definition (its rows hang
+        // from the viewport end while they fit, so its maximum is the
+        // negative top inset): it follows the end too.
         let followsEnd = pamFollowEndOnResize && !pamInverted &&
-            (anchorMaximum > 0 || (anchorMaximum == 0 && pamInitialScrollIndex > 0))
+            (anchorMaximum > 0 || (anchorMaximum == 0 && pamInitialScrollIndex > 0) || pamStackFromEnd)
         guard followsEnd, maximum != anchorMaximum,
               anchorOffset >= anchorMaximum - 1,
               !isTracking, !isDragging, !isDecelerating else { return }

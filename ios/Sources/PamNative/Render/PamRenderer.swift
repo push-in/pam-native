@@ -1039,11 +1039,18 @@ public final class PamRenderer: @unchecked Sendable {
             max($0, $1.1.maxY)
         }
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
-        if list.contentSize != contentSize {
+        let contentSizeChanged = list.contentSize != contentSize
+        if contentSizeChanged {
             list.contentSize = contentSize
-            if wasAnchored, anchorGap == 0, !list.isTracking, !list.isDecelerating {
-                list.contentOffset.y = list.primaryMaximumOffset
-            }
+        }
+        // Rows that rested against the end and no longer fit land on the
+        // end, also when only the viewport shrank (a keyboard opening over a
+        // short chat): the content size is the same rows then, and the list
+        // stayed at the top of the gap it just lost.
+        if wasAnchored, anchorGap == 0, !list.isTracking, !list.isDecelerating {
+            list.contentOffset.y = list.primaryMaximumOffset
+        }
+        if contentSizeChanged {
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
