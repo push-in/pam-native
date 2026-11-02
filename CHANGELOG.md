@@ -9,6 +9,11 @@
   fractional size. Engine floats were mounted as-is, so edges fell between
   pixels (soft borders and text) and fractions accumulated one pixel off
   React Native.
+- iOS: a `stackFromEnd` list whose rows rested against the end and stop
+  fitting because only the viewport shrank (the keyboard opening over a short
+  chat) lands on its end, and such a list follows its end on resize. It
+  stayed at the top of the gap it lost, hiding the newest rows behind the
+  composer.
 - iOS (debug): `PamFrameTrace` logs every applied frame (engine floats and the
   mounted pixels), enabled with `PAM_FRAME_TRACE=1` or the `PamFrameTrace`
   user default, like the Android log tag.
