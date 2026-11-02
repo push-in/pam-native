@@ -20,4 +20,6 @@ enum StyleQueryFeature: int
     case InputMode = 12;
     case MemoryClass = 13;
     case PerformanceTier = 14;
+    /** `(platform: ios|android)`: the operating system the app runs on (React Native Platform.OS). */
+    case Platform = 15;
 }

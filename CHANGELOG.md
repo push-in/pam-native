@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.46.34 - 2026-11-02
+
+Platform media queries and a lighter component precompile on top of 1.46.33.
+
+- Styles: `@media (platform: ios)` / `@media (platform: android)` select rules
+  by operating system, like React Native's `Platform.OS` / `Platform.select`
+  (an iOS line height without Android's font padding, for example).
+- Compiler: the prebuilt component pack is written in parts and the
+  per-component sources are released before the index is encoded. Joining the
+  header with a large app's pack copied it once more and ran `ios:prepare`
+  out of the CLI's 128 MB.
+
 ## 1.46.33 - 2026-11-02
 
 Android list rows on the React Native pixel grid for any list origin, and

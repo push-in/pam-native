@@ -887,19 +887,24 @@ final class PamPhpCompiler
                 ];
                 $data .= $class.$template;
             }
+            // The sources are in $data now: release them before encoding.
+            $count = count($entries);
+            unset($entries);
             $encoded = json_encode(
                 ['version' => 1, 'components' => (object) $index, 'sources' => $sources],
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
             );
+            // Written as parts: concatenating the header with a large app's
+            // pack copied it once more and ran out of the CLI's 128 MB.
             self::writeAtomic(
                 $output.DIRECTORY_SEPARATOR.self::PREBUILT_PACK,
-                self::PREBUILT_PACK_MAGIC.pack('V', strlen($encoded)).$encoded.$data,
+                [self::PREBUILT_PACK_MAGIC.pack('V', strlen($encoded)), $encoded, $data],
             );
 
             self::$prebuiltDirectories = [];
             self::$prebuiltPacks = [];
 
-            return count($entries);
+            return $count;
         } finally {
             if (is_dir($staging)) {
                 self::removeTree($staging);
@@ -1358,8 +1363,10 @@ final class PamPhpCompiler
         return CompiledTemplateNode::hydrate($template);
     }
 
-    private static function writeAtomic(string $path, string $contents): void
+    /** @param string|list<string> $contents parts are written in order, never joined in memory */
+    private static function writeAtomic(string $path, string|array $contents): void
     {
+        $length = is_array($contents) ? array_sum(array_map('strlen', $contents)) : strlen($contents);
         $directory = dirname($path);
         if (
             !is_dir($directory)
@@ -1372,7 +1379,7 @@ final class PamPhpCompiler
 
         if (
             $temporary === false
-            || file_put_contents($temporary, $contents, LOCK_EX) !== strlen($contents)
+            || file_put_contents($temporary, $contents, LOCK_EX) !== $length
             || !rename($temporary, $path)
         ) {
             if (is_string($temporary)) {
