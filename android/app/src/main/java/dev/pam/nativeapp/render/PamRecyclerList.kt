@@ -190,9 +190,40 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 scrolledToEnd = restingAtEnd() && canScrollTowardStart()
             }
             updateAccessibilityVisibility()
+            scheduleRampAhead()
         } finally {
             android.os.Trace.endSection()
         }
+    }
+
+    private var rampAheadPosted = false
+
+    /** Rows ahead kept at rest: the configured prefetch or one viewport, not a fast fling's adaptive extent. */
+    private fun restAheadSpace(): Int = maxOf(dp(rowHeight) * prefetchItems, if (horizontal) width else height)
+    private val rampAhead = Runnable {
+        rampAheadPosted = false
+        val manager = layoutManager as? PrefetchLayoutManager
+        if (manager != null && scrollState == SCROLL_STATE_IDLE && isAttachedToWindow &&
+            windowVisibility == VISIBLE && !manager.extraLayoutRamped(restAheadSpace())
+        ) {
+            requestLayout()
+        }
+    }
+
+    /**
+     * A list at rest grows its laid-out off-screen space (the rows ahead) one
+     * row per frame, as a scroll does, so the rows next to the viewport are
+     * bound (in slices) before the next drag instead of inside its first
+     * frames: a row bound in the drag's first frame made it late, and a late
+     * frame while the list moves leaves the window buffer-stuffed until it
+     * stops.
+     */
+    private fun scheduleRampAhead() {
+        if (rampAheadPosted || scrollState != SCROLL_STATE_IDLE) return
+        val manager = layoutManager as? PrefetchLayoutManager ?: return
+        if (manager.extraLayoutRamped(restAheadSpace())) return
+        rampAheadPosted = true
+        postOnAnimation(rampAhead)
     }
 
     /**
@@ -1091,9 +1122,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             first == NO_POSITION || position in (first - 1)..(last + 1)
         }
         adapter.moving = { scrollState != SCROLL_STATE_IDLE }
-        adapter.offscreenWhileMoving = { position ->
-            scrollState != SCROLL_STATE_IDLE && !adapter.shown(position)
+        adapter.frameIntervalMs = {
+            val rate = display?.refreshRate ?: 60f
+            if (rate >= 20f) (1000f / rate).toLong().coerceAtLeast(4L) else 16L
         }
+        // At rest too: the rows ahead grown by scheduleRampAhead.
+        adapter.offscreenWhileMoving = { position -> !adapter.shown(position) }
     }
 
     fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {
@@ -1282,7 +1316,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         motionTrace = if (dev.pam.nativeapp.BuildConfig.DEBUG &&
             android.util.Log.isLoggable(MOTION_TRACE_TAG, android.util.Log.DEBUG)
         ) {
-            HashMap()
+            MotionTrace()
         } else {
             null
         }
@@ -1295,15 +1329,62 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      * present in both frames, by stable id), so a jump, a snap or a content
      * swap shows exactly, without a screen recording. Off otherwise.
      */
-    private var motionTrace: HashMap<Long, Int>? = null
+    private var motionTrace: MotionTrace? = null
 
-    /** Rows the adapter held at the last traced frame (a page landing logs its frame). */
-    private var motionTraceCount = -1
+    /**
+     * Rows on screen at the last traced frame, in reused arrays (no per-frame
+     * allocation), and the pending log lines: they go out as one multi-line
+     * log record every ~250 ms or when the list stops (one logger write per
+     * frame was most of the trace's own UI-thread cost).
+     */
+    private class MotionTrace {
+        var ids = LongArray(32)
+        var tops = IntArray(32)
+        var size = 0
+        var nextIds = LongArray(32)
+        var nextTops = IntArray(32)
+        var deltas = IntArray(32)
+        var count = -1
+        val pending = StringBuilder()
+        var pendingSince = 0L
+
+        fun ensure(capacity: Int) {
+            if (nextIds.size >= capacity) return
+            val grown = maxOf(capacity, nextIds.size * 2)
+            nextIds = LongArray(grown)
+            nextTops = IntArray(grown)
+            deltas = IntArray(grown)
+            ids = ids.copyOf(grown)
+            tops = tops.copyOf(grown)
+        }
+
+        fun topOf(id: Long): Int {
+            for (index in 0 until size) if (ids[index] == id) return tops[index]
+            return Int.MIN_VALUE
+        }
+
+        fun swap(newSize: Int) {
+            val swapIds = ids
+            ids = nextIds
+            nextIds = swapIds
+            val swapTops = tops
+            tops = nextTops
+            nextTops = swapTops
+            size = newSize
+        }
+
+        fun flush() {
+            if (pending.isEmpty()) return
+            android.util.Log.d(MOTION_TRACE_TAG, pending.toString())
+            pending.setLength(0)
+        }
+    }
 
     private fun traceMotion() {
-        val previous = motionTrace ?: return
-        val current = HashMap<Long, Int>(childCount * 2)
-        val deltas = ArrayList<Int>(childCount)
+        val trace = motionTrace ?: return
+        trace.ensure(childCount)
+        var shown = 0
+        var common = 0
         var above = Int.MAX_VALUE
         for (index in 0 until childCount) {
             val child = getChildAt(index)
@@ -1313,22 +1394,47 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             val id = getChildItemId(child)
             if (id == NO_ID) continue
             val top = if (horizontal) child.left else child.top
-            current[id] = top
-            previous[id]?.let { deltas += top - it }
+            trace.nextIds[shown] = id
+            trace.nextTops[shown] = top
+            shown++
+            val before = trace.topOf(id)
+            if (before != Int.MIN_VALUE) trace.deltas[common++] = top - before
         }
-        if (current.isEmpty()) return
-        deltas.sort()
-        val moved = if (deltas.isEmpty()) null else deltas[deltas.size / 2]
+        if (shown == 0) return
+        java.util.Arrays.sort(trace.deltas, 0, common)
+        val moved: Int? = if (common == 0) null else trace.deltas[common / 2]
         val count = adapter?.itemCount ?: 0
-        if (moved != 0 || previous.keys != current.keys || count != motionTraceCount) {
-            android.util.Log.d(
-                MOTION_TRACE_TAG,
-                "t=${android.os.SystemClock.uptimeMillis()} dy=${moved ?: "swap"} common=${deltas.size} " +
-                    "shown=${current.size} state=$scrollState above=${if (above == Int.MAX_VALUE) -1 else above} count=$count",
-            )
+        val sameRows = common == shown && shown == trace.size
+        val now = android.os.SystemClock.uptimeMillis()
+        if (moved != 0 || !sameRows || count != trace.count) {
+            if (trace.pending.isEmpty()) trace.pendingSince = now
+            else trace.pending.append('\n')
+            trace.pending.append("t=").append(now).append(" dy=").append(moved ?: "swap")
+                .append(" common=").append(common).append(" shown=").append(shown)
+                .append(" state=").append(scrollState)
+                .append(" above=").append(if (above == Int.MAX_VALUE) -1 else above)
+                .append(" count=").append(count)
         }
-        motionTraceCount = count
-        motionTrace = current
+        trace.count = count
+        trace.swap(shown)
+        if (trace.pending.isNotEmpty() &&
+            (scrollState == SCROLL_STATE_IDLE || now - trace.pendingSince >= 250L || trace.pending.length > 3000)
+        ) {
+            trace.flush()
+        }
+    }
+
+    override fun onScrollStateChanged(state: Int) {
+        super.onScrollStateChanged(state)
+        if (state == SCROLL_STATE_IDLE) {
+            motionTrace?.flush()
+            scheduleRampAhead()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        motionTrace?.flush()
+        super.onDetachedFromWindow()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
@@ -1694,6 +1800,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
          * by row. The other side keeps its laid-out rows.
          */
         fun restartExtraLayoutRamp(start: Boolean = true, end: Boolean = true)
+
+        /** Whether both sides already reached [extraLayoutSpace] (or [limit]). */
+        fun extraLayoutRamped(limit: Int = Int.MAX_VALUE): Boolean
     }
 
     private class PamLinearLayoutManager(
@@ -1749,13 +1858,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             if (end) rampedEndSpace = 0
         }
 
+        override fun extraLayoutRamped(limit: Int): Boolean =
+            minOf(aheadTarget(), limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+
+        /**
+         * At least one viewport of rows stays laid out on each side (React
+         * Native renders several screens ahead with its default window):
+         * rows are bound, in slices, a screen before they arrive instead of
+         * at the edge of a fast drag. Off when memory trimming zeroed it.
+         */
+        private fun aheadTarget(): Int =
+            if (extraLayoutSpace <= 0) 0 else maxOf(extraLayoutSpace, if (orientation == VERTICAL) height else width)
+
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            val target = aheadTarget()
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
@@ -1818,13 +1940,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             if (end) rampedEndSpace = 0
         }
 
+        override fun extraLayoutRamped(limit: Int): Boolean =
+            minOf(aheadTarget(), limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+
+        /**
+         * At least one viewport of rows stays laid out on each side (React
+         * Native renders several screens ahead with its default window):
+         * rows are bound, in slices, a screen before they arrive instead of
+         * at the edge of a fast drag. Off when memory trimming zeroed it.
+         */
+        private fun aheadTarget(): Int =
+            if (extraLayoutSpace <= 0) 0 else maxOf(extraLayoutSpace, if (orientation == VERTICAL) height else width)
+
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            val target = aheadTarget()
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
@@ -2015,6 +2150,25 @@ internal class RichRecyclerAdapter(
     /** Whether the list is moving (set by the list). */
     var moving: () -> Boolean = { false }
 
+    /** Display frame interval in ms (set by the list). */
+    var frameIntervalMs: () -> Long = { 16L }
+
+    /**
+     * Nanoseconds of the current frame still free for off-screen cell slices:
+     * they may use up to half of the frame interval, counted from the frame's
+     * vsync, minus what input, scrolling and layout already took. A frame that
+     * started late or did heavy input work leaves nothing, so the slice waits
+     * for a lighter frame instead of pushing this one past its deadline (one
+     * late frame while the list moves leaves the window buffer-stuffed until
+     * the list stops).
+     */
+    private fun frameRoomNanos(budget: Long): Long {
+        val frame = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+        val elapsedMs = android.os.SystemClock.uptimeMillis() - frame
+        val roomMs = frameIntervalMs() / 2 + 1 - elapsedMs
+        return minOf(budget, roomMs * 1_000_000L).coerceAtLeast(0L)
+    }
+
     /** Whether the row at a position is on screen (set by the list). */
     var shown: (Int) -> Boolean = { true }
 
@@ -2071,7 +2225,12 @@ internal class RichRecyclerAdapter(
             iterator.remove()
             // Pending rows are empty or partly built (a slice): finish them.
             if (holder.boundId == id && (mountSlice != null || holder.container.childCount == 0)) {
-                mount(id, holder.container)
+                android.os.Trace.beginSection("PamList.mountShown")
+                try {
+                    mount(id, holder.container)
+                } finally {
+                    android.os.Trace.endSection()
+                }
             }
         }
     }
@@ -2086,13 +2245,14 @@ internal class RichRecyclerAdapter(
             mountWindowStart = frame
             mountWindowUsed = 0L
         }
-        if (mountWindowUsed >= MOUNT_BUDGET_NANOS) {
+        val room = frameRoomNanos(MOUNT_BUDGET_NANOS - mountWindowUsed)
+        if (mountWindowUsed >= MOUNT_BUDGET_NANOS || room <= 0L) {
             pendingMounts[holder] = id
             scheduleDrain()
             return false
         }
         val started = System.nanoTime()
-        val complete = mountPart(holder, id, started + MOUNT_BUDGET_NANOS - mountWindowUsed)
+        val complete = mountPart(holder, id, started + room)
         mountWindowUsed += System.nanoTime() - started
         if (!complete) {
             pendingMounts[holder] = id
@@ -2120,6 +2280,17 @@ internal class RichRecyclerAdapter(
         if (drainScheduled) return
         drainScheduled = true
         android.view.Choreographer.getInstance().postFrameCallback {
+            android.os.Trace.beginSection("PamList.slice")
+            try {
+                drain()
+            } finally {
+                android.os.Trace.endSection()
+            }
+        }
+    }
+
+    private fun drain() {
+        run {
             drainScheduled = false
             mountShown()
             // Rows bound earlier in this frame (a scroll) share its budget.
@@ -2130,15 +2301,20 @@ internal class RichRecyclerAdapter(
             }
             // While the list moves its frames are already busy: the small budget.
             val budget = if (deferMounts() || moving()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
+            // While the list moves the slice also fits in what the frame has left.
+            val frameEnd = if (moving()) System.nanoTime() + frameRoomNanos(budget) else Long.MAX_VALUE
             val iterator = pendingMounts.entries.iterator()
-            while (iterator.hasNext() && mountWindowUsed < budget) {
+            // At least one view per frame, so a slow stretch still makes progress.
+            var sliced = false
+            while (iterator.hasNext() && mountWindowUsed < budget && (!sliced || System.nanoTime() < frameEnd)) {
                 val (holder, id) = iterator.next()
                 if (holder.boundId != id) {
                     iterator.remove()
                     continue
                 }
                 val started = System.nanoTime()
-                val complete = mountPart(holder, id, started + budget - mountWindowUsed)
+                val complete = mountPart(holder, id, minOf(started + budget - mountWindowUsed, frameEnd))
+                sliced = true
                 mountWindowUsed += System.nanoTime() - started
                 if (complete) iterator.remove()
             }
@@ -2146,7 +2322,7 @@ internal class RichRecyclerAdapter(
             // cell per frame while the list moves (they are ahead of it).
             val repairs = pendingRepairs.entries.iterator()
             var repaired = 0
-            while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS) {
+            while (repairs.hasNext() && mountWindowUsed < MOUNT_BUDGET_NANOS && System.nanoTime() < frameEnd) {
                 if (repaired > 0 && moving()) break
                 val (id, entry) = repairs.next()
                 if (entry.first.boundId != id) {
@@ -2154,7 +2330,7 @@ internal class RichRecyclerAdapter(
                     continue
                 }
                 val started = System.nanoTime()
-                val complete = entry.second(started + MOUNT_BUDGET_NANOS - mountWindowUsed)
+                val complete = entry.second(minOf(started + MOUNT_BUDGET_NANOS - mountWindowUsed, frameEnd))
                 repaired++
                 mountWindowUsed += System.nanoTime() - started
                 if (complete) repairs.remove()
@@ -2454,7 +2630,13 @@ internal class RichRecyclerAdapter(
         if (params.width == width && params.height == height) return
         params.width = width
         params.height = height
-        container.requestLayout()
+        val cell = container as? RichCellContainer
+        cell?.resizing = true
+        try {
+            container.requestLayout()
+        } finally {
+            cell?.resizing = false
+        }
     }
 
     private fun dp(value: Float): Int =
@@ -2548,6 +2730,57 @@ internal class RichRecyclerAdapter(
  */
 internal class RichCellContainer(context: Context) : FrameLayout(context) {
     var pinned = false
+
+    /** Set while the adapter resizes this holder: that request must reach the list. */
+    var resizing = false
+
+    private var localLayoutPending = false
+    private val localLayout = object : android.view.ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            localLayoutPending = false
+            if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(this)
+            if (isLayoutRequested && isLaidOut && isAttachedToWindow && width > 0 && height > 0) {
+                measure(
+                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+                )
+                layout(left, top, right, bottom)
+            }
+            return true
+        }
+    }
+
+    /**
+     * A row's size never depends on its views (the engine sizes it), so a
+     * view added, removed or changed inside it (a cell slice building it over
+     * several frames, a text or image settling) lays out only this row, just
+     * before the next draw, instead of asking the list for a full layout pass
+     * of every row (5 to 9 ms per frame while a list moves). A resize from the
+     * adapter, a row not laid out yet or a list already laying out goes the
+     * normal way.
+     */
+    override fun requestLayout() {
+        if (!resizing && canLayOutLocally()) {
+            forceLayout()
+            if (!localLayoutPending) {
+                localLayoutPending = true
+                viewTreeObserver.addOnPreDrawListener(localLayout)
+                invalidate()
+            }
+            return
+        }
+        super.requestLayout()
+    }
+
+    private fun canLayOutLocally(): Boolean {
+        val list = parent as? RecyclerView ?: return false
+        if (!isAttachedToWindow || !isLaidOut || isInLayout || list.isInLayout || list.isLayoutRequested) return false
+        val params = layoutParams ?: return false
+        return fixedBy(params.width, width) && fixedBy(params.height, height)
+    }
+
+    private fun fixedBy(spec: Int, current: Int): Boolean =
+        spec == ViewGroup.LayoutParams.MATCH_PARENT || spec >= 0 && spec == current
 
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean = super.onTouchEvent(event) || pinned

@@ -28,7 +28,25 @@ internal class PamTextView(context: Context) : TextView(context) {
     /** The full text set by the renderer; [getText] may hold its tail-truncated copy. */
     private var sourceText: CharSequence? = null
     private var settingTruncated = false
-    private var truncatedFor: List<Any?>? = null
+    private var truncatedFor: TruncationKey? = null
+
+    /** What a truncation was computed for (compared field by field, no per-measure list). */
+    private data class TruncationKey(
+        val source: CharSequence,
+        val width: Int,
+        val lines: Int,
+        val textSize: Float,
+        val typeface: android.graphics.Typeface?,
+        val letterSpacing: Float,
+        val textScaleX: Float,
+        val fakeBold: Boolean,
+    )
+
+    private fun TruncationKey.matches(source: CharSequence, width: Int, lines: Int): Boolean =
+        this.source === source && this.width == width && this.lines == lines &&
+            textSize == paint.textSize && typeface == paint.typeface &&
+            letterSpacing == paint.letterSpacing && textScaleX == paint.textScaleX &&
+            fakeBold == paint.isFakeBoldText
 
     /** The full text the renderer set (what `onTextLayout` measures), not the tail-truncated copy on screen. */
     internal fun sourceContent(): CharSequence? = sourceText
@@ -63,9 +81,11 @@ internal class PamTextView(context: Context) : TextView(context) {
         }
         // The paint is part of the key: font size, family, weight and letter
         // spacing often land after the first measure (batched text props).
-        val key = listOf(source, contentWidth, lines, paint.textSize, paint.typeface, paint.letterSpacing, paint.textScaleX, paint.isFakeBoldText)
-        if (truncatedFor == key) return
-        truncatedFor = key
+        if (truncatedFor?.matches(source, contentWidth, lines) == true) return
+        truncatedFor = TruncationKey(
+            source, contentWidth, lines, paint.textSize, paint.typeface,
+            paint.letterSpacing, paint.textScaleX, paint.isFakeBoldText,
+        )
         // The truncated copy is laid out as wrapped lines that already fit;
         // an unwrapped (horizontally scrolling) line would clip instead.
         if (lines == 1) setHorizontallyScrolling(false)

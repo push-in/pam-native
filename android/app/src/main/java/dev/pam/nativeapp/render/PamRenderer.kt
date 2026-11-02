@@ -2673,6 +2673,7 @@ class PamRenderer(
                 applyInitialProperties(view, state)
                 installEvents(view, state)
                 applyCellLayout(id, rootId, rootFrame)
+                premeasureCellText(view)
             } else {
                 var mark = System.nanoTime()
                 val pooledView = takePooledCellView(state)
@@ -2689,6 +2690,7 @@ class PamRenderer(
                 installEvents(view, state)
                 now = System.nanoTime(); profile.eventsNs += now - mark; mark = now
                 applyCellLayout(id, rootId, rootFrame)
+                premeasureCellText(view)
                 profile.layoutNs += System.nanoTime() - mark
             }
         }
@@ -2703,6 +2705,22 @@ class PamRenderer(
             if (!materializeCellNode(child, rootId, rootFrame, holder)) return false
         }
         return true
+    }
+
+    /**
+     * Measures a cell's text at its engine frame inside the cell slice, so the
+     * text layout (and the tail truncation) is built in the slice's budget
+     * instead of all at once in the frame that lays the row out; that pass
+     * then reuses the layout made here (same width).
+     */
+    private fun premeasureCellText(view: View) {
+        if (view !is PamTextView) return
+        val params = view.layoutParams ?: return
+        if (params.width <= 0 || params.height <= 0) return
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(params.height, View.MeasureSpec.EXACTLY),
+        )
     }
 
     private fun attachCellView(
