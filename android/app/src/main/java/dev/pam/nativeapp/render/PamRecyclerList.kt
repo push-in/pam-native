@@ -357,7 +357,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // floored to the pixel grid. Rounding instead added a pixel for every
         // row whose height ends past half a pixel, so a list drifted down by
         // one more pixel per such row (+3/+4 px a few rows in).
-        val pixelExtents = extents.mapValues { (_, value) -> cellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density) }
+        val pixelExtents = extents.mapValues { (_, value) -> listCellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -1793,16 +1793,6 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private fun dp(value: Float): Int =
         max(1, (value * resources.displayMetrics.density + 0.5f).toInt())
 
-    internal companion object {
-        /**
-         * Pixel step of a cell [extentDp] high (or wide): floored like
-         * FlashList's measured item size; the epsilon keeps a whole pixel
-         * that float math left a hair short (358.99997) on that pixel.
-         */
-        fun cellPixels(extentDp: Float, density: Float): Int =
-            max(1, floor(extentDp * density + 0.001f).toInt())
-    }
-
     private interface PrefetchLayoutManager {
         var prefetchCount: Int
         /** Off-screen space kept laid out on each side (the prefetched rows). */
@@ -1993,6 +1983,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
  */
 internal fun rampExtraLayoutSpace(current: Int, target: Int, step: Int): Int =
     if (step <= 0 || target <= current) target else minOf(target, current + step)
+
+/**
+ * Pixel step of a list cell [extentDp] high (or wide): floored like
+ * FlashList's measured item size; the epsilon keeps a whole pixel that float
+ * math left a hair short (358.99997) on that pixel.
+ */
+internal fun listCellPixels(extentDp: Float, density: Float): Int =
+    max(1, floor(extentDp * density + 0.001f).toInt())
 
 /** True when [next] keeps every id of a non-empty [previous] in order and adds rows after them. */
 internal fun isAppend(previous: List<Long>, next: List<Long>): Boolean =
