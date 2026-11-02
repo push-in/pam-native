@@ -29,6 +29,10 @@ tooling, and the list `stackFromEnd` property (#220) on top of 1.46.25.
   `PamList.mountShown`.
 - Lists: `stackFromEnd` rests rows that do not fill the viewport against its
   end, like an inverted React Native list (#220).
+- iOS: image disk-cache trims coalesce into one background directory scan per
+  burst and cache hits decode on the image decode queue (an Explorar grid of
+  cached thumbnails went from 8-15 s to about 1 s on the Simulator); a photo
+  library request made while the system alert is up shares its answer (#221).
 
 ## 1.46.25 - 2026-11-01
 
