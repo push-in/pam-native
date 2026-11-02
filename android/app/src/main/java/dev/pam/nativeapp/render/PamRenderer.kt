@@ -583,7 +583,11 @@ internal fun windowSizedModalChildPlacement(
  * difference (0 or 1).
  */
 internal fun cellEndHang(slotExtent: Float, density: Float): Int =
-    (kotlin.math.floor(slotExtent * density + 0.5f).toInt() - listCellPixels(slotExtent, density)).coerceAtLeast(0)
+    (yogaCellPixels(slotExtent, density) - listCellPixels(slotExtent, density)).coerceAtLeast(0)
+
+/** A cell [extent] dp long as Yoga rounds it from a whole-pixel origin (half up). */
+internal fun yogaCellPixels(extent: Float, density: Float): Int =
+    kotlin.math.max(1, kotlin.math.floor(extent * density + 0.5f).toInt())
 
 /** A list cell root spanning its whole slot on one axis (no margins there). */
 internal fun cellRootFillsSlot(start: Float, extent: Float, slotStart: Float, slotExtent: Float): Boolean =
@@ -2888,11 +2892,24 @@ class PamRenderer(
         // like an inverted FlashList's cell: that cell is as tall as Yoga
         // rounds it while the rows step by their floored height, so its top
         // (and everything in it) sits the rounding pixel higher.
-        val hang = if (id == rootId || rootless) endAnchoredCellHang(rootId, rootFrame.height, density) else 0
+        val cellList = if (id == rootId || rootless) {
+            nodes[rootId]?.parent?.let { views[it] } as? PamRecyclerList
+        } else {
+            null
+        }
+        val hang = if (cellList?.rowsHangFromEnd == true) cellEndHang(rootFrame.height, density) else 0
+        // On the list's axis a filling root keeps the extent Yoga rounds it
+        // to, like a FlashList cell: the slot steps by the floored extent, so
+        // the root may overrun it by the rounding pixel (drawn, not clipped).
+        val mainHorizontal = cellList?.horizontalRows == true
         view.layoutParams = FrameLayout.LayoutParams(
-            if (fillWidth) ViewGroup.LayoutParams.MATCH_PARENT else horizontal.extent,
             when {
-                fillHeight && hang > 0 -> listCellPixels(rootFrame.height, density) + hang
+                fillWidth && cellList != null && mainHorizontal -> yogaCellPixels(rootFrame.width, density)
+                fillWidth -> ViewGroup.LayoutParams.MATCH_PARENT
+                else -> horizontal.extent
+            },
+            when {
+                fillHeight && cellList != null && !mainHorizontal -> yogaCellPixels(rootFrame.height, density)
                 fillHeight -> ViewGroup.LayoutParams.MATCH_PARENT
                 else -> vertical.extent
             },
@@ -2915,11 +2932,6 @@ class PamRenderer(
         }
     }
 
-    /** [cellEndHang] of a row of an end-anchored vertical list; 0 elsewhere. */
-    private fun endAnchoredCellHang(rootId: Long, slotExtent: Float, density: Float): Int {
-        val list = nodes[rootId]?.parent?.let { views[it] } as? PamRecyclerList ?: return 0
-        return if (list.rowsHangFromEnd) cellEndHang(slotExtent, density) else 0
-    }
 
     private fun dematerializeSubtree(id: Long) {
         children[id]?.forEach(::dematerializeSubtree)

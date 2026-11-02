@@ -108,7 +108,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         // PamScrollContainer coordinates ownership explicitly so a bounded
         // list and its page never consume the same drag simultaneously.
         isNestedScrollingEnabled = false
-        clipChildren = true
+        // Rows may overrun their floored step by a rounding pixel (see
+        // RichCellContainer); draw() still clips everything to the list.
+        clipChildren = false
         clipToPadding = false
         setHasFixedSize(true)
         updateLayoutManager()
@@ -943,6 +945,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      */
     val rowsHangFromEnd: Boolean
         get() = !horizontal && (stackRowsFromEnd || inverted)
+
+    /** True when rows run along the horizontal axis. */
+    val horizontalRows: Boolean
+        get() = horizontal
 
     fun setInverted(value: Boolean) {
         if (inverted == value) return
@@ -2582,7 +2588,10 @@ internal class RichRecyclerAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RichHolder =
         RichHolder(RichCellContainer(context).apply {
-            clipChildren = true
+            // A React Native cell does not clip: a row Yoga rounds one pixel
+            // past its floored step still draws that pixel (a card's bottom
+            // border), under the next row.
+            clipChildren = false
             clipToPadding = true
             importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
         })
@@ -2750,6 +2759,18 @@ internal class RichRecyclerAdapter(
  */
 internal class RichCellContainer(context: Context) : FrameLayout(context) {
     var pinned = false
+
+    /**
+     * Like a React Native cell, a row draws past its slot by the pixel its
+     * Yoga-rounded extent overruns the floored step (a card's bottom border,
+     * an end-anchored row's top); anything further out stays clipped.
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        val checkpoint = canvas.save()
+        canvas.clipRect(-1f, -1f, width + 1f, height + 1f)
+        super.dispatchDraw(canvas)
+        canvas.restoreToCount(checkpoint)
+    }
 
     /** Set while the adapter resizes this holder: that request must reach the list. */
     var resizing = false

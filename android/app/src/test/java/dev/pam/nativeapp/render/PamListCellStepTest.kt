@@ -29,4 +29,12 @@ class PamListCellStepTest {
         assertEquals(0, cellEndHang(165.4f, 2.625f))
         assertEquals(0, cellEndHang(16f, 2.625f))
     }
+
+    @Test fun aFillingRootKeepsTheExtentYogaRoundsItTo() {
+        // 178 dp = 467.25 px: the slot steps 467 and the root stays 467;
+        // 165.7 dp = 434.96 px: the slot steps 434, the root draws 435.
+        assertEquals(467, yogaCellPixels(178f, 2.625f))
+        assertEquals(435, yogaCellPixels(165.7f, 2.625f))
+        assertEquals(434, listCellPixels(165.7f, 2.625f))
+    }
 }
