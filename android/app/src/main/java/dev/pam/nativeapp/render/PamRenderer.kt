@@ -2831,9 +2831,22 @@ class PamRenderer(
         val density = resourcesDensity()
         val text = state.kind == NodeKind.TEXT
         val textRounding = yogaTextRounding(state.kind)
-        // Layout-only ancestors up to a hosted parent (not the slot itself).
-        val flattened = id != rootId && hostedParent != state.parent && hostedParent != 0L &&
-            (hostedParent != rootId || views[rootId] != null)
+        // Layout-only ancestors up to a hosted parent. A layout-only cell
+        // root is flattened into the slot too: React Native's cell view sums
+        // the rounded origin of every ancestor up to it (root included), so
+        // a child 2 + 2 dp down a layout-only root lands at 5 + 5 px, not at
+        // one 4 dp offset rounded to 11 px.
+        val rootless = hostedParent == rootId && views[rootId] == null
+        val flattened = id != rootId && hostedParent != state.parent && hostedParent != 0L
+        val rootFrameOfRoot = if (rootless) frames[rootId] else null
+        fun cellFlattenedOffset(horizontal: Boolean): Int? {
+            if (!flattened) return null
+            val inner = flattenedPixelOffset(id, hostedParent, horizontal, density, textRounding) ?: return null
+            if (!rootless) return inner
+            val root = rootFrameOfRoot ?: return null
+            val rootOffset = if (horizontal) root.x.toDouble() - rootFrame.x.toDouble() else root.y.toDouble() - rootFrame.y.toDouble()
+            return inner + yogaPixelGrid(rootOffset, density, forceCeil = false, forceFloor = false)
+        }
         val horizontal = snappedPixelSpan(
             frame.x,
             frame.width,
@@ -2841,7 +2854,7 @@ class PamRenderer(
             density,
             preserveContentExtent = text,
             textRounding = textRounding,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, true, density, textRounding) else null,
+            flattenedOffset = cellFlattenedOffset(true),
         )
         val vertical = snappedPixelSpan(
             frame.y,
@@ -2850,7 +2863,7 @@ class PamRenderer(
             density,
             preserveContentExtent = text,
             textRounding = textRounding,
-            flattenedOffset = if (flattened) flattenedPixelOffset(id, hostedParent, false, density, textRounding) else null,
+            flattenedOffset = cellFlattenedOffset(false),
         )
         traceFrame(id, state, hostedParent, frame, horizontal, vertical)
         val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
