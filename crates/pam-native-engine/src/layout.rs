@@ -2573,6 +2573,31 @@ fn intrinsic_extent(
         // min/max-width), breaking the line after too few items.
         return Ok(0.0);
     }
+    if node_children.is_empty() && empty_container_is_box(node) {
+        // Yoga: a View without children has no measure function, so its
+        // content size is its padding and border alone (0 when it has none).
+        // The 48/100 control placeholder made an empty row (every child
+        // behind a false condition) push its siblings down by 48 dp.
+        let padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
+        let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+        let extent = match requested_axis {
+            Axis::Vertical => {
+                let vertical = number(node, PropKey::PaddingVertical).unwrap_or(padding);
+                number(node, PropKey::PaddingTop).unwrap_or(vertical)
+                    + number(node, PropKey::PaddingBottom).unwrap_or(vertical)
+                    + border_top
+                    + border_bottom
+            }
+            Axis::Horizontal => {
+                let horizontal = number(node, PropKey::PaddingHorizontal).unwrap_or(padding);
+                number(node, PropKey::PaddingLeft).unwrap_or(horizontal)
+                    + number(node, PropKey::PaddingRight).unwrap_or(horizontal)
+                    + border_left
+                    + border_right
+            }
+        };
+        return finite_non_negative(extent);
+    }
     if node_children.is_empty() || (!content_sized(node) && !horizontal_scroll_height) {
         return finite_non_negative(leaf_intrinsic(
             node,
@@ -3047,6 +3072,20 @@ fn constrained_intrinsic_extent(
         ),
     };
     constrained(extent, minimum, maximum)
+}
+
+/// Plain layout containers that Yoga sizes by their content: with no
+/// children they collapse to padding + border instead of a control placeholder.
+fn empty_container_is_box(node: &Node) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Column
+            | NodeKind::Row
+            | NodeKind::View
+            | NodeKind::Pressable
+            | NodeKind::SafeAreaView
+            | NodeKind::KeyboardAvoidingView
+    )
 }
 
 fn content_sized(node: &Node) -> bool {
@@ -4831,6 +4870,29 @@ mod tests {
 
     fn size_of(frame: Layout) -> (f32, f32) {
         (frame.width, frame.height)
+    }
+
+    /// Yoga: a container without children (e.g. a row whose children are all
+    /// behind false conditions) is as big as its padding and border, never
+    /// a 48 dp control placeholder that pushes its siblings down.
+    #[test]
+    fn empty_containers_measure_padding_and_border_only() {
+        for kind in [NodeKind::View, NodeKind::Row, NodeKind::Column, NodeKind::Pressable] {
+            let tree = Tree {
+                root: 1,
+                nodes: BTreeMap::from([
+                    (1, node(1, 0, 0, NodeKind::View, vec![i(PropKey::AlignItems, 1)])),
+                    (2, node(2, 1, 0, kind, vec![f(PropKey::MarginTop, 8.0)])),
+                    (3, node(3, 1, 1, kind, vec![f(PropKey::Padding, 6.0), f(PropKey::BorderWidth, 1.0)])),
+                    (4, node(4, 1, 2, NodeKind::View, vec![f(PropKey::Height, 20.0), f(PropKey::Width, 20.0)])),
+                ]),
+            };
+            let layouts = calculate(&tree, Size { width: 411.0, height: 800.0 }).expect("layout");
+            assert_eq!(size_of(layouts[&2]), (0.0, 0.0), "{kind:?}: empty");
+            assert_eq!(layouts[&3].y, 8.0, "{kind:?}: below the empty one's margin");
+            assert_eq!(size_of(layouts[&3]), (14.0, 14.0), "{kind:?}: padding + border");
+            assert_eq!(layouts[&4].y, 22.0, "{kind:?}: sibling right after");
+        }
     }
 
     /// A fixed-width card (column) holding a `width: 100%; aspectRatio`
