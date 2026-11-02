@@ -25,6 +25,7 @@ import dev.pam.nativeapp.protocol.PackedStringList
 import java.util.Collections
 import java.util.IdentityHashMap
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -352,7 +353,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         mountSlice: ((Long, FrameLayout, Long) -> Boolean)? = null,
     ) {
         val sectionRestore = sectionSwitch?.let(::leaveSection)
-        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(0f)) }
+        // FlashList (React Native) steps each item by its measured height
+        // floored to the pixel grid. Rounding instead added a pixel for every
+        // row whose height ends past half a pixel, so a list drifted down by
+        // one more pixel per such row (+3/+4 px a few rows in).
+        val pixelExtents = extents.mapValues { (_, value) -> cellPixels(value.coerceAtLeast(0f), resources.displayMetrics.density) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -1787,6 +1792,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private fun dp(value: Float): Int =
         max(1, (value * resources.displayMetrics.density + 0.5f).toInt())
+
+    internal companion object {
+        /**
+         * Pixel step of a cell [extentDp] high (or wide): floored like
+         * FlashList's measured item size; the epsilon keeps a whole pixel
+         * that float math left a hair short (358.99997) on that pixel.
+         */
+        fun cellPixels(extentDp: Float, density: Float): Int =
+            max(1, floor(extentDp * density + 0.001f).toInt())
+    }
 
     private interface PrefetchLayoutManager {
         var prefetchCount: Int
