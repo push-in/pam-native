@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- iOS: frames mount on Yoga's pixel grid like React Native
+  (`roundLayoutResultsToPixelGrid`): the position is rounded relative to the
+  parent, the size comes from the rounded absolute edges, and measured nodes
+  (Text, TextInput, Switch, ActivityIndicator) floor their position and ceil a
+  fractional size. Engine floats were mounted as-is, so edges fell between
+  pixels (soft borders and text) and fractions accumulated one pixel off
+  React Native.
+- iOS (debug): `PamFrameTrace` logs every applied frame (engine floats and the
+  mounted pixels), enabled with `PAM_FRAME_TRACE=1` or the `PamFrameTrace`
+  user default, like the Android log tag.
+
 ## 1.46.31 - 2026-11-02
 
 Android list pixel grid like FlashList and an empty-container fix in the
