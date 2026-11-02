@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.46.32 - 2026-11-02
+
+iOS pixel grid like React Native and a keyboard fix for end-anchored lists on
+top of 1.46.31.
+
 - iOS: frames mount on Yoga's pixel grid like React Native
   (`roundLayoutResultsToPixelGrid`): the position is rounded relative to the
   parent, the size comes from the rounded absolute edges, and measured nodes
