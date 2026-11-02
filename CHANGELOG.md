@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 1.46.26 - 2026-11-01
+
+Android list scrolling (first scroll after opening a list), lighter debug
+tooling, and the list `stackFromEnd` property (#220) on top of 1.46.25.
+
+- Android: a list row lays itself out when a view inside it changes (rows are
+  sized by the engine) instead of requesting a full layout of the list. Cell
+  slices that build a row over several frames triggered a 5 to 9 ms layout of
+  every row in each frame while the list moved; with heavy touch input that
+  frame came late and left the window buffer-stuffed for the rest of the
+  fling (7 to 25% janky frames in the first chat scroll in some runs).
+- Android: off-screen cell slices only use what the current frame has left
+  (half the frame interval from vsync, at least one view per frame), and a
+  list at rest grows its rows ahead one row per frame (up to its configured
+  prefetch) and builds them in slices, so the rows next to the viewport are
+  ready before the next drag.
+- Android: list cells pre-measure their texts at the engine frame inside the
+  cell slice, so the text layout and tail truncation are built within the
+  slice budget; the truncation key no longer allocates on each measure.
+- Android (debug builds): the `PamListTrace` motion log batches its lines and
+  reuses its buffers; the safe-area inspector scans after the window is still,
+  at most every 2 s, on an idle main looper, and skips clipping groups that
+  stay clear of the insets. Trace sections `PamList.slice` and
+  `PamList.mountShown`.
+- Lists: `stackFromEnd` rests rows that do not fill the viewport against its
+  end, like an inverted React Native list (#220).
+
 ## 1.46.25 - 2026-11-01
 
 Android list scrolling fix and iOS Switch parity on top of 1.46.24.
