@@ -198,8 +198,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private var rampAheadPosted = false
 
-    /** Rows ahead kept at rest: the configured prefetch, not a fast fling's adaptive extent. */
-    private fun restAheadSpace(): Int = dp(rowHeight) * prefetchItems
+    /** Rows ahead kept at rest: the configured prefetch or one viewport, not a fast fling's adaptive extent. */
+    private fun restAheadSpace(): Int = maxOf(dp(rowHeight) * prefetchItems, if (horizontal) width else height)
     private val rampAhead = Runnable {
         rampAheadPosted = false
         val manager = layoutManager as? PrefetchLayoutManager
@@ -1859,15 +1859,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
 
         override fun extraLayoutRamped(limit: Int): Boolean =
-            minOf(extraLayoutSpace, limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+            minOf(aheadTarget(), limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+
+        /**
+         * At least one viewport of rows stays laid out on each side (React
+         * Native renders several screens ahead with its default window):
+         * rows are bound, in slices, a screen before they arrive instead of
+         * at the edge of a fast drag. Off when memory trimming zeroed it.
+         */
+        private fun aheadTarget(): Int =
+            if (extraLayoutSpace <= 0) 0 else maxOf(extraLayoutSpace, if (orientation == VERTICAL) height else width)
 
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            val target = aheadTarget()
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
@@ -1931,15 +1941,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
 
         override fun extraLayoutRamped(limit: Int): Boolean =
-            minOf(extraLayoutSpace, limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+            minOf(aheadTarget(), limit).let { rampedStartSpace >= it && rampedEndSpace >= it }
+
+        /**
+         * At least one viewport of rows stays laid out on each side (React
+         * Native renders several screens ahead with its default window):
+         * rows are bound, in slices, a screen before they arrive instead of
+         * at the edge of a fast drag. Off when memory trimming zeroed it.
+         */
+        private fun aheadTarget(): Int =
+            if (extraLayoutSpace <= 0) 0 else maxOf(extraLayoutSpace, if (orientation == VERTICAL) height else width)
 
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            val target = aheadTarget()
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }

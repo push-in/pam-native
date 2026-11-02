@@ -14,10 +14,11 @@ tooling, and the list `stackFromEnd` property (#220) on top of 1.46.25.
   frame came late and left the window buffer-stuffed for the rest of the
   fling (7 to 25% janky frames in the first chat scroll in some runs).
 - Android: off-screen cell slices only use what the current frame has left
-  (half the frame interval from vsync, at least one view per frame), and a
-  list at rest grows its rows ahead one row per frame (up to its configured
-  prefetch) and builds them in slices, so the rows next to the viewport are
-  ready before the next drag.
+  (half the frame interval from vsync, at least one view per frame). A list
+  keeps at least one viewport of rows laid out on each side (its configured
+  prefetch when larger) and, at rest, grows them one row per frame and builds
+  them in slices, so the rows next to the viewport are ready before the next
+  drag instead of being completed at the edge of a fast drag.
 - Android: list cells pre-measure their texts at the engine frame inside the
   cell slice, so the text layout and tail truncation are built within the
   slice budget; the truncation key no longer allocates on each measure.
