@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- iOS: video players configure the shared `AVAudioSession` like React Native
+  expo-video (`audioMixingMode: 'auto'`): `.playback`/`.moviePlayback` while a
+  video plays, so sound plays with the silent switch on; `.mixWithOthers`
+  while no audible video plays, so muted autoplay never stops another app's
+  music; an audible video takes the session over. A recording or call
+  session is never taken by a muted video. Interruptions (calls, alarms)
+  pause playing videos and resume them when the system says `shouldResume`;
+  unplugged headphones pause audible videos (muted ones keep playing).
+- iOS: an item that fails in the audio renderer (OSStatus -12746, e.g. a
+  simulator without audio output) keeps the poster without `on:error`, like
+  expo-video; network and file errors still report `on:error`.
+
 ## 1.46.26 - 2026-11-01
 
 Android list scrolling (first scroll after opening a list), lighter debug
