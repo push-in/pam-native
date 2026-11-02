@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.46.30 - 2026-11-02
+
+Android list-cell pixel grid and component-root text styles on top of
+1.46.29.
+
+- Templates: a text style a component's call site only inherited from an
+  ancestor (a `color` on a dark container) no longer decorates the component's
+  root over its own attributes; it reaches the component as an inherited
+  style. A component whose root is a Text (an icon glyph) was drawn in the
+  container's text colour instead of its own.
+
+- Android: list cells sum the rounded origin of every layout-only ancestor up
+  to the slot, a layout-only cell root included, as React Native's cell view
+  flattens it. A child 2 + 2 dp below such a root rounded its whole 4 dp
+  offset at once (11 px instead of 5 + 5 at 2.625), one pixel low.
+- Android: a list cell's children subtract their scroll host's content insets
+  like the non-cell layout does. A horizontal ScrollView with
+  `paddingHorizontal` inside a list row drew its items one padding further in.
+
 ## 1.46.29 - 2026-11-02
 
 Layout engine aspect-ratio measurement on top of 1.46.28.
