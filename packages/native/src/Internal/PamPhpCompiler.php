@@ -888,6 +888,7 @@ final class PamPhpCompiler
                 $data .= $class.$template;
             }
             // The sources are in $data now: release them before encoding.
+            $count = count($entries);
             unset($entries);
             $encoded = json_encode(
                 ['version' => 1, 'components' => (object) $index, 'sources' => $sources],
@@ -903,7 +904,7 @@ final class PamPhpCompiler
             self::$prebuiltDirectories = [];
             self::$prebuiltPacks = [];
 
-            return count($entries);
+            return $count;
         } finally {
             if (is_dir($staging)) {
                 self::removeTree($staging);
