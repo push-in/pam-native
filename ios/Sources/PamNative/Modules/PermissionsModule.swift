@@ -12,6 +12,10 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
     private let location = CLLocationManager()
     private var bluetooth: CBCentralManager?
     private var bluetoothCompletions: [ModuleCompletion] = []
+    /// Callers waiting on the photo-library prompt (main thread). A second
+    /// request while the system alert is up shares its answer: every caller
+    /// hears the decision the person made, not a stale "not determined".
+    private var photoCompletions: [ModuleCompletion] = []
     private var locationCompletion: ModuleCompletion?
     private var locationRequestGeneration = 0
 
@@ -97,7 +101,17 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
         case 2:
             AVCaptureDevice.requestAccess(for: .audio) { _ in self.status(kind, completion) }
         case 3:
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in self.status(kind, completion) }
+            DispatchQueue.main.async {
+                self.photoCompletions.append(completion)
+                guard self.photoCompletions.count == 1 else { return }
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
+                    DispatchQueue.main.async {
+                        let pending = self.photoCompletions
+                        self.photoCompletions.removeAll()
+                        for waiting in pending { self.status(kind, waiting) }
+                    }
+                }
+            }
         case 4:
             UNUserNotificationCenter.current().requestAuthorization(
                 options: [.alert, .badge, .sound]

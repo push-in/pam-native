@@ -5543,67 +5543,79 @@ public final class PamRenderer: @unchecked Sendable {
             state.imageSilentRestore = false
             return
         }
+        #if DEBUG
+        let traceStart = PamListTrace.enabled ? CACurrentMediaTime() : 0
+        #endif
         PamMediaDiskCache.shared.data(
             source: resolvedSource,
             stableKey: key,
             maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
         ) { [weak self, weak imageView] data in
             guard let self else { return }
-            let image = PamDecodedImageCache.shared.image(forKey: decodedKey) ?? data.flatMap {
-                self.decodeImage(
-                    $0,
-                    targetSize: targetSize,
-                    multiplier: multiplier
-                )
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamImage lookup %@ %.0fms %@", data == nil ? "miss" : "hit", (CACurrentMediaTime() - traceStart) * 1_000, URL(string: resolvedSource)?.path ?? "")
             }
-            if let image {
-                PamDecodedImageCache.shared.store(image, forKey: decodedKey)
-            }
-            DispatchQueue.main.async {
-                guard let current = self.nodes[nodeId],
-                      current.imageGeneration == generation,
-                      let imageView else { return }
-                let silent = current.imageSilentRestore
-                current.imageSilentRestore = false
-                if let image {
-                    imageView.image = image
-                    current.imageLoading = false
-                    self.rememberResidentImage(
-                        nodeId: nodeId,
-                        source: source,
-                        imageView: imageView,
-                        decodedKey: decodedKey
+            #endif
+            // Decoded off the cache queue: one serial decode per tile there
+            // held every later lookup of a grid behind it.
+            self.imageDecodeQueue.async {
+                let image = PamDecodedImageCache.shared.image(forKey: decodedKey) ?? data.flatMap {
+                    self.decodeImage(
+                        $0,
+                        targetSize: targetSize,
+                        multiplier: multiplier
                     )
-                    if silent { return }
-                    if current.properties[PamConstants.onMediaCacheHit] != nil {
+                }
+                if let image {
+                    PamDecodedImageCache.shared.store(image, forKey: decodedKey)
+                }
+                DispatchQueue.main.async {
+                    guard let current = self.nodes[nodeId],
+                          current.imageGeneration == generation,
+                          let imageView else { return }
+                    let silent = current.imageSilentRestore
+                    current.imageSilentRestore = false
+                    if let image {
+                        imageView.image = image
+                        current.imageLoading = false
+                        self.rememberResidentImage(
+                            nodeId: nodeId,
+                            source: source,
+                            imageView: imageView,
+                            decodedKey: decodedKey
+                        )
+                        if silent { return }
+                        if current.properties[PamConstants.onMediaCacheHit] != nil {
+                            self.dispatchMediaCacheEvent(
+                                nodeId: nodeId,
+                                kind: .mediaCacheHit,
+                                key: identity,
+                                loaded: Int64(data?.count ?? 0),
+                                total: Int64(data?.count ?? 0),
+                                disk: true
+                            )
+                        }
+                        self.dispatchCachedImageLoad(
+                            nodeId: nodeId,
+                            source: resolvedSource,
+                            image: image
+                        )
+                        return
+                    }
+                    if current.properties[PamConstants.onMediaCacheMiss] != nil {
                         self.dispatchMediaCacheEvent(
                             nodeId: nodeId,
-                            kind: .mediaCacheHit,
-                            key: identity,
-                            loaded: Int64(data?.count ?? 0),
-                            total: Int64(data?.count ?? 0),
-                            disk: true
+                            kind: .mediaCacheMiss,
+                            key: identity
                         )
                     }
-                    self.dispatchCachedImageLoad(
-                        nodeId: nodeId,
-                        source: resolvedSource,
-                        image: image
-                    )
-                    return
-                }
-                if current.properties[PamConstants.onMediaCacheMiss] != nil {
-                    self.dispatchMediaCacheEvent(
-                        nodeId: nodeId,
-                        kind: .mediaCacheMiss,
-                        key: identity
-                    )
-                }
-                if policy == 7 {
-                    current.imageLoading = false
-                    self.dispatchImageCacheOnlyError(nodeId: nodeId)
-                } else {
-                    self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
+                    if policy == 7 {
+                        current.imageLoading = false
+                        self.dispatchImageCacheOnlyError(nodeId: nodeId)
+                    } else {
+                        self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
+                    }
                 }
             }
         }
@@ -5772,8 +5784,16 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
+        #if DEBUG
+        let networkStart = PamListTrace.enabled ? CACurrentMediaTime() : 0
+        #endif
         context.onSuccess = { [weak self] context, data in
             guard let self else { return }
+            #if DEBUG
+            if PamListTrace.enabled {
+                NSLog("PamImage network %.0fms %dB %@", (CACurrentMediaTime() - networkStart) * 1_000, data.count, url.path)
+            }
+            #endif
             guard let state = self.nodes[context.nodeId],
                   state.imageGeneration == context.generation,
                   let hostView = self.views[context.nodeId],
