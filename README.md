@@ -236,6 +236,11 @@ PAM Native is open source under Apache-2.0. You may build and sell proprietary o
 <a id="pam-ecosystem"></a>
 ## <picture><img src=".github/assets/icons/plug.svg" width="22" height="22" alt=""></picture> Part of the PAM ecosystem
 
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/pam-wordmark-dark.svg">
+  <img src=".github/assets/pam-wordmark-light.svg" height="56" alt="PAM">
+</picture></p>
+
 PAM runs PHP natively on servers, desktops and phones. This repository is one piece of it.
 
 | [**PAM**](https://github.com/push-in/pam) | [**PAM Desktop**](https://github.com/push-in/pam-desktop) | [**Ecosystem**](https://github.com/push-in/pam#ecosystem) |
