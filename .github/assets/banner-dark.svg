@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="pam-native: Build real Android and iOS applications with typed PHP. No JavaScript runtime, no WebView.">
+<title>pam-native</title>
+<defs><linearGradient id="pg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f53003"/><stop offset="1" stop-color="#f8b803"/></linearGradient><radialGradient id="gl"><stop offset="0" stop-color="#ff4433" stop-opacity=".30"/><stop offset="1" stop-color="#ff4433" stop-opacity="0"/></radialGradient><clipPath id="cl"><rect width="1280" height="320" rx="16"/></clipPath></defs>
+<g clip-path="url(#cl)"><rect width="1280" height="320" fill="#0a0a0a"/>
+<circle cx="1080" cy="160" r="260" fill="url(#gl)"/>
+<g fill="none" stroke="#3e3e3a" stroke-width="1.5" opacity=".55"><path d="M840 70H940l20 20H1270"/><circle cx="940" cy="70" r="3"/><path d="M840 115H960l20 -20H1270"/><circle cx="960" cy="115" r="3"/><path d="M840 160H980l20 20H1270"/><circle cx="980" cy="160" r="3"/><path d="M840 205H1000l20 -20H1270"/><circle cx="1000" cy="205" r="3"/><path d="M840 250H1020l20 20H1270"/><circle cx="1020" cy="250" r="3"/></g>
+</g>
+<rect x=".5" y=".5" width="1279" height="319" rx="16" fill="none" stroke="#3e3e3a"/>
+<circle cx="128" cy="160" r="66" fill="#0a0a0a" stroke="#ff4433" stroke-width="2"/>
+<circle cx="128" cy="160" r="66" fill="none" stroke="#ff4433"><animate attributeName="r" values="66;92" dur="3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values=".5;0" dur="3s" repeatCount="indefinite"/></circle>
+<g transform="translate(74 104.2) scale(.9)"><rect x="30" y="88" width="9" height="14" rx="4.5" fill="#f53003"/><rect x="47" y="88" width="9" height="14" rx="4.5" fill="#f53003"/><rect x="64" y="88" width="9" height="14" rx="4.5" fill="#f53003"/><rect x="81" y="88" width="9" height="14" rx="4.5" fill="#f53003"/><rect x="20" y="22" width="80" height="72" rx="26" fill="#f53003"/><circle cx="47" cy="58" r="5.5" fill="#1b1b18"/><circle cx="73" cy="58" r="5.5" fill="#1b1b18"/><path d="M54 70q6 6 12 0" stroke="#1b1b18" stroke-width="4" stroke-linecap="round" fill="none"/></g>
+<text x="236" y="84" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" letter-spacing="2" fill="#f53003">PAM NATIVE · HOST</text>
+<text x="234" y="140" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-weight="700" font-size="58" letter-spacing="-1" fill="#ededec">pam-native</text>
+<text x="236" y="180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="21" fill="#a1a09a">Build real Android and iOS applications with typed PHP.</text>
+<text x="236" y="208" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="21" fill="#a1a09a">No JavaScript runtime, no WebView.</text>
+<rect x="236" y="236" width="89" height="26" rx="13" fill="#161615" stroke="#3e3e3a"/><circle cx="250" cy="249" r="4" fill="#3ddc84"/><text x="261" y="253.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" fill="#ededec">Android</text>
+<rect x="333.375" y="236" width="59" height="26" rx="13" fill="#161615" stroke="#3e3e3a"/><circle cx="347.375" cy="249" r="4" fill="#ededec"/><text x="358.375" y="253.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" fill="#ededec">iOS</text>
+<rect x="1010" y="90" width="140" height="140" rx="28" fill="#161615" stroke="#3e3e3a" stroke-width="1.5"/><g transform="translate(1044 124) scale(3)" fill="none" stroke="url(#pg)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h10v20H7zM11 18h2"/></g>
+</svg>
