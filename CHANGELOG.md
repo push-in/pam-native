@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.47.0 - 2026-11-11
+
 TV apps: Android TV, Google TV and Fire TV from the same code as the phone app.
 See [docs/tv.md](docs/tv.md).
 
