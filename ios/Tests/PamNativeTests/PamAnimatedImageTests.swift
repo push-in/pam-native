@@ -98,7 +98,9 @@ final class PamAnimatedImageTests: XCTestCase {
         window.isHidden = false
         defer { window.isHidden = true }
         let view = PamImageView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
-        let data = Self.gif(colors: [.red, .green, .blue], delays: [0.1, 0.1, 0.1])
+        // Long frames: the real display link also ticks while the test waits,
+        // and must not move the animation past frame 1 meanwhile.
+        let data = Self.gif(colors: [.red, .green, .blue], delays: [5, 5, 5])
         view.image = PamImageDownsampling.image(data: data, targetSize: view.bounds.size)
         XCTAssertFalse(view.isAnimatingImage, "not in a window: no clock")
         window.addSubview(view)
@@ -106,7 +108,7 @@ final class PamAnimatedImageTests: XCTestCase {
         XCTAssertTrue(PamAnimatedImageClock.shared.isRunning)
         let first = view.image?.cgImage
         // Frame 1 decodes off the main thread; let it land.
-        PamAnimatedImageClock.shared.step(by: 0.15)
+        PamAnimatedImageClock.shared.step(by: 7)
         waitUntil { view.animationFrameIndex != 0 }
         XCTAssertNotEqual(view.animationFrameIndex, 0)
         XCTAssertFalse(view.image?.cgImage === first, "the displayed bitmap changed")
