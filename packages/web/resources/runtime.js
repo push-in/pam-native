@@ -491,6 +491,42 @@ var PAM = (function () {
         };
     }
 
+    // PHP interfaces: `x instanceof I` walks the classes' __ifaces lists.
+    function iface(name, parents) {
+        var I = { phpName: name, __parents: parents };
+        Object.defineProperty(I, Symbol.hasInstance, { value: function (value) { return implementsIface(value, I); } });
+        return I;
+    }
+
+    // A class lists its interfaces and inherits their constants.
+    function implement(C, list) {
+        C.__ifaces = list;
+        (function copy(interfaces) {
+            interfaces.forEach(function (I) {
+                Object.getOwnPropertyNames(I).forEach(function (key) {
+                    if (key === 'phpName' || key === '__parents' || key in C) return;
+                    Object.defineProperty(C, key, { configurable: true, get: function () { return I[key]; } });
+                });
+                copy(I.__parents);
+            });
+        })(list);
+    }
+
+    function extendsIface(candidate, I) {
+        if (candidate === I) return true;
+        for (var i = 0; i < candidate.__parents.length; i++) if (extendsIface(candidate.__parents[i], I)) return true;
+        return false;
+    }
+
+    function implementsIface(value, I) {
+        if (value === null || typeof value !== 'object') return false;
+        for (var C = value.constructor; C && C !== Object; C = Object.getPrototypeOf(C)) {
+            var list = Object.prototype.hasOwnProperty.call(C, '__ifaces') ? C.__ifaces : [];
+            for (var i = 0; i < list.length; i++) if (extendsIface(list[i], I)) return true;
+        }
+        return false;
+    }
+
     function className(value) {
         return value && value.constructor && value.constructor.phpName ? value.constructor.phpName : '';
     }
@@ -517,7 +553,286 @@ var PAM = (function () {
     function byKey(v, compare) {
         return arr(sortedBy(entries(v), function (x, y) { return compare(x[0], y[0]); }));
     }
+    // ---- PCRE (preg_*) --------------------------------------------------------
+    // Patterns become RegExps once; named groups turn into numbered ones
+    // (Chromium 63 has no `(?<name>)`) and their names come back in matches.
+
+    var patterns = {};
+    function pcre(pattern) {
+        pattern = s(pattern);
+        if (patterns[pattern]) return patterns[pattern];
+        var open = pattern.charAt(0);
+        var close = { '(': ')', '{': '}', '[': ']', '<': '>' }[open] || open;
+        var end = pattern.lastIndexOf(close);
+        if (end <= 0 || /[A-Za-z0-9\\\s]/.test(open)) throw PhpError('ValueError', 'preg: the pattern ' + JSON.stringify(pattern) + ' has no delimiters');
+        var body = pattern.slice(1, end), modifiers = pattern.slice(end + 1), flags = '', extended = false;
+        for (var m = 0; m < modifiers.length; m++) {
+            var mod = modifiers.charAt(m);
+            if ('ims'.indexOf(mod) >= 0) flags += mod;
+            else if (mod === 'u') flags += 'u';
+            else if (mod === 'x') extended = true;
+            else if (mod !== 'D' && mod !== 'S' && mod !== '\n') throw PhpError('ValueError', 'preg: the /' + mod + ' modifier is not available in web builds');
+        }
+        var names = [], out = '', group = 0, inClass = false;
+        for (var i = 0; i < body.length; i++) {
+            var c = body.charAt(i);
+            if (c === '\\') {
+                var next = body.charAt(i + 1);
+                if (next === 'A') out += '^';
+                else if (next === 'z') out += '(?![\\s\\S])';
+                else if (next === 'Z') out += '(?=\\n?(?![\\s\\S]))';
+                else if (next === 'h') out += inClass ? ' \\t' : '[ \\t]';
+                else if (next === 'k' && /[<{']/.test(body.charAt(i + 2))) {
+                    var stop = body.indexOf({ '<': '>', '{': '}', "'": "'" }[body.charAt(i + 2)], i + 3);
+                    out += '\\' + (names.indexOf(body.slice(i + 3, stop)) + 1);
+                    i = stop;
+                    continue;
+                } else {
+                    if (next === 'p' || next === 'P' || next === 'x' && body.charAt(i + 2) === '{') flags += flags.indexOf('u') < 0 ? 'u' : '';
+                    out += c + next;
+                }
+                i++;
+                continue;
+            }
+            if (inClass) {
+                if (c === ']') inClass = false;
+                out += c;
+                continue;
+            }
+            if (c === '[') {
+                inClass = true;
+                out += c;
+                if (body.charAt(i + 1) === '^') { out += '^'; i++; }
+                if (body.charAt(i + 1) === ']') { out += '\\]'; i++; }
+                continue;
+            }
+            if (extended && /\s/.test(c)) continue;
+            if (extended && c === '#') {
+                while (i < body.length && body.charAt(i) !== '\n') i++;
+                continue;
+            }
+            if (c === '(') {
+                var named = /^\?(?:P?<([A-Za-z_]\w*)>|'([A-Za-z_]\w*)')/.exec(body.slice(i + 1));
+                if (named) {
+                    names[group++] = named[1] || named[2];
+                    out += '(';
+                    i += named[0].length;
+                    continue;
+                }
+                if (body.charAt(i + 1) === '?') {
+                    var kind = body.charAt(i + 2);
+                    if (kind === '>' || kind === '|' || kind === '(' || /[0-9+A-Za-z-]/.test(kind)) {
+                        throw PhpError('ValueError', 'preg: (?' + kind + ' groups are not available in web builds');
+                    }
+                } else if (body.charAt(i + 1) !== '*') {
+                    names[group++] = null;
+                }
+                out += c;
+                continue;
+            }
+            if (c === '+' && /[*+?}]/.test(out.charAt(out.length - 1)) && out.charAt(out.length - 2) !== '\\') {
+                throw PhpError('ValueError', 'preg: possessive quantifiers are not available in web builds');
+            }
+            out += c;
+        }
+        var compiled = { source: out, flags: flags, names: names, groups: group };
+        patterns[pattern] = compiled;
+        return compiled;
+    }
+
+    function regex(pattern, global) {
+        var p = pcre(pattern);
+        return { re: new RegExp(p.source, p.flags + (global ? 'g' : '')), names: p.names };
+    }
+
+    // PHP's match array: numbered groups, each named group also under its name;
+    // trailing groups that did not take part are left out, as PCRE does.
+    function groups(match, names, flags) {
+        var last = match.length - 1;
+        if (!(flags & 512)) while (last > 0 && match[last] === undefined) last--;
+        var pairs = [], hasNames = false;
+        for (var i = 0; i <= last; i++) {
+            var text = match[i] === undefined ? (flags & 512 ? null : '') : match[i];
+            var value = flags & 256 ? [text, match[i] === undefined ? -1 : match.index + (i === 0 ? 0 : match[0].indexOf(text))] : text;
+            if (i > 0 && names[i - 1]) { pairs.push([names[i - 1], value]); hasNames = true; }
+            pairs.push([i, value]);
+        }
+        return hasNames ? arr(pairs) : pairs.map(function (pair) { return pair[1]; });
+    }
+
+    function all(pattern, subject) {
+        var r = regex(pattern, true), list = [], match;
+        subject = s(subject);
+        while ((match = r.re.exec(subject)) !== null) {
+            list.push(match);
+            if (match[0] === '') r.re.lastIndex++;
+        }
+        return { matches: list, names: r.names };
+    }
+
+    function pregReplace(pattern, replacement, subject, limit) {
+        if (isArr(subject)) return arr(entries(subject).map(function (pair) { return [pair[0], pregReplace(pattern, replacement, pair[1], limit)]; }));
+        var list = isArr(pattern) ? values(pattern) : [pattern];
+        var out = s(subject);
+        list.forEach(function (one, index) {
+            var r = regex(one, true), count = 0;
+            var to = typeof replacement === 'function' ? replacement : (isArr(replacement) ? s(values(replacement)[index]) : s(replacement));
+            out = out.replace(r.re, function () {
+                var match = Array.prototype.slice.call(arguments, 0, -2);
+                match.index = arguments[arguments.length - 2];
+                if (limit !== undefined && limit !== null && limit >= 0 && count >= limit) return match[0];
+                count++;
+                if (typeof to === 'function') return s(to(groups(match, r.names, 0)));
+                return to.replace(/\\(\d{1,2})|\$(\d{1,2})|\$\{(\d{1,2})\}/g, function (all, a, b, c) { var v = match[Number(a || b || c)]; return v === undefined ? '' : v; });
+            });
+        });
+        return out;
+    }
+
+    var preg = {
+        preg_quote: function (text, delimiter) { var special = '.\\+*?[^]$(){}=!<>|:-#' + (delimiter ? s(delimiter) : ''); return s(text).replace(/[\s\S]/g, function (c) { return c === '\0' ? '\\000' : (special.indexOf(c) >= 0 ? '\\' + c : c); }); },
+        preg_match: function (pattern, subject) { return regex(pattern, false).re.test(s(subject)) ? 1 : 0; },
+        preg_match_all: function (pattern, subject) { return all(pattern, subject).matches.length; },
+        preg_replace: function (pattern, replacement, subject, limit) { return pregReplace(pattern, replacement, subject, limit); },
+        preg_replace_callback: function (pattern, callback, subject, limit) { return pregReplace(pattern, fn(callback), subject, limit); },
+        preg_split: function (pattern, subject, limit, flags) {
+            subject = s(subject); flags = flags || 0;
+            var found = all(pattern, subject).matches, parts = [], at = 0;
+            var push = function (text, offset) { if (flags & 1 && text === '') return; parts.push(flags & 4 ? [text, offset] : text); };
+            for (var i = 0; i < found.length; i++) {
+                if (limit > 0 && parts.length >= limit - 1) break;
+                if (found[i][0] === '' && (found[i].index === 0 || found[i].index === subject.length)) continue;
+                push(subject.slice(at, found[i].index), at);
+                if (flags & 2) for (var g = 1; g < found[i].length; g++) if (found[i][g] !== undefined) push(found[i][g], found[i].index);
+                at = found[i].index + found[i][0].length;
+            }
+            push(subject.slice(at), at);
+            return parts;
+        },
+        preg_grep: function (pattern, input) { var r = regex(pattern, false); return arr(entries(input).filter(function (pair) { return r.re.test(s(pair[1])); })); },
+    };
+
+    // More of PHP's standard library, for Composer packages.
+    function ctype(test) { return function (v) { v = typeof v === 'string' ? v : ''; return v !== '' && test.test(v); }; }
+    function keyed(test) {
+        return function (first) {
+            var others = Array.prototype.slice.call(arguments, 1);
+            return arr(entries(first).filter(function (pair) { return test(pair, others); }).map(function (pair) { return [pair[0], pair[1]]; }));
+        };
+    }
+    function hasKey(v, k) { return Array.isArray(v) ? typeof k === 'number' && k >= 0 && k < v.length : Object.prototype.hasOwnProperty.call(v, k); }
+    function hasValue(v, x) { return values(v).some(function (y) { return s(y) === s(x); }); }
+    var entities = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'", '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' };
+    var more = {
+        strtr: function (v, from, to) {
+            v = s(v);
+            if (to !== undefined) { from = s(from); to = s(to); var n = Math.min(from.length, to.length); return v.replace(/[\s\S]/g, function (c) { var i = from.slice(0, n).indexOf(c); return i < 0 ? c : to.charAt(i); }); }
+            var pairs = entries(from).map(function (pair) { return [s(pair[0]), s(pair[1])]; }).filter(function (pair) { return pair[0] !== ''; }).sort(function (a, c) { return c[0].length - a[0].length; });
+            var out = '', i = 0;
+            outer: while (i < v.length) {
+                for (var k = 0; k < pairs.length; k++) if (v.startsWith(pairs[k][0], i)) { out += pairs[k][1]; i += pairs[k][0].length; continue outer; }
+                out += v.charAt(i++);
+            }
+            return out;
+        },
+        strip_tags: function (v) { return s(v).replace(/<!--[\s\S]*?-->|<\/?[a-zA-Z!?][^>]*>/g, ''); },
+        method_exists: function (o, m) { var C = typeof o === 'string' ? null : (typeof o === 'function' ? o : o && o.constructor); return !!(C && (typeof C.prototype[m] === 'function' || typeof C[m] === 'function')); },
+        property_exists: function (o, p) { return o !== null && typeof o === 'object' && p in o; },
+        is_object: function (v) { return v !== null && typeof v === 'object' && !isArr(v); },
+        is_callable: function (v) { try { return typeof fn(v) === 'function'; } catch (e) { return false; } },
+        is_iterable: function (v) { return isArr(v) || (v !== null && typeof v === 'object' && typeof v.getIterator === 'function'); },
+        is_countable: function (v) { return isArr(v) || (v !== null && typeof v === 'object' && typeof v.count === 'function'); },
+        is_scalar: function (v) { return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'; },
+        array_intersect_key: keyed(function (pair, others) { return others.every(function (o) { return hasKey(o, pair[0]); }); }),
+        array_diff_key: keyed(function (pair, others) { return others.every(function (o) { return !hasKey(o, pair[0]); }); }),
+        array_intersect: keyed(function (pair, others) { return others.every(function (o) { return hasValue(o, pair[1]); }); }),
+        array_diff: keyed(function (pair, others) { return others.every(function (o) { return !hasValue(o, pair[1]); }); }),
+        array_fill_keys: function (keys, v) { return arr(values(keys).map(function (k) { return [k, v]; })); },
+        array_pad: function (v, size, x) { var list = values(v).slice(); var n = Math.abs(size) - list.length; for (var i = 0; i < n; i++) size > 0 ? list.push(x) : list.unshift(x); return list; },
+        array_product: function (v) { return values(v).reduce(function (a, c) { return a * Number(c); }, 1); },
+        array_count_values: function (v) { var out = {}; values(v).forEach(function (x) { out[x] = (out[x] || 0) + 1; }); return out; },
+        array_replace: function () { var out = arguments[0]; for (var i = 1; i < arguments.length; i++) entries(arguments[i]).forEach(function (pair) { out = set(out, pair[0], pair[1]); }); return out; },
+        array_find: function (v, c) { c = fn(c); var e = entries(v); for (var i = 0; i < e.length; i++) if (b(c(e[i][1], e[i][0]))) return e[i][1]; return null; },
+        array_any: function (v, c) { c = fn(c); return entries(v).some(function (pair) { return b(c(pair[1], pair[0])); }); },
+        array_all: function (v, c) { c = fn(c); return entries(v).every(function (pair) { return b(c(pair[1], pair[0])); }); },
+        array_rand: function (v) { var keys = entries(v).map(function (pair) { return pair[0]; }); return keys[Math.floor(Math.random() * keys.length)]; },
+        iterator_to_array: function (v) { return isArr(v) ? v : toArray(v); },
+        str_split: function (v, n) { v = s(v); n = n || 1; var out = []; for (var i = 0; i < v.length; i += n) out.push(v.slice(i, i + n)); return out.length ? out : ['']; },
+        mb_str_split: function (v, n) { var chars = Array.from(s(v)); n = n || 1; var out = []; for (var i = 0; i < chars.length; i += n) out.push(chars.slice(i, i + n).join('')); return out; },
+        strrev: function (v) { return s(v).split('').reverse().join(''); },
+        substr_count: function (h, n) { return s(h).split(s(n)).length - 1; },
+        strrpos: function (h, n) { var i = s(h).lastIndexOf(s(n)); return i < 0 ? false : i; },
+        stripos: function (h, n, o) { var i = s(h).toLowerCase().indexOf(s(n).toLowerCase(), o || 0); return i < 0 ? false : i; },
+        mb_strpos: function (h, n, o) { var chars = Array.from(s(h)); var i = chars.slice(o || 0).join('').indexOf(s(n)); return i < 0 ? false : Array.from(chars.slice(o || 0).join('').slice(0, i)).length + (o || 0); },
+        strstr: function (h, n, before) { h = s(h); var i = h.indexOf(s(n)); return i < 0 ? false : (before ? h.slice(0, i) : h.slice(i)); },
+        stristr: function (h, n, before) { h = s(h); var i = h.toLowerCase().indexOf(s(n).toLowerCase()); return i < 0 ? false : (before ? h.slice(0, i) : h.slice(i)); },
+        strrchr: function (h, n) { h = s(h); var i = h.lastIndexOf(s(n).charAt(0)); return i < 0 ? false : h.slice(i); },
+        str_ireplace: function (search, replace, subject) { var from = Array.isArray(search) ? search : [search]; var out = s(subject); from.forEach(function (item, i) { var to = Array.isArray(replace) ? s(replace[i]) : s(replace); if (s(item) === '') return; out = out.replace(new RegExp(s(item).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function () { return to; }); }); return out; },
+        wordwrap: function (v, width, brk, cut) { width = width || 75; brk = brk === undefined ? '\n' : s(brk); var re = new RegExp('.{1,' + width + '}(\\s|$)' + (cut ? '|.{' + width + '}|.+$' : '|\\S+?(\\s|$)'), 'g'); return (s(v).match(re) || []).map(function (line) { return line.replace(/\s+$/, ''); }).join(brk); },
+        strcmp: function (a, c) { a = s(a); c = s(c); return a < c ? -1 : (a > c ? 1 : 0); },
+        strcasecmp: function (a, c) { return more.strcmp(s(a).toLowerCase(), s(c).toLowerCase()); },
+        strncmp: function (a, c, n) { return more.strcmp(s(a).slice(0, n), s(c).slice(0, n)); },
+        strncasecmp: function (a, c, n) { return more.strcmp(s(a).slice(0, n).toLowerCase(), s(c).slice(0, n).toLowerCase()); },
+        strnatcmp: function (a, c) { return int(s(a).localeCompare(s(c), 'en', { numeric: true })); },
+        strnatcasecmp: function (a, c) { return int(s(a).localeCompare(s(c), 'en', { numeric: true, sensitivity: 'base' })); },
+        ord: function (v) { return s(v).length ? s(v).charCodeAt(0) & 255 : 0; },
+        chr: function (n) { return String.fromCharCode(((int(n) % 256) + 256) % 256); },
+        mb_ord: function (v) { return s(v).codePointAt(0); },
+        mb_chr: function (n) { return String.fromCodePoint(n); },
+        dechex: function (n) { return int(n).toString(16); },
+        hexdec: function (v) { return parseInt(s(v).replace(/[^0-9a-f]/gi, ''), 16) || 0; },
+        decbin: function (n) { return int(n).toString(2); },
+        bindec: function (v) { return parseInt(s(v).replace(/[^01]/g, ''), 2) || 0; },
+        decoct: function (n) { return int(n).toString(8); },
+        octdec: function (v) { return parseInt(s(v).replace(/[^0-7]/g, ''), 8) || 0; },
+        base_convert: function (v, from, to) { return parseInt(s(v).toLowerCase(), from).toString(to); },
+        bin2hex: function (v) { return unescape(encodeURIComponent(s(v))).split('').map(function (c) { return ('0' + c.charCodeAt(0).toString(16)).slice(-2); }).join(''); },
+        base64_encode: function (v) { return btoa(unescape(encodeURIComponent(s(v)))); },
+        base64_decode: function (v) { try { return decodeURIComponent(escape(atob(s(v)))); } catch (e) { return false; } },
+        rawurlencode: function (v) { return encodeURIComponent(s(v)).replace(/[!'()*]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase(); }); },
+        urlencode: function (v) { return more.rawurlencode(v).replace(/%20/g, '+').replace(/~/g, '%7E'); },
+        rawurldecode: function (v) { return decodeURIComponent(s(v)); },
+        urldecode: function (v) { return decodeURIComponent(s(v).replace(/\+/g, ' ')); },
+        http_build_query: function (v) { return entries(v).map(function (pair) { return more.urlencode(pair[0]) + '=' + more.urlencode(pair[1]); }).join('&'); },
+        htmlspecialchars_decode: function (v) { return s(v).replace(/&(amp|lt|gt|quot|#0?39|apos);/g, function (e) { return entities[e]; }); },
+        html_entity_decode: function (v) { return s(v).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, function (e, name) { if (name.charAt(0) === '#') return String.fromCodePoint(name.charAt(1).toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1))); return entities[e.toLowerCase()] || e; }); },
+        addslashes: function (v) { return s(v).replace(/[\\'"\0]/g, function (c) { return '\\' + (c === '\0' ? '0' : c); }); },
+        stripslashes: function (v) { return s(v).replace(/\\(.?)/g, function (m, c) { return c === '0' ? '\0' : c; }); },
+        vsprintf: function (format, args) { return f.sprintf.apply(null, [format].concat(values(args))); },
+        lcg_value: function () { return Math.random(); },
+        ctype_digit: ctype(/^[0-9]+$/), ctype_alpha: ctype(/^[A-Za-z]+$/), ctype_alnum: ctype(/^[A-Za-z0-9]+$/),
+        ctype_upper: ctype(/^[A-Z]+$/), ctype_lower: ctype(/^[a-z]+$/), ctype_space: ctype(/^[\s\v]+$/),
+        ctype_xdigit: ctype(/^[0-9A-Fa-f]+$/), ctype_punct: ctype(/^[!-\/:-@\[-`{-~]+$/),
+    };
+    Object.keys(more).forEach(function (name) { f[name] = more[name]; });
+
+    Object.keys(preg).forEach(function (name) { f[name] = preg[name]; });
+
+    // preg_match() and preg_match_all() with a $matches argument: [matches, result].
+    var pregByReference = {
+        preg_match: function (pattern, subject, flags, offset) {
+            var r = regex(pattern, true);
+            r.re.lastIndex = offset || 0;
+            var match = r.re.exec(s(subject));
+            return match === null ? [[], 0] : [groups(match, r.names, flags || 0), 1];
+        },
+        preg_match_all: function (pattern, subject, flags) {
+            flags = flags || 1;
+            var found = all(pattern, subject), sets = found.matches.map(function (match) { return groups(match, found.names, flags & 768); });
+            if (flags & 2) return [sets, sets.length];
+            var columns = [], count = pcre(pattern).groups;
+            for (var g = 0; g <= count; g++) {
+                var column = found.matches.map(function (match) { return match[g] === undefined ? '' : match[g]; });
+                if (g > 0 && found.names[g - 1]) columns.push([found.names[g - 1], column]);
+                columns.push([g, column]);
+            }
+            return [arr(columns), sets.length];
+        },
+    };
+
     var r = {
+        preg_match: pregByReference.preg_match,
+        preg_match_all: pregByReference.preg_match_all,
         sort: function (v) { return [byValue(v, cmp, false), true]; },
         rsort: function (v) { return [byValue(v, function (a, c) { return cmp(c, a); }, false), true]; },
         usort: function (v, compare) { var c = fn(compare); return [byValue(v, function (a, d) { return int(c(a, d)); }, false), true]; },
@@ -1127,7 +1442,7 @@ var PAM = (function () {
 
     return {
         config: config, g: g, App: App, Base: Base, Component: Component, KeyEvent: KeyEvent, H: H,
-        props: props, signal: signal, batch: batch, consts: consts, enumCases: enumCases, bound: bound,
+        props: props, signal: signal, batch: batch, consts: consts, iface: iface, implement: implement, enumCases: enumCases, bound: bound,
         fn: fn, call: call, listOf: listOf, toArray: toArray, raise: raise, clone: clone, className: className, classOf: classOf, r: r,
         s: s, b: b, num: num, int: int, set: set, setIn: setIn, unset: unset, APPEND: APPEND, dig: dig, co: co,
         entries: entries, values: values, arr: arr, same: same, eq: eq, cmp: cmp, empty: empty, f: f,

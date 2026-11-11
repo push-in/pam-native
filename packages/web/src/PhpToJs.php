@@ -45,6 +45,32 @@ final class PhpToJs
         $this->class = $info;
         $node = $info->node;
         $js = Js::name($info->name);
+        $interfaces = [];
+        foreach ($info->interfaces as $interface) {
+            // Built-in interfaces (Countable, JsonSerializable...) have no JS side.
+            if (!isset($this->classes[strtolower(ltrim($interface, '\\'))]) && interface_exists($interface, false)
+                && (new \ReflectionClass($interface))->isInternal()) {
+                continue;
+            }
+            $interfaces[] = $this->classReference($interface, $node);
+        }
+        if ($info->isInterface) {
+            $constants = [];
+            foreach ($node->stmts as $statement) {
+                if ($statement instanceof Stmt\ClassConst) {
+                    foreach ($statement->consts as $constant) {
+                        $constants[] = Js::string($constant->name->toString()).': function () { return '.$this->constantExpression($constant->value).'; }';
+                    }
+                }
+            }
+            $out = "var {$js} = PAM.iface(".Js::string($info->name).', ['.implode(', ', $interfaces)."]);\n";
+            if ($constants !== []) {
+                $out .= "PAM.consts({$js}, {".implode(', ', $constants)."});\n";
+            }
+            $this->class = null;
+
+            return $out;
+        }
         $parent = $info->parent === null ? 'PAM.Base' : $this->classReference($info->parent, $node);
         if ($info->isEnum) {
             $parent = 'PAM.Base';
@@ -98,6 +124,9 @@ final class PhpToJs
             $members,
         ))."\n};\n";
         $out .= "{$js}.phpName = ".Js::string($info->name).";\n";
+        if ($interfaces !== []) {
+            $out .= "PAM.implement({$js}, [".implode(', ', $interfaces)."]);\n";
+        }
         if ($constants !== []) {
             $out .= "PAM.consts({$js}, {".implode(', ', $constants)."});\n";
         }
@@ -880,6 +909,16 @@ final class PhpToJs
         $short = strtolower(ltrim($name, '\\'));
         if ($node->isFirstClassCallable()) {
             return 'PAM.f.'.$short;
+        }
+        if (($short === 'preg_match' || $short === 'preg_match_all') && count($node->args) >= 3) {
+            $matches = $node->args[2];
+            if (!$matches instanceof Node\Arg) {
+                throw $this->error($node, "{$short}() needs a \$matches variable");
+            }
+            $result = $this->temporary();
+            $rest = array_map(fn (Node\Arg|Node\VariadicPlaceholder $arg): string => $this->argument($arg), [$node->args[0], $node->args[1], ...array_slice($node->args, 3)]);
+
+            return "(({$result} = PAM.r.{$short}(".implode(', ', $rest).')), '.$this->assignTo($matches->value, "{$result}[0]").", {$result}[1])";
         }
         $byReference = ['sort', 'rsort', 'usort', 'uasort', 'uksort', 'ksort', 'krsort', 'asort', 'arsort', 'shuffle',
             'array_push', 'array_pop', 'array_shift', 'array_unshift', 'array_splice'];

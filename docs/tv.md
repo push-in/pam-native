@@ -179,13 +179,23 @@ The remote keys arrive with the same W3C names as on Android: Tizen's Return
 `tizen.tvinputdevice` at launch. `useFormFactor()` reports a TV with a remote.
 
 What compiles: components, variants (`.tv.pam.php` wins), classes, enums,
-interfaces, closures, `match`, exceptions, string/array functions and
-`sprintf`, the template directives and the `@media (device-type: tv)` and
+interfaces (`instanceof` and their constants), traits, closures, `match`,
+exceptions, string/array/ctype functions, `sprintf`, `preg_*` (PCRE patterns
+become JavaScript RegExps; named groups work on Chromium 63), the template directives and the `@media (device-type: tv)` and
 `(input-mode: remote)` queries. What the build refuses, with the file and
 line: native modules and plugins, file and network I/O, references (`&`) other
 than the sort and array functions, `goto`, generators and PHP functions with no
 JavaScript version. Tags the web runtime does not know are drawn as `View`,
 with a warning.
+
+Composer packages compile too, without running PHP: the build reads
+`vendor/composer` (classmap, PSR-4, PSR-0 and `files`) and follows the
+classes, interfaces, traits and functions the app reaches from `src/` and the
+entry script, so a package adds only the code the app uses. A pure PHP library
+works as is (for example `cocur/slugify`); one that needs I/O or a PHP feature
+the build refuses stops the build with its own file and line, such as
+`vendor/acme/lib/src/Client.php:42: curl_init() is not available in web builds`.
+For HTTP and storage use the PAM Native APIs.
 
 `scripts/web-e2e.py` runs the same end-to-end scripts on the build, in
 headless Chrome with each TV's key codes:

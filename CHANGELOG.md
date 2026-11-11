@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Web TV builds compile the Composer packages the app uses: the build follows
+  `vendor/composer` (classmap, PSR-4, PSR-0, `files`) from `src/` and the
+  entry script and compiles only the classes, interfaces, traits and functions
+  the app reaches; anything it cannot compile fails the build with the
+  package's file and line.
+- Web builds: traits, interfaces with `instanceof` and constants, `preg_*`
+  (PCRE to RegExp, named groups on Chromium 63) and about 70 more string,
+  array, ctype and URL functions.
+
 ## 1.48.0 - 2026-11-11
 
 Samsung (Tizen) and LG (webOS) TVs, without a server: the PHP app is compiled

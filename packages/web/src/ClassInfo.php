@@ -6,7 +6,7 @@ namespace Pam\Native\Web;
 
 use PhpParser\Node\Stmt;
 
-/** A class, enum or component of the app, collected before translation. */
+/** A class, interface, enum or component of the app or of a Composer package, collected before translation. */
 final class ClassInfo
 {
     public bool $isComponent = false;
@@ -15,6 +15,9 @@ final class ClassInfo
     public string $templateFile = '';
     public string $style = '';
     public bool $styleScoped = true;
+    public bool $isInterface = false;
+    /** @var list<string> */
+    public array $interfaces = [];
 
     /**
      * @param array<string, bool> $methods lower-case name => static

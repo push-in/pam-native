@@ -43,6 +43,11 @@ final class BuilderTest extends TestCase
 
     protected function tearDown(): void
     {
+        if (getenv('PAM_WEB_KEEP') !== false) {
+            fwrite(STDERR, "kept {$this->app}\n");
+
+            return;
+        }
         exec('rm -rf '.escapeshellarg($this->app));
     }
 
@@ -89,6 +94,46 @@ final class BuilderTest extends TestCase
         }
     }
 
+    public function testCompilesOnlyTheComposerCodeTheAppUses(): void
+    {
+        $this->vendorPackage();
+        $this->component(<<<'PHP'
+                public string $label = '';
+
+                public function add(): void
+                {
+                    $money = new \Acme\Money\Money(1250);
+                    $this->label = $money instanceof \Acme\Money\Formattable ? $money->format() : acme_upper('none');
+                }
+            PHP);
+
+        (new Builder($this->app, 'tizen', $this->app.'/dist', true))->build();
+
+        $js = (string) file_get_contents($this->app.'/dist/app.js');
+        self::assertStringContainsString('class Acme_Money_Money extends Acme_Money_Amount', $js);
+        self::assertStringContainsString('var Acme_Money_Formattable = PAM.iface(', $js);
+        self::assertStringContainsString('PAM.implement(Acme_Money_Money, [Acme_Money_Formattable])', $js);
+        self::assertStringContainsString('cents()', $js, 'the trait method is copied into the class');
+        self::assertStringContainsString('function fn_acme_upper', $js);
+        self::assertStringNotContainsString('Acme_Money_Unused', $js, 'classes the app never reaches are left out');
+        $this->assertValidJavaScript($this->app.'/dist/app.js');
+    }
+
+    public function testRefusesComposerCodeItCannotCompileWithItsFile(): void
+    {
+        $this->vendorPackage();
+        $this->component(<<<'PHP'
+                public function add(): void
+                {
+                    \Acme\Money\Unused::all();
+                }
+            PHP);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('#vendor/acme/money/src/Unused\.php:\d+: .*not supported in web builds#');
+        (new Builder($this->app, 'tizen', $this->app.'/dist', true))->build();
+    }
+
     public function testResolvesTvMediaQueriesForTheTarget(): void
     {
         $style = '.box { color: red; } @media (device-type: tv) { .box { color: blue; } }';
@@ -99,6 +144,46 @@ final class BuilderTest extends TestCase
         self::assertStringContainsString('blue', $tv);
         self::assertStringNotContainsString('blue', $phone);
         self::assertStringContainsString('.box.s1', $tv);
+    }
+
+    /** A Composer package as `composer install` lays it out: PSR-4 classes and a files autoload. */
+    public function testRuntimeFunctionsBehaveLikePhp(): void
+    {
+        exec('command -v node', $found, $missing);
+        if ($missing !== 0) {
+            self::markTestIncomplete('node is not installed');
+        }
+        exec('node '.escapeshellarg(__DIR__.'/runtime.test.js').' 2>&1', $output, $status);
+        self::assertSame(0, $status, implode("\n", $output));
+        self::assertSame([], preg_grep('/^FAIL/', $output), implode("\n", $output));
+    }
+
+    private function vendorPackage(): void
+    {
+        $package = $this->app.'/vendor/acme/money';
+        mkdir($package.'/src', 0o777, true);
+        mkdir($this->app.'/vendor/composer', 0o777, true);
+        file_put_contents($this->app.'/vendor/composer/autoload_psr4.php', <<<'PHP'
+            <?php
+            $vendorDir = dirname(__DIR__);
+            return array('Acme\\Money\\' => array($vendorDir . '/acme/money/src'));
+            PHP);
+        file_put_contents($this->app.'/vendor/composer/autoload_files.php', <<<'PHP'
+            <?php
+            $vendorDir = dirname(__DIR__);
+            return array('a1b2' => $vendorDir . '/acme/money/functions.php');
+            PHP);
+        $files = [
+            'functions.php' => "<?php\nif (!function_exists('acme_upper')) {\n    function acme_upper(string \$text): string { return strtoupper(\$text); }\n}\n",
+            'src/Formattable.php' => "<?php\nnamespace Acme\\Money;\ninterface Formattable { public const CURRENCY = 'BRL'; public function format(): string; }\n",
+            'src/HasCents.php' => "<?php\nnamespace Acme\\Money;\ntrait HasCents { public function cents(): int { return \$this->value % 100; } }\n",
+            'src/Amount.php' => "<?php\nnamespace Acme\\Money;\nabstract class Amount { public function __construct(protected int \$value) {} abstract public function format(): string; }\n",
+            'src/Money.php' => "<?php\nnamespace Acme\\Money;\nfinal class Money extends Amount implements Formattable, \\JsonSerializable {\n    use HasCents;\n    public function format(): string { return acme_upper(self::CURRENCY).' '.intdiv(\$this->value, 100).','.str_pad((string) \$this->cents(), 2, '0', STR_PAD_LEFT); }\n    public function jsonSerialize(): mixed { return \$this->value; }\n}\n",
+            'src/Unused.php' => "<?php\nnamespace Acme\\Money;\nfinal class Unused { public static function all(): iterable { yield 1; } }\n",
+        ];
+        foreach ($files as $name => $contents) {
+            file_put_contents($package.'/'.$name, $contents);
+        }
     }
 
     private function component(string $body): void

@@ -7,7 +7,10 @@ namespace Pam\Native\Web;
 use Pam\Native\Internal\TemplateCompiler;
 use PhpParser\Node;
 use PhpParser\Node\Stmt;
+use PhpParser\Node\Expr;
+use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
@@ -31,6 +34,15 @@ final class Builder
     private array $functions = [];
     /** @var list<string> */
     public array $warnings = [];
+    /** @var array<string, array{node: Stmt\Trait_, file: string, ready: bool}> */
+    private array $traits = [];
+    private ComposerAutoload $composer;
+    /** @var array<string, true> */
+    private array $loaded = [];
+    /** @var array<string, array{node: Stmt\Function_, file: string}>|null */
+    private ?array $vendorFunctions = null;
+    /** @var list<Stmt> */
+    private array $entryAst = [];
 
     public function __construct(
         private readonly string $root,
@@ -42,6 +54,7 @@ final class Builder
             throw new RuntimeException("Unknown web target {$target}; use one of: ".implode(', ', self::TARGETS).'.');
         }
         $this->parser = (new ParserFactory())->createForNewestSupportedVersion();
+        $this->composer = new ComposerAutoload($root);
     }
 
     /** @return array{files: array<string, int>, warnings: list<string>} */
@@ -52,7 +65,9 @@ final class Builder
         $tv = $this->target !== 'web' || $this->tv;
         $overscan = (bool) ($manifest['web']['tv']['overscan'] ?? $manifest['android']['tv']['overscan'] ?? true);
 
+        $this->entryAst = $this->parse($entry);
         $this->collect();
+        $this->link();
         $features = ['device-type' => $tv ? 'tv' : 'tablet', 'input-mode' => $tv ? 'remote' : 'pointer'];
 
         $js = [];
@@ -91,8 +106,7 @@ final class Builder
                 $css[] = StyleToCss::compile($info->style, $info->styleScoped ? 's'.$scope : null, $features, $this->relative($info->templateFile));
             }
         }
-        $entryAst = $this->parse($entry);
-        $js[] = $translator->script($entryAst, $this->relative($entry));
+        $js[] = $translator->script($this->entryAst, $this->relative($entry));
 
         $config = [
             'target' => $this->target,
@@ -151,6 +165,13 @@ final class Builder
             }
         }
         sort($files);
+        $parsed = [];
+        foreach ($files as $file) {
+            if (!str_ends_with($file, '.pam.php')) {
+                $parsed[$file] = $this->parse($file);
+                $this->registerTraits($parsed[$file], $file);
+            }
+        }
         $variants = [];
         foreach ($files as $file) {
             if (preg_match('/^(.*)\.(tv|phone|tablet)\.pam\.php$/D', $file, $match) === 1) {
@@ -165,7 +186,7 @@ final class Builder
                 $this->component($file, $variants[$file] ?? []);
                 continue;
             }
-            $this->declarations($this->parse($file), $file);
+            $this->declarations($parsed[$file], $file);
         }
         // A class is a component when it extends Component, directly or not.
         foreach ($this->classes as $info) {
@@ -277,12 +298,13 @@ final class Builder
                 $this->functions[strtolower($name)] = ['node' => $statement, 'file' => $this->relative($file), 'js' => 'fn_'.Js::name($name)];
                 continue;
             }
-            if (!($statement instanceof Stmt\Class_ || $statement instanceof Stmt\Enum_)) {
-                if ($statement instanceof Stmt\Trait_) {
-                    throw new RuntimeException($this->relative($file).':'.$statement->getStartLine().': traits are not supported in web builds yet.');
-                }
+            if ($statement instanceof Stmt\Trait_) {
                 continue;
             }
+            if (!($statement instanceof Stmt\Class_ || $statement instanceof Stmt\Enum_ || $statement instanceof Stmt\Interface_)) {
+                continue;
+            }
+            $this->useTraits($statement, $file);
             $name = $statement->namespacedName?->toString() ?? (string) $statement->name;
             $methods = [];
             $properties = [];
@@ -305,11 +327,194 @@ final class Builder
             }
             $parent = $statement instanceof Stmt\Class_ && $statement->extends !== null ? $statement->extends->toString() : null;
             $info = new ClassInfo($name, $this->relative($file), $statement, $parent, $statement instanceof Stmt\Enum_, $methods, $properties);
+            $info->isInterface = $statement instanceof Stmt\Interface_;
+            $interfaces = $statement instanceof Stmt\Interface_ ? $statement->extends
+                : ($statement instanceof Stmt\Class_ || $statement instanceof Stmt\Enum_ ? $statement->implements : []);
+            $info->interfaces = array_map(static fn (Node\Name $interface): string => $interface->toString(), $interfaces);
             $this->classes[strtolower($name)] = $info;
             $found[] = $info;
         }
 
         return $found;
+    }
+
+    /** @param list<Node> $statements */
+    private function registerTraits(array $statements, string $file): void
+    {
+        foreach ($statements as $statement) {
+            if ($statement instanceof Stmt\Namespace_) {
+                $this->registerTraits($statement->stmts, $file);
+            } elseif ($statement instanceof Stmt\Trait_) {
+                $name = $statement->namespacedName?->toString() ?? (string) $statement->name;
+                $this->traits[strtolower($name)] = ['node' => $statement, 'file' => $file, 'ready' => false];
+            }
+        }
+    }
+
+    /** Copies the members of the traits a class uses into the class, as PHP does. */
+    private function useTraits(Stmt\ClassLike $node, string $file): void
+    {
+        $own = [];
+        foreach ($node->stmts as $member) {
+            foreach (self::memberKeys($member) as $key) {
+                $own[$key] = true;
+            }
+        }
+        $statements = [];
+        foreach ($node->stmts as $member) {
+            if (!$member instanceof Stmt\TraitUse) {
+                $statements[] = $member;
+                continue;
+            }
+            if ($member->adaptations !== []) {
+                throw new RuntimeException($this->relative($file).':'.$member->getStartLine().': trait adaptations (insteadof, as) are not supported in web builds yet.');
+            }
+            foreach ($member->traits as $traitName) {
+                $trait = $this->trait($traitName->toString(), $file, $member->getStartLine());
+                foreach ($trait->stmts as $traitMember) {
+                    $keys = self::memberKeys($traitMember);
+                    if ($keys !== [] && array_intersect_key(array_flip($keys), $own) !== []) {
+                        continue;
+                    }
+                    foreach ($keys as $key) {
+                        $own[$key] = true;
+                    }
+                    [$statements[]] = (new NodeTraverser(new CloningVisitor()))->traverse([$traitMember]);
+                }
+            }
+        }
+        $node->stmts = $statements;
+    }
+
+    /** @return list<string> */
+    private static function memberKeys(Node $member): array
+    {
+        return match (true) {
+            $member instanceof Stmt\ClassMethod => ['m:'.$member->name->toLowerString()],
+            $member instanceof Stmt\Property => array_map(static fn ($property): string => 'p:'.$property->name->toString(), $member->props),
+            $member instanceof Stmt\ClassConst => array_map(static fn ($constant): string => 'c:'.$constant->name->toString(), $member->consts),
+            default => [],
+        };
+    }
+
+    private function trait(string $name, string $file, int $line): Stmt\Trait_
+    {
+        $lower = strtolower(ltrim($name, '\\'));
+        if (!isset($this->traits[$lower])) {
+            $this->loadClassFile($name);
+        }
+        if (!isset($this->traits[$lower])) {
+            throw new RuntimeException($this->relative($file).':'.$line.": trait {$name} is not in src/ or vendor/.");
+        }
+        if (!$this->traits[$lower]['ready']) {
+            $this->traits[$lower]['ready'] = true;
+            $this->useTraits($this->traits[$lower]['node'], $this->traits[$lower]['file']);
+        }
+
+        return $this->traits[$lower]['node'];
+    }
+
+    /**
+     * Compiles the Composer classes and functions the app reaches, following
+     * references from src/ and the entry script until nothing new turns up.
+     */
+    private function link(): void
+    {
+        $queue = [$this->entryAst];
+        foreach ($this->classes as $info) {
+            $queue[] = [$info->node];
+        }
+        foreach ($this->functions as $function) {
+            $queue[] = [$function['node']];
+        }
+        $finder = new NodeFinder();
+        while ($queue !== []) {
+            $nodes = array_pop($queue);
+            $before = count($this->classes);
+            $functions = count($this->functions);
+            foreach ($finder->find($nodes, static fn (Node $node): bool => $node instanceof Expr\New_
+                || $node instanceof Expr\StaticCall || $node instanceof Expr\StaticPropertyFetch
+                || $node instanceof Expr\ClassConstFetch || $node instanceof Expr\Instanceof_
+                || $node instanceof Stmt\Catch_ || $node instanceof Stmt\Class_ || $node instanceof Stmt\Interface_
+                || $node instanceof Stmt\Enum_ || $node instanceof Expr\FuncCall) as $node) {
+                $names = match (true) {
+                    $node instanceof Stmt\Catch_ => $node->types,
+                    $node instanceof Stmt\Class_ => [$node->extends, ...$node->implements],
+                    $node instanceof Stmt\Interface_ => $node->extends,
+                    $node instanceof Stmt\Enum_ => $node->implements,
+                    $node instanceof Expr\FuncCall => [],
+                    $node instanceof Expr\ClassConstFetch && $node->name instanceof Node\Identifier
+                        && $node->name->toLowerString() === 'class' => [],
+                    default => [$node->class],
+                };
+                foreach ($names as $name) {
+                    if ($name instanceof Node\Name && !$name->isSpecialClassName()) {
+                        $this->loadClassFile($name->toString());
+                    }
+                }
+                if ($node instanceof Expr\FuncCall && $node->name instanceof Node\Name) {
+                    $namespaced = $node->name->getAttribute('namespacedName');
+                    $this->loadFunction([$namespaced instanceof Node\Name ? $namespaced->toString() : null, $node->name->toString()]);
+                }
+            }
+            foreach (array_slice($this->classes, $before) as $info) {
+                $queue[] = [$info->node];
+            }
+            foreach (array_slice($this->functions, $functions) as $function) {
+                $queue[] = [$function['node']];
+            }
+        }
+    }
+
+    private function loadClassFile(string $name): void
+    {
+        $name = ltrim($name, '\\');
+        $lower = strtolower($name);
+        if (isset($this->classes[$lower]) || isset($this->traits[$lower]) || str_starts_with($lower, 'pam\\native\\')
+            || in_array($name, Stdlib::EXCEPTIONS, true)) {
+            return;
+        }
+        $file = $this->composer->find($name);
+        if ($file === null) {
+            return;
+        }
+        $real = realpath($file) ?: $file;
+        if (isset($this->loaded[$real])) {
+            return;
+        }
+        $this->loaded[$real] = true;
+        $statements = $this->parse($file);
+        $this->registerTraits($statements, $file);
+        $this->declarations($statements, $file);
+    }
+
+    /** @param list<?string> $candidates */
+    private function loadFunction(array $candidates): void
+    {
+        if ($this->vendorFunctions === null) {
+            $this->vendorFunctions = [];
+            foreach ($this->composer->files as $file) {
+                // Polyfills declare functions inside `if (!function_exists())`.
+                foreach ((new NodeFinder())->findInstanceOf($this->parse($file), Stmt\Function_::class) as $function) {
+                    $name = $function->namespacedName?->toString() ?? $function->name->toString();
+                    if (!in_array(strtolower($name), Stdlib::FUNCTIONS, true)) {
+                        $this->vendorFunctions[strtolower($name)] ??= ['node' => $function, 'file' => $file];
+                    }
+                }
+            }
+        }
+        foreach (array_filter($candidates) as $candidate) {
+            $lower = strtolower(ltrim($candidate, '\\'));
+            if (isset($this->functions[$lower])) {
+                return;
+            }
+            if (isset($this->vendorFunctions[$lower])) {
+                $function = $this->vendorFunctions[$lower];
+                $this->functions[$lower] = ['node' => $function['node'], 'file' => $this->relative($function['file']), 'js' => 'fn_'.Js::name($function['node']->namespacedName?->toString() ?? $function['node']->name->toString())];
+
+                return;
+            }
+        }
     }
 
     private function extendsComponent(ClassInfo $info): bool
@@ -337,8 +542,10 @@ final class Builder
                 return;
             }
             $done[$info->name] = true;
-            if ($info->parent !== null && isset($this->classes[strtolower($info->parent)])) {
-                $visit($this->classes[strtolower($info->parent)]);
+            foreach ([$info->parent, ...$info->interfaces] as $dependency) {
+                if ($dependency !== null && isset($this->classes[strtolower($dependency)])) {
+                    $visit($this->classes[strtolower($dependency)]);
+                }
             }
             $out[] = $info;
         };

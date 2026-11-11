@@ -24,7 +24,19 @@ final class Stdlib
         'array_reverse', 'array_search', 'array_key_exists', 'array_key_first', 'array_key_last', 'array_column',
         'array_combine', 'array_flip', 'array_unique', 'array_sum', 'array_fill', 'array_chunk', 'in_array',
         'range', 'json_encode', 'json_decode', 'time', 'microtime', 'hrtime', 'random_int', 'mt_rand', 'uniqid',
-        'spl_object_id', 'gettype', 'get_debug_type', 'date',
+        'spl_object_id', 'gettype', 'get_debug_type', 'date', 'preg_match', 'preg_match_all', 'preg_replace',
+        'preg_replace_callback', 'preg_split', 'preg_quote', 'preg_grep',
+        'addslashes', 'array_all', 'array_any', 'array_count_values', 'array_diff', 'array_diff_key',
+        'array_fill_keys', 'array_find', 'array_intersect', 'array_intersect_key', 'array_pad', 'array_product',
+        'array_rand', 'array_replace', 'base64_decode', 'base64_encode', 'base_convert', 'bin2hex', 'bindec', 'chr',
+        'ctype_alnum', 'ctype_alpha', 'ctype_digit', 'ctype_lower', 'ctype_punct', 'ctype_space', 'ctype_upper',
+        'ctype_xdigit', 'decbin', 'dechex', 'decoct', 'hexdec', 'html_entity_decode', 'htmlspecialchars_decode',
+        'http_build_query', 'is_callable', 'is_countable', 'is_iterable', 'is_object', 'is_scalar',
+        'iterator_to_array', 'lcg_value', 'mb_chr', 'mb_ord', 'mb_str_split', 'mb_strpos', 'method_exists',
+        'octdec', 'ord', 'property_exists', 'rawurldecode', 'rawurlencode', 'str_ireplace', 'str_split',
+        'strcasecmp', 'strcmp', 'strip_tags', 'stripos', 'stripslashes', 'stristr', 'strnatcasecmp', 'strnatcmp',
+        'strncasecmp', 'strncmp', 'strrchr', 'strrev', 'strrpos', 'strstr', 'strtr', 'substr_count', 'urldecode',
+        'urlencode', 'vsprintf', 'wordwrap',
     ];
 
     /** `Pam\Native` functions and classes, by short name, implemented on `PAM`. */
@@ -64,6 +76,13 @@ final class Stdlib
         'JSON_UNESCAPED_SLASHES' => '0',
         'JSON_UNESCAPED_UNICODE' => '0',
         'JSON_PRETTY_PRINT' => '0',
+        'PREG_PATTERN_ORDER' => '1',
+        'PREG_SET_ORDER' => '2',
+        'PREG_OFFSET_CAPTURE' => '256',
+        'PREG_UNMATCHED_AS_NULL' => '512',
+        'PREG_SPLIT_NO_EMPTY' => '1',
+        'PREG_SPLIT_DELIM_CAPTURE' => '2',
+        'PREG_SPLIT_OFFSET_CAPTURE' => '4',
     ];
 
     /** @param list<string> $arguments */
