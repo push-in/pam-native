@@ -27,7 +27,7 @@
     "pushinbr/pam-native-scanner": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-share-extension": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-subscriptions": ">=0.1.0 <1.0.0",
-    "pushinbr/pam-native-video": "^0.3.0",
+    "pushinbr/pam-native-video": "^0.4.1",
     "pushinbr/pam-native-widgets": ">=0.1.0 <1.0.0"
     },
     "config": {

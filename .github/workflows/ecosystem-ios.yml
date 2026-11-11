@@ -33,6 +33,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+      # The plugins are developed and certified with the newest Xcode 26; the
+      # image default can be an older 26.x whose compiler rejects them.
+      - name: Select the newest installed Xcode 26
+        run: |
+          set -euo pipefail
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          sudo xcode-select -s "${xcode}/Contents/Developer"
+          xcodebuild -version
       - name: Fetch released plugin sources
         env:
           GH_TOKEN: ${{ github.token }}
