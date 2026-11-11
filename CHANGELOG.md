@@ -31,6 +31,8 @@ See [docs/tv.md](docs/tv.md).
   remote and check the screen and the focus. `examples/tv` (PAM TV) runs one
   on a Google TV emulator.
 - Protocol: extension event 1001 (`KeyDown`) and properties 1012-1020.
+- mbstring polyfill: like ext-mbstring since PHP 8.5.12, a lone surrogate
+  from UCS-2/4 written to UTF-8 is substituted instead of kept.
 
 ## 1.46.34 - 2026-11-02
 

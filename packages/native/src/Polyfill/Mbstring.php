@@ -55,6 +55,8 @@ final class Mbstring
 
     /** A byte sequence that is invalid in the source encoding. */
     private const int BAD = -1;
+    /** PHP 8.5.12 substitutes lone surrogates written to UTF-8. */
+    private const bool SURROGATES_FAIL = PHP_VERSION_ID >= 80512;
 
     private const int MODE_CHAR = 0;
     private const int MODE_NONE = 1;
@@ -1211,9 +1213,10 @@ final class Mbstring
             foreach ($units as $unit) {
                 if (is_string($unit)) {
                     $out .= $unit;
-                } elseif ($unit !== self::BAD && $unit < 0x110000) {
-                    // Like ext-mbstring, a lone surrogate decoded from UCS-2/4
-                    // is written as its three-byte form, not substituted.
+                } elseif ($unit !== self::BAD && $unit < 0x110000 && !self::SURROGATES_FAIL) {
+                    // Before PHP 8.5.12, ext-mbstring writes a lone surrogate
+                    // decoded from UCS-2/4 as its three-byte form; since then
+                    // it substitutes it like any other invalid code point.
                     $out .= self::character($unit);
                 } else {
                     $out .= self::failure($unit, $name);
