@@ -145,19 +145,46 @@ fn build(target: &str, options: &Options) -> Result<PathBuf, String> {
         .out
         .clone()
         .unwrap_or_else(|| project.join("dist").join(target));
-    let compiler = compiler(&project)?;
+    compile(&compiler(&project)?, &project, target, &dist)?;
+    Ok(dist)
+}
+
+fn compile(compiler: &Path, project: &Path, target: &str, out: &Path) -> Result<(), String> {
     let status = Command::new(crate::mobile::host_php())
-        .arg(&compiler)
+        .arg(compiler)
         .arg("build")
-        .arg(&project)
+        .arg(project)
         .args(["--target", target, "--out"])
-        .arg(&dist)
+        .arg(out)
         .status()
         .map_err(|error| format!("cannot start the web compiler: {error}"))?;
     if !status.success() {
         return Err(format!("the web compiler exited with {status}"));
     }
-    Ok(dist)
+    Ok(())
+}
+
+/// The web build 32-bit Android TVs run (PamWebActivity), written to the APK
+/// assets. `Ok(false)` when the project has no web compiler: the APK is then
+/// 64-bit only, as before.
+pub(crate) fn android_fallback(project: &Path, assets: &Path) -> Result<bool, String> {
+    remove_android_fallback(assets)?;
+    let out = assets.join("pam-web");
+    let Ok(compiler) = compiler(project) else {
+        eprintln!(
+            "PAM Native: 32-bit Android TVs (armeabi-v7a) need the web build; add it with `pam composer require --dev pushinbr/pam-native-web`"
+        );
+        return Ok(false);
+    };
+    if let Err(error) = compile(&compiler, project, "web", &out) {
+        // The native APK still builds; only 32-bit TVs are left out.
+        eprintln!(
+            "PAM Native warning: no 32-bit Android TV build ({error}); the APK is 64-bit only"
+        );
+        remove_android_fallback(assets)?;
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// The project's `vendor/bin/pam-native-web`, else the SDK copy.
@@ -177,6 +204,15 @@ fn compiler(project: &Path) -> Result<PathBuf, String> {
             "the web compiler is missing; run `pam composer require --dev pushinbr/pam-native-web`"
                 .to_owned()
         })
+}
+
+pub(crate) fn remove_android_fallback(assets: &Path) -> Result<(), String> {
+    let out = assets.join("pam-web");
+    if out.exists() {
+        fs::remove_dir_all(&out)
+            .map_err(|error| format!("cannot remove {}: {error}", out.display()))?;
+    }
+    Ok(())
 }
 
 fn artifacts(options: &Options) -> Result<PathBuf, String> {

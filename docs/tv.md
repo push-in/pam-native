@@ -7,10 +7,11 @@ phones, tablets and TVs, and the framework handles the remote control.
 Samsung (Tizen) and LG (webOS) TVs run HTML/JS apps: for them the same app
 is compiled to a static HTML/JS build, with no PHP and no server on the TV
 (see [Samsung and LG TVs](#samsung-and-lg-tvs-tizen-and-webos)). Apple TV
-(tvOS) is not a target yet. Android TVs need 64-bit Android (`arm64-v8a`, or `x86_64` emulators):
-devices that run 32-bit Android (`armeabi-v7a` only, such as the 2020
-Chromecast with Google TV and older Fire TV sticks) are not supported yet,
-because the PHP SDK needs 64-bit integers (ARGB colors, node ids).
+(tvOS) is not a target yet. The native renderer needs 64-bit Android (`arm64-v8a`, or `x86_64`
+emulators), because the PHP SDK uses 64-bit integers (ARGB colors, node ids).
+Devices that run 32-bit Android (`armeabi-v7a`, such as the 2020 Chromecast
+with Google TV and older Fire TV sticks) get the same APK and open the app's
+web build in a WebView instead (see [32-bit Android TVs](#32-bit-android-tvs)).
 
 ## Add the target
 
@@ -144,6 +145,26 @@ and have no `on:press`, `on:keyDown` or `focusable`: a remote cannot reach
 them. Add a press, a key handler, or a `.tv.pam.php` variant. A component
 with a TV variant is checked through its variant. The warning never fails
 the build.
+
+## 32-bit Android TVs
+
+With `android-tv` in `targets` and `pushinbr/pam-native-web` installed,
+`pam mobile build` also compiles the app to the web build (see below) into the
+APK assets and adds `armeabi-v7a` and `x86` to the APK with a 3 KB stub
+library, so the APK installs on 32-bit devices. There `PamActivity` hands off
+to `PamWebActivity`, a WebView with the web build: the D-pad, OK and the media
+keys reach the page, Back goes through the app's focus engine and leaves the app
+at the root. 64-bit devices keep the native renderer. If the app uses
+something the web build refuses, the build prints a warning and the APK stays
+64-bit only.
+
+`examples/tv` passes its 25 steps on an Android TV 9 x86 emulator (32-bit,
+WebView 66), with the keys sent through adb:
+
+```bash
+adb forward tcp:9334 localabstract:webview_devtools_remote_$(adb shell pidof dev.pam.tv.debug)
+scripts/web-e2e.py examples/tv/tests/e2e.json --cdp http://127.0.0.1:9334 --adb --target web
+```
 
 ## Samsung and LG TVs (Tizen and webOS)
 

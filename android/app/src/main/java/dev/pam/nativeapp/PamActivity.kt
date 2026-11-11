@@ -54,6 +54,8 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
     private var suppressBackUntil = 0L
+    /** 32-bit device: this activity only handed off to [PamWebActivity]. */
+    private var webFallback = false
     private var errorOverlay: ErrorOverlay? = null
     private var errorOverlayParent: FrameLayout? = null
 
@@ -131,6 +133,13 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (PamWebActivity.required(this)) {
+            webFallback = true
+            super.onCreate(savedInstanceState)
+            startActivity(Intent(intent).setClass(this, PamWebActivity::class.java))
+            finish()
+            return
+        }
         if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
             Log.d(
                 PERFORMANCE_TAG,
@@ -602,6 +611,10 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onDestroy() {
+        if (webFallback) {
+            super.onDestroy()
+            return
+        }
         hiddenTrimHandler.removeCallbacks(hiddenTrim)
         dev.pam.nativeapp.render.PamSafeAreaInspector.detach(window)
         releaseSplash()

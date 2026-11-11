@@ -25,6 +25,11 @@ ahead of time to static HTML/JS. See
 - Web builds: traits, interfaces with `instanceof` and constants, `preg_*`
   (PCRE to RegExp, named groups on Chromium 63) and about 70 more string,
   array, ctype and URL functions.
+- 32-bit Android TVs (`armeabi-v7a`): apps with the `android-tv` target and
+  `pushinbr/pam-native-web` ship the web build in the APK; on 32-bit devices
+  `PamActivity` hands off to `PamWebActivity` (WebView), with the remote's
+  keys and Back. 64-bit devices keep the native renderer.
+- `scripts/web-e2e.py --adb` sends the keys through adb for the Android WebView.
 
 ## 1.47.0 - 2026-11-11
 

@@ -13,6 +13,11 @@ Chrome runs headless on the GPU (ANGLE over EGL), 1920x1080 like a 1080p TV.
 With --cdp the script attaches instead to the app already running on a TV or
 emulator through its DevTools port (Tizen: `sdb shell 0 debug <app id>` and
 `sdb forward tcp:<port> tcp:<port>`); `launch` then reloads the app.
+
+32-bit Android TVs run the web build in a WebView: with --adb the remote keys
+go through `adb shell input keyevent` (Back reaches the activity first, as on
+the device) and --cdp reads the WebView, forwarded with
+`adb forward tcp:9334 localabstract:webview_devtools_remote_<pid>`.
 """
 
 import argparse
@@ -22,6 +27,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -37,6 +43,9 @@ TV_KEYS = {
     "web": {},
 }
 ERROR_HOOK = "window.addEventListener('error', e => { window.__pamError = e.message; });"
+ANDROID_KEYS = {"ArrowUp": 19, "ArrowDown": 20, "ArrowLeft": 21, "ArrowRight": 22, "Enter": 23, "GoBack": 4,
+                "MediaPlayPause": 85, "MediaPlay": 126, "MediaPause": 127, "MediaStop": 86,
+                "MediaFastForward": 90, "MediaRewind": 89}
 KEYBOARD = {"ArrowUp": 38, "ArrowDown": 40, "ArrowLeft": 37, "ArrowRight": 39, "Enter": 13, "GoBack": 27,
             "Escape": 27, " ": 32}
 
@@ -61,7 +70,12 @@ def until(page, condition, seconds, failure):
         time.sleep(0.05)
 
 
-def press(session, target, name):
+def press(session, target, name, adb=False):
+    if adb:
+        if name not in ANDROID_KEYS:
+            raise AssertionError(f"{name} is not an Android remote key")
+        subprocess.run(["adb", "shell", "input", "keyevent", str(ANDROID_KEYS[name])], check=True)
+        return
     code = TV_KEYS[target].get(name)
     if code is not None:
         events = [{"windowsVirtualKeyCode": code, "nativeVirtualKeyCode": code, "key": "Unidentified"}]
@@ -205,7 +219,7 @@ class Browser:
         self.browser.close()
 
 
-def run(steps, app, target, shots, endpoint=None):
+def run(steps, app, target, shots, endpoint=None, adb=False):
     url = (Path(app).resolve() / "index.html").as_uri() if app else None
     with contextlib.ExitStack() as stack:
         if endpoint:
@@ -233,7 +247,7 @@ def run(steps, app, target, shots, endpoint=None):
                     until(session, lambda s: text in s["focus"], step.get("timeout", 5), f"the focus is not on {text!r}")
                 elif "key" in step:
                     for _ in range(step.get("times", 1)):
-                        press(session, target, step["key"])
+                        press(session, target, step["key"], adb)
                         time.sleep(step.get("delay", 0.08))
                 elif "tap" in step:
                     session.tap(step["tap"])
@@ -262,11 +276,13 @@ def main():
     parser.add_argument("--app", help="the build directory (with index.html)")
     parser.add_argument("--cdp", help="DevTools endpoint of the app on a TV or emulator (http://127.0.0.1:<port>)")
     parser.add_argument("--target", choices=sorted(TV_KEYS), default="tizen")
+    parser.add_argument("--adb", action="store_true", help="send the keys with adb (Android WebView, with --cdp)")
     parser.add_argument("--shots", help="directory for shot steps and the failure screenshot")
     arguments = parser.parse_args()
     if not arguments.app and not arguments.cdp:
         parser.error("--app or --cdp is required")
-    run(json.loads(Path(arguments.script).read_text()), arguments.app, arguments.target, arguments.shots, arguments.cdp)
+    run(json.loads(Path(arguments.script).read_text()), arguments.app, arguments.target, arguments.shots, arguments.cdp,
+        arguments.adb)
 
 
 if __name__ == "__main__":

@@ -497,7 +497,8 @@ final class Builder
                 // Polyfills declare functions inside `if (!function_exists())`.
                 foreach ((new NodeFinder())->findInstanceOf($this->parse($file), Stmt\Function_::class) as $function) {
                     $name = $function->namespacedName?->toString() ?? $function->name->toString();
-                    if (!in_array(strtolower($name), Stdlib::FUNCTIONS, true)) {
+                    // PAM Native's own functions (signal(), useFormFactor()...) are the runtime's.
+                    if (!in_array(strtolower($name), Stdlib::FUNCTIONS, true) && !str_starts_with(strtolower($name), 'pam\\native\\')) {
                         $this->vendorFunctions[strtolower($name)] ??= ['node' => $function, 'file' => $file];
                     }
                 }

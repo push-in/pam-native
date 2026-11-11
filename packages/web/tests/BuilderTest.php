@@ -102,6 +102,7 @@ final class BuilderTest extends TestCase
 
                 public function add(): void
                 {
+                    \Pam\Native\useFormFactor();
                     $money = new \Acme\Money\Money(1250);
                     $this->label = $money instanceof \Acme\Money\Formattable ? $money->format() : acme_upper('none');
                 }
@@ -116,6 +117,7 @@ final class BuilderTest extends TestCase
         self::assertStringContainsString('cents()', $js, 'the trait method is copied into the class');
         self::assertStringContainsString('function fn_acme_upper', $js);
         self::assertStringNotContainsString('Acme_Money_Unused', $js, 'classes the app never reaches are left out');
+        self::assertStringContainsString('PAM.useFormFactor()', $js);
         $this->assertValidJavaScript($this->app.'/dist/app.js');
     }
 
@@ -171,7 +173,7 @@ final class BuilderTest extends TestCase
         file_put_contents($this->app.'/vendor/composer/autoload_files.php', <<<'PHP'
             <?php
             $vendorDir = dirname(__DIR__);
-            return array('a1b2' => $vendorDir . '/acme/money/functions.php');
+            return array('a1b2' => $vendorDir . '/acme/money/functions.php', 'c3d4' => $vendorDir . '/pushinbr/pam-native/src/functions.php');
             PHP);
         $files = [
             'functions.php' => "<?php\nif (!function_exists('acme_upper')) {\n    function acme_upper(string \$text): string { return strtoupper(\$text); }\n}\n",
@@ -184,6 +186,9 @@ final class BuilderTest extends TestCase
         foreach ($files as $name => $contents) {
             file_put_contents($package.'/'.$name, $contents);
         }
+        // PAM Native's own functions come from the runtime, never from vendor/.
+        mkdir($this->app.'/vendor/pushinbr/pam-native/src', 0o777, true);
+        file_put_contents($this->app.'/vendor/pushinbr/pam-native/src/functions.php', "<?php\nnamespace Pam\\Native;\nfunction useFormFactor(): object { return Composables\\Sources::formFactor(); }\n");
     }
 
     private function component(string $body): void

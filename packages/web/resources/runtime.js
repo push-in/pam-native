@@ -1375,6 +1375,7 @@ var PAM = (function () {
     function back() {
         if (window.tizen && tizen.application) { try { tizen.application.getCurrentApplication().exit(); } catch (e) {} return; }
         if (window.webOS && typeof webOS.platformBack === 'function') { webOS.platformBack(); return; }
+        if (window.PamAndroid) { PamAndroid.exit(); return; }
         if (history.length > 1) history.back();
     }
 
@@ -1407,6 +1408,11 @@ var PAM = (function () {
             event.preventDefault();
             back();
         }
+    }
+
+    // A key from the host (Android's Back reaches the WebView's activity, not the page).
+    function hostKey(name) {
+        onKey({ key: name, keyCode: 0, ctrlKey: false, altKey: false, metaKey: false, preventDefault: function () {} });
     }
 
     function registerTvKeys() {
@@ -1442,7 +1448,7 @@ var PAM = (function () {
 
     return {
         config: config, g: g, App: App, Base: Base, Component: Component, KeyEvent: KeyEvent, H: H,
-        props: props, signal: signal, batch: batch, consts: consts, iface: iface, implement: implement, enumCases: enumCases, bound: bound,
+        props: props, signal: signal, batch: batch, consts: consts, key: hostKey, iface: iface, implement: implement, enumCases: enumCases, bound: bound,
         fn: fn, call: call, listOf: listOf, toArray: toArray, raise: raise, clone: clone, className: className, classOf: classOf, r: r,
         s: s, b: b, num: num, int: int, set: set, setIn: setIn, unset: unset, APPEND: APPEND, dig: dig, co: co,
         entries: entries, values: values, arr: arr, same: same, eq: eq, cmp: cmp, empty: empty, f: f,

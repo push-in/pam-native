@@ -90,9 +90,9 @@ impl AndroidAbi {
             "arm64-v8a" | "arm64" | "aarch64" => Ok(Self::Arm64),
             "x86_64" | "x64" => Ok(Self::X86_64),
             "armeabi-v7a" | "armv7" | "arm" => Err(
-                "armeabi-v7a is not supported yet: the PAM PHP SDK needs 64-bit integers \
-                 (ARGB colors and node ids), and 32-bit Android runs PHP with 32-bit ones. \
-                 TVs with 64-bit Android (arm64-v8a) are supported"
+                "armeabi-v7a is not a native ABI: the PAM PHP SDK needs 64-bit integers. \
+                 Apps with the android-tv target add armeabi-v7a by themselves, where they \
+                 open their web build (pushinbr/pam-native-web)"
                     .to_owned(),
             ),
             _ => Err(format!(
@@ -5959,6 +5959,18 @@ fn configure_android(
     abis: &[AndroidAbi],
 ) -> Result<(), String> {
     let sdk = android_sdk()?;
+    let assets = workspace.join("app/src/main/assets");
+    let web_fallback = if project.manifest.targets_android_tv() {
+        crate::web_tv::android_fallback(&project.root, &assets)?
+    } else {
+        crate::web_tv::remove_android_fallback(&assets)?;
+        false
+    };
+    let mut gradle_abis = display_abis(abis);
+    if web_fallback {
+        // 32-bit TVs, and x86 emulators to test them.
+        gradle_abis.push_str(",armeabi-v7a,x86");
+    }
     write_atomic(
         &workspace.join("local.properties"),
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
@@ -5987,7 +5999,7 @@ fn configure_android(
         project.manifest.android.target_sdk,
         project.manifest.version_code,
         property_value(&project.manifest.version_name),
-        display_abis(abis),
+        gradle_abis,
     );
     write_atomic(
         &workspace.join("pam-native.properties"),
@@ -8892,7 +8904,13 @@ fn connected_abi() -> Result<AndroidAbi, String> {
     if !output.status.success() {
         return Err("no authorized Android device is available through adb".to_owned());
     }
-    AndroidAbi::parse(String::from_utf8_lossy(&output.stdout).trim())
+    let abi = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if abi.starts_with("armeabi") || abi == "x86" {
+        // The APK also carries armeabi-v7a and x86, where the app runs its web build.
+        println!("PAM Native: the device runs 32-bit Android; the app opens its web build there");
+        return Ok(AndroidAbi::Arm64);
+    }
+    AndroidAbi::parse(&abi)
 }
 
 fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<(), String> {
