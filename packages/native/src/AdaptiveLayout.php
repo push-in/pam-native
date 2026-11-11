@@ -14,10 +14,11 @@ final class AdaptiveLayout
         ?WindowMetrics $window = null,
         bool $television = false,
     ): DeviceClass {
-        if ($television) {
+        $window ??= App::windowMetrics();
+        if ($television || $window->deviceType === 'tv') {
             return DeviceClass::Television;
         }
-        $width = ($window ?? App::windowMetrics())->width;
+        $width = $window->width;
         return match (true) {
             $width >= 840.0 => DeviceClass::Expanded,
             $width >= 600.0 => DeviceClass::Medium,

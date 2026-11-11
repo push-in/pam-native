@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- pam-native:tv-features:start -->
+    <!-- pam-native:tv-features:end -->
 
     <queries>
         <!-- Explicit visibility for optional social share targets; no broad installed-app access. -->
@@ -55,6 +57,7 @@
 
     <application
         android:allowBackup="false"
+        android:banner="@drawable/pam_tv_banner"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
         android:icon="@drawable/pam_launcher"
@@ -98,6 +101,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- pam-native:tv-launcher:start -->
+            <!-- pam-native:tv-launcher:end -->
             <!-- pam-native:share-targets:start -->
             <!-- pam-native:share-targets:end -->
         </activity>

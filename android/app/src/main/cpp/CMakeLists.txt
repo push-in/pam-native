@@ -9,8 +9,11 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
     set(PAM_RUST_TARGET "aarch64-linux-android")
 elseif(ANDROID_ABI STREQUAL "x86_64")
     set(PAM_RUST_TARGET "x86_64-linux-android")
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    # 32-bit ARM: Android TV sticks, boxes and TV sets.
+    set(PAM_RUST_TARGET "armv7-linux-androideabi")
 else()
-    message(FATAL_ERROR "Pam Native supports arm64-v8a and x86_64 only")
+    message(FATAL_ERROR "Pam Native supports arm64-v8a, armeabi-v7a and x86_64 only")
 endif()
 
 if(NOT DEFINED PAM_NATIVE_ROOT)

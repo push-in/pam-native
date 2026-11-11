@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rewritten by the CLI from pam-native.json "android.tv". -->
+<resources>
+    <bool name="pam_tv_overscan">true</bool>
+</resources>

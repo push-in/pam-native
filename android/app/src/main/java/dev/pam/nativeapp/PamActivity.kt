@@ -1005,7 +1005,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private fun styleEnvironment(): StyleEnvironment {
         val configuration = resources.configuration
         val deviceType = when {
-            configuration.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION -> "tv"
+            isTelevision() -> "tv"
             configuration.smallestScreenWidthDp >= 600 -> "tablet"
             else -> "phone"
         }
@@ -1021,7 +1021,11 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         return StyleEnvironment(
             deviceType = deviceType,
             inputMode = inputMode,
-            pointer = if (inputMode == "touch" || inputMode == "remote") "coarse" else "fine",
+            pointer = when (inputMode) {
+                "remote" -> "none"
+                "touch" -> "coarse"
+                else -> "fine"
+            },
             refreshRate = refreshRate,
             reducedMotion = Settings.Global.getFloat(
                 contentResolver,
@@ -1047,10 +1051,34 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             } else null
         val reported = insets?.let { windowSafeInsets(this, it) }
             ?: androidx.core.graphics.Insets.NONE
-        return retainedWhileUnfocused(
-            androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, reported.bottom),
+        return retainedWhileUnfocused(withOverscan(reported))
+    }
+
+    /**
+     * TVs may crop the picture edges (overscan): Android TV keeps text and
+     * focusable content inside 5% margins (48 x 27 dp on a 960 x 540 dp
+     * screen). The margin joins the safe area, so SafeAreaView and
+     * `useSafeAreaInsets()` keep content inside it. An app turns it off with
+     * `android.tv.overscan: false` in pam-native.json (R.bool.pam_tv_overscan).
+     */
+    private fun withOverscan(reported: androidx.core.graphics.Insets): androidx.core.graphics.Insets {
+        if (!isTelevision() || !overscanEnabled) return reported
+        val width = window.decorView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val height = window.decorView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val horizontal = (width * OVERSCAN_FRACTION).toInt()
+        val vertical = (height * OVERSCAN_FRACTION).toInt()
+        return androidx.core.graphics.Insets.of(
+            maxOf(reported.left, horizontal),
+            maxOf(reported.top, vertical),
+            maxOf(reported.right, horizontal),
+            maxOf(reported.bottom, vertical),
         )
     }
+
+    private val overscanEnabled: Boolean by lazy { resources.getBoolean(R.bool.pam_tv_overscan) }
+
+    private fun isTelevision(): Boolean =
+        resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -1152,6 +1180,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     internal companion object {
+        private const val OVERSCAN_FRACTION = 0.05f
         const val EVENT_APP_STATE = 16
         const val EVENT_DIMENSIONS = 17
         const val EVENT_MEMORY_PRESSURE = 18

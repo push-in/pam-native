@@ -77,6 +77,8 @@ impl BuildMode {
 enum AndroidAbi {
     Arm64 = 1,
     X86_64 = 2,
+    /// 32-bit ARM: most Android TV sticks, boxes and TV sets.
+    ArmV7 = 3,
 }
 
 impl AndroidAbi {
@@ -84,8 +86,9 @@ impl AndroidAbi {
         match value {
             "arm64-v8a" | "arm64" | "aarch64" => Ok(Self::Arm64),
             "x86_64" | "x64" => Ok(Self::X86_64),
+            "armeabi-v7a" | "armv7" | "arm" => Ok(Self::ArmV7),
             _ => Err(format!(
-                "unsupported Android ABI {value:?}; expected arm64-v8a or x86_64"
+                "unsupported Android ABI {value:?}; expected arm64-v8a, armeabi-v7a or x86_64"
             )),
         }
     }
@@ -94,6 +97,7 @@ impl AndroidAbi {
         match self {
             Self::Arm64 => "arm64-v8a",
             Self::X86_64 => "x86_64",
+            Self::ArmV7 => "armeabi-v7a",
         }
     }
 
@@ -101,6 +105,7 @@ impl AndroidAbi {
         match self {
             Self::Arm64 => "aarch64-linux-android",
             Self::X86_64 => "x86_64-linux-android",
+            Self::ArmV7 => "armv7-linux-androideabi",
         }
     }
 
@@ -108,6 +113,7 @@ impl AndroidAbi {
         match self {
             Self::Arm64 => "aarch64-linux-android26-clang",
             Self::X86_64 => "x86_64-linux-android26-clang",
+            Self::ArmV7 => "armv7a-linux-androideabi26-clang",
         }
     }
 }
@@ -127,6 +133,10 @@ struct NativeManifest {
     version_code: u32,
     #[serde(default = "default_version_name")]
     version_name: String,
+    /// Where the app ships: `android`, `ios` and `android-tv` (Android TV,
+    /// Google TV, Fire TV). The default is the two phone platforms.
+    #[serde(default = "default_targets")]
+    targets: Vec<AppTarget>,
     #[serde(default)]
     android: AndroidOptions,
     #[serde(default)]
@@ -153,6 +163,50 @@ struct NativeManifest {
     /// Route compiler options (routes file, generated namespace/output).
     #[serde(default)]
     routes: Option<crate::routes::RoutesOptions>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum AppTarget {
+    Android,
+    Ios,
+    AndroidTv,
+}
+
+fn default_targets() -> Vec<AppTarget> {
+    vec![AppTarget::Android, AppTarget::Ios]
+}
+
+impl NativeManifest {
+    fn targets_android_tv(&self) -> bool {
+        self.targets.contains(&AppTarget::AndroidTv)
+    }
+}
+
+/// `android.tv`: how the APK presents itself on Android TV.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidTvOptions {
+    /// 320x180 PNG shown in the TV launcher (16:9, the app name in it);
+    /// without one the launcher icon is drawn on the app background.
+    #[serde(default)]
+    banner: Option<PathBuf>,
+    /// Keep content inside 5% margins where TVs may crop the picture.
+    #[serde(default = "default_true")]
+    overscan: bool,
+}
+
+impl Default for AndroidTvOptions {
+    fn default() -> Self {
+        Self {
+            banner: None,
+            overscan: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,6 +308,8 @@ struct AndroidOptions {
     /// it too unless `appearance.splash` sets its own icon.
     #[serde(default)]
     icon: Option<crate::app_icon::AndroidIcon>,
+    #[serde(default)]
+    tv: AndroidTvOptions,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -362,6 +418,7 @@ impl Default for AndroidOptions {
             share_targets: Vec::new(),
             safe_area_bottom_fallback: 0,
             icon: None,
+            tv: AndroidTvOptions::default(),
         }
     }
 }
@@ -1403,7 +1460,7 @@ fn parse_options(
             "--abi" => {
                 let value = arguments
                     .next()
-                    .ok_or_else(|| "--abi requires arm64-v8a or x86_64".to_owned())?;
+                    .ok_or_else(|| "--abi requires arm64-v8a, armeabi-v7a or x86_64".to_owned())?;
                 let abi = AndroidAbi::parse(&value.to_string_lossy())?;
                 if !abis.contains(&abi) {
                     abis.push(abi);
@@ -1469,6 +1526,16 @@ fn parse_release_options(
 
 fn default_abis() -> Vec<AndroidAbi> {
     vec![AndroidAbi::Arm64, AndroidAbi::X86_64]
+}
+
+/// The requested ABIs, plus 32-bit ARM when the app targets Android TV and
+/// the default set was not overridden: most TV sticks and sets run it.
+fn effective_abis(project: &Project, requested: &[AndroidAbi]) -> Vec<AndroidAbi> {
+    let mut abis = requested.to_vec();
+    if project.manifest.targets_android_tv() && requested == default_abis().as_slice() {
+        abis.push(AndroidAbi::ArmV7);
+    }
+    abis
 }
 
 fn load_project(path: &Path) -> Result<Project, String> {
@@ -5956,7 +6023,82 @@ fn configure_android(
     add_share_targets(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         &android_share_types(project)?,
-    )
+    )?;
+    configure_android_tv(project, workspace)
+}
+
+/// `targets: ["android-tv"]`: the TV launcher entry (LEANBACK_LAUNCHER), a
+/// banner, and features that let TVs without a touch screen install the APK.
+/// The same APK still runs on phones and tablets.
+fn configure_android_tv(project: &Project, workspace: &Path) -> Result<(), String> {
+    let tv = &project.manifest.android.tv;
+    write_atomic(
+        &workspace.join("app/src/main/res/values/pam_tv.xml"),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <bool name=\"pam_tv_overscan\">{}</bool>\n</resources>\n",
+            tv.overscan
+        )
+        .as_bytes(),
+    )?;
+    let enabled = project.manifest.targets_android_tv();
+    let manifest = workspace.join("app/src/main/AndroidManifest.xml");
+    replace_between_markers(
+        &manifest,
+        "    <!-- pam-native:tv-features:start -->",
+        "    <!-- pam-native:tv-features:end -->",
+        if enabled {
+            "    <uses-feature android:name=\"android.software.leanback\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.touchscreen\" android:required=\"false\" />\n"
+        } else {
+            ""
+        },
+    )?;
+    replace_between_markers(
+        &manifest,
+        "            <!-- pam-native:tv-launcher:start -->",
+        "            <!-- pam-native:tv-launcher:end -->",
+        if enabled {
+            "            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LEANBACK_LAUNCHER\" />\n            </intent-filter>\n"
+        } else {
+            ""
+        },
+    )?;
+    if let Some(banner) = &tv.banner {
+        let source = project.root.join(banner);
+        if source.extension() != Some(OsStr::new("png")) || !source.is_file() {
+            return Err(format!(
+                "android.tv.banner must be a PNG file inside the project: {}",
+                source.display()
+            ));
+        }
+        let resources = workspace.join("app/src/main/res");
+        let default = resources.join("drawable/pam_tv_banner.xml");
+        if default.exists() {
+            fs::remove_file(&default)
+                .map_err(|error| format!("cannot replace {}: {error}", default.display()))?;
+        }
+        let destination = resources.join("drawable-xhdpi/pam_tv_banner.png");
+        fs::create_dir_all(destination.parent().expect("drawable directory"))
+            .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
+        fs::copy(&source, &destination)
+            .map_err(|error| format!("cannot copy {}: {error}", source.display()))?;
+    }
+    Ok(())
+}
+
+/// Replaces what lies between two marker lines (kept) with `body`.
+fn replace_between_markers(path: &Path, start: &str, end: &str, body: &str) -> Result<(), String> {
+    let mut contents = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let from = contents
+        .find(start)
+        .ok_or_else(|| format!("{} has no marker {}", path.display(), start.trim()))?
+        + start.len();
+    let to = contents[from..]
+        .find(end)
+        .map(|offset| from + offset)
+        .ok_or_else(|| format!("{} has no marker {}", path.display(), end.trim()))?;
+    contents.replace_range(from..to, &format!("\n{body}"));
+    write_atomic(path, contents.as_bytes())
 }
 
 fn property_value(value: &str) -> String {
@@ -7385,8 +7527,9 @@ fn build_intermediate(options: MobileOptions, installable: bool) -> Result<Built
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, false)?;
-    let workspace = prepare(&project, &native_home, &options.abis)?;
-    for abi in &options.abis {
+    let abis = effective_abis(&project, &options.abis);
+    let workspace = prepare(&project, &native_home, &abis)?;
+    for abi in &abis {
         if !runtime_ready_at(&runtime.root, *abi) {
             return Err(format!(
                 "verified PHP {} Android runtime is missing for {}; build it with `runtime-builder/android/build.sh --php {} {}` (expected {})",
@@ -11326,6 +11469,32 @@ mod tests {
         assert!(
             validate_plugin_config(&empty, &[share_plugin("vendor/bad", "Share-Ext")]).is_err()
         );
+    }
+
+    #[test]
+    fn tv_markers_add_and_remove_the_leanback_launcher() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-tv-manifest-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        fs::write(&manifest, template).expect("manifest");
+        let start = "            <!-- pam-native:tv-launcher:start -->";
+        let end = "            <!-- pam-native:tv-launcher:end -->";
+        let filter = "            <intent-filter>\n                <category android:name=\"android.intent.category.LEANBACK_LAUNCHER\" />\n            </intent-filter>\n";
+        replace_between_markers(&manifest, start, end, filter).expect("tv launcher");
+        replace_between_markers(&manifest, start, end, filter).expect("idempotent tv launcher");
+        let contents = fs::read_to_string(&manifest).expect("manifest");
+        assert_eq!(contents.matches("LEANBACK_LAUNCHER").count(), 1);
+        assert!(contents.contains("android:banner=\"@drawable/pam_tv_banner\""));
+        replace_between_markers(&manifest, start, end, "").expect("phone only");
+        assert_eq!(fs::read_to_string(&manifest).expect("manifest"), template);
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

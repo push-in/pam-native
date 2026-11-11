@@ -118,6 +118,27 @@ $assert(
     'heightClass and useFontScale()->clamp()/scaled() must follow the Material classes and Flutter TextScaler.clamp.',
 );
 
+// useFormFactor(): a TV reports device-type tv and a remote; the window class follows.
+$formFactor = null;
+$formScope = effectScope(static function () use (&$formFactor): void {
+    $formFactor = \Pam\Native\useFormFactor();
+});
+$assert($formFactor->type === 'phone' && $formFactor->phone && !$formFactor->tv && $formFactor->touch, 'useFormFactor() starts as a touch phone.');
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 960.0, 'height' => 540.0, 'density' => 2.0, 'fontScale' => 1.0,
+    'deviceType' => 'tv', 'inputMode' => 'remote', 'pointer' => 'none',
+]));
+$assert(
+    $formFactor->tv && $formFactor->type === 'tv' && $formFactor->remote && !$formFactor->touch
+        && $formFactor->pointer === 'none' && $window->deviceClass === DeviceClass::Television,
+    'useFormFactor() and deviceClass follow a TV driven by a remote.',
+);
+$formScope->dispose();
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 820.0, 'height' => 600.0, 'density' => 2.0, 'fontScale' => 1.8,
+    'safeAreaTop' => 24.0, 'safeAreaBottom' => 34.0, 'safeAreaLeft' => 0.0, 'safeAreaRight' => 0.0,
+]));
+
 // Each window property is its own signal (Flutter MediaQuery.sizeOf): a
 // reader of the width is not re-run when only the height or the insets change.
 $widthRuns = 0;
