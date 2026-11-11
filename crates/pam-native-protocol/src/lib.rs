@@ -741,6 +741,15 @@ pub enum PropKey {
     KeyboardProgress = 1009,
     ModalNavigationBarColor = 1010,
     ListStackFromEnd = 1011,
+    OnKeyDown = 1012,
+    CaptureKeys = 1013,
+    Focusable = 1014,
+    NextFocusUp = 1015,
+    NextFocusDown = 1016,
+    NextFocusLeft = 1017,
+    NextFocusRight = 1018,
+    FocusGroup = 1019,
+    FocusRing = 1020,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1302,6 +1311,15 @@ impl TryFrom<u16> for PropKey {
             1009 => Ok(Self::KeyboardProgress),
             1010 => Ok(Self::ModalNavigationBarColor),
             1011 => Ok(Self::ListStackFromEnd),
+            1012 => Ok(Self::OnKeyDown),
+            1013 => Ok(Self::CaptureKeys),
+            1014 => Ok(Self::Focusable),
+            1015 => Ok(Self::NextFocusUp),
+            1016 => Ok(Self::NextFocusDown),
+            1017 => Ok(Self::NextFocusLeft),
+            1018 => Ok(Self::NextFocusRight),
+            1019 => Ok(Self::FocusGroup),
+            1020 => Ok(Self::FocusRing),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2247,13 +2265,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1011 {
+        for value in EXTENSION_BASE..=1020 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1012).is_err());
+        assert!(PropKey::try_from(1021).is_err());
     }
 
     #[test]

@@ -510,6 +510,27 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         super.onLowMemory()
     }
 
+    /**
+     * Remote control, game pad and keyboard keys reach PHP first: the
+     * nearest `onKeyDown`, then `captureKeys`, `nextFocus*` and focus groups.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (dispatchPamKey(window.decorView, event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    /** Keys of a window this activity owns (itself, a Modal's dialog). */
+    internal fun dispatchPamKey(root: View, event: KeyEvent): Boolean =
+        runtimeStarted && activeRenderer?.dispatchKey(root, event) == true
+
+    internal fun observePamFocus(root: View) {
+        activeRenderer?.observeFocus(root)
+    }
+
+    internal fun unobservePamFocus(root: View) {
+        activeRenderer?.unobserveFocus(root)
+    }
+
     // API 33+ is handled by registerBackCallback(), including predictive
     // progress on API 34+. These overrides are the legacy keyboard/button
     // path retained exclusively for older supported Android releases.

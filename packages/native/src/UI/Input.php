@@ -77,11 +77,6 @@ final class Input extends Element
         return $this->withProperty(PropKey::MaxLength, max(0, $length));
     }
 
-    public function autoFocus(bool $autoFocus = true): self
-    {
-        return $this->withProperty(PropKey::AutoFocus, $autoFocus);
-    }
-
     public function returnKey(ReturnKeyType $type): self
     {
         return $this->withProperty(PropKey::ReturnKeyType, $type->value);

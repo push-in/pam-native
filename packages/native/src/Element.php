@@ -265,6 +265,106 @@ abstract class Element implements Renderable
     }
 
     /**
+     * Keys pressed while this element or a descendant has the focus (remote
+     * control, game pad, hardware keyboard), nearest listener first. Keys
+     * also keep their native meaning (arrows move the focus, Enter presses)
+     * unless they are listed in captureKeys().
+     *
+     * @param Closure(KeyEvent): void $handler
+     */
+    final public function onKeyDown(Closure $handler): static
+    {
+        return $this->withEvent(
+            EventKind::KeyDown,
+            static function (string $payload) use ($handler): void {
+                $handler(KeyEvent::fromPayload($payload));
+            },
+        );
+    }
+
+    /**
+     * Keys this element takes before native handling while it or a
+     * descendant has the focus: they reach its onKeyDown() and do not move
+     * the focus or press anything. W3C names ("ArrowLeft", "Enter",
+     * "MediaPlayPause"…). Keys with Control, Alt or Meta are never captured.
+     */
+    final public function captureKeys(string ...$keys): static
+    {
+        $list = implode(',', array_values(array_filter(
+            array_map('trim', $keys),
+            static fn (string $key): bool => $key !== '',
+        )));
+        if (strlen($list) > 512) {
+            throw new InvalidArgumentException('captureKeys accepts at most 512 bytes of key names.');
+        }
+
+        return $list === ''
+            ? $this->withoutProperty(PropKey::CaptureKeys)
+            : $this->withProperty(PropKey::CaptureKeys, $list);
+    }
+
+    /**
+     * Whether the remote, a game pad or the keyboard can move the focus here.
+     * Pressables, links and inputs are focusable by default; any other box
+     * becomes a focus stop with true, and false takes a pressable out.
+     */
+    final public function focusable(bool $focusable = true): static
+    {
+        return $this->withProperty(PropKey::Focusable, $focusable);
+    }
+
+    /** Takes the focus when it appears (the first focus on a TV screen). */
+    final public function autoFocus(bool $autoFocus = true): static
+    {
+        return $this->withProperty(PropKey::AutoFocus, $autoFocus);
+    }
+
+    /**
+     * Where the D-pad goes from here instead of the nearest element in that
+     * direction: the testId of the target. Null keeps the automatic choice.
+     */
+    final public function nextFocus(
+        ?string $up = null,
+        ?string $down = null,
+        ?string $left = null,
+        ?string $right = null,
+    ): static {
+        $copy = $this;
+        foreach ([
+            [PropKey::NextFocusUp, $up],
+            [PropKey::NextFocusDown, $down],
+            [PropKey::NextFocusLeft, $left],
+            [PropKey::NextFocusRight, $right],
+        ] as [$key, $target]) {
+            $copy = $target === null || $target === ''
+                ? $copy->withoutProperty($key)
+                : $copy->withProperty($key, $target);
+        }
+
+        return $copy;
+    }
+
+    /**
+     * A row, rail or menu that remembers its last focused child: when the
+     * D-pad comes back into the group, the focus returns to that child
+     * instead of the nearest one.
+     */
+    final public function focusGroup(bool $group = true): static
+    {
+        return $this->withProperty(PropKey::FocusGroup, $group);
+    }
+
+    /**
+     * The ring drawn around the focused element while a remote or keyboard
+     * drives the app. "auto" (the default) draws it unless a :focus style
+     * already shows the focus; "none" never draws it.
+     */
+    final public function focusRing(bool $visible): static
+    {
+        return $this->withProperty(PropKey::FocusRing, $visible ? 1 : 0);
+    }
+
+    /**
      * Preserves the visual identity of this element across a native route
      * transition. Matching tags are measured and animated entirely by UIKit or
      * Android's UI thread; PHP is never involved per frame.
@@ -923,6 +1023,17 @@ abstract class Element implements Renderable
         return $copy;
     }
 
+    final protected function withoutProperty(PropKey $key): static
+    {
+        if (!array_key_exists($key->value, $this->properties)) {
+            return $this;
+        }
+        $copy = clone $this;
+        unset($copy->properties[$key->value]);
+
+        return $copy;
+    }
+
     final protected function withProperty(
         PropKey $key,
         string|int|float|bool|BinaryValue $value,
@@ -1061,6 +1172,7 @@ abstract class Element implements Renderable
             EventKind::PageChange => PropKey::OnPageChange,
             EventKind::RouteCovered => PropKey::OnRouteCovered,
             EventKind::RouteFocused => PropKey::OnRouteFocused,
+            EventKind::KeyDown => PropKey::OnKeyDown,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

@@ -894,6 +894,7 @@ internal class PamModalHost @JvmOverloads constructor(
             modal.requestWindowFeature(Window.FEATURE_NO_TITLE)
             (content.parent as? ViewGroup)?.removeView(content)
             modal.setContentView(content)
+            pamActivity()?.observePamFocus(content)
             observeDialogIme(modal)
             applyDismissPolicy(modal)
             modal.setOnCancelListener {
@@ -902,7 +903,10 @@ internal class PamModalHost @JvmOverloads constructor(
                 requestClose()
             }
             modal.setOnKeyListener { _, keyCode, event ->
-                if (keyCode != KeyEvent.KEYCODE_BACK) {
+                val root = modal.window?.decorView
+                if (root != null && pamActivity()?.dispatchPamKey(root, event) == true) {
+                    true
+                } else if (keyCode != KeyEvent.KEYCODE_BACK) {
                     false
                 } else {
                     // Own the whole Back gesture (down and up) so neither half
@@ -1929,6 +1933,7 @@ internal class PamModalHost @JvmOverloads constructor(
         content.alpha = 1f
         content.translationY = 0f
         val wasShowing = modal.isPresentedWindow
+        pamActivity()?.unobservePamFocus(content)
         unregisterDialogBackCallback(modal)
         legacyKeyboardVisibility?.close()
         legacyKeyboardVisibility = null

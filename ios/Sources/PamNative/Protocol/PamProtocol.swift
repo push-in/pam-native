@@ -14,9 +14,9 @@ public let PAM_EXTENSION_BASE = 1001
 /// Highest IDs this renderer implements, exported in the renderer contract.
 /// `scripts/protocol-parity.py` pins them to the PHP tables.
 public let PAM_PROPERTY_CEILING = 543
-public let PAM_EXTENSION_PROPERTY_CEILING = 1011
+public let PAM_EXTENSION_PROPERTY_CEILING = 1020
 public let PAM_EVENT_CEILING = 80
-public let PAM_EXTENSION_EVENT_CEILING = 1000
+public let PAM_EXTENSION_EVENT_CEILING = 1001
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
@@ -154,6 +154,7 @@ public enum EventKind: Int {
     case routeCovered = 78
     case routeFocused = 79
     case listWindow = 80
+    case keyDown = 1001
 }
 
 public enum PropValue {
@@ -607,6 +608,15 @@ public enum PamConstants {
     public static let keyboardProgress = 1009
     public static let modalNavigationBarColor = 1010
     public static let listStackFromEnd = 1011
+    public static let onKeyDown = 1012
+    public static let captureKeys = 1013
+    public static let focusable = 1014
+    public static let nextFocusUp = 1015
+    public static let nextFocusDown = 1016
+    public static let nextFocusLeft = 1017
+    public static let nextFocusRight = 1018
+    public static let focusGroup = 1019
+    public static let focusRing = 1020
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97
