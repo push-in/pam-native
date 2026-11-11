@@ -14,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
@@ -29,6 +30,11 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @RunWith(AndroidJUnit4::class)
 class PamNavigationRestInstrumentedTest {
+    // Transitions and settles are observed in flight; CI emulators disable
+    // animations, which the host rightly treats as "end at once".
+    @get:Rule
+    val animations = PamAnimationsEnabledRule()
+
     private val instrumentation: Instrumentation = InstrumentationRegistry.getInstrumentation()
     private lateinit var activity: PamTestActivity
     private lateinit var navigation: PamNavigationHost

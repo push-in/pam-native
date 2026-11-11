@@ -2528,12 +2528,14 @@ class PamRendererInstrumentedTest {
                 )
 
                 assertEquals(
-                    roundedDp(activity.host, 100f),
+                    // Rows step like FlashList cells from the list's pixel origin.
+                    listCellPixels(100f, activity.resources.displayMetrics.density, list.pixelOrigin),
                     requireNotNull(list.findViewHolderForAdapterPosition(0))
                         .itemView.layoutParams.height,
                 )
                 assertEquals(
-                    roundedDp(activity.host, 180f),
+                    // Rows step like FlashList cells from the list's pixel origin.
+                    listCellPixels(180f, activity.resources.displayMetrics.density, list.pixelOrigin),
                     requireNotNull(list.findViewHolderForAdapterPosition(1))
                         .itemView.layoutParams.height,
                 )
