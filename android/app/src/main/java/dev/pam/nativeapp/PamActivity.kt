@@ -514,6 +514,8 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
      * Remote control, game pad and keyboard keys reach PHP first: the
      * nearest `onKeyDown`, then `captureKeys`, `nextFocus*` and focus groups.
      */
+    // super is the platform Activity method; lint flags androidx's override.
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (dispatchPamKey(window.decorView, event)) return true
         return super.dispatchKeyEvent(event)
