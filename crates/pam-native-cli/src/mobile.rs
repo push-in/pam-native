@@ -7244,7 +7244,9 @@ fn audit_tv_reachability(destination: &Path) {
     {
         Ok(status) if status.success() => {}
         Ok(status) => eprintln!("PAM Native warning: the TV reachability audit stopped ({status})"),
-        Err(error) => eprintln!("PAM Native warning: cannot run the TV reachability audit: {error}"),
+        Err(error) => {
+            eprintln!("PAM Native warning: cannot run the TV reachability audit: {error}")
+        }
     }
 }
 
