@@ -57,14 +57,27 @@ class PamScrollRequestFlingInstrumentedTest {
             list.fling(0, 9_000)
         }
         SystemClock.sleep(48)
-        main { list.scrollToLogicalOffset(0f, animated = true) }
-        SystemClock.sleep(80)
+        // Every frame of the glide, not one sample at a fixed delay: a slow CI
+        // emulator can draw its first glide frame well after 80 ms.
+        val offsets = mutableListOf<Int>()
+        val recorder = object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                offsets += recyclerView.computeVerticalScrollOffset()
+            }
+        }
         main {
-            val offset = list.computeVerticalScrollOffset()
-            assertTrue("Animated request glides instead of jumping (offset $offset)", offset > 0)
+            list.addOnScrollListener(recorder)
+            list.scrollToLogicalOffset(0f, animated = true)
         }
         awaitIdle { list.scrollState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE }
-        main { assertEquals(0, list.computeVerticalScrollOffset()) }
+        main {
+            list.removeOnScrollListener(recorder)
+            assertTrue(
+                "Animated request glides instead of jumping (offsets $offsets)",
+                offsets.count { it > 0 } >= 2,
+            )
+            assertEquals(0, list.computeVerticalScrollOffset())
+        }
     }
 
     @Test fun scrollViewJumpToTopStopsTheFlingInProgress() = withScroll { scroll ->
