@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.48.0 - 2026-11-11
+
 Samsung (Tizen) and LG (webOS) TVs, without a server: the PHP app is compiled
 ahead of time to static HTML/JS. See
 [docs/tv.md](docs/tv.md#samsung-and-lg-tvs-tizen-and-webos).

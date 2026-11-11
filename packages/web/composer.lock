@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b52f926f3fbc03b6d869bea7c6b94069",
+    "content-hash": "b35256b72702d1e33b1eb6fb22f6d4fb",
     "packages": [
         {
             "name": "nikic/php-parser",
@@ -65,11 +65,11 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "1.47.0",
+            "version": "1.48.0",
             "dist": {
                 "type": "path",
                 "url": "../native",
-                "reference": "16926d4ddc393288463a75bc9cfbce1610487ee5"
+                "reference": "78126d98dd8ed0c179a1496c864183097b72de72"
             },
             "require": {
                 "php": "^8.5"
@@ -2150,5 +2150,5 @@
         "php": "^8.5"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.11.0"
 }

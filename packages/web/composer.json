@@ -6,7 +6,7 @@
   "require": {
     "php": "^8.5",
     "nikic/php-parser": "^5.4",
-    "pushinbr/pam-native": "^1.47"
+    "pushinbr/pam-native": "^1.48"
   },
   "require-dev": {
     "phpunit/phpunit": "^12.5"
@@ -34,7 +34,7 @@
       "options": {
         "symlink": true,
         "versions": {
-          "pushinbr/pam-native": "1.47.0"
+          "pushinbr/pam-native": "1.48.0"
         }
       }
     }
