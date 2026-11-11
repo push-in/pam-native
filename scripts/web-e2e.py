@@ -10,6 +10,9 @@ mapping of the runtime is what the test exercises.
     scripts/web-e2e.py examples/tv/tests/e2e.json --app examples/tv/dist/tizen --target tizen
 
 Chrome runs headless on the GPU (ANGLE over EGL), 1920x1080 like a 1080p TV.
+With --cdp the script attaches instead to the app already running on a TV or
+emulator through its DevTools port (Tizen: `sdb shell 0 debug <app id>` and
+`sdb forward tcp:<port> tcp:<port>`); `launch` then reloads the app.
 """
 
 import argparse
@@ -65,15 +68,19 @@ def press(page, cdp, target, name):
                                             "nativeVirtualKeyCode": code, "key": "Unidentified"})
 
 
-def run(steps, app, target, shots):
-    url = (Path(app).resolve() / "index.html").as_uri()
+def run(steps, app, target, shots, endpoint=None):
+    url = (Path(app).resolve() / "index.html").as_uri() if app else None
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            executable_path=os.environ.get("CHROME", "/usr/bin/google-chrome"),
-            args=["--use-angle=gl-egl", "--use-gl=angle", "--ignore-gpu-blocklist", "--enable-gpu-rasterization",
-                  "--allow-file-access-from-files"],
-        )
-        page = browser.new_page(viewport={"width": 1920, "height": 1080})
+        if endpoint:
+            browser = playwright.chromium.connect_over_cdp(endpoint)
+            page = next(page for context in browser.contexts for page in context.pages)
+        else:
+            browser = playwright.chromium.launch(
+                executable_path=os.environ.get("CHROME", "/usr/bin/google-chrome"),
+                args=["--use-angle=gl-egl", "--use-gl=angle", "--ignore-gpu-blocklist", "--enable-gpu-rasterization",
+                      "--allow-file-access-from-files"],
+            )
+            page = browser.new_page(viewport={"width": 1920, "height": 1080})
         page.add_init_script("window.addEventListener('error', e => { window.__pamError = e.message; });")
         console = []
         page.on("console", lambda message: console.append(f"{message.type}: {message.text}"))
@@ -83,7 +90,7 @@ def run(steps, app, target, shots):
             for number, step in enumerate(steps, 1):
                 print(f"{number:>3} {json.dumps(step, ensure_ascii=False)}")
                 if step.get("launch"):
-                    page.goto(url)
+                    page.goto(url) if url else page.reload()
                 elif "wait" in step:
                     text = step["wait"]
                     until(page, lambda s: text in s["texts"], step.get("timeout", 15), f"{text!r} did not appear")
@@ -126,11 +133,14 @@ def run(steps, app, target, shots):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("script")
-    parser.add_argument("--app", required=True, help="the build directory (with index.html)")
+    parser.add_argument("--app", help="the build directory (with index.html)")
+    parser.add_argument("--cdp", help="DevTools endpoint of the app on a TV or emulator (http://127.0.0.1:<port>)")
     parser.add_argument("--target", choices=sorted(TV_KEYS), default="tizen")
     parser.add_argument("--shots", help="directory for shot steps and the failure screenshot")
     arguments = parser.parse_args()
-    run(json.loads(Path(arguments.script).read_text()), arguments.app, arguments.target, arguments.shots)
+    if not arguments.app and not arguments.cdp:
+        parser.error("--app or --cdp is required")
+    run(json.loads(Path(arguments.script).read_text()), arguments.app, arguments.target, arguments.shots, arguments.cdp)
 
 
 if __name__ == "__main__":

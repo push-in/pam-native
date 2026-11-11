@@ -14,3 +14,4 @@
 **/vendor/
 /dist/
 examples/tv/dist/
+examples/*/artifacts/

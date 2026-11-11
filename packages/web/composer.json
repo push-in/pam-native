@@ -2,7 +2,7 @@
   "name": "pushinbr/pam-native-web",
   "description": "Compiles a PAM Native app to a static HTML/JS app for web-based TVs (Samsung Tizen, LG webOS) and browsers. No server, no PHP on the device.",
   "type": "library",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "require": {
     "php": "^8.5",
     "nikic/php-parser": "^5.4",
