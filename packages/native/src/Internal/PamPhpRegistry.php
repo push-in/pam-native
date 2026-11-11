@@ -32,6 +32,13 @@ final class PamPhpRegistry
     private static array $classFiles = [];
 
     /**
+     * Templates of `Name.tv.pam.php`-style variants by class and device type.
+     *
+     * @var array<class-string, array<string, PamPhpComponent>>
+     */
+    private static array $variants = [];
+
+    /**
      * @var array<class-string<Component>, array{
      *     factory: Closure(array): Component,
      *     parameters: list<array{
@@ -79,6 +86,11 @@ final class PamPhpRegistry
         foreach ($components as $component) {
             /** @var class-string<Component> $className */
             $className = $component->className;
+            $variant = PamPhpCompiler::variantOf($component->source);
+            if ($variant !== null) {
+                self::$variants[$className][$variant] = $component;
+                continue;
+            }
             $registered = self::$components[$className] ?? null;
             if (
                 $registered !== null
@@ -115,6 +127,9 @@ final class PamPhpRegistry
             }
             /** @var class-string<Component> $className */
             $className = $component->className;
+            if (PamPhpCompiler::variantOf($component->source) !== null) {
+                continue;
+            }
             self::autoload($className);
             TemplateRegistry::contract(
                 ComponentContractFactory::fromClass($className, $component->tag),
@@ -217,7 +232,13 @@ final class PamPhpRegistry
             );
         }
 
-        return new CompiledComponentView($component, $definition->template);
+        $template = $definition->template;
+        if (isset(self::$variants[$component::class])) {
+            $device = Runtime::windowMetrics()->deviceType;
+            $template = (self::$variants[$component::class][$device] ?? null)?->template ?? $template;
+        }
+
+        return new CompiledComponentView($component, $template);
     }
 
     public static function retainScope(Component $owner): void
@@ -275,6 +296,7 @@ final class PamPhpRegistry
         self::releaseInstances();
         self::$components = [];
         self::$classFiles = [];
+        self::$variants = [];
         self::$metadata = [];
         self::$propertyParameters = [];
     }

@@ -35,6 +35,8 @@ final class EventPayloads
         ScrollPhaseEvent::class => true,
         PageChangeEvent::class => true,
         TextLayoutEvent::class => true,
+        \Pam\Native\KeyEvent::class => true,
+        \Pam\Native\InputKeyEvent::class => true,
     ];
 
     private function __construct()

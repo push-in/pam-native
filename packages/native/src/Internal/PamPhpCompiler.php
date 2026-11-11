@@ -198,6 +198,31 @@ final class PamPhpCompiler
     /** Written by the CLI at the root of every staged application bundle. */
     private const BUNDLE_MANIFEST = 'manifest.sha256';
 
+    /**
+     * The device type a variant file is for: `tv` for `Home.tv.pam.php`
+     * (also `phone` and `tablet`), null for an ordinary component.
+     */
+    public static function variantOf(string $source): ?string
+    {
+        return preg_match('/\.(tv|phone|tablet)\.pam(?:\.php)?$/D', $source, $match) === 1
+            ? $match[1]
+            : null;
+    }
+
+    /** `Home.pam.php` (or `Home.pam`) beside the variant `Home.tv.pam.php`. */
+    private static function variantBase(string $source): string
+    {
+        $stem = (string) preg_replace('/\.(?:tv|phone|tablet)\.pam(?:\.php)?$/D', '', $source);
+        foreach ([$stem.'.pam.php', $stem.'.pam'] as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+        throw new RuntimeException(
+            'PAM variant '.basename($source).' needs its component beside it: '.basename($stem).'.pam.php.',
+        );
+    }
+
     private static function isComponentFile(string $filename): bool
     {
         return str_ends_with($filename, '.pam')
@@ -249,6 +274,14 @@ final class PamPhpCompiler
             return $fresh;
         }
 
+        $variantBase = null;
+        if (self::variantOf($source) !== null) {
+            $variantBase = self::variantBase($source);
+            if (!str_starts_with(ltrim($contents), '<?php')) {
+                // A variant may hold only <template> and <style>.
+                $contents = '<?php ?>'.$contents;
+            }
+        }
         [$php, $template, $templateLine, $style, $language, $styleScope] =
             self::split($contents, $source);
         $imports = ScopedStyleCompiler::collectImports();
@@ -258,12 +291,26 @@ final class PamPhpCompiler
             $imported = ScopedStyleCompiler::finishCollectingImports($imports);
         }
         self::validateHotPath($php, $source);
-        [$className, $tag] = self::classIdentity($php, $source);
+        if ($variantBase !== null) {
+            // `Home.tv.pam.php` is another template for the class declared in
+            // `Home.pam.php`: same state, actions and props.
+            $baseContents = file_get_contents($variantBase);
+            if ($baseContents === false) {
+                throw new RuntimeException("Cannot read PAM component {$variantBase}.");
+            }
+            [$basePhp] = self::split($baseContents, $variantBase);
+            [$className, $tag] = self::classIdentity($basePhp, $variantBase);
+        } else {
+            [$className, $tag] = self::classIdentity($php, $source);
+        }
         $hash = hash('sha256', $contents."\0".$style."\0".$styleScope->value);
         $dependencies = [];
         $appStyle = self::appStylePath($source);
         foreach (array_unique([...($appStyle === null ? [] : [$appStyle]), ...$imported]) as $dependency) {
             $dependencies[$dependency] = self::dependencyFingerprint($dependency);
+        }
+        if ($variantBase !== null) {
+            $dependencies[$variantBase] = self::dependencyFingerprint($variantBase);
         }
         $tree = self::cachedTree(
             $metadataFile,

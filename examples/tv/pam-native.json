@@ -1,0 +1,31 @@
+{
+  "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
+  "android": {
+    "deepLinks": [],
+    "minSdk": 26,
+    "permissions": [],
+    "targetSdk": 36,
+    "tv": {
+      "overscan": true
+    }
+  },
+  "applicationId": "dev.pam.tv",
+  "entry": "index.php",
+  "ios": {
+    "minimumVersion": "15.0"
+  },
+  "modules": [],
+  "name": "PAM TV",
+  "runtime": {
+    "channel": "stable",
+    "php": "8.5"
+  },
+  "version": 1,
+  "versionCode": 1,
+  "versionName": "0.1.0",
+  "views": [],
+  "targets": [
+    "android",
+    "android-tv"
+  ]
+}

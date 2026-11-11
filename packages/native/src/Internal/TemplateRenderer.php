@@ -7469,6 +7469,9 @@ final class TemplateRenderer
             $value = \Pam\Native\LayoutEvent::fromPayload($payload);
         } elseif ($kind === EventKind::MediaReady && is_string($payload)) {
             $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::KeyDown && is_string($payload)) {
+            $value = \Pam\Native\KeyEvent::fromPayload($payload);
+
         } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
             $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);
         } elseif ($kind === EventKind::Toggle) {

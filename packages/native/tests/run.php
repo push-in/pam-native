@@ -7659,6 +7659,7 @@ require __DIR__.'/arch_v2_signal_rendering.php';
 require __DIR__.'/arch_v2_setup_lifecycle.php';
 require __DIR__.'/arch_v2_globals.php';
 require __DIR__.'/arch_v2_composables.php';
+require __DIR__.'/form_factor_variants.php';
 require __DIR__.'/arch_v2_resource.php';
 require __DIR__.'/arch_v2_resource_production.php';
 require __DIR__.'/arch_v2_resource_options.php';

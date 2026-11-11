@@ -1,0 +1,14 @@
+{
+  "$schema": "https://push-in.github.io/pam-docs/schemas/pam.schema.json",
+  "name": "tv",
+  "native": {
+    "applicationId": "dev.pam.tv",
+    "platforms": [
+      1
+    ],
+    "starter": 1
+  },
+  "schema": 1,
+  "type": 2,
+  "version": "0.1.0"
+}
