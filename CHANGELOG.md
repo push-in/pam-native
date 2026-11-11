@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 1.48.0 - 2026-11-11
+
+Samsung (Tizen) and LG (webOS) TVs, without a server: the PHP app is compiled
+ahead of time to static HTML/JS. See
+[docs/tv.md](docs/tv.md#samsung-and-lg-tvs-tizen-and-webos).
+
+- `pushinbr/pam-native-web` (`packages/web`): PHP to JavaScript compiler
+  (nikic/php-parser) for components, templates, scoped styles, classes and
+  enums, with a 20 KB gzip runtime (signals, focus engine, remote keys,
+  960x540 logical screen, overscan).
+- Manifest: `tizen` and `webos` targets and `web` (`icon`, `tv.overscan`).
+- CLI: `tizen:build`, `tizen:package`, `tizen:run`, `webos:build`,
+  `webos:package`, `webos:run` and `web:build`.
+- `scripts/web-e2e.py`: the end-to-end scripts on a web build, with Tizen and
+  webOS key codes.
+- Web TV builds compile the Composer packages the app uses: the build follows
+  `vendor/composer` (classmap, PSR-4, PSR-0, `files`) from `src/` and the
+  entry script and compiles only the classes, interfaces, traits and functions
+  the app reaches; anything it cannot compile fails the build with the
+  package's file and line.
+- Web builds: traits, interfaces with `instanceof` and constants, `preg_*`
+  (PCRE to RegExp, named groups on Chromium 63) and about 70 more string,
+  array, ctype and URL functions.
+- 32-bit Android TVs (`armeabi-v7a`): apps with the `android-tv` target and
+  `pushinbr/pam-native-web` ship the web build in the APK; on 32-bit devices
+  `PamActivity` hands off to `PamWebActivity` (WebView), with the remote's
+  keys and Back. 64-bit devices keep the native renderer.
+- `scripts/web-e2e.py --adb` sends the keys through adb for the Android WebView.
+
 ## 1.47.0 - 2026-11-11
 
 TV apps: Android TV, Google TV and Fire TV from the same code as the phone app.

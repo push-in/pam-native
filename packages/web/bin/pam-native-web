@@ -1,0 +1,54 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Pam\Native\Web\Builder;
+
+foreach ([__DIR__.'/../vendor/autoload.php', __DIR__.'/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+
+$usage = "Usage: pam-native-web build <app> [--target tizen|webos|web] [--out <dir>] [--no-tv]\n";
+$args = array_slice($argv, 1);
+if (($args[0] ?? '') !== 'build') {
+    fwrite(STDERR, $usage);
+    exit(2);
+}
+$app = null;
+$target = 'tizen';
+$out = null;
+$tv = true;
+for ($i = 1; $i < count($args); $i++) {
+    match ($args[$i]) {
+        '--target' => $target = $args[++$i] ?? '',
+        '--out' => $out = $args[++$i] ?? '',
+        '--no-tv' => $tv = false,
+        default => $app ??= $args[$i],
+    };
+}
+$app = realpath($app ?? '.');
+if ($app === false) {
+    fwrite(STDERR, $usage);
+    exit(2);
+}
+$out ??= $app.'/dist/'.$target;
+
+try {
+    $result = (new Builder($app, $target, $out, $tv))->build();
+} catch (Throwable $error) {
+    fwrite(STDERR, 'error: '.$error->getMessage()."\n");
+    exit(1);
+}
+foreach ($result['warnings'] as $warning) {
+    fwrite(STDERR, "warning: {$warning}\n");
+}
+$total = array_sum($result['files']);
+echo "Built {$target} app in {$out}\n";
+foreach ($result['files'] as $name => $size) {
+    printf("  %-14s %8.1f KB\n", $name, $size / 1024);
+}
+printf("  %-14s %8.1f KB (%.1f KB gzip for app.js)\n", 'total', $total / 1024, strlen((string) gzencode((string) file_get_contents($out.'/app.js'), 9)) / 1024);

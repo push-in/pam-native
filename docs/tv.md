@@ -1,14 +1,17 @@
-# TV apps (Android TV, Google TV, Fire TV)
+# TV apps (Android TV, Google TV, Fire TV, Samsung, LG)
 
 A PAM Native app runs on Android TV from the same code as the phone app. TV is
 one more target of the project, not another project: the same APK installs on
 phones, tablets and TVs, and the framework handles the remote control.
 
-Apple TV (tvOS) and the web-based TVs (Samsung Tizen, LG webOS) are not
-targets yet. TVs need 64-bit Android (`arm64-v8a`, or `x86_64` emulators):
-devices that run 32-bit Android (`armeabi-v7a` only, such as the 2020
-Chromecast with Google TV and older Fire TV sticks) are not supported yet,
-because the PHP SDK needs 64-bit integers (ARGB colors, node ids).
+Samsung (Tizen) and LG (webOS) TVs run HTML/JS apps: for them the same app
+is compiled to a static HTML/JS build, with no PHP and no server on the TV
+(see [Samsung and LG TVs](#samsung-and-lg-tvs-tizen-and-webos)). Apple TV
+(tvOS) is not a target yet. The native renderer needs 64-bit Android (`arm64-v8a`, or `x86_64`
+emulators), because the PHP SDK uses 64-bit integers (ARGB colors, node ids).
+Devices that run 32-bit Android (`armeabi-v7a`, such as the 2020 Chromecast
+with Google TV and older Fire TV sticks) get the same APK and open the app's
+web build in a WebView instead (see [32-bit Android TVs](#32-bit-android-tvs)).
 
 ## Add the target
 
@@ -142,6 +145,101 @@ and have no `on:press`, `on:keyDown` or `focusable`: a remote cannot reach
 them. Add a press, a key handler, or a `.tv.pam.php` variant. A component
 with a TV variant is checked through its variant. The warning never fails
 the build.
+
+## 32-bit Android TVs
+
+With `android-tv` in `targets` and `pushinbr/pam-native-web` installed,
+`pam mobile build` also compiles the app to the web build (see below) into the
+APK assets and adds `armeabi-v7a` and `x86` to the APK with a 3 KB stub
+library, so the APK installs on 32-bit devices. There `PamActivity` hands off
+to `PamWebActivity`, a WebView with the web build: the D-pad, OK and the media
+keys reach the page, Back goes through the app's focus engine and leaves the app
+at the root. 64-bit devices keep the native renderer. If the app uses
+something the web build refuses, the build prints a warning and the APK stays
+64-bit only.
+
+`examples/tv` passes its 25 steps on an Android TV 9 x86 emulator (32-bit,
+WebView 66), with the keys sent through adb:
+
+```bash
+adb forward tcp:9334 localabstract:webview_devtools_remote_$(adb shell pidof dev.pam.tv.debug)
+scripts/web-e2e.py examples/tv/tests/e2e.json --cdp http://127.0.0.1:9334 --adb --target web
+```
+
+## Samsung and LG TVs (Tizen and webOS)
+
+Tizen and webOS apps are web pages, so `pushinbr/pam-native-web` compiles the
+PHP app ahead of time into `index.html`, `app.js` and `app.css`: components and
+classes become JavaScript, templates become DOM builders and `<style scoped>`
+becomes CSS. A small runtime (about 20 KB gzip with
+[`@preact/signals-core`](https://github.com/preactjs/signals)) keeps the
+reactivity, the focus engine (same distance rules as Android, `focusGroup`
+memory, `nextFocus*`, `autoFocus`), the keys of each remote and the 960x540
+logical screen with the 5% overscan margins. Nothing runs on a server.
+
+```bash
+pam composer require --dev pushinbr/pam-native-web
+pam add target tizen        # or webos; edits targets in pam-native.json
+pam mobile tizen:build      # dist/tizen: index.html, app.js, app.css, config.xml
+pam mobile webos:build      # dist/webos: ..., appinfo.json
+pam mobile tizen:package --sign <profile>   # artifacts/*.wgt (Tizen CLI)
+pam mobile webos:package    # artifacts/*.ipk (webOS CLI, ares-package)
+pam mobile tizen:run --device <serial>      # install and launch (TV or emulator)
+pam mobile webos:run --device <name>
+```
+
+`web.icon` sets the launcher icon (default `android.icon`) and
+`web.tv.overscan` the safe margins (default `android.tv.overscan`, `true`).
+The build targets the oldest browsers still in use (Tizen 5.0 with Chromium
+63, webOS 5 with Chromium 68): ES2017, no optional chaining, `gap`
+emulated with margins.
+
+The remote keys arrive with the same W3C names as on Android: Tizen's Return
+(10009) and webOS Back (461) are `GoBack`, and the media keys (`MediaPlayPause`,
+`MediaPlay`, `MediaFastForward`...) are registered with
+`tizen.tvinputdevice` at launch. `useFormFactor()` reports a TV with a remote.
+
+What compiles: components, variants (`.tv.pam.php` wins), classes, enums,
+interfaces (`instanceof` and their constants), traits, closures, `match`,
+exceptions, string/array/ctype functions, `sprintf`, `preg_*` (PCRE patterns
+become JavaScript RegExps; named groups work on Chromium 63), the template directives and the `@media (device-type: tv)` and
+`(input-mode: remote)` queries. What the build refuses, with the file and
+line: native modules and plugins, file and network I/O, references (`&`) other
+than the sort and array functions, `goto`, generators and PHP functions with no
+JavaScript version. Tags the web runtime does not know are drawn as `View`,
+with a warning.
+
+Composer packages compile too, without running PHP: the build reads
+`vendor/composer` (classmap, PSR-4, PSR-0 and `files`) and follows the
+classes, interfaces, traits and functions the app reaches from `src/` and the
+entry script, so a package adds only the code the app uses. A pure PHP library
+works as is (for example `cocur/slugify`); one that needs I/O or a PHP feature
+the build refuses stops the build with its own file and line, such as
+`vendor/acme/lib/src/Client.php:42: curl_init() is not available in web builds`.
+For HTTP and storage use the PAM Native APIs.
+
+`scripts/web-e2e.py` runs the same end-to-end scripts on the build, in
+headless Chrome with each TV's key codes:
+
+```bash
+scripts/web-e2e.py examples/tv/tests/e2e.json --app examples/tv/dist/tizen --target tizen
+```
+
+With `--cdp http://127.0.0.1:<port>` the same script drives the app already
+open on a TV, the Tizen emulator or the
+[webOS TV Simulator](https://webostv.developer.lge.com/develop/tools/simulator-installation)
+through its DevTools port (no Playwright needed). `examples/tv` passes the 25
+steps on the webOS TV 22 Simulator (Chromium 87):
+
+```bash
+webOS_TV_22_Simulator_1.4.1.appimage examples/tv/dist/webos --remote-debugging-port=9333 &
+scripts/web-e2e.py examples/tv/tests/e2e.json --cdp http://127.0.0.1:9333 --target webos
+```
+
+Samsung TVs and the Samsung TV emulator only install packages signed with a
+Samsung certificate (Tizen Studio, Certificate Manager, with a Samsung
+account); `tizen:package --sign <profile>` uses that profile. Run the
+simulators and emulators on a virtual display (`Xvfb`) in CI.
 
 ## End-to-end tests
 

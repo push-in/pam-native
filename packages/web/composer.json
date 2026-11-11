@@ -1,0 +1,42 @@
+{
+  "name": "pushinbr/pam-native-web",
+  "description": "Compiles a PAM Native app to a static HTML/JS app for web-based TVs (Samsung Tizen, LG webOS) and browsers. No server, no PHP on the device.",
+  "type": "library",
+  "license": "Apache-2.0",
+  "require": {
+    "php": "^8.5",
+    "nikic/php-parser": "^5.4",
+    "pushinbr/pam-native": "^1.48"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^12.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Pam\\Native\\Web\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Pam\\Native\\Web\\Tests\\": "tests/"
+    }
+  },
+  "bin": [
+    "bin/pam-native-web"
+  ],
+  "config": {
+    "sort-packages": true
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../native",
+      "options": {
+        "symlink": true,
+        "versions": {
+          "pushinbr/pam-native": "1.48.0"
+        }
+      }
+    }
+  ]
+}

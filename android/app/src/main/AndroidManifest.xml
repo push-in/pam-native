@@ -106,5 +106,10 @@
             <!-- pam-native:share-targets:start -->
             <!-- pam-native:share-targets:end -->
         </activity>
+        <activity
+            android:name=".PamWebActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:theme="@style/Theme.PamNative" />
     </application>
 </manifest>

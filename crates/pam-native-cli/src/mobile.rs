@@ -90,9 +90,9 @@ impl AndroidAbi {
             "arm64-v8a" | "arm64" | "aarch64" => Ok(Self::Arm64),
             "x86_64" | "x64" => Ok(Self::X86_64),
             "armeabi-v7a" | "armv7" | "arm" => Err(
-                "armeabi-v7a is not supported yet: the PAM PHP SDK needs 64-bit integers \
-                 (ARGB colors and node ids), and 32-bit Android runs PHP with 32-bit ones. \
-                 TVs with 64-bit Android (arm64-v8a) are supported"
+                "armeabi-v7a is not a native ABI: the PAM PHP SDK needs 64-bit integers. \
+                 Apps with the android-tv target add armeabi-v7a by themselves, where they \
+                 open their web build (pushinbr/pam-native-web)"
                     .to_owned(),
             ),
             _ => Err(format!(
@@ -141,14 +141,17 @@ struct NativeManifest {
     version_code: u32,
     #[serde(default = "default_version_name")]
     version_name: String,
-    /// Where the app ships: `android`, `ios` and `android-tv` (Android TV,
-    /// Google TV, Fire TV). The default is the two phone platforms.
+    /// Where the app ships: `android`, `ios`, `android-tv` (Android TV,
+    /// Google TV, Fire TV), `tizen` (Samsung) and `webos` (LG). The default is the two phone platforms.
     #[serde(default = "default_targets")]
     targets: Vec<AppTarget>,
     #[serde(default)]
     android: AndroidOptions,
     #[serde(default)]
     ios: IosOptions,
+    #[serde(default)]
+    #[allow(dead_code)]
+    web: crate::web_tv::WebOptions,
     #[serde(default)]
     appearance: crate::appearance::AppearanceOptions,
     /// LogBox-style runtime error overlay: `true` (debug builds only, the
@@ -179,6 +182,10 @@ enum AppTarget {
     Android,
     Ios,
     AndroidTv,
+    /// Samsung TVs (Tizen), built by `pam-native tizen:build`.
+    Tizen,
+    /// LG TVs (webOS), built by `pam-native webos:build`.
+    Webos,
 }
 
 fn default_targets() -> Vec<AppTarget> {
@@ -1069,6 +1076,8 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "ios:devices" => devices_ios(parse_project_only(arguments)?),
         "ios:screenshot" => screenshot_ios(parse_screenshot_options(arguments, "ios.png")?),
         "ios:devtools" => toggle_devtools_ios(parse_project_only(arguments)?),
+        "tizen:build" | "webos:build" | "web:build" | "tizen:package" | "webos:package"
+        | "tizen:run" | "webos:run" => crate::web_tv::run(&command.to_string_lossy(), arguments),
         "build" => {
             let mut forwarded = Vec::new();
             let mut benchmark = false;
@@ -5950,6 +5959,18 @@ fn configure_android(
     abis: &[AndroidAbi],
 ) -> Result<(), String> {
     let sdk = android_sdk()?;
+    let assets = workspace.join("app/src/main/assets");
+    let web_fallback = if project.manifest.targets_android_tv() {
+        crate::web_tv::android_fallback(&project.root, &assets)?
+    } else {
+        crate::web_tv::remove_android_fallback(&assets)?;
+        false
+    };
+    let mut gradle_abis = display_abis(abis);
+    if web_fallback {
+        // 32-bit TVs, and x86 emulators to test them.
+        gradle_abis.push_str(",armeabi-v7a,x86");
+    }
     write_atomic(
         &workspace.join("local.properties"),
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
@@ -5978,7 +5999,7 @@ fn configure_android(
         project.manifest.android.target_sdk,
         project.manifest.version_code,
         property_value(&project.manifest.version_name),
-        display_abis(abis),
+        gradle_abis,
     );
     write_atomic(
         &workspace.join("pam-native.properties"),
@@ -8883,7 +8904,13 @@ fn connected_abi() -> Result<AndroidAbi, String> {
     if !output.status.success() {
         return Err("no authorized Android device is available through adb".to_owned());
     }
-    AndroidAbi::parse(String::from_utf8_lossy(&output.stdout).trim())
+    let abi = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if abi.starts_with("armeabi") || abi == "x86" {
+        // The APK also carries armeabi-v7a and x86, where the app runs its web build.
+        println!("PAM Native: the device runs 32-bit Android; the app opens its web build there");
+        return Ok(AndroidAbi::Arm64);
+    }
+    AndroidAbi::parse(&abi)
 }
 
 fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<(), String> {
@@ -9798,7 +9825,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics\n  tizen:build, tizen:package, tizen:run, webos:build, webos:package, webos:run, web:build"
     );
 }
 
