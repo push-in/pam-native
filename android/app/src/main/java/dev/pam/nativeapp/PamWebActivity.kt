@@ -1,14 +1,14 @@
 package dev.pam.nativeapp
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Context
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.view.KeyEvent
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 
 /**
  * 32-bit Android (TV sticks and boxes with `armeabi-v7a` only): the PHP SDK
@@ -17,7 +17,7 @@ import android.webkit.WebView
  * remote's arrows, Enter and media keys reach the page as on a TV browser;
  * Back is handed to the app's focus engine and leaves the app at the root.
  */
-class PamWebActivity : Activity() {
+class PamWebActivity : ComponentActivity() {
     private lateinit var web: WebView
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -35,14 +35,11 @@ class PamWebActivity : Activity() {
         setContentView(web)
         web.loadUrl(ENTRY)
         web.requestFocus()
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-            if (event.action == KeyEvent.ACTION_UP) web.evaluateJavascript("window.PAM && PAM.key('GoBack')", null)
-            return true
-        }
-        return super.dispatchKeyEvent(event)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                web.evaluateJavascript("window.PAM && PAM.key('GoBack')", null)
+            }
+        })
     }
 
     override fun onPause() {
