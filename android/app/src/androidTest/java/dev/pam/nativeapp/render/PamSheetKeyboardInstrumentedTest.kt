@@ -485,8 +485,12 @@ class PamSheetKeyboardInstrumentedTest {
                 assertTrue("focused field remains within viewport: top=$inputTop", inputTop >= safeTop)
                 assertTrue("focused field remains above IME", screenBottom(input) <= requireNotNull(dialogImeTop(input)))
                 if (snapPoint >= 0.9) {
-                    assertTrue("remaining keyboard overlap reaches the sheet keyboard avoider",
-                        (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset() > 0)
+                    // A tall interactive sheet rises to the safe top and
+                    // shrinks (a31a83bb), so its footer rests on the IME
+                    // instead of passing the overlap to its keyboard avoider.
+                    val imeTop = requireNotNull(dialogImeTop(input))
+                    assertTrue("tall sheet bottom rests on the IME: bottom=${screenBottom(sheet)} ime=$imeTop",
+                        screenBottom(sheet) <= imeTop + 2)
                 }
             }
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
