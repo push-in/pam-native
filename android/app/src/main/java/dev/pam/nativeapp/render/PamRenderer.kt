@@ -7892,6 +7892,8 @@ class PamRenderer(
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
         val topLeft = dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat())
             .toFloat()
+        // The default focus ring follows the box's corners.
+        view.setTag(dev.pam.nativeapp.R.id.pam_focus_radius, topLeft)
         val topRight = dp(state.number(PropKey.BORDER_TOP_RIGHT_RADIUS, logicalRadius).toFloat())
             .toFloat()
         val bottomRight = dp(

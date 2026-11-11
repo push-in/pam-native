@@ -7218,6 +7218,32 @@ pub(crate) fn host_php() -> String {
         })
 }
 
+const TV_AUDIT: &str = "require 'vendor/autoload.php';\n\
+    $audit = 'Pam\\\\Native\\\\Tooling\\\\TvAudit';\n\
+    if (!class_exists($audit)) { exit(0); }\n\
+    exit($audit::run(getcwd()));\n";
+
+/// Warns, without failing the build, about elements a TV remote cannot reach
+/// (touch-only gestures with no press, key handler or focus stop) when the
+/// app targets android-tv.
+fn audit_tv_reachability(destination: &Path) {
+    if !destination.join("vendor/autoload.php").is_file() {
+        return;
+    }
+    match Command::new(host_php())
+        .arg("-r")
+        .arg(TV_AUDIT)
+        .current_dir(destination)
+        .env_remove("PAM_NATIVE_MODE")
+        .env_remove("PAM_NATIVE_STRICT")
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("PAM Native warning: the TV reachability audit stopped ({status})"),
+        Err(error) => eprintln!("PAM Native warning: cannot run the TV reachability audit: {error}"),
+    }
+}
+
 const RUNTIME_EXTENSION_AUDIT: &str = "require 'vendor/autoload.php';\n\
     $audit = 'Pam\\\\Native\\\\Tooling\\\\MobileRuntimeAudit';\n\
     if (!class_exists($audit)) { exit(0); }\n\
@@ -7316,6 +7342,9 @@ fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> 
     if precompile {
         prebuild_components(destination)?;
         audit_runtime_extensions(project, destination);
+        if project.manifest.targets_android_tv() {
+            audit_tv_reachability(destination);
+        }
     }
     let version = directory_digest(destination)?;
     write_atomic(

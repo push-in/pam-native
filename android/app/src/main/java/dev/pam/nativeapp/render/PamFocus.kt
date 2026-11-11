@@ -287,7 +287,7 @@ internal object PamFocus {
             }
             outline.setEmpty()
             view.outlineProvider?.getOutline(view, outline)
-            val radius = outline.radius.coerceAtLeast(0f)
+            val radius = ((view.getTag(R.id.pam_focus_radius) as? Float) ?: outline.radius).coerceAtLeast(0f)
             val half = outer.strokeWidth / 2f
             bounds.set(getBounds())
             bounds.inset(half, half)

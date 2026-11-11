@@ -63,3 +63,16 @@ foreach (glob($orphan.'/cache/*') ?: [] as $cached) {
 @rmdir($orphan.'/cache');
 unlink($orphan.'/Lonely.tv.pam.php');
 rmdir($orphan);
+
+// TvAudit: an element only touch gestures reach is a warning for TV apps.
+$auditCache = sys_get_temp_dir().'/pam-tv-audit-'.getmypid();
+$auditFindings = \Pam\Native\Tooling\TvAudit::findings(__DIR__.'/Fixtures/TvAudit/src', $auditCache);
+$assert(
+    count($auditFindings) === 1
+        && str_starts_with($auditFindings[0], 'src/SwipeRow.pam.php:12: <Pressable> reacts only to touch (longPress)'),
+    'TvAudit flags only the element that reacts to touch alone: '.json_encode($auditFindings),
+);
+foreach (glob($auditCache.'/*') ?: [] as $cached) {
+    unlink($cached);
+}
+@rmdir($auditCache);
