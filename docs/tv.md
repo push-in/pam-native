@@ -194,6 +194,22 @@ headless Chrome with each TV's key codes:
 scripts/web-e2e.py examples/tv/tests/e2e.json --app examples/tv/dist/tizen --target tizen
 ```
 
+With `--cdp http://127.0.0.1:<port>` the same script drives the app already
+open on a TV, the Tizen emulator or the
+[webOS TV Simulator](https://webostv.developer.lge.com/develop/tools/simulator-installation)
+through its DevTools port (no Playwright needed). `examples/tv` passes the 25
+steps on the webOS TV 22 Simulator (Chromium 87):
+
+```bash
+webOS_TV_22_Simulator_1.4.1.appimage examples/tv/dist/webos --remote-debugging-port=9333 &
+scripts/web-e2e.py examples/tv/tests/e2e.json --cdp http://127.0.0.1:9333 --target webos
+```
+
+Samsung TVs and the Samsung TV emulator only install packages signed with a
+Samsung certificate (Tizen Studio, Certificate Manager, with a Samsung
+account); `tizen:package --sign <profile>` uses that profile. Run the
+simulators and emulators on a virtual display (`Xvfb`) in CI.
+
 ## End-to-end tests
 
 `scripts/android-e2e.py` drives an installed app with the remote and checks

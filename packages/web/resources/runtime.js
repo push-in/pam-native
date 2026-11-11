@@ -947,7 +947,13 @@ var PAM = (function () {
 
     function focus(el) {
         if (!el || !el.isConnected) return;
+        // Chromium 63 (Tizen 5) ignores preventScroll: put the scroll back.
+        var kept = [];
+        for (var parent = el.parentElement; parent; parent = parent.parentElement) {
+            if (parent.classList.contains('p-scroll')) kept.push([parent, parent.scrollTop, parent.scrollLeft]);
+        }
         el.focus({ preventScroll: true });
+        kept.forEach(function (entry) { entry[0].scrollTop = entry[1]; entry[0].scrollLeft = entry[2]; });
         reveal(el);
     }
 

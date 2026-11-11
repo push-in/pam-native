@@ -60,7 +60,7 @@ pub(crate) fn run(command: &str, arguments: impl Iterator<Item = OsString>) -> R
         ("tizen", "run") => {
             let package = tizen_package(&options, &dist)?;
             let id = tizen_application_id(&dist)?;
-            let device = options.device.as_deref().map(|device| ["-t", device]);
+            let device = options.device.as_deref().map(|device| ["-s", device]);
             tool("tizen", |command| {
                 command.args(["install", "-n"]).arg(&package);
                 if let Some(device) = device {
