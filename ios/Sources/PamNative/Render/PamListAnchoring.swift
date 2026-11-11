@@ -175,4 +175,12 @@ final class PamListTrace {
         )
     }
 }
+#else
+/// Release builds have no list trace; `enabled` is false so every call site
+/// is skipped.
+final class PamListTrace {
+    static let enabled = false
+
+    func record(listId: Int64, list: UIScrollView, frames: [(Int64, CGRect)], horizontal: Bool, rowCount: Int) {}
+}
 #endif
