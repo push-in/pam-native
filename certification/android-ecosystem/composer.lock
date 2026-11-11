@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "174d88d48f3a5a5a87c87525dfce48d1",
+    "content-hash": "7d59fae50fc1f5d91e20ef005ed02225",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -1012,50 +1012,6 @@
             "time": "2026-08-25T19:31:47+00:00"
         },
         {
-            "name": "pushinbr/pam-native-media-editor",
-            "version": "v0.1.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/push-in/pam-native-media-editor.git",
-                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-media-editor/zipball/b978afc7cedfb9ea3587ca69112c08e6f81c0273",
-                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273",
-                "shasum": ""
-            },
-            "require": {
-                "php": "^8.5",
-                "pushinbr/pam-native": "^0.8.0"
-            },
-            "require-dev": {
-                "phpstan/phpstan": "^2.1",
-                "pushinbr/pam-native-plugin-kit": "^0.2.0"
-            },
-            "type": "pam-native-plugin",
-            "extra": {
-                "pam-native": {
-                    "plugin": "pam-native.plugin.json"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Pam\\Native\\MediaEditor\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Non-destructive native media timelines, effects and export for PAM Native.",
-            "support": {
-                "issues": "https://github.com/push-in/pam-native-media-editor/issues",
-                "source": "https://github.com/push-in/pam-native-media-editor/tree/v0.1.0"
-            },
-            "time": "2026-08-23T18:56:08+00:00"
-        },
-        {
             "name": "pushinbr/pam-native-nfc",
             "version": "v0.2.0",
             "source": {
@@ -1393,5 +1349,5 @@
         "php": "^8.5"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.11.0"
 }
