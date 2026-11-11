@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 TV_KEYS = {
     "tizen": {"GoBack": 10009, "MediaPlayPause": 10252, "MediaPlay": 415, "MediaPause": 19, "MediaStop": 413,
               "MediaFastForward": 417, "MediaRewind": 412, "ChannelUp": 427, "ChannelDown": 428},
-    "webos": {"GoBack": 461, "MediaPlay": 415, "MediaPause": 19, "MediaStop": 413,
+    "webos": {"GoBack": 461, "MediaPlayPause": 179, "MediaPlay": 415, "MediaPause": 19, "MediaStop": 413,
               "MediaFastForward": 417, "MediaRewind": 412, "ChannelUp": 33, "ChannelDown": 34},
     "web": {},
 }

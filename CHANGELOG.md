@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+Samsung (Tizen) and LG (webOS) TVs, without a server: the PHP app is compiled
+ahead of time to static HTML/JS. See
+[docs/tv.md](docs/tv.md#samsung-and-lg-tvs-tizen-and-webos).
+
+- `pushinbr/pam-native-web` (`packages/web`): PHP to JavaScript compiler
+  (nikic/php-parser) for components, templates, scoped styles, classes and
+  enums, with a 20 KB gzip runtime (signals, focus engine, remote keys,
+  960x540 logical screen, overscan).
+- Manifest: `tizen` and `webos` targets and `web` (`icon`, `tv.overscan`).
+- CLI: `tizen:build`, `tizen:package`, `tizen:run`, `webos:build`,
+  `webos:package`, `webos:run` and `web:build`.
+- `scripts/web-e2e.py`: the end-to-end scripts on a web build, with Tizen and
+  webOS key codes.
+
 ## 1.47.0 - 2026-11-11
 
 TV apps: Android TV, Google TV and Fire TV from the same code as the phone app.

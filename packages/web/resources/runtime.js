@@ -904,7 +904,7 @@ var PAM = (function () {
     // ---- Focus and keys --------------------------------------------------------
 
     var KEYCODES = {
-        10009: 'GoBack', 461: 'GoBack', 10182: 'Exit', 10252: 'MediaPlayPause', 415: 'MediaPlay', 19: 'MediaPause',
+        10009: 'GoBack', 461: 'GoBack', 10182: 'Exit', 10252: 'MediaPlayPause', 179: 'MediaPlayPause', 178: 'MediaStop', 415: 'MediaPlay', 19: 'MediaPause',
         413: 'MediaStop', 417: 'MediaFastForward', 412: 'MediaRewind', 427: 'ChannelUp', 428: 'ChannelDown',
         403: 'ColorF0Red', 404: 'ColorF1Green', 405: 'ColorF2Yellow', 406: 'ColorF3Blue', 457: 'Info', 10135: 'ContextMenu',
         37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown', 13: 'Enter',

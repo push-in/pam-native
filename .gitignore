@@ -13,3 +13,4 @@
 /android/app/src/main/generated/
 **/vendor/
 /dist/
+examples/tv/dist/

@@ -61,12 +61,14 @@
         },
         "targets": {
             "type": "array",
-            "description": "Where the app ships: android, ios and android-tv (Android TV, Google TV, Fire TV). Defaults to [\"android\", \"ios\"].",
+            "description": "Where the app ships: android, ios, android-tv (Android TV, Google TV, Fire TV), tizen (Samsung TVs) and webos (LG TVs). Tizen and webOS get a static HTML/JS build (pam-native tizen:build / webos:build). Defaults to [\"android\", \"ios\"].",
             "items": {
                 "enum": [
                     "android",
                     "ios",
-                    "android-tv"
+                    "android-tv",
+                    "tizen",
+                    "webos"
                 ]
             },
             "uniqueItems": true,
@@ -292,6 +294,28 @@
                         "maxLength": 35
                     },
                     "description": "Languages the app is localized in (CFBundleLocalizations and the Xcode known regions). The development region is always included."
+                }
+            }
+        },
+        "web": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Options for the tizen and webos targets (static HTML/JS build).",
+            "properties": {
+                "icon": {
+                    "type": "string",
+                    "description": "Launcher icon PNG, relative to the project. Defaults to android.icon."
+                },
+                "tv": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "overscan": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Keep content inside 5% margins where TVs may crop the picture."
+                        }
+                    }
                 }
             }
         },

@@ -8,6 +8,7 @@ mod dev_event;
 mod mobile;
 mod routes;
 mod safe_area_lint;
+mod web_tv;
 
 fn main() -> ExitCode {
     match mobile::run(std::env::args_os().skip(1).collect::<Vec<OsString>>()) {

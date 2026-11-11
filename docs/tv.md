@@ -1,11 +1,13 @@
-# TV apps (Android TV, Google TV, Fire TV)
+# TV apps (Android TV, Google TV, Fire TV, Samsung, LG)
 
 A PAM Native app runs on Android TV from the same code as the phone app. TV is
 one more target of the project, not another project: the same APK installs on
 phones, tablets and TVs, and the framework handles the remote control.
 
-Apple TV (tvOS) and the web-based TVs (Samsung Tizen, LG webOS) are not
-targets yet. TVs need 64-bit Android (`arm64-v8a`, or `x86_64` emulators):
+Samsung (Tizen) and LG (webOS) TVs run HTML/JS apps: for them the same app
+is compiled to a static HTML/JS build, with no PHP and no server on the TV
+(see [Samsung and LG TVs](#samsung-and-lg-tvs-tizen-and-webos)). Apple TV
+(tvOS) is not a target yet. Android TVs need 64-bit Android (`arm64-v8a`, or `x86_64` emulators):
 devices that run 32-bit Android (`armeabi-v7a` only, such as the 2020
 Chromecast with Google TV and older Fire TV sticks) are not supported yet,
 because the PHP SDK needs 64-bit integers (ARGB colors, node ids).
@@ -142,6 +144,55 @@ and have no `on:press`, `on:keyDown` or `focusable`: a remote cannot reach
 them. Add a press, a key handler, or a `.tv.pam.php` variant. A component
 with a TV variant is checked through its variant. The warning never fails
 the build.
+
+## Samsung and LG TVs (Tizen and webOS)
+
+Tizen and webOS apps are web pages, so `pushinbr/pam-native-web` compiles the
+PHP app ahead of time into `index.html`, `app.js` and `app.css`: components and
+classes become JavaScript, templates become DOM builders and `<style scoped>`
+becomes CSS. A small runtime (about 20 KB gzip with
+[`@preact/signals-core`](https://github.com/preactjs/signals)) keeps the
+reactivity, the focus engine (same distance rules as Android, `focusGroup`
+memory, `nextFocus*`, `autoFocus`), the keys of each remote and the 960x540
+logical screen with the 5% overscan margins. Nothing runs on a server.
+
+```bash
+pam composer require --dev pushinbr/pam-native-web
+pam add target tizen        # or webos; edits targets in pam-native.json
+pam mobile tizen:build      # dist/tizen: index.html, app.js, app.css, config.xml
+pam mobile webos:build      # dist/webos: ..., appinfo.json
+pam mobile tizen:package --sign <profile>   # artifacts/*.wgt (Tizen CLI)
+pam mobile webos:package    # artifacts/*.ipk (webOS CLI, ares-package)
+pam mobile tizen:run --device <serial>      # install and launch (TV or emulator)
+pam mobile webos:run --device <name>
+```
+
+`web.icon` sets the launcher icon (default `android.icon`) and
+`web.tv.overscan` the safe margins (default `android.tv.overscan`, `true`).
+The build targets the oldest browsers still in use (Tizen 5.0 with Chromium
+63, webOS 5 with Chromium 68): ES2017, no optional chaining, `gap`
+emulated with margins.
+
+The remote keys arrive with the same W3C names as on Android: Tizen's Return
+(10009) and webOS Back (461) are `GoBack`, and the media keys (`MediaPlayPause`,
+`MediaPlay`, `MediaFastForward`...) are registered with
+`tizen.tvinputdevice` at launch. `useFormFactor()` reports a TV with a remote.
+
+What compiles: components, variants (`.tv.pam.php` wins), classes, enums,
+interfaces, closures, `match`, exceptions, string/array functions and
+`sprintf`, the template directives and the `@media (device-type: tv)` and
+`(input-mode: remote)` queries. What the build refuses, with the file and
+line: native modules and plugins, file and network I/O, references (`&`) other
+than the sort and array functions, `goto`, generators and PHP functions with no
+JavaScript version. Tags the web runtime does not know are drawn as `View`,
+with a warning.
+
+`scripts/web-e2e.py` runs the same end-to-end scripts on the build, in
+headless Chrome with each TV's key codes:
+
+```bash
+scripts/web-e2e.py examples/tv/tests/e2e.json --app examples/tv/dist/tizen --target tizen
+```
 
 ## End-to-end tests
 

@@ -141,14 +141,17 @@ struct NativeManifest {
     version_code: u32,
     #[serde(default = "default_version_name")]
     version_name: String,
-    /// Where the app ships: `android`, `ios` and `android-tv` (Android TV,
-    /// Google TV, Fire TV). The default is the two phone platforms.
+    /// Where the app ships: `android`, `ios`, `android-tv` (Android TV,
+    /// Google TV, Fire TV), `tizen` (Samsung) and `webos` (LG). The default is the two phone platforms.
     #[serde(default = "default_targets")]
     targets: Vec<AppTarget>,
     #[serde(default)]
     android: AndroidOptions,
     #[serde(default)]
     ios: IosOptions,
+    #[serde(default)]
+    #[allow(dead_code)]
+    web: crate::web_tv::WebOptions,
     #[serde(default)]
     appearance: crate::appearance::AppearanceOptions,
     /// LogBox-style runtime error overlay: `true` (debug builds only, the
@@ -179,6 +182,10 @@ enum AppTarget {
     Android,
     Ios,
     AndroidTv,
+    /// Samsung TVs (Tizen), built by `pam-native tizen:build`.
+    Tizen,
+    /// LG TVs (webOS), built by `pam-native webos:build`.
+    Webos,
 }
 
 fn default_targets() -> Vec<AppTarget> {
@@ -1069,6 +1076,8 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "ios:devices" => devices_ios(parse_project_only(arguments)?),
         "ios:screenshot" => screenshot_ios(parse_screenshot_options(arguments, "ios.png")?),
         "ios:devtools" => toggle_devtools_ios(parse_project_only(arguments)?),
+        "tizen:build" | "webos:build" | "web:build" | "tizen:package" | "webos:package"
+        | "tizen:run" | "webos:run" => crate::web_tv::run(&command.to_string_lossy(), arguments),
         "build" => {
             let mut forwarded = Vec::new();
             let mut benchmark = false;
@@ -9798,7 +9807,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics\n  tizen:build, tizen:package, tizen:run, webos:build, webos:package, webos:run, web:build"
     );
 }
 
