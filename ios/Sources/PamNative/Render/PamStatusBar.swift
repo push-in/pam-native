@@ -1,5 +1,17 @@
 import UIKit
 
+#if os(tvOS)
+/// tvOS has no status bar. These stand in for UIKit's iOS-only types so the
+/// `StatusBar` node keeps compiling there; nothing reads them on a TV.
+@objc public enum UIStatusBarStyle: Int {
+    case `default`, lightContent, darkContent
+}
+
+@objc public enum UIStatusBarAnimation: Int {
+    case none, fade, slide
+}
+#endif
+
 /// The status bar a screen declares with `StatusBar` nodes (RN `StatusBar`
 /// on iOS): `barStyle`, `hidden` and `animated`. `backgroundColor` and
 /// `translucent` are Android-only in React Native; PAM paints the colour as
@@ -232,7 +244,9 @@ public final class PamStatusBarCoordinator {
     /// re-read the status bar (UIKit asks whichever one owns it).
     static func setNeedsStatusBarAppearanceUpdate(from controller: UIViewController?) {
         guard let controller else { return }
+        #if !os(tvOS)
         controller.setNeedsStatusBarAppearanceUpdate()
+        #endif
         for child in controller.children {
             setNeedsStatusBarAppearanceUpdate(from: child)
         }
@@ -259,6 +273,7 @@ public final class PamStatusBarCoordinator {
     /// Resolve these selectors dynamically so modern builds remain warning-free
     /// while apps that explicitly opt into the legacy plist mode keep working.
     static func applyApplicationStatusBar(_ config: PamStatusBarConfig) {
+        #if !os(tvOS)
         let application = UIApplication.shared
         let styleSelector = NSSelectorFromString("setStatusBarStyle:animated:")
         if application.responds(to: styleSelector) {
@@ -283,5 +298,6 @@ public final class PamStatusBarCoordinator {
             let setter = unsafeBitCast(application.method(for: hiddenSelector), to: HiddenSetter.self)
             setter(application, hiddenSelector, config.hidden, config.updateAnimation)
         }
+        #endif
     }
 }

@@ -381,6 +381,10 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
 
     @objc private func onCopyPress(_ recognizer: UILongPressGestureRecognizer) {
         guard recognizer.state == .began else { return }
+        #if os(tvOS)
+        // No edit menus on tvOS: a long press copies the text.
+        copyTextToPasteboard()
+        #else
         if #available(iOS 16.0, *) {
             let interaction: UIEditMenuInteraction
             if let existing = editMenuInteraction as? UIEditMenuInteraction {
@@ -397,6 +401,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
             )
             interaction.presentEditMenu(with: configuration)
         }
+        #endif
     }
 
     private func copyTextToPasteboard() {
@@ -528,6 +533,7 @@ private final class PamTextMarqueeTicker: NSObject {
     }
 }
 
+#if !os(tvOS)
 @available(iOS 16.0, *)
 extension PamTextView: UIEditMenuInteractionDelegate {
     func editMenuInteraction(
@@ -541,3 +547,4 @@ extension PamTextView: UIEditMenuInteractionDelegate {
         return UIMenu(children: [copy])
     }
 }
+#endif

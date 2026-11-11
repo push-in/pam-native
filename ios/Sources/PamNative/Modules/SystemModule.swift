@@ -351,6 +351,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
     }
 
     private func share(text: String, completion: @escaping ModuleCompletion) {
+        #if os(tvOS)
+        completion(.failure, Data("Sharing is not available on tvOS".utf8))
+        #else
         DispatchQueue.main.async {
             guard let controller = Self.topPresenter() else {
                 completion(.failure, Data("No view controller is available for sharing".utf8))
@@ -366,6 +369,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 completion(.success, Data())
             }
         }
+        #endif
     }
 
     private static func topPresenter() -> UIViewController? {
@@ -391,6 +395,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
 
     private func checkPermission(_ permission: String) -> Bool {
         switch permission {
+        #if !os(tvOS)
         case "camera":
             return AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         case "microphone":
@@ -399,6 +404,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
             } else {
                 return AVAudioSession.sharedInstance().recordPermission == .granted
             }
+        #endif
         case "photos":
             let status = PHPhotoLibrary.authorizationStatus()
             return status == .authorized || status == .limited
@@ -409,10 +415,15 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
 
     private func requestPermission(_ permission: String, completion: @escaping (Bool) -> Void) {
         switch permission {
+        #if os(tvOS)
+        case "camera", "microphone":
+            completion(false)
+        #else
         case "camera":
             AVCaptureDevice.requestAccess(for: .video, completionHandler: completion)
         case "microphone":
             AVAudioSession.sharedInstance().requestRecordPermission(completion)
+        #endif
         case "photos":
             if #available(iOS 16.0, *) {
                 PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in

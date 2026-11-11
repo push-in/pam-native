@@ -119,7 +119,11 @@ final class ViewRefModule: NativeModule {
 
     private static func firstInput(_ view: UIView) -> UIView? {
         if view is UITextField { return view }
+        #if os(tvOS)
+        if view is UITextView { return view }
+        #else
         if let area = view as? UITextView, area.isEditable { return area }
+        #endif
         for child in view.subviews {
             if let match = firstInput(child) { return match }
         }

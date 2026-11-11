@@ -38,6 +38,8 @@ final class PamKeyboardTapVisibility {
     private var tokens: [NSObjectProtocol] = []
 
     private init() {
+        // tvOS shows its own full-screen keyboard: nothing to track there.
+        #if !os(tvOS)
         let center = NotificationCenter.default
         tokens.append(center.addObserver(
             forName: UIResponder.keyboardWillShowNotification,
@@ -49,6 +51,7 @@ final class PamKeyboardTapVisibility {
             object: nil,
             queue: .main
         ) { [weak self] _ in self?.visible = false })
+        #endif
     }
 }
 

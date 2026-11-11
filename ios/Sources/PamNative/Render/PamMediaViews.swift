@@ -1281,7 +1281,11 @@ extension PamMediaView: PamSharedContentView {
     /// keeps its current frame) cropped to the drawn video rect, or the poster.
     func sharedContent() -> PamSharedContent? {
         if frameShown {
+            #if os(tvOS)
+            let rect = playerView.playerLayer.videoRect
+            #else
             let rect = controller.map { $0.videoBounds } ?? playerView.playerLayer.videoRect
+            #endif
             let surface: UIView = controller?.view ?? playerView
             if rect.width > 0, rect.height > 0,
                let snapshot = surface.snapshotView(afterScreenUpdates: false) {

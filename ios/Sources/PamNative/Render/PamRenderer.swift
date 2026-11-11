@@ -6392,7 +6392,9 @@ public final class PamRenderer: @unchecked Sendable {
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
+                #if !os(tvOS)
                 tap.numberOfTouchesRequired = minimum
+                #endif
                 recognizer = tap
             case 2, 5:
                 let pan = PamHeldPanGestureRecognizer(
@@ -6400,9 +6402,17 @@ public final class PamRenderer: @unchecked Sendable {
                     action: #selector(onSemanticGesture(_:))
                 )
                 pan.minimumHoldDuration = type == 2 ? max(0, minimumDuration) : 0
+                #if !os(tvOS)
                 pan.minimumNumberOfTouches = minimum
                 pan.maximumNumberOfTouches = maximum
+                #endif
                 recognizer = pan
+            #if os(tvOS)
+            case 3, 4:
+                // No pinch or rotation on a remote: the gesture never begins.
+                recognizer = UIGestureRecognizer()
+                recognizer.isEnabled = false
+            #else
             case 3:
                 recognizer = UIPinchGestureRecognizer(
                     target: self,
@@ -6413,13 +6423,16 @@ public final class PamRenderer: @unchecked Sendable {
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
+            #endif
             default:
                 let longPress = UILongPressGestureRecognizer(
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
                 longPress.minimumPressDuration = max(0.001, minimumDuration)
+                #if !os(tvOS)
                 longPress.numberOfTouchesRequired = minimum
+                #endif
                 recognizer = longPress
             }
             recognizer.cancelsTouchesInView = composition == 1
@@ -6772,6 +6785,7 @@ public final class PamRenderer: @unchecked Sendable {
                 translation = pan.translation(in: sender.view)
                 velocity = pan.velocity(in: sender.view)
             }
+            #if !os(tvOS)
             if let pinch = sender as? UIPinchGestureRecognizer {
                 scale = pinch.scale
                 velocity = CGPoint(x: pinch.velocity, y: 0)
@@ -6780,6 +6794,7 @@ public final class PamRenderer: @unchecked Sendable {
                 rotation = rotationGesture.rotation
                 velocity = CGPoint(x: rotationGesture.velocity, y: 0)
             }
+            #endif
             // Drag runs on the main thread every frame; PHP only sees the
             // semantic begin/end (with the chosen snap) and the settle.
             let dragging = sender is UIPanGestureRecognizer && drag?.config != nil

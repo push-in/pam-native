@@ -116,7 +116,7 @@ final class PamScreenSecurity {
 
     private static func makeShield() -> UIView {
         let cover = UIView()
-        cover.backgroundColor = .systemBackground
+        cover.backgroundColor = .pamSystemBackground
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         cover.accessibilityViewIsModal = true
         cover.isAccessibilityElement = true

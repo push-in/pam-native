@@ -167,8 +167,10 @@ private final class PamDrawingOverlay: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        #if !os(tvOS)
         isMultipleTouchEnabled = false
         isExclusiveTouch = true
+        #endif
         contentMode = .redraw
     }
 

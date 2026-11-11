@@ -764,6 +764,8 @@ public final class PamRuntime {
     /// Feeds the visible keyboard height over the current host view to the
     /// engine for every host (brownfield controller and generated app).
     private func observeKeyboard() {
+        // tvOS has a full-screen system keyboard: no inset to follow.
+        #if !os(tvOS)
         let center = NotificationCenter.default
         keyboardObservers.append(center.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification,
@@ -779,6 +781,7 @@ public final class PamRuntime {
         ) { [weak self] notification in
             self?.keyboardChanged(notification, hiding: true)
         })
+        #endif
     }
 
     private func refreshKeyboardVisibility() {
@@ -787,6 +790,9 @@ public final class PamRuntime {
             keyboardVisibility.update(surface: 0, bottom: 0)
             return
         }
+        #if os(tvOS)
+        keyboardVisibility.update(surface: 0, bottom: 0)
+        #else
         // Unlike a cached notification frame, the layout guide reflects an
         // IME that stayed visible while an OS prompt made the app inactive.
         let guide = window.keyboardLayoutGuide
@@ -802,8 +808,10 @@ public final class PamRuntime {
             height: visible && !overlap.isNull ? Float(window.bounds.maxY - overlap.minY) : 0,
             durationMs: 0
         )
+        #endif
     }
 
+    #if !os(tvOS)
     private func keyboardChanged(_ notification: Notification, hiding: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard let host = renderer.hostView, let window = host.window else { return }
@@ -847,6 +855,7 @@ public final class PamRuntime {
         renderer.followKeyboard(overlap: overlap, duration: duration, curve: curve)
         updateKeyboardInset(bottom: Float(overlap))
     }
+    #endif
 
     public func updateViewport(widthDp: Float, heightDp: Float, textScale: Float, darkAppearance: Bool) {
         layoutViewport = (widthDp, heightDp, textScale)

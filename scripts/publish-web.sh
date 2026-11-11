@@ -13,7 +13,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"; git -C "$root" branch -D pam-native-web-split >/dev/null 2>&1 || true' EXIT
 
 git -C "$root" subtree split -q --prefix packages/web -b pam-native-web-split
-git clone -q --branch pam-native-web-split "$root" "$work/web"
+git clone -q --no-tags --branch pam-native-web-split "$root" "$work/web"
 cd "$work/web"
 php -r '
     $file = "composer.json";

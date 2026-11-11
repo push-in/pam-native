@@ -35,7 +35,9 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
         monitor.pathUpdateHandler = { path in
             monitor.cancel()
             DispatchQueue.main.async {
+                #if !os(tvOS)
                 UIDevice.current.isBatteryMonitoringEnabled = true
+                #endif
                 let type: Int64
                 if path.status != .satisfied {
                     type = 1
@@ -48,10 +50,17 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
                 } else {
                     type = 5
                 }
+                #if os(tvOS)
+                // Apple TV runs on mains power: no battery to report.
+                let charging = false
+                let batteryLevel = -1.0
+                #else
                 let charging = UIDevice.current.batteryState == .charging ||
                     UIDevice.current.batteryState == .full
+                let batteryLevel = Double(UIDevice.current.batteryLevel)
+                #endif
                 let result = (try? WireMap.encode([
-                    "batteryLevel": .decimal(Double(UIDevice.current.batteryLevel)),
+                    "batteryLevel": .decimal(batteryLevel),
                     "charging": .flag(charging),
                     "networkType": .integer(type),
                     "expensiveNetwork": .flag(path.isExpensive),

@@ -1,13 +1,15 @@
 import Foundation
+#if !os(tvOS)
 import QuickLook
+#endif
 import Photos
+#if !os(tvOS)
 import PhotosUI
+#endif
 import UniformTypeIdentifiers
 import UIKit
 
-final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
-    UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate,
-    PHPickerViewControllerDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+final class FilesModule: NSObject, NativeModule, ClosableNativeModule {
     private let queue = DispatchQueue(label: "dev.pam.native.files")
     private let root: URL
     private var pending: ModuleCompletion?
@@ -16,7 +18,9 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     private var pendingMaximumBytes = 64 * 1_024 * 1_024
     private var captureType = 1
     private var previewURL: URL?
+    #if !os(tvOS)
     private weak var previewController: QLPreviewController?
+    #endif
     private var nextDownloadId: Int64 = 1
     private var downloads: [Int64: (RemoteFileDownload, FileDownloadChannel)] = [:]
 
@@ -240,6 +244,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
+#if !os(tvOS)
     private func shareFiles(_ payload: Data, completion: @escaping ModuleCompletion) {
         do {
             let values = try WireMap.decode(payload)
@@ -278,6 +283,11 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             }
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
+#else
+    private func shareFiles(_ payload: Data, completion: @escaping ModuleCompletion) {
+        completion(.failure, Data("Sharing files is not available on tvOS".utf8))
+    }
+#endif
 
     private func read(_ payload: Data, _ completion: @escaping ModuleCompletion) {
         do {
@@ -488,6 +498,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         return values
     }
 
+#if !os(tvOS)
     private func openFile(_ payload: Data, completion: @escaping ModuleCompletion) {
         do {
             let values = try WireMap.decode(payload)
@@ -720,6 +731,26 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         picker.dismiss(animated: true)
         takePending()?(.success, Data())
     }
+#else
+    private func openFile(_ payload: Data, completion: @escaping ModuleCompletion) {
+        completion(.failure, Data("Opening files is not available on tvOS".utf8))
+    }
+
+    private func presentPicker(
+        type: Int,
+        multiple: Bool,
+        limit: Int,
+        requestedType: UTType?,
+        maximumBytes: Int,
+        completion: @escaping ModuleCompletion
+    ) {
+        completion(.failure, Data("File and photo pickers are not available on tvOS".utf8))
+    }
+
+    private func presentCapture(type: Int, completion: @escaping ModuleCompletion) {
+        completion(.failure, Data("The camera is not available on tvOS".utf8))
+    }
+#endif
 
     private func importFile(_ source: URL, maximumBytes: Int, completion: ModuleCompletion?) {
         guard let completion else { return }
@@ -974,13 +1005,20 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             }
         }
         DispatchQueue.main.async { self.finishFailure("Files module closed") }
+        #if !os(tvOS)
         DispatchQueue.main.async {
             self.previewController?.dismiss(animated: false)
             self.previewURL = nil
             self.previewController = nil
         }
+        #endif
     }
 }
+
+#if !os(tvOS)
+extension FilesModule: UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate,
+    PHPickerViewControllerDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {}
+#endif
 
 private struct FileModuleError: LocalizedError {
     let message: String
