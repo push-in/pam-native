@@ -47,7 +47,11 @@ class PamInitialBackgroundPropertiesInstrumentedTest {
                 val before = pixels(parent)
                 val flags = flags(container)
                 val shadows = shadows(container)
-                assertTrue(container.clipChildren)
+                // overflow:hidden clips the subtree to the container box in
+                // dispatchDraw; clipChildren stays off so a child's own
+                // overflow is not cut to the child's bounds.
+                assertTrue("overflow clip is active", container.overflowCornerRadius() > 0f)
+                assertFalse(container.clipChildren)
                 assertFalse(container.clipToPadding)
                 assertTrue("outer shadow remains registered", shadows.isNotEmpty())
 
@@ -67,7 +71,7 @@ class PamInitialBackgroundPropertiesInstrumentedTest {
                 assertNotSame(old, target.background)
                 assertFalse("changed fill must draw", before.sameAs(pixels(parent)))
                 renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.OVERFLOW, null))))
-                assertFalse(container.clipChildren)
+                assertEquals("overflow clip is released", 0f, container.overflowCornerRadius(), 0f)
                 assertEquals("unclipped child reaches the square corner", Color.BLUE, pixels(target).getPixel(0, 0))
             }
         }

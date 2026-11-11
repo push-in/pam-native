@@ -1,5 +1,4 @@
 import XCTest
-import Network
 import CryptoKit
 @testable import PamNative
 
@@ -192,7 +191,7 @@ extension HttpUploadTests {
 }
 
 private final class UploadHTTPServer: @unchecked Sendable {
-    private let listener: NWListener
+    private var listener: LoopbackTCPListener!
     private let queue = DispatchQueue(label: "pam.test.http.upload")
     private let length: Int
     private let source: URL
@@ -201,9 +200,9 @@ private final class UploadHTTPServer: @unchecked Sendable {
     private let responseStatus: Int64
     private var received = Data()
     private var headersRead = false
-    private var connections: [NWConnection] = []
+    private var connections: [LoopbackTCPConnection] = []
 
-    var url: String? { listener.port.map { "http://127.0.0.1:\($0.rawValue)/upload" } }
+    var url: String? { "http://127.0.0.1:\(listener.port)/upload" }
     var digest: SHA256.Digest { queue.sync { SHA256.hash(data: received) } }
 
     init(length: Int, source: URL, responds: Bool = true, responseStatus: Int64 = 204,
@@ -213,21 +212,17 @@ private final class UploadHTTPServer: @unchecked Sendable {
         self.responds = responds
         self.onReceived = received
         self.responseStatus = responseStatus
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
-        listener = try NWListener(using: parameters)
-        listener.stateUpdateHandler = { state in if case .ready = state { ready() } }
-        listener.newConnectionHandler = { [weak self] connection in
+        listener = try LoopbackTCPListener(queue: queue) { [weak self] connection in
             guard let self else { connection.cancel(); return }
             self.connections.append(connection)
-            connection.start(queue: self.queue)
             self.read(connection)
         }
-        listener.start(queue: queue)
+        // Bound and listening already: no readiness to wait for.
+        queue.async(execute: ready)
     }
 
-    private func read(_ connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, finished, error in
+    private func read(_ connection: LoopbackTCPConnection) {
+        connection.receive(maximumLength: 65_536) { [weak self] data, finished, error in
             guard let self, let data, error == nil else { connection.cancel(); return }
             self.received.append(data)
             guard self.received.count <= self.length + 16_384 else { connection.cancel(); return }
@@ -265,7 +260,7 @@ private final class UploadHTTPServer: @unchecked Sendable {
                 }
                 let redirect = self.responseStatus == 307 ? "Location: http://127.0.0.1:1/must-not-receive-file\r\n" : ""
                 let response = Data("HTTP/1.1 \(statusLine)\r\n\(redirect)Content-Length: 0\r\nConnection: close\r\n\r\n".utf8)
-                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+                connection.send(response) { connection.cancel() }
             } else if finished {
                 connection.cancel()
             } else { self.read(connection) }

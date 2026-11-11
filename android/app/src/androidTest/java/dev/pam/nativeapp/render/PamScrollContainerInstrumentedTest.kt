@@ -39,13 +39,15 @@ class PamScrollContainerInstrumentedTest {
                 activity.host.layout(0, 0, 300, 300)
                 val nativeScroll = scroll.getChildAt(0) as ViewGroup
                 assertEquals(false, nativeScroll.clipToPadding)
-                nativeScroll.scrollTo(0, Int.MAX_VALUE)
+                // Past the end, but not Int.MAX_VALUE: API 26's ScrollView
+                // clamp adds the viewport to the target and overflows.
+                nativeScroll.scrollTo(0, PAST_THE_END)
                 assertEquals(360, scroll.snapshotOffsetPixels().second)
                 assertEquals(48, nativeScroll.paddingBottom)
                 scroll.setContentInsets(0, 0, 0, 0)
                 activity.host.measure(exactly(300), exactly(300))
                 activity.host.layout(0, 0, 300, 300)
-                nativeScroll.scrollTo(0, Int.MAX_VALUE)
+                nativeScroll.scrollTo(0, PAST_THE_END)
                 assertEquals(300, scroll.snapshotOffsetPixels().second)
             }
         } finally { activity.finish() }
@@ -623,5 +625,9 @@ class PamScrollContainerInstrumentedTest {
     private fun relayout(host: View) {
         host.measure(exactly(300), exactly(400))
         host.layout(0, 0, 300, 400)
+    }
+
+    private companion object {
+        const val PAST_THE_END = 100_000
     }
 }

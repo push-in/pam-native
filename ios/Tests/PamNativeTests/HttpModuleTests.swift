@@ -1,5 +1,4 @@
 import XCTest
-import Network
 @testable import PamNative
 
 final class HttpModuleTests: XCTestCase {
@@ -178,32 +177,28 @@ private final class HTTPURLProtocol: URLProtocol {
 }
 
 private final class RedirectHTTPServer: @unchecked Sendable {
-    private let listener: NWListener
+    private var listener: LoopbackTCPListener!
     private let queue = DispatchQueue(label: "pam.test.http.redirect")
     private var count = 0
-    private var connections: [NWConnection] = []
+    private var connections: [LoopbackTCPConnection] = []
     private let crossOrigin: Bool
 
-    var url: String? { listener.port.map { "http://127.0.0.1:\($0.rawValue)/upload" } }
+    var url: String? { "http://127.0.0.1:\(listener.port)/upload" }
     var requestCount: Int { queue.sync { count } }
 
     init(crossOrigin: Bool, ready: @escaping () -> Void) throws {
         self.crossOrigin = crossOrigin
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
-        listener = try NWListener(using: parameters)
-        listener.stateUpdateHandler = { state in if case .ready = state { ready() } }
-        listener.newConnectionHandler = { [weak self] connection in
+        listener = try LoopbackTCPListener(queue: queue) { [weak self] connection in
             guard let self else { connection.cancel(); return }
             self.connections.append(connection)
-            connection.start(queue: self.queue)
             self.receive(connection, head: Data())
         }
-        listener.start(queue: queue)
+        // Bound and listening already: no readiness to wait for.
+        queue.async(execute: ready)
     }
 
-    private func receive(_ connection: NWConnection, head: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, finished, error in
+    private func receive(_ connection: LoopbackTCPConnection, head: Data) {
+        connection.receive(maximumLength: 16_384) { [weak self] data, finished, error in
             guard let self, let data, error == nil else { connection.cancel(); return }
             var head = head
             head.append(data)
@@ -212,19 +207,14 @@ private final class RedirectHTTPServer: @unchecked Sendable {
                 if finished { connection.cancel() } else { self.receive(connection, head: head) }
                 return
             }
-            guard let port = self.listener.port else { connection.cancel(); return }
+            let port = self.listener.port
             self.count += 1
             let host = self.crossOrigin ? "localhost" : "127.0.0.1"
-            let location = "http://\(host):\(port.rawValue)/redirected"
+            let location = "http://\(host):\(port)/redirected"
             let response = self.count == 1
                 ? "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            connection.send(
-                content: Data(response.utf8),
-                contentContext: .defaultMessage,
-                isComplete: true,
-                completion: .contentProcessed { _ in connection.cancel() }
-            )
+            connection.send(Data(response.utf8)) { connection.cancel() }
         }
     }
 
