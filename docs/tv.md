@@ -16,7 +16,8 @@ because the PHP SDK needs 64-bit integers (ARGB colors, node ids).
 pam init my-app --template native --platform android,ios,android-tv
 ```
 
-or, in an existing app, add it to `pam-native.json`:
+or, in an existing app, run `pam add target android-tv` (`pam remove target
+android-tv` takes it out), which edits `targets` in `pam-native.json`:
 
 ```json
 {
