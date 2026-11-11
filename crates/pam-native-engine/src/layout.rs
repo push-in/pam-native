@@ -4937,6 +4937,7 @@ mod tests {
     /// map and a fixed footer, under parents of every sizing mode. Yoga
     /// sizes the card as map + footer; the footer is never clipped.
     #[test]
+    #[allow(clippy::type_complexity)]
     fn aspect_ratio_percent_child_counts_with_its_siblings_in_a_content_sized_parent() {
         let card = vec![f(PropKey::Width, 248.0), i(PropKey::Overflow, 1)];
         let map = vec![
