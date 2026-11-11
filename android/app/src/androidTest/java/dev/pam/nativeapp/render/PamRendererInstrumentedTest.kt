@@ -2539,12 +2539,13 @@ class PamRendererInstrumentedTest {
                     requireNotNull(list.findViewHolderForAdapterPosition(1))
                         .itemView.layoutParams.height,
                 )
-                assertTrue(list.clipChildren)
+                // A row may draw the pixel Yoga rounds past its floored step
+                // (like a React Native cell); the list's draw() still clips
+                // everything to its own bounds.
+                assertFalse(list.clipChildren)
                 assertTrue(
-                    (
-                        requireNotNull(list.findViewHolderForAdapterPosition(0))
-                            .itemView as FrameLayout
-                    ).clipChildren,
+                    requireNotNull(list.findViewHolderForAdapterPosition(0))
+                        .itemView is RichCellContainer,
                 )
 
                 val retainedFirst = requireNotNull(

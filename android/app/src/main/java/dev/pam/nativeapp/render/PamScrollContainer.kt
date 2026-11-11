@@ -538,8 +538,12 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
     }
 
+    /** Bumped whenever a keyboard reveal is scheduled or scrolls. */
+    private var keyboardRevealGeneration = 0
+
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return
+        keyboardRevealGeneration++
         ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true, keyboardGuard = true)
     }
 
@@ -592,7 +596,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 else -> current
             }
             val boundedNext = next.coerceIn(0, primaryMaxOffset())
-            if (boundedNext != current) scrollToPrimary(boundedNext)
+            if (boundedNext != current) {
+                if (keyboardGuard) keyboardRevealGeneration++
+                scrollToPrimary(boundedNext)
+            }
             // Keyboard insets and orientation-driven PHP layout can settle on
             // the next frame. Recheck once so the focused editor cannot be
             // left outside a newly reduced viewport after rotation.
@@ -624,12 +631,16 @@ internal class PamScrollContainer @JvmOverloads constructor(
     fun preserveOffsetAfterUnchangedKeyboardInsets() {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
         val (x, y) = snapshotOffsetPixels()
+        val generation = keyboardRevealGeneration
         activeScroll.postOnAnimation {
             if (
                 isAttachedToWindow &&
                 !hasRequestedOffsetX &&
                 !hasRequestedOffsetY &&
-                keyboardAvoidanceInsetPx > 0
+                keyboardAvoidanceInsetPx > 0 &&
+                // A keyboard reveal scheduled or applied since the snapshot
+                // moved the offset on purpose; restoring would undo it.
+                generation == keyboardRevealGeneration
             ) {
                 activeScroll.scrollTo(x, y)
             }
