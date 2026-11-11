@@ -205,6 +205,11 @@ fn tizen_package(options: &Options, dist: &Path) -> Result<PathBuf, String> {
         .map(|(path, _)| path)
         .next()
         .ok_or("tizen package did not write a .wgt")?;
+    // The Tizen CLI names it after the app name; sdb cannot push names with spaces.
+    let id = tizen_application_id(dist)?;
+    let named = output.join(format!("{}.wgt", id.split('.').next().unwrap_or(&id)));
+    fs::rename(&package, &named).map_err(|error| format!("cannot rename the .wgt: {error}"))?;
+    let package = named;
     println!("Packaged {}", package.display());
     Ok(package)
 }
