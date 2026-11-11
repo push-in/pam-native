@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+TV apps: Android TV, Google TV and Fire TV from the same code as the phone app.
+See [docs/tv.md](docs/tv.md).
+
+- Manifest: `targets` (`android`, `ios`, `android-tv`) and `android.tv`
+  (`banner`, `overscan`). The `android-tv` target adds the TV launcher entry,
+  the banner and optional touch screen and leanback features. TVs need 64-bit
+  Android: `armeabi-v7a` is refused with a clear message, because the PHP SDK
+  needs 64-bit integers.
+- Remote and keyboard keys: `on:keyDown` with a typed `KeyEvent` (W3C names:
+  arrows, `Enter`, `GoBack`, `ContextMenu`, media and colour keys) and
+  `captureKeys`, like PAM Desktop.
+- Focus: `focusable`, `autoFocus` on any element, `focusGroup` (rails and menus
+  remember their last focused child), `nextFocusUp/Down/Left/Right` and a
+  default focus ring that follows the corners while a remote drives the app
+  (`focusRing="none"` or a `:focus` style replace it). `on:focus`/`on:blur`
+  now reach any element.
+- `useFormFactor()` (`type`, `tv`, `phone`, `tablet`, `remote`, `touch`), and
+  `deviceClass` is `Television` on a TV. The pointer of a remote is `none`.
+- `Name.tv.pam.php` (and `.phone`/`.tablet`) variants: another template for
+  the same component class.
+- Overscan: 5% safe-area margins on TVs (`android.tv.overscan`).
+- The build warns about elements only touch gestures reach when the app
+  targets `android-tv`.
+- `scripts/android-e2e.py`: end-to-end scripts that drive an app with the
+  remote and check the screen and the focus. `examples/tv` (PAM TV) runs one
+  on a Google TV emulator.
+- Protocol: extension event 1001 (`KeyDown`) and properties 1012-1020.
+
 ## 1.46.34 - 2026-11-02
 
 Platform media queries and a lighter component precompile on top of 1.46.33.

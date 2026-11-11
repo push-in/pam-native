@@ -77,7 +77,10 @@ impl BuildMode {
 enum AndroidAbi {
     Arm64 = 1,
     X86_64 = 2,
-    /// 32-bit ARM: most Android TV sticks, boxes and TV sets.
+    /// 32-bit ARM (TV sticks with 32-bit Android). The host, engine and PHP
+    /// runtime build for it; the PHP SDK does not run on 32-bit integers yet,
+    /// so [AndroidAbi::parse] refuses it.
+    #[allow(dead_code)]
     ArmV7 = 3,
 }
 
@@ -86,7 +89,12 @@ impl AndroidAbi {
         match value {
             "arm64-v8a" | "arm64" | "aarch64" => Ok(Self::Arm64),
             "x86_64" | "x64" => Ok(Self::X86_64),
-            "armeabi-v7a" | "armv7" | "arm" => Ok(Self::ArmV7),
+            "armeabi-v7a" | "armv7" | "arm" => Err(
+                "armeabi-v7a is not supported yet: the PAM PHP SDK needs 64-bit integers \
+                 (ARGB colors and node ids), and 32-bit Android runs PHP with 32-bit ones. \
+                 TVs with 64-bit Android (arm64-v8a) are supported"
+                    .to_owned(),
+            ),
             _ => Err(format!(
                 "unsupported Android ABI {value:?}; expected arm64-v8a, armeabi-v7a or x86_64"
             )),
@@ -1528,14 +1536,10 @@ fn default_abis() -> Vec<AndroidAbi> {
     vec![AndroidAbi::Arm64, AndroidAbi::X86_64]
 }
 
-/// The requested ABIs, plus 32-bit ARM when the app targets Android TV and
-/// the default set was not overridden: most TV sticks and sets run it.
-fn effective_abis(project: &Project, requested: &[AndroidAbi]) -> Vec<AndroidAbi> {
-    let mut abis = requested.to_vec();
-    if project.manifest.targets_android_tv() && requested == default_abis().as_slice() {
-        abis.push(AndroidAbi::ArmV7);
-    }
-    abis
+/// The ABIs to build. 32-bit ARM ([AndroidAbi::ArmV7]) is not added for TVs
+/// yet: the PHP SDK needs 64-bit integers.
+fn effective_abis(_project: &Project, requested: &[AndroidAbi]) -> Vec<AndroidAbi> {
+    requested.to_vec()
 }
 
 fn load_project(path: &Path) -> Result<Project, String> {
