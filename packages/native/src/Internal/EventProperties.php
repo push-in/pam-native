@@ -85,5 +85,6 @@ final class EventProperties
         EventKind::PageChange->value => PropKey::OnPageChange->value,
         EventKind::RouteCovered->value => PropKey::OnRouteCovered->value,
         EventKind::RouteFocused->value => PropKey::OnRouteFocused->value,
+        EventKind::KeyDown->value => PropKey::OnKeyDown->value,
     ];
 }

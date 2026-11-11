@@ -20,6 +20,7 @@ use Closure;
 use Pam\Native\Composables\AppStateRef;
 use Pam\Native\Composables\ColorScheme;
 use Pam\Native\Composables\FontScale;
+use Pam\Native\Composables\FormFactor;
 use Pam\Native\Composables\KeyboardState;
 use Pam\Native\Composables\LocaleState;
 use Pam\Native\Composables\NetworkState;
@@ -162,6 +163,21 @@ if (!\function_exists('Pam\Native\useWindowDimensions')) {
         $source->acquireForScope();
 
         return new WindowDimensions($source);
+    }
+}
+
+if (!\function_exists('Pam\Native\useFormFactor')) {
+    /**
+     * What the app runs on and how it is driven: `->type` ('phone'|'tablet'|'tv'),
+     * `->tv`, `->phone`, `->tablet`, `->remote` (a D-pad drives the focus),
+     * `->touch`, `->inputMode` and `->pointer`.
+     */
+    function useFormFactor(): FormFactor
+    {
+        $source = Sources::window();
+        $source->acquireForScope();
+
+        return new FormFactor($source);
     }
 }
 

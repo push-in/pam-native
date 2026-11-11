@@ -44,12 +44,48 @@ $assert(
         && (\Pam\Native\UI\FlatList::make(['a'])->stackFromEnd(false)->properties()[1011] ?? null) === false,
     'FlatList::stackFromEnd() sends ListStackFromEnd (1011).',
 );
+$focusView = ExtensionView::make()
+    ->focusable()
+    ->focusGroup()
+    ->focusRing(false)
+    ->captureKeys('ArrowLeft', ' ArrowRight ', '')
+    ->nextFocus(up: 'menu', right: 'rail')
+    ->autoFocus()
+    ->onKeyDown(static function (\Pam\Native\KeyEvent $event): void {});
+$focusProps = $focusView->properties();
+$assert(
+    EventKind::KeyDown->value === 1001
+        && PropKey::OnKeyDown->value === 1012 && PropKey::FocusRing->value === 1020
+        && ($focusProps[1014] ?? null) === true && ($focusProps[1019] ?? null) === true
+        && ($focusProps[1020] ?? null) === 0 && ($focusProps[1013] ?? null) === 'ArrowLeft,ArrowRight'
+        && ($focusProps[1015] ?? null) === 'menu' && ($focusProps[1018] ?? null) === 'rail'
+        && !array_key_exists(1016, $focusProps) && ($focusProps[1012] ?? null) === true
+        && ($focusProps[PropKey::AutoFocus->value] ?? null) === true,
+    'Focus and key props: focusable, focusGroup, focusRing, captureKeys, nextFocus, autoFocus and onKeyDown (1001-1020).',
+);
+$keyEvent = \Pam\Native\KeyEvent::fromPayload(\Pam\Native\Internal\Wire::map(['key' => 'MediaPlayPause', 'repeat' => true]));
+$assert(
+    $keyEvent->key === 'MediaPlayPause' && $keyEvent->repeat && $keyEvent->isMedia() && !$keyEvent->isArrow(),
+    'KeyEvent decodes the W3C key name and flags from the wire map.',
+);
+$focusTree = \Pam\Native\Internal\TemplateCompiler::compile(
+    '<View focusable="true" focusGroup="true" focusRing="none" captureKeys="ArrowLeft, MediaPlayPause" nextFocusDown="grid" autoFocus="true" />',
+    'FocusTemplate.pam',
+    \Pam\Native\LanguageVersion::Language2,
+);
+$focusTemplate = \Pam\Native\Internal\TemplateRenderer::render($focusTree, null, [])->properties();
+$assert(
+    ($focusTemplate[1014] ?? null) === true && ($focusTemplate[1019] ?? null) === true
+        && ($focusTemplate[1020] ?? null) === 0 && ($focusTemplate[1013] ?? null) === 'ArrowLeft,MediaPlayPause'
+        && ($focusTemplate[1016] ?? null) === 'grid' && ($focusTemplate[PropKey::AutoFocus->value] ?? null) === true,
+    'Templates map focusable, focusGroup, focusRing, captureKeys, nextFocus* and autoFocus on any view.',
+);
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::ListStackFromEnd->value
-        && $local->eventCeiling === max(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()))
-        && $local->extensionEventCeiling === 1000,
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::FocusRing->value
+        && $local->eventCeiling === max(array_filter(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()), static fn (int $v): bool => $v < 1001))
+        && $local->extensionEventCeiling === EventKind::KeyDown->value,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',
 );
 
@@ -126,7 +162,8 @@ try {
 
     // Events: core kinds pass, undeclared extension kinds are refused.
     $assert($legacy->supportsEvent(EventKind::Press->value) && !$legacy->supportsEvent(1001), 'Event ceilings follow the contract.');
-    $throws(static fn () => $legacy->requireEvent(1001), 'does not implement event unknown (1001)');
+    $throws(static fn () => $legacy->requireEvent(1001), 'does not implement event KeyDown (1001)');
+    $throws(static fn () => $legacy->requireEvent(1002), 'does not implement event unknown (1002)');
     $assert(
         $parsed->supportsProperty(540) && !$parsed->supportsProperty(541) && !$parsed->supportsProperty(1000)
             && $parsed->supportsProperty(1001) && !$parsed->supportsProperty(1002) && !$parsed->supportsProperty(0),

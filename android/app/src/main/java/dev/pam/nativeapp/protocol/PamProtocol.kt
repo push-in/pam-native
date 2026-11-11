@@ -161,7 +161,10 @@ enum class EventKind(val value: Int) {
     PAGE_CHANGE(77),
     ROUTE_COVERED(78),
     ROUTE_FOCUSED(79),
-    LIST_WINDOW(80);
+    LIST_WINDOW(80),
+
+    // Extension table.
+    KEY_DOWN(1001);
 }
 
 enum class PropKey(val value: Int) {
@@ -719,7 +722,16 @@ enum class PropKey(val value: Int) {
     PRESS_BACKGROUND_COLOR(1008),
     KEYBOARD_PROGRESS(1009),
     MODAL_NAVIGATION_BAR_COLOR(1010),
-    LIST_STACK_FROM_END(1011);
+    LIST_STACK_FROM_END(1011),
+    ON_KEY_DOWN(1012),
+    CAPTURE_KEYS(1013),
+    FOCUSABLE(1014),
+    NEXT_FOCUS_UP(1015),
+    NEXT_FOCUS_DOWN(1016),
+    NEXT_FOCUS_LEFT(1017),
+    NEXT_FOCUS_RIGHT(1018),
+    FOCUS_GROUP(1019),
+    FOCUS_RING(1020);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

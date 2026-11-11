@@ -563,4 +563,14 @@ enum PropKey: int
     case KeyboardProgress = 1009;
     case ModalNavigationBarColor = 1010;
     case ListStackFromEnd = 1011;
+    // TV and keyboard focus.
+    case OnKeyDown = 1012;
+    case CaptureKeys = 1013;
+    case Focusable = 1014;
+    case NextFocusUp = 1015;
+    case NextFocusDown = 1016;
+    case NextFocusLeft = 1017;
+    case NextFocusRight = 1018;
+    case FocusGroup = 1019;
+    case FocusRing = 1020;
 }

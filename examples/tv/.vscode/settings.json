@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.pam": "pam",
+        "*.pam.php": "pam"
+    },
+    "[pam]": {
+        "editor.defaultFormatter": "pushin.pam-native",
+        "editor.formatOnSave": true
+    },
+    "html.customData": [
+        "./vendor/pushinbr/pam-native/resources/pam-native.custom-data.json"
+    ]
+}

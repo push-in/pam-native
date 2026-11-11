@@ -86,4 +86,7 @@ enum EventKind: int
     case RouteCovered = 78;
     case RouteFocused = 79;
     case ListWindow = 80;
+
+    // Extension table (Protocol::EXTENSION_BASE and up).
+    case KeyDown = 1001;
 }

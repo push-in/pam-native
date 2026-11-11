@@ -4878,20 +4878,57 @@ mod tests {
     /// a 48 dp control placeholder that pushes its siblings down.
     #[test]
     fn empty_containers_measure_padding_and_border_only() {
-        for kind in [NodeKind::View, NodeKind::Row, NodeKind::Column, NodeKind::Pressable] {
+        for kind in [
+            NodeKind::View,
+            NodeKind::Row,
+            NodeKind::Column,
+            NodeKind::Pressable,
+        ] {
             let tree = Tree {
                 root: 1,
                 nodes: BTreeMap::from([
-                    (1, node(1, 0, 0, NodeKind::View, vec![i(PropKey::AlignItems, 1)])),
+                    (
+                        1,
+                        node(1, 0, 0, NodeKind::View, vec![i(PropKey::AlignItems, 1)]),
+                    ),
                     (2, node(2, 1, 0, kind, vec![f(PropKey::MarginTop, 8.0)])),
-                    (3, node(3, 1, 1, kind, vec![f(PropKey::Padding, 6.0), f(PropKey::BorderWidth, 1.0)])),
-                    (4, node(4, 1, 2, NodeKind::View, vec![f(PropKey::Height, 20.0), f(PropKey::Width, 20.0)])),
+                    (
+                        3,
+                        node(
+                            3,
+                            1,
+                            1,
+                            kind,
+                            vec![f(PropKey::Padding, 6.0), f(PropKey::BorderWidth, 1.0)],
+                        ),
+                    ),
+                    (
+                        4,
+                        node(
+                            4,
+                            1,
+                            2,
+                            NodeKind::View,
+                            vec![f(PropKey::Height, 20.0), f(PropKey::Width, 20.0)],
+                        ),
+                    ),
                 ]),
             };
-            let layouts = calculate(&tree, Size { width: 411.0, height: 800.0 }).expect("layout");
+            let layouts = calculate(
+                &tree,
+                Size {
+                    width: 411.0,
+                    height: 800.0,
+                },
+            )
+            .expect("layout");
             assert_eq!(size_of(layouts[&2]), (0.0, 0.0), "{kind:?}: empty");
             assert_eq!(layouts[&3].y, 8.0, "{kind:?}: below the empty one's margin");
-            assert_eq!(size_of(layouts[&3]), (14.0, 14.0), "{kind:?}: padding + border");
+            assert_eq!(
+                size_of(layouts[&3]),
+                (14.0, 14.0),
+                "{kind:?}: padding + border"
+            );
             assert_eq!(layouts[&4].y, 22.0, "{kind:?}: sibling right after");
         }
     }
@@ -4900,17 +4937,48 @@ mod tests {
     /// map and a fixed footer, under parents of every sizing mode. Yoga
     /// sizes the card as map + footer; the footer is never clipped.
     #[test]
+    #[allow(clippy::type_complexity)]
     fn aspect_ratio_percent_child_counts_with_its_siblings_in_a_content_sized_parent() {
         let card = vec![f(PropKey::Width, 248.0), i(PropKey::Overflow, 1)];
-        let map = vec![f(PropKey::WidthPercent, 100.0), f(PropKey::AspectRatio, 248.0 / 140.0)];
+        let map = vec![
+            f(PropKey::WidthPercent, 100.0),
+            f(PropKey::AspectRatio, 248.0 / 140.0),
+        ];
         let footer = vec![f(PropKey::Height, 56.0)];
         let parents: Vec<(&str, Vec<(PropKey, PropValue)>, Vec<(PropKey, PropValue)>)> = vec![
             ("stretch column", vec![], vec![]),
             ("start column", vec![i(PropKey::AlignItems, 1)], vec![]),
             ("row", vec![i(PropKey::FlexDirection, 2)], vec![]),
-            ("start column > padded bubble", vec![i(PropKey::AlignItems, 1)], vec![f(PropKey::PaddingTop, 4.0), f(PropKey::PaddingBottom, 4.0), f(PropKey::PaddingLeft, 4.0), f(PropKey::PaddingRight, 4.0), f(PropKey::MaxWidthPercent, 80.0)]),
-            ("row > padded bubble", vec![i(PropKey::FlexDirection, 2)], vec![f(PropKey::PaddingTop, 4.0), f(PropKey::PaddingBottom, 4.0), f(PropKey::PaddingLeft, 4.0), f(PropKey::PaddingRight, 4.0), f(PropKey::MaxWidthPercent, 80.0)]),
-            ("row > shrinking bubble", vec![i(PropKey::FlexDirection, 2)], vec![f(PropKey::FlexShrink, 1.0), f(PropKey::MaxWidthPercent, 80.0)]),
+            (
+                "start column > padded bubble",
+                vec![i(PropKey::AlignItems, 1)],
+                vec![
+                    f(PropKey::PaddingTop, 4.0),
+                    f(PropKey::PaddingBottom, 4.0),
+                    f(PropKey::PaddingLeft, 4.0),
+                    f(PropKey::PaddingRight, 4.0),
+                    f(PropKey::MaxWidthPercent, 80.0),
+                ],
+            ),
+            (
+                "row > padded bubble",
+                vec![i(PropKey::FlexDirection, 2)],
+                vec![
+                    f(PropKey::PaddingTop, 4.0),
+                    f(PropKey::PaddingBottom, 4.0),
+                    f(PropKey::PaddingLeft, 4.0),
+                    f(PropKey::PaddingRight, 4.0),
+                    f(PropKey::MaxWidthPercent, 80.0),
+                ],
+            ),
+            (
+                "row > shrinking bubble",
+                vec![i(PropKey::FlexDirection, 2)],
+                vec![
+                    f(PropKey::FlexShrink, 1.0),
+                    f(PropKey::MaxWidthPercent, 80.0),
+                ],
+            ),
         ];
         for (label, root, bubble) in parents {
             let tree = Tree {
@@ -4923,10 +4991,25 @@ mod tests {
                     (5, node(5, 3, 1, NodeKind::View, footer.clone())),
                 ]),
             };
-            let layouts = calculate(&tree, Size { width: 411.0, height: 800.0 }).expect("layout");
+            let layouts = calculate(
+                &tree,
+                Size {
+                    width: 411.0,
+                    height: 800.0,
+                },
+            )
+            .expect("layout");
             assert_eq!(size_of(layouts[&4]), (248.0, 140.0), "{label}: map");
-            assert_eq!(layouts[&5].y - layouts[&3].y, 140.0, "{label}: footer below the map");
-            assert_eq!(size_of(layouts[&3]), (248.0, 196.0), "{label}: card = map + footer");
+            assert_eq!(
+                layouts[&5].y - layouts[&3].y,
+                140.0,
+                "{label}: footer below the map"
+            );
+            assert_eq!(
+                size_of(layouts[&3]),
+                (248.0, 196.0),
+                "{label}: card = map + footer"
+            );
         }
     }
 
@@ -8502,13 +8585,53 @@ mod tests {
         let mut nodes = BTreeMap::new();
         nodes.insert(
             1,
-            node(1, 0, 0, NodeKind::VirtualList, [(PropKey::ListRowHeight, PropValue::Float(120.0))]),
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListRowHeight, PropValue::Float(120.0))],
+            ),
         );
-        nodes.insert(2, node(2, 1, 0, NodeKind::Column, [(PropKey::Height, PropValue::Float(40.0))]));
-        nodes.insert(3, node(3, 1, 1, NodeKind::Column, [(PropKey::Height, PropValue::Float(0.0))]));
-        nodes.insert(4, node(4, 1, 2, NodeKind::Column, [(PropKey::Height, PropValue::Float(60.0))]));
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(40.0))],
+            ),
+        );
+        nodes.insert(
+            3,
+            node(
+                3,
+                1,
+                1,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(0.0))],
+            ),
+        );
+        nodes.insert(
+            4,
+            node(
+                4,
+                1,
+                2,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(60.0))],
+            ),
+        );
         let tree = Tree { root: 1, nodes };
-        let layout = calculate(&tree, Size { width: 360.0, height: 640.0 }).expect("zero row");
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("zero row");
 
         assert_eq!(layout[&3].y, 40.0);
         assert_eq!(layout[&3].height, 0.0);

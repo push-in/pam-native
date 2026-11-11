@@ -519,6 +519,14 @@ final class TemplateRenderer
         'dataDetectorType' => PropKey::TextDataDetectorType,
         'maxLength' => PropKey::MaxLength,
         'autoFocus' => PropKey::AutoFocus,
+        'captureKeys' => PropKey::CaptureKeys,
+        'focusable' => PropKey::Focusable,
+        'nextFocusUp' => PropKey::NextFocusUp,
+        'nextFocusDown' => PropKey::NextFocusDown,
+        'nextFocusLeft' => PropKey::NextFocusLeft,
+        'nextFocusRight' => PropKey::NextFocusRight,
+        'focusGroup' => PropKey::FocusGroup,
+        'focusRing' => PropKey::FocusRing,
         'returnKeyType' => PropKey::ReturnKeyType,
         'hitSlop' => PropKey::HitSlop,
         'hitSlopLeft' => PropKey::HitSlopLeft,
@@ -730,6 +738,7 @@ final class TemplateRenderer
         'on:selectionChange' => EventKind::InputSelectionChange,
         'on:contentSizeChange' => EventKind::InputContentSizeChange,
         'on:keyPress' => EventKind::InputKeyPress,
+        'on:keyDown' => EventKind::KeyDown,
         'on:pressIn' => EventKind::PressIn,
         'on:pressOut' => EventKind::PressOut,
         'on:pressMove' => EventKind::PressMove,
@@ -2301,6 +2310,8 @@ final class TemplateRenderer
                         EventKind::BottomSheetDismiss => $element->onDismiss($handler),
                         default => $element->on($event, $handler),
                     };
+                } elseif ($event === EventKind::KeyDown) {
+                    $element = $element->onKeyDown($handler);
                 } else {
                     $element = $element->on($event, $handler);
                 }
@@ -4618,6 +4629,20 @@ final class TemplateRenderer
         }
     }
 
+    private static function captureKeys(mixed $value): ?string
+    {
+        $keys = is_array($value) ? $value : explode(',', self::stringValue($value, 'captureKeys'));
+        $list = implode(',', array_values(array_filter(
+            array_map(static fn (mixed $key): string => trim(self::stringValue($key, 'captureKeys')), $keys),
+            static fn (string $key): bool => $key !== '',
+        )));
+        if (strlen($list) > 512) {
+            throw new InvalidArgumentException('captureKeys accepts at most 512 bytes of key names.');
+        }
+
+        return $list === '' ? null : $list;
+    }
+
     private static function convertPropertyValue(PropKey $key, mixed $value): string|int|float|bool|null
     {
         return match ($key) {
@@ -5154,6 +5179,21 @@ final class TemplateRenderer
             PropKey::ListActiveSection,
             => $value === null || $value === false ? null : self::stringValue($value, "Template {$key->name}"),
             PropKey::PressDoubleTapDelayMs => max(80, min(1_000, self::intValue($value, 'doubleTapDelay'))),
+            PropKey::Focusable,
+            PropKey::FocusGroup,
+            PropKey::AutoFocus,
+            => self::boolValue($value, "Template {$key->name}"),
+            PropKey::FocusRing => is_bool($value)
+                ? ($value ? 1 : 0)
+                : self::named($value, ['auto' => 1, 'none' => 0]),
+            PropKey::CaptureKeys => self::captureKeys($value),
+            PropKey::NextFocusUp,
+            PropKey::NextFocusDown,
+            PropKey::NextFocusLeft,
+            PropKey::NextFocusRight,
+            => $value === null || $value === false || $value === ''
+                ? null
+                : self::boundedString($value, "Template {$key->name}"),
             PropKey::GestureDragSnapIndex => Drag::snapRequestValue($value),
             PropKey::AnimationRestartKey => max(0, self::intValue($value, "Template {$key->name}")),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
@@ -7429,6 +7469,9 @@ final class TemplateRenderer
             $value = \Pam\Native\LayoutEvent::fromPayload($payload);
         } elseif ($kind === EventKind::MediaReady && is_string($payload)) {
             $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::KeyDown && is_string($payload)) {
+            $value = \Pam\Native\KeyEvent::fromPayload($payload);
+
         } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
             $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);
         } elseif ($kind === EventKind::Toggle) {

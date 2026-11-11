@@ -1591,6 +1591,7 @@ class PamRenderer(
 
     override fun close() {
         onPropertyError = null
+        unobserveFocus(host)
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
         onSurfaceKeyboardInset = null
@@ -4001,7 +4002,10 @@ class PamRenderer(
                     is PamRecyclerList -> view.setTextColor(color)
                 }
             }
-            PropKey.NATIVE_STATE_STYLES -> configureNativeStateStyles(view, state)
+            PropKey.NATIVE_STATE_STYLES -> {
+                configureNativeStateStyles(view, state)
+                refreshFocusInfo(view, state)
+            }
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
@@ -4653,6 +4657,15 @@ class PamRenderer(
             } else {
                 Unit
             }
+            PropKey.FOCUSABLE -> applyFocusable(view, state)
+            PropKey.CAPTURE_KEYS,
+            PropKey.NEXT_FOCUS_UP,
+            PropKey.NEXT_FOCUS_DOWN,
+            PropKey.NEXT_FOCUS_LEFT,
+            PropKey.NEXT_FOCUS_RIGHT,
+            PropKey.FOCUS_GROUP,
+            PropKey.FOCUS_RING,
+            -> refreshFocusInfo(view, state)
             PropKey.RETURN_KEY_TYPE -> (view as? PamEditText)?.let {
                 applyInputConfiguration(it, state)
             }
@@ -4771,6 +4784,7 @@ class PamRenderer(
             PropKey.ON_LONG_PRESS,
             PropKey.ON_FOCUS,
             PropKey.ON_BLUR,
+            PropKey.ON_KEY_DOWN,
             PropKey.ON_SUBMIT,
             PropKey.ON_SCROLL,
             PropKey.ON_REFRESH,
@@ -4959,7 +4973,10 @@ class PamRenderer(
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
             }
-            PropKey.NATIVE_STATE_STYLES -> configureNativeStateStyles(view, state)
+            PropKey.NATIVE_STATE_STYLES -> {
+                configureNativeStateStyles(view, state)
+                refreshFocusInfo(view, state)
+            }
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
@@ -5071,6 +5088,15 @@ class PamRenderer(
             }
             PropKey.MAX_LENGTH -> (view as? EditText)?.filters = emptyArray()
             PropKey.AUTO_FOCUS -> Unit
+            PropKey.FOCUSABLE -> applyFocusable(view, state)
+            PropKey.CAPTURE_KEYS,
+            PropKey.NEXT_FOCUS_UP,
+            PropKey.NEXT_FOCUS_DOWN,
+            PropKey.NEXT_FOCUS_LEFT,
+            PropKey.NEXT_FOCUS_RIGHT,
+            PropKey.FOCUS_GROUP,
+            PropKey.FOCUS_RING,
+            -> refreshFocusInfo(view, state)
             PropKey.ENABLED -> {
                 view.isEnabled = true
                 configurePressable(view, state)
@@ -5573,6 +5599,7 @@ class PamRenderer(
     }
 
     private fun installEvents(view: View, state: NodeState) {
+        refreshFocusInfo(view, state)
         if (view is PamPressable) {
             view.setOnClickListener(null)
             view.setOnLongClickListener(null)
@@ -6554,6 +6581,92 @@ class PamRenderer(
             )
         }
     }
+
+    /** Mirrors the node's key and focus props into its [PamFocusInfo] tag. */
+    private fun refreshFocusInfo(view: View, state: NodeState) {
+        val properties = state.properties
+        PamFocus.edit(view, state.id) { info ->
+            info.keyDown = properties[PropKey.ON_KEY_DOWN] != null
+            info.captureKeys = properties[PropKey.CAPTURE_KEYS]?.textOrNull()
+                ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty)?.toSet()
+                ?: emptySet()
+            info.next[0] = properties[PropKey.NEXT_FOCUS_UP]?.textOrNull()
+            info.next[1] = properties[PropKey.NEXT_FOCUS_DOWN]?.textOrNull()
+            info.next[2] = properties[PropKey.NEXT_FOCUS_LEFT]?.textOrNull()
+            info.next[3] = properties[PropKey.NEXT_FOCUS_RIGHT]?.textOrNull()
+            info.group = (properties[PropKey.FOCUS_GROUP] as? PropValue.Flag)?.value == true
+            info.ring = ((properties[PropKey.FOCUS_RING] as? PropValue.Integer)?.value ?: 1L).toInt()
+            info.focusStyle = nativeStateDeclarations(state, NativeStyleState.FOCUSED) != null
+            // Nodes with state styles hear focus through configureNativeStateStyles.
+            info.focusEvents = view !is EditText && properties[PropKey.NATIVE_STATE_STYLES] == null &&
+                (properties[PropKey.ON_FOCUS] != null || properties[PropKey.ON_BLUR] != null)
+        }
+        if (view.isFocused) PamFocus.updateRing(view, true)
+    }
+
+    private fun applyFocusable(view: View, state: NodeState) {
+        val focusable = (state.properties[PropKey.FOCUSABLE] as? PropValue.Flag)?.value
+            ?: (view is PamPressable || view is EditText ||
+                state.kind == NodeKind.PRESSABLE || state.kind == NodeKind.BUTTON)
+        view.isFocusable = focusable
+        if (!focusable && view.isFocused) view.clearFocus()
+    }
+
+    private val focusListener = android.view.ViewTreeObserver.OnGlobalFocusChangeListener { old, new ->
+        onFocusMoved(old, new)
+    }
+
+    private val touchModeListener = android.view.ViewTreeObserver.OnTouchModeChangeListener {
+        host.findFocus()?.let { focused -> PamFocus.updateRing(focused, PamFocus.isFocusStop(focused)) }
+    }
+
+    init {
+        observeFocus(host)
+    }
+
+    /** Follows focus in [root]'s window (the activity, a Modal's dialog). */
+    internal fun observeFocus(root: View) {
+        root.viewTreeObserver.addOnGlobalFocusChangeListener(focusListener)
+        root.viewTreeObserver.addOnTouchModeChangeListener(touchModeListener)
+    }
+
+    internal fun unobserveFocus(root: View) {
+        if (!root.viewTreeObserver.isAlive) return
+        root.viewTreeObserver.removeOnGlobalFocusChangeListener(focusListener)
+        root.viewTreeObserver.removeOnTouchModeChangeListener(touchModeListener)
+    }
+
+    /** Focus left [old] and reached [new] (any window of this renderer). */
+    internal fun onFocusMoved(old: View?, new: View?) {
+        if (old != null) {
+            PamFocus.updateRing(old, false)
+            PamFocus.info(old)?.takeIf { it.focusEvents }?.let { info ->
+                if (nodes[info.nodeId]?.properties?.get(PropKey.ON_BLUR) != null) dispatch(info.nodeId, EVENT_BLUR)
+            }
+        }
+        if (new != null) {
+            PamFocus.remember(new)
+            if (PamFocus.isFocusStop(new)) PamFocus.updateRing(new, true)
+            PamFocus.info(new)?.takeIf { it.focusEvents }?.let { info ->
+                if (nodes[info.nodeId]?.properties?.get(PropKey.ON_FOCUS) != null) dispatch(info.nodeId, EVENT_FOCUS)
+            }
+        }
+    }
+
+    /**
+     * A key from the remote, a game pad or a keyboard, before the window
+     * handles it: `onKeyDown`, `captureKeys`, `nextFocus*` and focus groups.
+     * True when the key must not reach native handling.
+     */
+    fun dispatchKey(root: View, event: KeyEvent): Boolean =
+        PamFocus.dispatch(root, event) { id, payload ->
+            if (nodes[id] != null) {
+                dispatchBytes(id, EVENT_KEY_DOWN, payload)
+                true
+            } else {
+                false
+            }
+        }
 
     private fun configureNativeStateStyles(view: View, state: NodeState) {
         if (view !is EditText) {
@@ -7540,6 +7653,7 @@ class PamRenderer(
             EVENT_INPUT_CONTENT_SIZE_CHANGE ->
                 PropKey.ON_INPUT_CONTENT_SIZE_CHANGE
             EVENT_INPUT_KEY_PRESS -> PropKey.ON_INPUT_KEY_PRESS
+            EVENT_KEY_DOWN -> PropKey.ON_KEY_DOWN
             EVENT_PRESS_IN -> PropKey.ON_PRESS_IN
             EVENT_PRESS_OUT -> PropKey.ON_PRESS_OUT
             EVENT_PRESS_MOVE -> PropKey.ON_PRESS_MOVE
@@ -7778,6 +7892,8 @@ class PamRenderer(
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
         val topLeft = dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat())
             .toFloat()
+        // The default focus ring follows the box's corners.
+        view.setTag(dev.pam.nativeapp.R.id.pam_focus_radius, topLeft)
         val topRight = dp(state.number(PropKey.BORDER_TOP_RIGHT_RADIUS, logicalRadius).toFloat())
             .toFloat()
         val bottomRight = dp(
@@ -11361,6 +11477,7 @@ class PamRenderer(
         const val EVENT_INPUT_SELECTION_CHANGE = 25
         const val EVENT_INPUT_CONTENT_SIZE_CHANGE = 26
         const val EVENT_INPUT_KEY_PRESS = 27
+        const val EVENT_KEY_DOWN = 1001
         const val EVENT_PRESS_IN = 28
         const val EVENT_PRESS_OUT = 29
         const val EVENT_PRESS_MOVE = 30
@@ -11441,6 +11558,19 @@ class PamRenderer(
         )
 
         val HOST_PROPERTIES = setOf(
+            // Focus stops, key listeners and focus groups are views the
+            // remote's D-pad walks through.
+            PropKey.FOCUSABLE,
+            PropKey.AUTO_FOCUS,
+            PropKey.ON_KEY_DOWN,
+            PropKey.CAPTURE_KEYS,
+            PropKey.NEXT_FOCUS_UP,
+            PropKey.NEXT_FOCUS_DOWN,
+            PropKey.NEXT_FOCUS_LEFT,
+            PropKey.NEXT_FOCUS_RIGHT,
+            PropKey.FOCUS_GROUP,
+            PropKey.ON_FOCUS,
+            PropKey.ON_BLUR,
             // Route focus listeners and media progress fills need a real view.
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
@@ -11595,6 +11725,7 @@ class PamRenderer(
             "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY"
 
         val EVENT_PROPERTIES = setOf(
+            PropKey.ON_KEY_DOWN,
             PropKey.ON_DOUBLE_TAP,
             PropKey.ON_GESTURE_SETTLE,
             PropKey.ON_SCROLL_BEGIN_DRAG,

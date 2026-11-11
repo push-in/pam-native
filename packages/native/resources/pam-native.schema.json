@@ -59,6 +59,19 @@
             "maxLength": 64,
             "default": "0.2.1"
         },
+        "targets": {
+            "type": "array",
+            "description": "Where the app ships: android, ios and android-tv (Android TV, Google TV, Fire TV). Defaults to [\"android\", \"ios\"].",
+            "items": {
+                "enum": [
+                    "android",
+                    "ios",
+                    "android-tv"
+                ]
+            },
+            "uniqueItems": true,
+            "minItems": 1
+        },
         "android": {
             "type": "object",
             "additionalProperties": false,
@@ -173,6 +186,22 @@
                             "type": "string",
                             "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$",
                             "description": "Optional single-colour layer for Android 13+ themed icons."
+                        }
+                    }
+                },
+                "tv": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "How the APK presents itself on Android TV (with the android-tv target).",
+                    "properties": {
+                        "banner": {
+                            "type": "string",
+                            "description": "320x180 PNG for the TV launcher, relative to the project."
+                        },
+                        "overscan": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Keep content inside 5% margins where TVs may crop the picture."
                         }
                     }
                 }
