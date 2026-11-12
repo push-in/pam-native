@@ -2425,6 +2425,23 @@ fn unconstrained_natural_scroll_extent(
         )?;
         return finite_non_negative(padding_before + content + padding_after);
     }
+    if axis == Axis::Vertical && node_axis == Axis::Horizontal {
+        // A row's children share its width (icon, flex text, chevron). Measure
+        // their height at the widths the final layout allocates, as
+        // `intrinsic_extent` does, not each one across the whole row: text
+        // measured wider wrapped to fewer lines than it lays out on narrow
+        // screens, and the extra lines ate the content's bottom padding.
+        return intrinsic_extent(
+            children,
+            node,
+            axis,
+            own_cross,
+            available_main,
+            text_scale,
+            text_metrics,
+            depth,
+        );
+    }
     let mut extents = Vec::with_capacity(visible_children.len());
     let mut grow_total = 0.0_f32;
     let mut grow_unit = 0.0_f32;
@@ -6895,6 +6912,129 @@ mod tests {
         .expect("scroll layout");
         assert_eq!(layouts[&3].height, 969.0);
         assert_eq!(layouts[&5].y, 900.0);
+    }
+
+    #[test]
+    fn scroll_content_measures_row_text_at_its_allocated_width() {
+        use PropValue::{Float as F, Integer as I};
+        // Settings-style rows: icon, flex text that wraps on narrow screens,
+        // chevron. The content keeps its bottom padding at every width.
+        for width in [300.0_f32, 320.0, 340.0, 360.0, 390.0, 420.0] {
+            let mut nodes = BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (
+                    2,
+                    node(2, 1, 0, NodeKind::Scroll, [(PropKey::FlexGrow, F(1.0))]),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [
+                            (PropKey::PaddingBottom, F(120.0)),
+                            (PropKey::PaddingHorizontal, F(16.0)),
+                        ],
+                    ),
+                ),
+            ]);
+            let mut last_row = 0;
+            for index in 0..16_u64 {
+                let row = 10 + index * 5;
+                last_row = row;
+                nodes.insert(
+                    row,
+                    node(
+                        row,
+                        3,
+                        index as u32,
+                        NodeKind::Row,
+                        [
+                            (PropKey::AlignItems, I(2)),
+                            (PropKey::PaddingVertical, F(12.0)),
+                        ],
+                    ),
+                );
+                nodes.insert(
+                    row + 1,
+                    node(
+                        row + 1,
+                        row,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, F(24.0)),
+                            (PropKey::Height, F(24.0)),
+                            (PropKey::MarginRight, F(12.0)),
+                        ],
+                    ),
+                );
+                nodes.insert(
+                    row + 2,
+                    node(
+                        row + 2,
+                        row,
+                        1,
+                        NodeKind::Column,
+                        [
+                            (PropKey::FlexGrow, F(1.0)),
+                            (PropKey::FlexShrink, F(1.0)),
+                            (PropKey::PaddingRight, F(10.0)),
+                        ],
+                    ),
+                );
+                nodes.insert(
+                    row + 3,
+                    node(
+                        row + 3,
+                        row + 2,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (
+                                PropKey::Text,
+                                PropValue::String("Encerrar a sessao neste aparelho".into()),
+                            ),
+                            (PropKey::FontSize, F(14.0)),
+                            (PropKey::LineHeight, F(19.0)),
+                        ],
+                    ),
+                );
+                nodes.insert(
+                    row + 4,
+                    node(
+                        row + 4,
+                        row,
+                        2,
+                        NodeKind::View,
+                        [(PropKey::Width, F(18.0)), (PropKey::Height, F(18.0))],
+                    ),
+                );
+            }
+            let layouts = calculate(
+                &Tree { root: 1, nodes },
+                Size {
+                    width,
+                    height: 640.0,
+                },
+            )
+            .expect("layout");
+            let row = layouts[&last_row];
+            let text = layouts[&(last_row + 3)];
+            let copy = layouts[&(last_row + 2)];
+            assert!(
+                text.y + text.height <= copy.y + copy.height + 0.01,
+                "{width}: text inside its column"
+            );
+            assert!(
+                (layouts[&3].y + layouts[&3].height - (row.y + row.height + 120.0)).abs() < 0.01,
+                "{width}: content {} ends 120 below the last row ({})",
+                layouts[&3].height,
+                row.y + row.height
+            );
+        }
     }
 
     #[test]

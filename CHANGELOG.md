@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Vertical scroll content measures a row's children at the widths the final
+  layout gives them (icon, flex text, chevron), like intrinsic layout does.
+  Text measured across the whole row wrapped to fewer lines than it laid out
+  on narrow screens (320-360 dp), so the extra lines ate the content's bottom
+  padding and the last rows ended under the navigation bar.
+- Android `DeviceModule` registers its battery/power receiver and network
+  callback on the application context: a recreated Activity (font size,
+  display size, language) no longer leaks the previous one.
+
 ## 1.49.2 - 2026-11-12
 
 - Android release builds keep `PamRuntime.onNativeRemount` from R8. The JNI
