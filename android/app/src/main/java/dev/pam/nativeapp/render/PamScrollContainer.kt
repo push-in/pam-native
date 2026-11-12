@@ -538,12 +538,12 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
     }
 
-    /** Bumped whenever a keyboard reveal is scheduled or scrolls. */
-    private var keyboardRevealGeneration = 0
+    /** Keyboard reveals scheduled whose first pass has not run yet. */
+    private var pendingKeyboardReveals = 0
 
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return
-        keyboardRevealGeneration++
+        pendingKeyboardReveals++
         ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true, keyboardGuard = true)
     }
 
@@ -557,8 +557,13 @@ internal class PamScrollContainer @JvmOverloads constructor(
         retry: Boolean,
         keyboardGuard: Boolean = false,
     ) {
-        if (horizontal) return
+        val firstKeyboardPass = keyboardGuard && retry
+        if (horizontal) {
+            if (firstKeyboardPass) pendingKeyboardReveals = (pendingKeyboardReveals - 1).coerceAtLeast(0)
+            return
+        }
         activeScroll.post {
+            if (firstKeyboardPass) pendingKeyboardReveals = (pendingKeyboardReveals - 1).coerceAtLeast(0)
             if (
                 !isAttachedToWindow ||
                 !target.isAttachedToWindow ||
@@ -596,10 +601,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 else -> current
             }
             val boundedNext = next.coerceIn(0, primaryMaxOffset())
-            if (boundedNext != current) {
-                if (keyboardGuard) keyboardRevealGeneration++
-                scrollToPrimary(boundedNext)
-            }
+            if (boundedNext != current) scrollToPrimary(boundedNext)
             // Keyboard insets and orientation-driven PHP layout can settle on
             // the next frame. Recheck once so the focused editor cannot be
             // left outside a newly reduced viewport after rotation.
@@ -630,17 +632,16 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun preserveOffsetAfterUnchangedKeyboardInsets() {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
+        // A reveal scheduled but not run yet: the offset now is the one it is
+        // about to replace, and restoring it would undo the reveal.
+        if (pendingKeyboardReveals > 0) return
         val (x, y) = snapshotOffsetPixels()
-        val generation = keyboardRevealGeneration
         activeScroll.postOnAnimation {
             if (
                 isAttachedToWindow &&
                 !hasRequestedOffsetX &&
                 !hasRequestedOffsetY &&
-                keyboardAvoidanceInsetPx > 0 &&
-                // A keyboard reveal scheduled or applied since the snapshot
-                // moved the offset on purpose; restoring would undo it.
-                generation == keyboardRevealGeneration
+                keyboardAvoidanceInsetPx > 0
             ) {
                 activeScroll.scrollTo(x, y)
             }
