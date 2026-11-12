@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.3 - 2026-11-12
 
 - Vertical scroll content measures a row's children at the widths the final
   layout gives them (icon, flex text, chevron), like intrinsic layout does.
