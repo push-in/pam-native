@@ -332,6 +332,19 @@ class PamRuntime(
                     true,
                 )
             }
+            // BuildConfiguration::mode(): debug builds are development, release
+            // builds production; without it a store build ran as development.
+            runCatching {
+                android.system.Os.setenv(
+                    "PAM_NATIVE_MODE",
+                    when {
+                        BuildConfig.DEBUG -> "development"
+                        BuildConfig.BUILD_TYPE == "benchmark" -> "benchmark"
+                        else -> "production"
+                    },
+                    true,
+                )
+            }
             // A deep-linked cold start: PHP routes the launch URL before its
             // first frame (Linking::routeLaunchUrl()).
             runCatching {

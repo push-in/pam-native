@@ -13,6 +13,7 @@ public struct PamPhpRuntimeConfiguration: Equatable {
     public static let opcacheDirectoryVariable = "PAM_NATIVE_OPCACHE_DIR"
     public static let opcacheMemoryVariable = "PAM_NATIVE_OPCACHE_MEMORY"
     public static let immutableSourcesVariable = "PAM_NATIVE_IMMUTABLE_SOURCES"
+    public static let modeVariable = "PAM_NATIVE_MODE"
 
     public let memoryLimitMegabytes: Int
     public let opcacheMemoryMegabytes: Int
@@ -74,6 +75,8 @@ public struct PamPhpRuntimeConfiguration: Equatable {
         set(Self.memoryLimitVariable, "\(memoryLimitMegabytes)M")
         set(Self.opcacheMemoryVariable, "\(opcacheMemoryMegabytes)")
         set(Self.immutableSourcesVariable, immutableSources ? "1" : "0")
+        // BuildConfiguration::mode(): only release builds have immutable sources.
+        set(Self.modeVariable, immutableSources ? "production" : "development")
         if let opcacheDirectory { set(Self.opcacheDirectoryVariable, opcacheDirectory) }
         // Renderer contract handshake (see ProtocolHandshake.swift).
         set(PAM_RENDERER_CONTRACT_VARIABLE, pamRendererContractJSON())
