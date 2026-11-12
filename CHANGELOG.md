@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.49.4 - 2026-11-12
+
+- Vertical scroll content measures each stacked child inside its own width
+  (content width minus its side margins, or its width, clamped by min/max),
+  like final layout. Cards with side margins were measured across the full
+  width, wrapped to fewer lines, and still ate part of the bottom padding on
+  narrow screens after 1.49.3.
+
 ## 1.49.3 - 2026-11-12
 
 - Vertical scroll content measures a row's children at the widths the final
