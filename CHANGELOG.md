@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.0 - 2026-11-11
 
 Apple TV (tvOS): the UIKit renderer and the PHP runtime run on tvOS. See
 [docs/tv.md](docs/tv.md#apple-tv-tvos).
