@@ -105,9 +105,11 @@ final class PamAnimatedImageTests: XCTestCase {
         XCTAssertTrue(view.isAnimatingImage)
         XCTAssertTrue(PamAnimatedImageClock.shared.isRunning)
         let first = view.image?.cgImage
-        // Frame 1 decodes off the main thread; let it land.
+        // Frame 1 decodes off the main thread; let it land. The index moves
+        // before the decoded bitmap is shown, and a slow CI simulator can
+        // take longer than 2 s for both.
         PamAnimatedImageClock.shared.step(by: 0.15)
-        waitUntil { view.animationFrameIndex != 0 }
+        waitUntil(timeout: 10) { view.animationFrameIndex != 0 && view.image?.cgImage !== first }
         XCTAssertNotEqual(view.animationFrameIndex, 0)
         XCTAssertFalse(view.image?.cgImage === first, "the displayed bitmap changed")
 
