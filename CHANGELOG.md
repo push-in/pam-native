@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.49.1 - 2026-11-12
+
+- Android and iOS export `PAM_NATIVE_MODE` before PHP starts:
+  `production` for release builds, `development` for debug builds and
+  `benchmark` for the Android benchmark build type. Release builds used to run
+  as development, so `BuildConfiguration::mode()` could not tell them apart
+  and the profiler, dev warnings and error snippets stayed on.
+
 ## 1.49.0 - 2026-11-11
 
 Apple TV (tvOS): the UIKit renderer and the PHP runtime run on tvOS. See
