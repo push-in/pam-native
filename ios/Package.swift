@@ -6,6 +6,7 @@ let package = Package(
     name: "PamNative",
     platforms: [
         .iOS(.v15),
+        .tvOS(.v15),
     ],
     products: [
         .library(name: "PamNative", targets: ["PamNative"]),

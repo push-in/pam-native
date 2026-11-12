@@ -72,7 +72,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         let entry = PamActiveUpdateInstaller.resolve(embeddedEntry: embeddedEntry)
 
         let runtime = PamRuntime(
-            hostView: controller.view,
+            hostView: controller.renderView,
             nativeModules: PamNativePluginRegistry.modules(),
             nativeViews: PamNativePluginRegistry.views(),
             reportError: { [weak self] message in
@@ -94,8 +94,8 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         controller.onGeometryChange = { [weak runtime, weak controller] in
             guard let runtime, let controller else { return }
             runtime.updateViewport(
-                widthDp: Float(controller.view.bounds.width),
-                heightDp: Float(controller.view.bounds.height),
+                widthDp: Float(controller.renderView.bounds.width),
+                heightDp: Float(controller.renderView.bounds.height),
                 textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
@@ -103,8 +103,8 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         controller.onAppearanceChange = { [weak runtime, weak controller] in
             guard let runtime, let controller else { return }
             runtime.updateViewport(
-                widthDp: Float(controller.view.bounds.width),
-                heightDp: Float(controller.view.bounds.height),
+                widthDp: Float(controller.renderView.bounds.width),
+                heightDp: Float(controller.renderView.bounds.height),
                 textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
@@ -118,8 +118,8 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
             guard let runtime, let controller else { return }
             runtime.start(
                 entry: entry.path,
-                widthDp: Float(controller.view.bounds.width),
-                heightDp: Float(controller.view.bounds.height),
+                widthDp: Float(controller.renderView.bounds.width),
+                heightDp: Float(controller.renderView.bounds.height),
                 textScale: PamRuntime.deviceTextScale(traits: controller.traitCollection),
                 darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
             )
@@ -210,9 +210,15 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         PamPushNotifications.didReceive(notification: notification)
+#if os(tvOS)
+        // tvOS shows no banners: a notification only updates the badge.
+        completionHandler([.badge])
+#else
         completionHandler([.banner, .list, .sound, .badge])
+#endif
     }
 
+#if !os(tvOS)
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -220,6 +226,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
     ) {
         PamPushNotifications.didReceive(response: response, completionHandler: completionHandler)
     }
+#endif
 
     func application(
         _ app: UIApplication,
@@ -316,9 +323,24 @@ final class PamHostViewController: UIViewController {
     private var lastSize = CGSize.zero
     private var lastInsets = UIEdgeInsets.zero
 
+#if os(tvOS)
+    /// tvOS renders into a 960 dp canvas scaled to the screen.
+    private let canvas = PamTVCanvas()
+    var renderView: UIView {
+        if canvas.superview == nil {
+            view.addSubview(canvas)
+            canvas.fit(in: view.bounds)
+        }
+        return canvas
+    }
+#else
+    var renderView: UIView { view }
+#endif
+
     // PAM `StatusBar` nodes (RN StatusBar): barStyle, hidden and animated,
     // resolved per screen and modal by PamStatusBarCoordinator, which calls
-    // setNeedsStatusBarAppearanceUpdate when they change.
+    // setNeedsStatusBarAppearanceUpdate when they change. tvOS has no status bar.
+#if !os(tvOS)
     override var preferredStatusBarStyle: UIStatusBarStyle {
         PamStatusBarCoordinator.shared.config.style
     }
@@ -330,9 +352,39 @@ final class PamHostViewController: UIViewController {
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         PamStatusBarCoordinator.shared.config.updateAnimation
     }
+#else
+    // The Siri Remote: autoFocus, focus groups, captureKeys and onKeyDown.
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        PamTVFocus.preferredEnvironments() ?? super.preferredFocusEnvironments
+    }
+
+    override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+        PamTVFocus.shouldUpdateFocus(in: context) && super.shouldUpdateFocus(in: context)
+    }
+
+    override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        PamTVFocus.didUpdateFocus(in: context)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if !PamTVFocus.pressesBegan(presses) {
+            super.pressesBegan(presses, with: event)
+        }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if !PamTVFocus.pressesEnded(presses) {
+            super.pressesEnded(presses, with: event)
+        }
+    }
+#endif
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+#if os(tvOS)
+        if canvas.superview != nil { canvas.fit(in: view.bounds) }
+#endif
         reportGeometryIfNeeded()
     }
 

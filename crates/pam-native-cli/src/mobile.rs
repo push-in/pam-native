@@ -284,7 +284,56 @@ struct ResolvedRuntime {
     release: RuntimeRelease,
     root: PathBuf,
     ios_root: PathBuf,
+    tvos_root: PathBuf,
 }
+
+/// The Apple platform a host app is prepared for: tvOS reuses the iOS host
+/// with tvOS build settings and the runtime built by `build.sh tvos`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AppleOs {
+    Ios,
+    Tvos,
+}
+
+impl AppleOs {
+    fn name(self) -> &'static str {
+        match self {
+            AppleOs::Ios => "iOS",
+            AppleOs::Tvos => "tvOS",
+        }
+    }
+
+    fn directory(self) -> &'static str {
+        match self {
+            AppleOs::Ios => "ios",
+            AppleOs::Tvos => "tvos",
+        }
+    }
+
+    fn runtime_root(self, runtime: &ResolvedRuntime) -> &Path {
+        match self {
+            AppleOs::Ios => &runtime.ios_root,
+            AppleOs::Tvos => &runtime.tvos_root,
+        }
+    }
+
+    fn simulator_sdk(self) -> &'static str {
+        match self {
+            AppleOs::Ios => "iphonesimulator",
+            AppleOs::Tvos => "appletvsimulator",
+        }
+    }
+
+    fn simulator_destination(self) -> &'static str {
+        match self {
+            AppleOs::Ios => "generic/platform=iOS Simulator",
+            AppleOs::Tvos => "generic/platform=tvOS Simulator",
+        }
+    }
+}
+
+/// The tvOS deployment target of the host app (the renderer's minimum).
+const TVOS_MINIMUM: &str = "15.0";
 
 fn default_php_series() -> String {
     "8.5".to_owned()
@@ -1065,6 +1114,20 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             );
             Ok(0)
         }
+        "tvos:prepare" => {
+            let project = load_project(&parse_project_only(arguments)?)?;
+            let workspace = prepare_apple(&project, AppleOs::Tvos)?;
+            println!(
+                "Prepared {} for tvOS at {}",
+                project.manifest.name,
+                workspace.display()
+            );
+            Ok(0)
+        }
+        "tvos:build" => {
+            build_apple(parse_project_only(arguments)?, false, AppleOs::Tvos).map(|_| 0)
+        }
+        "tvos:run" => run_tvos(parse_project_only(arguments)?),
         "ios:doctor" => doctor_ios(parse_project_only(arguments)?),
         "ios:build" => build_ios(parse_project_only(arguments)?, false).map(|_| 0),
         "ios:run" => run_ios(parse_project_only(arguments)?),
@@ -2962,6 +3025,7 @@ fn resolve_runtime(project: &Project, pam_home: &Path) -> Result<ResolvedRuntime
     Ok(ResolvedRuntime {
         root: pam_home.join("runtime/android").join(&id),
         ios_root: pam_home.join("runtime/ios").join(&id),
+        tvos_root: pam_home.join("runtime/tvos").join(&id),
         id,
         release,
     })
@@ -3695,15 +3759,16 @@ fn repair_android_environment(project_path: &Path) -> Result<(), String> {
 }
 
 fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
-    runtime
-        .ios_root
-        .join("PamPhp.xcframework/Info.plist")
-        .is_file()
-        && runtime
-            .ios_root
+    apple_runtime_ready(runtime, AppleOs::Ios)
+}
+
+fn apple_runtime_ready(runtime: &ResolvedRuntime, os: AppleOs) -> bool {
+    let root = os.runtime_root(runtime);
+    root.join("PamPhp.xcframework/Info.plist").is_file()
+        && root
             .join("PamNativeEngine.xcframework/Info.plist")
             .is_file()
-        && runtime.ios_root.join("runtime.json").is_file()
+        && root.join("runtime.json").is_file()
 }
 
 /// The iOS engine xcframework must be built from these sources: same SDK
@@ -3798,23 +3863,34 @@ fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
 }
 
 fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
+    prepare_apple(project, AppleOs::Ios)
+}
+
+fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
     let native_home = native_home()?;
     let runtime = resolve_runtime(project, &pam_home()?)?;
-    if !ios_runtime_ready(&runtime) {
+    let runtime_root = os.runtime_root(&runtime).to_path_buf();
+    if !apple_runtime_ready(&runtime, os) {
         return Err(format!(
-            "verified PHP {} iOS runtime is missing; build it on macOS with `runtime-builder/ios/build.sh --php {} all` (expected {})",
+            "verified PHP {} {} runtime is missing; build it on macOS with `runtime-builder/ios/build.sh --php {} {}` (expected {})",
             runtime.release.php_version,
+            os.name(),
             project.manifest.runtime.php,
-            runtime.ios_root.display()
+            if os == AppleOs::Ios { "all" } else { "tvos" },
+            runtime_root.display()
         ));
     }
-    ios_engine_matches(&runtime.ios_root, &native_home)?;
+    ios_engine_matches(&runtime_root, &native_home)?;
     write_runtime_lock(project, &runtime)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;
 
     let source = native_home.join("ios-host");
-    let workspace = project.root.join(".pam-native/ios/App");
+    let workspace = project
+        .root
+        .join(".pam-native")
+        .join(os.directory())
+        .join("App");
     fs::create_dir_all(&workspace)
         .map_err(|error| format!("cannot create {}: {error}", workspace.display()))?;
     prune_tree(&source, &workspace, &["build", "DerivedData"])?;
@@ -3857,7 +3933,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             fs::remove_dir_all(&destination)
                 .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
         }
-        copy_tree(&runtime.ios_root.join(framework), &destination, &[])?;
+        copy_tree(&runtime_root.join(framework), &destination, &[])?;
     }
 
     write_ios_plugin_package(project, &workspace.join("PamNativeSDK"))?;
@@ -3889,6 +3965,9 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
     } else {
         ""
     };
+    if os == AppleOs::Tvos {
+        adapt_host_for_tvos(&workspace)?;
+    }
     replace_ios_placeholders(
         &workspace.join("PamNativeApp.xcodeproj/project.pbxproj"),
         &[
@@ -3942,6 +4021,80 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         )],
     )?;
     Ok(workspace)
+}
+
+/// Turns the staged iOS host into a tvOS one: tvOS SDK and device family,
+/// the tvOS runtime slices on the header paths, and no iPhone-only
+/// Info.plist keys.
+fn adapt_host_for_tvos(workspace: &Path) -> Result<(), String> {
+    let path = workspace.join("PamNativeApp.xcodeproj/project.pbxproj");
+    let mut pbx = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    pbx = pbx
+        .replace("SDKROOT = iphoneos;", "SDKROOT = appletvos;")
+        .replace(
+            "IPHONEOS_DEPLOYMENT_TARGET = __PAM_IOS_MINIMUM__;",
+            &format!("TVOS_DEPLOYMENT_TARGET = {TVOS_MINIMUM};"),
+        )
+        .replace(
+            "TARGETED_DEVICE_FAMILY = \"1,2\";",
+            "TARGETED_DEVICE_FAMILY = 3;",
+        )
+        .replace("[sdk=iphoneos*]", "[sdk=appletvos*]")
+        .replace("[sdk=iphonesimulator*]", "[sdk=appletvsimulator*]");
+    for framework in ["PamPhp.xcframework", "PamNativeEngine.xcframework"] {
+        let (device, simulator) = tvos_slices(&workspace.join("Runtime").join(framework))?;
+        pbx = pbx
+            .replace(
+                &format!("{framework}/ios-arm64/"),
+                &format!("{framework}/{device}/"),
+            )
+            .replace(
+                &format!("{framework}/ios-arm64_x86_64-simulator/"),
+                &format!("{framework}/{simulator}/"),
+            );
+    }
+    write_atomic(&path, pbx.as_bytes())?;
+
+    let info_path = workspace.join("App/Info.plist");
+    let mut info = read_apple_plist(&info_path)?;
+    if let Some(object) = info.as_object_mut() {
+        for key in [
+            "LSRequiresIPhoneOS",
+            "UIRequiredDeviceCapabilities",
+            "UISupportedInterfaceOrientations",
+            "UISupportedInterfaceOrientations~ipad",
+            "UIViewControllerBasedStatusBarAppearance",
+            "UILaunchScreen",
+        ] {
+            object.remove(key);
+        }
+    }
+    write_apple_plist(&info_path, &info)
+}
+
+/// The device and simulator slice directories of a tvOS xcframework (the
+/// simulator one stands in for the device when only the simulator was built).
+fn tvos_slices(framework: &Path) -> Result<(String, String), String> {
+    let mut device = None;
+    let mut simulator = None;
+    let entries = fs::read_dir(framework)
+        .map_err(|error| format!("cannot read {}: {error}", framework.display()))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("tvos-") || !entry.path().is_dir() {
+            continue;
+        }
+        if name.ends_with("-simulator") {
+            simulator = Some(name);
+        } else {
+            device = Some(name);
+        }
+    }
+    let simulator = simulator
+        .or_else(|| device.clone())
+        .ok_or_else(|| format!("{} has no tvOS slice", framework.display()))?;
+    Ok((device.unwrap_or_else(|| simulator.clone()), simulator))
 }
 
 fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, String> {
@@ -4868,11 +5021,19 @@ fn replace_ios_placeholders(path: &Path, replacements: &[(&str, &str)]) -> Resul
 }
 
 fn build_ios_intermediate(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
+    build_apple_intermediate(project_path, release, AppleOs::Ios)
+}
+
+fn build_apple_intermediate(
+    project_path: PathBuf,
+    release: bool,
+    os: AppleOs,
+) -> Result<PathBuf, String> {
     if !cfg!(target_os = "macos") {
-        return Err("iOS builds require macOS with Xcode".to_owned());
+        return Err(format!("{} builds require macOS with Xcode", os.name()));
     }
     let project = load_project(&project_path)?;
-    let workspace = prepare_ios(&project)?;
+    let workspace = prepare_apple(&project, os)?;
     let configuration = if release { "Release" } else { "Debug" };
     let derived = workspace.join("DerivedData");
     let status = Command::new("xcodebuild")
@@ -4884,10 +5045,11 @@ fn build_ios_intermediate(project_path: PathBuf, release: bool) -> Result<PathBu
             "-configuration",
             configuration,
             "-destination",
-            "generic/platform=iOS Simulator",
+            os.simulator_destination(),
             "-derivedDataPath",
         ])
         .arg(&derived)
+        .args(simulator_archs(&workspace))
         .args(["CODE_SIGNING_ALLOWED=NO", "build"])
         .current_dir(&workspace)
         .status()
@@ -4897,7 +5059,7 @@ fn build_ios_intermediate(project_path: PathBuf, release: bool) -> Result<PathBu
     }
     let app = derived
         .join("Build/Products")
-        .join(format!("{configuration}-iphonesimulator"))
+        .join(format!("{configuration}-{}", os.simulator_sdk()))
         .join(format!("{}.app", project.manifest.name));
     if !app.is_dir() {
         return Err(format!("Xcode did not produce {}", app.display()));
@@ -4906,17 +5068,40 @@ fn build_ios_intermediate(project_path: PathBuf, release: bool) -> Result<PathBu
     Ok(app)
 }
 
+/// `ARCHS=…` limited to the simulator architectures the PHP runtime ships
+/// (a runtime built only for the Intel simulator links only x86_64); none
+/// when it cannot be read, so Xcode keeps its default.
+fn simulator_archs(workspace: &Path) -> Option<String> {
+    let info = read_apple_plist(&workspace.join("Runtime/PamPhp.xcframework/Info.plist")).ok()?;
+    let archs = info["AvailableLibraries"]
+        .as_array()?
+        .iter()
+        .find(|library| library["SupportedPlatformVariant"].as_str() == Some("simulator"))?
+        ["SupportedArchitectures"]
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!archs.is_empty()).then(|| format!("ARCHS={archs}"))
+}
+
 fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
+    build_apple(project_path, release, AppleOs::Ios)
+}
+
+fn build_apple(project_path: PathBuf, release: bool, os: AppleOs) -> Result<PathBuf, String> {
     let project = load_project(&project_path)?;
     with_ios_build_cleanup(&project.root, || {
-        let app = build_ios_intermediate(project.root.clone(), release)?;
+        let app = build_apple_intermediate(project.root.clone(), release, os)?;
         let output = project.root.join("dist");
         fs::create_dir_all(&output)
             .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
         let destination = output.join(format!(
-            "{}-{}-ios-{}.app",
+            "{}-{}-{}-{}.app",
             android_artifact_stem(&project),
             project.manifest.version_name,
+            os.directory(),
             if release { "release" } else { "debug" }
         ));
         if destination.exists() {
@@ -4930,25 +5115,44 @@ fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
 }
 
 fn booted_ios_simulator() -> Result<String, String> {
+    booted_simulator(AppleOs::Ios)
+}
+
+/// The first booted simulator of [os] (simctl groups devices by runtime,
+/// `com.apple.CoreSimulator.SimRuntime.iOS-…` or `….tvOS-…`).
+fn booted_simulator(os: AppleOs) -> Result<String, String> {
+    let name = os.name();
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices", "booted", "--json"])
         .output()
-        .map_err(|error| format!("cannot query iOS simulators: {error}"))?;
+        .map_err(|error| format!("cannot query {name} simulators: {error}"))?;
     if !output.status.success() {
-        return Err("cannot query booted iOS simulators".to_owned());
+        return Err(format!("cannot query booted {name} simulators"));
     }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("invalid simctl response: {error}"))?;
+    let runtime = format!(".SimRuntime.{name}-");
     value["devices"]
         .as_object()
         .into_iter()
-        .flat_map(|runtimes| runtimes.values())
-        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter(|(key, _)| key.contains(&runtime))
+        .filter_map(|(_, devices)| devices.as_array())
         .flatten()
         .find_map(|device| device["udid"].as_str().map(str::to_owned))
         .ok_or_else(|| {
-            "no booted iOS simulator; open Simulator or run `xcrun simctl boot <udid>`".to_owned()
+            format!("no booted {name} simulator; open Simulator or run `xcrun simctl boot <udid>`")
         })
+}
+
+fn run_tvos(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    with_ios_build_cleanup(&project.root, || {
+        let simulator = booted_simulator(AppleOs::Tvos)?;
+        let app = build_apple_intermediate(project.root.clone(), false, AppleOs::Tvos)?;
+        install_and_launch_ios(&project, &simulator, &app)?;
+        Ok(0)
+    })
 }
 
 fn run_ios(project_path: PathBuf) -> Result<u8, String> {
@@ -5053,6 +5257,8 @@ fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
         &[
             project_root.join(".pam-native/ios/App/DerivedData"),
             project_root.join(".pam-native/ios/App/build"),
+            project_root.join(".pam-native/tvos/App/DerivedData"),
+            project_root.join(".pam-native/tvos/App/build"),
             project_root.join(".pam-native/ios/HotReloadBundle"),
         ],
     )
@@ -6912,7 +7118,7 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         .collect::<Result<Vec<_>, _>>()?;
     let pam_native_path = native_home.join("ios");
     let manifest = format!(
-        "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"PamNativePlugins\",\n    platforms: [.iOS({})],\n    products: [.library(name: \"PamNativePlugins\", targets: [\"PamNativePlugins\"])],\n    dependencies: [\n        .package(path: {}),{}\n    ],\n    targets: [\n{}    ]\n)\n",
+        "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"PamNativePlugins\",\n    platforms: [.iOS({}), .tvOS(\"15.0\")],\n    products: [.library(name: \"PamNativePlugins\", targets: [\"PamNativePlugins\"])],\n    dependencies: [\n        .package(path: {}),{}\n    ],\n    targets: [\n{}    ]\n)\n",
         swift_string(&project.manifest.ios.minimum_version),
         swift_string(&pam_native_path.to_string_lossy()),
         if external_dependencies.is_empty() {
@@ -9825,7 +10031,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics\n  tizen:build, tizen:package, tizen:run, webos:build, webos:package, webos:run, web:build"
+        "PAM Native commands:\n  doctor, audit, dev, dev:serve, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile, safe-area-lint <frame>... [--insets l,t,r,b] [--viewport WxH] [--json] [--explicit-only]\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics\n  tvos:prepare, tvos:build, tvos:run\n  tizen:build, tizen:package, tizen:run, webos:build, webos:package, webos:run, web:build"
     );
 }
 
@@ -10919,7 +11125,7 @@ mod tests {
         let swift_package =
             fs::read_to_string(root.join(".pam-native/ios/PamNativePlugins/Package.swift"))
                 .expect("generated Swift Package.swift");
-        assert!(swift_package.contains("platforms: [.iOS(\"18.0\")]"));
+        assert!(swift_package.contains("platforms: [.iOS(\"18.0\"), .tvOS(\"15.0\")]"));
         assert!(swift_package.contains(".linkedFramework(\"AuthenticationServices\")"));
         assert!(swift_package.contains(
             ".package(url: \"https://github.com/apple/swift-collections.git\", exact: \"1.1.0\")"

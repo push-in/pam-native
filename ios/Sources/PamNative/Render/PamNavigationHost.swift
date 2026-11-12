@@ -19,17 +19,23 @@ private final class PamRouteViewController: UIViewController, UISearchResultsUpd
 
     // A route presented as a full-screen modal owns the status bar; it
     // reports the resolved StatusBar stack like the root controller.
+    #if !os(tvOS)
     override var preferredStatusBarStyle: UIStatusBarStyle {
         PamStatusBarCoordinator.shared.config.style
     }
+    #endif
 
+    #if !os(tvOS)
     override var prefersStatusBarHidden: Bool {
         PamStatusBarCoordinator.shared.config.hidden
     }
+    #endif
 
+    #if !os(tvOS)
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         PamStatusBarCoordinator.shared.config.updateAnimation
     }
+    #endif
 
     func updateSearchResults(for searchController: UISearchController) {
         onSearchChange?(searchController.searchBar.text ?? "")
@@ -98,6 +104,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     /// `interactivePopGestureRecognizer`: scroll views let it win, while a
     /// plain pan inside scrollable content never gets the touch. The plain
     /// pan stays for `fullScreenGestureEnabled` and vertical (direction 2).
+    #if os(tvOS)
+    // tvOS: the remote's Menu button goes back; there is no edge swipe.
+    private(set) lazy var screenEdgeGesture = UIPanGestureRecognizer()
+    #else
     private(set) lazy var screenEdgeGesture: UIScreenEdgePanGestureRecognizer = {
         let recognizer = UIScreenEdgePanGestureRecognizer(
             target: self,
@@ -106,17 +116,22 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         recognizer.edges = .left
         return recognizer
     }()
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
         edgeGesture.delegate = self
+        #if !os(tvOS)
         edgeGesture.maximumNumberOfTouches = 1
+        #endif
         edgeGesture.isEnabled = false
         addGestureRecognizer(edgeGesture)
+        #if !os(tvOS)
         screenEdgeGesture.delegate = self
         screenEdgeGesture.maximumNumberOfTouches = 1
         addGestureRecognizer(screenEdgeGesture)
+        #endif
         addGestureRecognizer(launchTap)
     }
 
@@ -170,9 +185,14 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     }
 
     private func syncGestureRecognizers() {
+        #if os(tvOS)
+        // Swipes on the Siri Remote's touch surface move the focus, never pop.
+        edgeGesture.isEnabled = false
+        #else
         screenEdgeGesture.edges = effectiveUserInterfaceLayoutDirection == .rightToLeft ? .right : .left
         screenEdgeGesture.isEnabled = gestureEnabled && usesScreenEdgeGesture
         edgeGesture.isEnabled = gestureEnabled && !usesScreenEdgeGesture
+        #endif
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -661,7 +681,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let parent = nearestViewController() else { return }
         let navigation = UINavigationController()
         navigation.setNavigationBarHidden(true, animated: false)
+        #if !os(tvOS)
         navigation.interactivePopGestureRecognizer?.isEnabled = false
+        #endif
         parent.addChild(navigation)
         navigation.view.frame = bounds
         navigation.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -832,7 +854,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     internal var usesNativeNavigationController: Bool { navigationController != nil }
     internal var usesNativeModalController: Bool { presentedNavigationController != nil }
     internal var activeSheetDetentCount: Int {
+        #if os(tvOS)
+        0
+        #else
         presentedNavigationController?.sheetPresentationController?.detents.count ?? 0
+        #endif
     }
     internal var activeSharedElementCount: Int { sharedElements.count }
 
@@ -851,7 +877,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private func applyControllerChrome() {
         guard let navigation = presentedNavigationController ?? navigationController else { return }
         navigation.setNavigationBarHidden(!headerShown, animated: false)
+        #if !os(tvOS)
         navigation.navigationBar.prefersLargeTitles = headerLargeTitleEnabled
+        #endif
         navigation.navigationBar.tintColor = headerTintColor
         let appearance = UINavigationBarAppearance()
         if headerTransparent { appearance.configureWithTransparentBackground() }
@@ -863,8 +891,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
 
         guard let controller = navigation.topViewController as? PamRouteViewController else { return }
         controller.title = screenTitle
-        controller.navigationItem.largeTitleDisplayMode = headerLargeTitleEnabled ? .always : .never
         controller.onSearchChange = onSearchChange
+        #if !os(tvOS)
+        controller.navigationItem.largeTitleDisplayMode = headerLargeTitleEnabled ? .always : .never
         if headerSearchEnabled {
             let search = controller.navigationItem.searchController ?? UISearchController(searchResultsController: nil)
             search.searchResultsUpdater = controller
@@ -875,6 +904,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         } else {
             controller.navigationItem.searchController = nil
         }
+        #endif
     }
 
     private func configurePresentation(_ modal: UINavigationController) {
@@ -887,9 +917,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         case 6:
             modal.modalPresentationStyle = .overCurrentContext
             modal.view.backgroundColor = .clear
-        default: modal.modalPresentationStyle = .pageSheet
+        default:
+            #if os(tvOS)
+            // tvOS has no page sheets: modals cover the screen.
+            modal.modalPresentationStyle = .fullScreen
+            #else
+            modal.modalPresentationStyle = .pageSheet
+            #endif
         }
         modal.presentationController?.delegate = self
+        #if !os(tvOS)
         guard screenPresentation == 7, let sheet = modal.sheetPresentationController else { return }
         if #available(iOS 16.0, *) {
             sheet.detents = sheetDetents.prefix(3).enumerated().map { index, fraction in
@@ -909,6 +946,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         sheet.prefersGrabberVisible = sheetGrabberVisible
         sheet.preferredCornerRadius = sheetCornerRadius > 0 ? sheetCornerRadius : nil
         sheet.prefersScrollingExpandsWhenScrolledToEdge = sheetExpandsWhenScrolledToEdge
+        #endif
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
@@ -919,6 +957,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     }
 
     private func applyPlatformScreenBehavior() {
+        // A TV is always landscape and has no home indicator.
+        #if !os(tvOS)
         if #available(iOS 16.0, *), navigationOrientation != 1,
            let scene = window?.windowScene {
             let mask: UIInterfaceOrientationMask = switch navigationOrientation {
@@ -941,6 +981,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             }
             responder = current.next
         }
+        #endif
         NotificationCenter.default.post(
             name: Notification.Name("PamNativeHomeIndicatorAutoHide"),
             object: self,

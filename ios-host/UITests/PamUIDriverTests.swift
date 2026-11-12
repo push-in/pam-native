@@ -29,6 +29,9 @@ import XCTest
 ///     {"dump": "tree"}                accessibility tree (.txt) + attachment
 ///     {"probe": "label", "name": "x"} frame and hittability of every match
 ///                                      (.txt) without tapping
+///     {"wait": "label"} / {"expect": "label"} / {"expectNot": "label"}
+///     {"key": "ArrowRight", "times": 2}  Siri Remote button (tvOS)
+///     {"expectFocus": "label"}         text of the focused element (tvOS)
 final class PamUIDriverTests: XCTestCase {
     private var app: XCUIApplication!
     private var shotDirectory: URL?
@@ -82,6 +85,7 @@ final class PamUIDriverTests: XCTestCase {
             app.launch()
             return
         }
+#if os(iOS)
         if let label = step["tap"] as? String {
             let element = try element(labelled: label, timeout: timeout, step: index)
             element.tap()
@@ -201,6 +205,53 @@ final class PamUIDriverTests: XCTestCase {
             }
             return
         }
+#endif
+        if let label = step["wait"] as? String {
+            _ = try element(labelled: label, timeout: timeout, step: index)
+            return
+        }
+        if let label = step["expect"] as? String {
+            _ = try element(labelled: label, timeout: step["timeout"] as? Double ?? 5, step: index)
+            return
+        }
+        if let label = step["expectNot"] as? String {
+            let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
+            let element = app.descendants(matching: .any).matching(predicate).firstMatch
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+            XCTAssertEqual(
+                XCTWaiter().wait(for: [gone], timeout: step["timeout"] as? Double ?? 5),
+                .completed,
+                "step \(index): \(label) is still shown"
+            )
+            return
+        }
+#if os(tvOS)
+        if let key = step["key"] as? String {
+            guard let button = Self.remoteButton(key) else {
+                XCTFail("step \(index): no Siri Remote button for \(key)")
+                return
+            }
+            for _ in 0..<(step["times"] as? Int ?? 1) {
+                XCUIRemote.shared.press(button)
+                Thread.sleep(forTimeInterval: step["delay"] as? Double ?? 0.4)
+            }
+            return
+        }
+        if let label = step["expectFocus"] as? String {
+            // The focused element's label holds its text (a Pressable reads
+            // the labels of its content).
+            let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            let deadline = Date().addingTimeInterval(step["timeout"] as? Double ?? 5)
+            while !(focused.exists && focused.label.contains(label)) {
+                guard Date() < deadline else {
+                    XCTFail("step \(index): the focus is on \(focused.exists ? focused.label : "nothing"), not \(label)")
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            return
+        }
+#endif
         if let seconds = step["wait"] as? Double {
             Thread.sleep(forTimeInterval: seconds)
             return
@@ -242,6 +293,22 @@ final class PamUIDriverTests: XCTestCase {
         }
         XCTFail("step \(index): unknown step \(step)")
     }
+
+#if os(tvOS)
+    /// The Siri Remote button for a W3C key name of the PAM E2E steps.
+    private static func remoteButton(_ key: String) -> XCUIRemote.Button? {
+        switch key {
+        case "ArrowUp": return .up
+        case "ArrowDown": return .down
+        case "ArrowLeft": return .left
+        case "ArrowRight": return .right
+        case "Enter": return .select
+        case "GoBack", "Escape": return .menu
+        case "MediaPlayPause": return .playPause
+        default: return nil
+        }
+    }
+#endif
 
     private func element(labelled label: String, timeout: Double, step: Int) throws -> XCUIElement {
         let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)

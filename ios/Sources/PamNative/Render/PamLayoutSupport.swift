@@ -212,6 +212,7 @@ final class PamKeyboardInsetObserver {
     init(scrollView: UIScrollView) {
         self.scrollView = scrollView
         let center = NotificationCenter.default
+        #if !os(tvOS)
         tokens.append(center.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification,
             object: nil,
@@ -226,6 +227,7 @@ final class PamKeyboardInsetObserver {
         ) { [weak self] notification in
             self?.keyboardChanged(notification, hiding: true)
         })
+        #endif
         // Focus moving between editors under an unchanged keyboard posts no
         // keyboard frame change; the newly focused one is revealed here.
         for name in [UITextField.textDidBeginEditingNotification, UITextView.textDidBeginEditingNotification] {
@@ -292,6 +294,7 @@ final class PamKeyboardInsetObserver {
         return abs(bounded - current) > 0.5 ? bounded : nil
     }
 
+    #if !os(tvOS)
     private func keyboardChanged(_ notification: Notification, hiding: Bool) {
         guard let scrollView, let window = scrollView.window else { return }
         let end = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
@@ -301,6 +304,7 @@ final class PamKeyboardInsetObserver {
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
         apply(overlap > 0 ? overlap + max(0, extraInset) : 0, duration: duration)
     }
+    #endif
 
     private func apply(_ next: CGFloat, duration: TimeInterval) {
         // Repeated unchanged insets must not undo a user's manual scroll.

@@ -259,7 +259,7 @@ public final class PamErrorOverlay: UIView {
 
     private func buildInspector() {
         inspector.translatesAutoresizingMaskIntoConstraints = false
-        inspector.backgroundColor = .systemBackground
+        inspector.backgroundColor = .pamSystemBackground
         addSubview(inspector)
         NSLayoutConstraint.activate([
             inspector.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -301,7 +301,7 @@ public final class PamErrorOverlay: UIView {
         footer.spacing = 8
         footer.translatesAutoresizingMaskIntoConstraints = false
         let footerBackground = UIView()
-        footerBackground.backgroundColor = .secondarySystemBackground
+        footerBackground.backgroundColor = .pamSecondarySystemBackground
         footerBackground.translatesAutoresizingMaskIntoConstraints = false
         inspector.addSubview(footerBackground)
         footerBackground.addSubview(footer)
@@ -436,7 +436,7 @@ public final class PamErrorOverlay: UIView {
         label.lineBreakMode = .byCharWrapping
         label.attributedText = text
         let container = UIView()
-        container.backgroundColor = .secondarySystemBackground
+        container.backgroundColor = .pamSecondarySystemBackground
         container.layer.cornerRadius = 8
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
@@ -500,7 +500,7 @@ public final class PamErrorOverlay: UIView {
 
     private func buildFallback() {
         fallback.translatesAutoresizingMaskIntoConstraints = false
-        fallback.backgroundColor = .systemBackground
+        fallback.backgroundColor = .pamSystemBackground
         addSubview(fallback)
         let title = label(Self.text("Something went wrong", "Algo deu errado"), font: .systemFont(ofSize: 24, weight: .bold), color: .label)
         title.textAlignment = .center

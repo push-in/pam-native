@@ -1,7 +1,9 @@
 import AVFoundation
 import CoreBluetooth
 import CoreLocation
+#if canImport(Contacts)
 import Contacts
+#endif
 import Foundation
 import Photos
 import UIKit
@@ -58,10 +60,16 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
 
     private func status(_ kind: Int, _ completion: @escaping ModuleCompletion) {
         switch kind {
+        #if os(tvOS)
+        case 1, 2:
+            // No camera or microphone on an Apple TV.
+            finish(status: 5, canAskAgain: false, completion)
+        #else
         case 1:
             finish(AVCaptureDevice.authorizationStatus(for: .video), completion)
         case 2:
             finish(AVCaptureDevice.authorizationStatus(for: .audio), completion)
+        #endif
         case 3:
             let value = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             if value == .limited {
@@ -83,7 +91,11 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
         case 5:
             finish(location.authorizationStatus, completion)
         case 6:
+            #if canImport(Contacts)
             finishContacts(CNContactStore.authorizationStatus(for: .contacts), completion)
+            #else
+            finish(status: 5, canAskAgain: false, completion)
+            #endif
         case 7:
             finishBluetooth(completion)
         case 8, 9:
@@ -96,10 +108,15 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
 
     private func request(_ kind: Int, _ completion: @escaping ModuleCompletion) {
         switch kind {
+        #if os(tvOS)
+        case 1, 2:
+            status(kind, completion)
+        #else
         case 1:
             AVCaptureDevice.requestAccess(for: .video) { _ in self.status(kind, completion) }
         case 2:
             AVCaptureDevice.requestAccess(for: .audio) { _ in self.status(kind, completion) }
+        #endif
         case 3:
             DispatchQueue.main.async {
                 self.photoCompletions.append(completion)
@@ -138,9 +155,13 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
                 }
             }
         case 6:
+            #if canImport(Contacts)
             CNContactStore().requestAccess(for: .contacts) { _, _ in
                 self.status(kind, completion)
             }
+            #else
+            self.status(kind, completion)
+            #endif
         case 7:
             DispatchQueue.main.async {
                 guard CBManager.authorization == .notDetermined else {
@@ -188,6 +209,7 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
         finish(manager.authorizationStatus, completion)
     }
 
+    #if !os(tvOS)
     private func finish(
         _ status: AVAuthorizationStatus,
         _ completion: @escaping ModuleCompletion
@@ -199,6 +221,7 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
         @unknown default: finish(status: 2, canAskAgain: false, completion)
         }
     }
+    #endif
 
     private func finish(
         _ status: PHAuthorizationStatus,
@@ -240,6 +263,7 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
         ])) ?? Data())
     }
 
+    #if canImport(Contacts)
     private func finishContacts(
         _ status: CNAuthorizationStatus,
         _ completion: @escaping ModuleCompletion
@@ -261,6 +285,7 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             finish(status: 2, canAskAgain: false, completion)
         }
     }
+    #endif
 
     private func kind(_ payload: Data) throws -> Int {
         let values = try WireMap.decode(payload)

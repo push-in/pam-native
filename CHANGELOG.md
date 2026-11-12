@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+Apple TV (tvOS): the UIKit renderer and the PHP runtime run on tvOS. See
+[docs/tv.md](docs/tv.md#apple-tv-tvos).
+
+- CLI: `tvos:prepare`, `tvos:build` and `tvos:run` build the iOS host for
+  tvOS with the runtime of `runtime/tvos/<runtime>` (`runtime-builder/ios/
+  build.sh tvos` in pam); simulator builds link only the architectures the
+  runtime ships.
+- Renderer on tvOS: a 960 x 540 dp canvas scaled to the screen; the Siri
+  Remote's focus and keys (`autoFocus`, `focusGroup`, `captureKeys`,
+  `@keyDown`, `@focus` / `@blur`, `:focus` styles, the default focus ring);
+  select presses Pressables; tvOS stand-ins for haptics, the clipboard,
+  `Switch` and pull to refresh.
+- UI test driver: `key`, `expect`, `expectNot`, `expectFocus` and `wait`
+  with a label, so `tests/e2e.json` runs on the tvOS Simulator.
+- `examples/tv` passes its end-to-end script on the Apple TV Simulator.
+- The generated `PamNativePlugins` package declares tvOS 15.
+
 ## 1.48.0 - 2026-11-11
 
 Samsung (Tizen) and LG (webOS) TVs, without a server: the PHP app is compiled

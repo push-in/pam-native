@@ -1,4 +1,4 @@
-# TV apps (Android TV, Google TV, Fire TV, Samsung, LG)
+# TV apps (Android TV, Google TV, Fire TV, Apple TV, Samsung, LG)
 
 A PAM Native app runs on Android TV from the same code as the phone app. TV is
 one more target of the project, not another project: the same APK installs on
@@ -7,7 +7,8 @@ phones, tablets and TVs, and the framework handles the remote control.
 Samsung (Tizen) and LG (webOS) TVs run HTML/JS apps: for them the same app
 is compiled to a static HTML/JS build, with no PHP and no server on the TV
 (see [Samsung and LG TVs](#samsung-and-lg-tvs-tizen-and-webos)). Apple TV
-(tvOS) is not a target yet. The native renderer needs 64-bit Android (`arm64-v8a`, or `x86_64`
+runs the native UIKit renderer and PHP, like the iPhone app (see
+[Apple TV](#apple-tv-tvos)). The native Android renderer needs 64-bit Android (`arm64-v8a`, or `x86_64`
 emulators), because the PHP SDK uses 64-bit integers (ARGB colors, node ids).
 Devices that run 32-bit Android (`armeabi-v7a`, such as the 2020 Chromecast
 with Google TV and older Fire TV sticks) get the same APK and open the app's
@@ -240,6 +241,51 @@ Samsung TVs and the Samsung TV emulator only install packages signed with a
 Samsung certificate (Tizen Studio, Certificate Manager, with a Samsung
 account); `tizen:package --sign <profile>` uses that profile. Run the
 simulators and emulators on a virtual display (`Xvfb`) in CI.
+
+## Apple TV (tvOS)
+
+Apple TV runs the iOS renderer (UIKit) and the same PHP runtime, built for
+tvOS. On macOS with Xcode:
+
+```sh
+runtime-builder/ios/build.sh --php 8.5 tvos   # in the pam repository, once
+pam tvos:build      # .pam-native/tvos/App, dist/<app>-<version>-tvos-debug.app
+pam tvos:run        # installs and starts on the booted Apple TV Simulator
+```
+
+`build.sh tvos` writes `runtime/tvos/<runtime>/` (`PamPhp.xcframework` and
+`PamNativeEngine.xcframework`, device and simulator slices; `tvos-simulator`
+builds the simulator only, and `PAM_TVOS_SIMULATOR_ARCHS=x86_64` only the
+Intel slice). The engine uses Rust's tier 3 tvOS targets (`nightly`,
+`-Z build-std`). PHP's `exec`, `proc_open` and `pcntl_fork` fail on tvOS,
+which has no processes.
+
+The host app is the iOS one with tvOS settings (tvOS 15 or later):
+
+- **Size.** The app renders into a 960 x 540 dp canvas scaled to the screen
+  (1920 x 1080 points), like a 1080p Android TV, with text drawn at the
+  screen's resolution. `Dimensions` reports `deviceType` `tv` and
+  `inputMode` `remote`, and the safe area is the TV's overscan margin.
+- **Focus.** Pressables and `focusable` views take the focus; `autoFocus`,
+  `focusGroup` (the group's last focused child comes back), `:focus` styles,
+  `@focus` / `@blur`, `captureKeys`, `@keyDown` and the default focus ring
+  work as on Android TV. The remote's keys: arrows (`ArrowUp` ...), select
+  (`Enter`), Menu (`GoBack`, which leaves the app at the root unless a view
+  captures it) and play/pause (`MediaPlayPause`).
+- **Not on tvOS.** Haptics are no-ops, the clipboard is the app's own,
+  pull to refresh is not shown, file pickers, camera, share sheets and
+  notification actions are unavailable, and text views are read-only (text
+  entry goes through the system keyboard of `TextInput`).
+
+The end-to-end steps run on the tvOS Simulator through the host's UI tests
+(`XCUIRemote` presses the remote's buttons):
+
+```sh
+cd .pam-native/tvos/App
+TEST_RUNNER_PAM_UI_SCRIPT=$PWD/../../../tests/e2e.json xcodebuild test \
+  -project PamNativeApp.xcodeproj -scheme PamNativeUITests \
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation) (at 1080p)'
+```
 
 ## End-to-end tests
 

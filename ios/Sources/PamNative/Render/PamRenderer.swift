@@ -851,12 +851,16 @@ public final class PamRenderer: @unchecked Sendable {
             properties: state.properties
         )
         let view = dequeueRecycledView(for: state) ?? createView(for: spec)
+        #if os(tvOS)
+        PamTVCanvas.sharpen(view)
+        #endif
         views[state.id] = view
         view.tag = Int(clamping: state.id)
         attach(view, parentId: state.parent, index: state.index)
         for (key, value) in state.properties {
             applyProperty(view: view, nodeId: state.id, key: key, value: value)
         }
+        refreshTVFocus(view: view, nodeId: state.id)
         for key in PamRenderer.motionPropertyOrder {
             if let value = state.properties[key] {
                 applyMotionProperty(view: view, nodeId: state.id, key: key, value: value)
@@ -1935,10 +1939,12 @@ public final class PamRenderer: @unchecked Sendable {
             let container = PamContainerView()
             container.pamTouchTransparentWhenIdle = true
             return container
-        case .pressable:
+        case .pressable, .button:
+            #if os(tvOS)
+            return PamPressButton(type: .custom)
+            #else
             return PamPressButton(type: .system)
-        case .button:
-            return PamPressButton(type: .system)
+            #endif
         case .text:
             return PamTextView()
         case .input:
@@ -2900,6 +2906,42 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
+    /// Mirrors the node's key and focus props into its [PamFocusInfo]
+    /// (`view.pamFocus`); only the tvOS focus engine reads them.
+    private func refreshTVFocus(view: UIView, nodeId: Int64) {
+        #if os(tvOS)
+        guard let properties = nodes[nodeId]?.properties else { return }
+        let keyDown = properties[PamConstants.onKeyDown] != nil
+        let captureKeys = Set(
+            (properties[PamConstants.captureKeys]?.textOrNil() ?? "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
+        let focusable = properties[PamConstants.focusable]?.boolOrNil() == true
+        let group = properties[PamConstants.focusGroup]?.boolOrNil() == true
+        let ring = Int(properties[PamConstants.focusRing]?.integerOrNil() ?? 1)
+        let focusEvents = !(view is any PamTextInputHost)
+            && (properties[PamConstants.onFocus] != nil || properties[PamConstants.onBlur] != nil)
+        guard keyDown || !captureKeys.isEmpty || focusable || group || ring != 1 || focusEvents else {
+            view.pamFocus = nil
+            return
+        }
+        let info = view.pamFocus.flatMap { $0.nodeId == nodeId ? $0 : nil } ?? PamFocusInfo(nodeId: nodeId)
+        info.keyDown = keyDown
+        info.captureKeys = captureKeys
+        info.focusable = focusable
+        info.group = group
+        info.ring = ring
+        info.focusEvents = focusEvents
+        info.send = { [weak self] id, kind, payload in
+            guard let self, self.nodes[id] != nil else { return }
+            self.dispatchEvent(id, kind, payload)
+        }
+        view.pamFocus = info
+        #endif
+    }
+
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
         if let plugin = view as? NativePropertyView {
             plugin.onProtocolEvent = { [weak self] kind, payload in self?.dispatchEvent(nodeId, kind, payload) }
@@ -2925,7 +2967,14 @@ public final class PamRenderer: @unchecked Sendable {
              PamConstants.inputShowSoftInputOnFocus:
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.autoFocus:
-            (view as? (any PamTextInputHost))?.autoFocusRequested = value.boolOrNil() ?? false
+            if let field = view as? (any PamTextInputHost) {
+                field.autoFocusRequested = value.boolOrNil() ?? false
+            } else if value.boolOrNil() == true {
+                PamTVFocus.request(view)
+            }
+        case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
+             PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
+            refreshTVFocus(view: view, nodeId: nodeId)
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
@@ -3758,6 +3807,9 @@ public final class PamRenderer: @unchecked Sendable {
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.autoFocus:
             (view as? (any PamTextInputHost))?.autoFocusRequested = false
+        case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
+             PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
+            refreshTVFocus(view: view, nodeId: nodeId)
         case PamConstants.height:
             (view as? PamMultilineInputField)?.growsWithContent = true
         case PamConstants.secure:
@@ -6173,7 +6225,12 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         func attachButtonPress(_ button: UIButton) {
+            #if os(tvOS)
+            // The remote's select button triggers the primary action.
+            button.addTarget(self, action: #selector(onButtonPress(_:event:)), for: .primaryActionTriggered)
+            #else
             button.addTarget(self, action: #selector(onButtonPress(_:event:)), for: .touchUpInside)
+            #endif
             control = button
         }
 
@@ -6392,7 +6449,9 @@ public final class PamRenderer: @unchecked Sendable {
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
+                #if !os(tvOS)
                 tap.numberOfTouchesRequired = minimum
+                #endif
                 recognizer = tap
             case 2, 5:
                 let pan = PamHeldPanGestureRecognizer(
@@ -6400,9 +6459,17 @@ public final class PamRenderer: @unchecked Sendable {
                     action: #selector(onSemanticGesture(_:))
                 )
                 pan.minimumHoldDuration = type == 2 ? max(0, minimumDuration) : 0
+                #if !os(tvOS)
                 pan.minimumNumberOfTouches = minimum
                 pan.maximumNumberOfTouches = maximum
+                #endif
                 recognizer = pan
+            #if os(tvOS)
+            case 3, 4:
+                // No pinch or rotation on a remote: the gesture never begins.
+                recognizer = UIGestureRecognizer()
+                recognizer.isEnabled = false
+            #else
             case 3:
                 recognizer = UIPinchGestureRecognizer(
                     target: self,
@@ -6413,13 +6480,16 @@ public final class PamRenderer: @unchecked Sendable {
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
+            #endif
             default:
                 let longPress = UILongPressGestureRecognizer(
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
                 longPress.minimumPressDuration = max(0.001, minimumDuration)
+                #if !os(tvOS)
                 longPress.numberOfTouchesRequired = minimum
+                #endif
                 recognizer = longPress
             }
             recognizer.cancelsTouchesInView = composition == 1
@@ -6772,6 +6842,7 @@ public final class PamRenderer: @unchecked Sendable {
                 translation = pan.translation(in: sender.view)
                 velocity = pan.velocity(in: sender.view)
             }
+            #if !os(tvOS)
             if let pinch = sender as? UIPinchGestureRecognizer {
                 scale = pinch.scale
                 velocity = CGPoint(x: pinch.velocity, y: 0)
@@ -6780,6 +6851,7 @@ public final class PamRenderer: @unchecked Sendable {
                 rotation = rotationGesture.rotation
                 velocity = CGPoint(x: rotationGesture.velocity, y: 0)
             }
+            #endif
             // Drag runs on the main thread every frame; PHP only sees the
             // semantic begin/end (with the chosen snap) and the settle.
             let dragging = sender is UIPanGestureRecognizer && drag?.config != nil

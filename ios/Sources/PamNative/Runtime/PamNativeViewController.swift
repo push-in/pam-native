@@ -41,17 +41,23 @@ public final class PamNativeViewController: UIViewController {
 
     // The resolved PAM `StatusBar` stack (RN StatusBar); a host that embeds
     // this controller forwards it with `childForStatusBarStyle`.
+    #if !os(tvOS)
     public override var preferredStatusBarStyle: UIStatusBarStyle {
         PamStatusBarCoordinator.shared.config.style
     }
+    #endif
 
+    #if !os(tvOS)
     public override var prefersStatusBarHidden: Bool {
         PamStatusBarCoordinator.shared.config.hidden
     }
+    #endif
 
+    #if !os(tvOS)
     public override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
         PamStatusBarCoordinator.shared.config.updateAnimation
     }
+    #endif
 
     public override func loadView() {
         view = UIView(frame: .zero)

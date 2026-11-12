@@ -1,0 +1,15 @@
+name: Publication compatibility
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ecosystem-compatibility:
+    name: Certify the complete PAM Native ecosystem
+    uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main

@@ -17,7 +17,7 @@ final class PamTabHost: UIView, UITabBarDelegate {
     private var position = 1
     private var activeColor = UIColor.label
     private var inactiveColor = UIColor.secondaryLabel
-    private var barColor = UIColor.systemBackground
+    private var barColor = UIColor.pamSystemBackground
     private var indicatorColor = UIColor.label
     private var swipeEnabled = false
     var onSelect: ((Int) -> Void)?

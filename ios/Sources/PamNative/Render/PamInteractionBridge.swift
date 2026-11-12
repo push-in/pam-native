@@ -2,10 +2,9 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
-final class PamInteractionBridge: NSObject,
-    UIDragInteractionDelegate,
-    UIDropInteractionDelegate,
-    UIContextMenuInteractionDelegate {
+/// Drag, drop and context menus. tvOS has none of them: there the bridge
+/// keeps the callbacks and attaches nothing.
+final class PamInteractionBridge: NSObject {
     struct MenuItem {
         let id: String
         let title: String
@@ -21,9 +20,11 @@ final class PamInteractionBridge: NSObject,
     private let onDragEnd: (() -> Void)?
     private let onDrop: ((String) -> Void)?
     private let onMenuAction: ((String) -> Void)?
+    #if !os(tvOS)
     private var dragInteraction: UIDragInteraction?
     private var dropInteraction: UIDropInteraction?
     private var menuInteraction: UIContextMenuInteraction?
+    #endif
 
     init(
         view: UIView,
@@ -45,6 +46,7 @@ final class PamInteractionBridge: NSObject,
         self.onDrop = onDrop
         self.onMenuAction = onMenuAction
         super.init()
+        #if !os(tvOS)
         if draggable {
             let interaction = UIDragInteraction(delegate: self)
             interaction.isEnabled = true
@@ -61,14 +63,20 @@ final class PamInteractionBridge: NSObject,
             view.addInteraction(interaction)
             menuInteraction = interaction
         }
+        #endif
     }
 
     func detach() {
+        #if !os(tvOS)
         if let dragInteraction { view?.removeInteraction(dragInteraction) }
         if let dropInteraction { view?.removeInteraction(dropInteraction) }
         if let menuInteraction { view?.removeInteraction(menuInteraction) }
+        #endif
     }
+}
 
+#if !os(tvOS)
+extension PamInteractionBridge: UIDragInteractionDelegate, UIDropInteractionDelegate, UIContextMenuInteractionDelegate {
     func dragInteraction(
         _ interaction: UIDragInteraction,
         itemsForBeginning session: UIDragSession
@@ -124,3 +132,4 @@ final class PamInteractionBridge: NSObject,
         }
     }
 }
+#endif

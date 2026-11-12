@@ -18,7 +18,9 @@ public protocol PushEventHandler: AnyObject {
     func didRefresh(token: String, provider: Int64)
     func didFailToRegister(error: Error)
     func didReceive(notification: UNNotification)
+    #if !os(tvOS)
     func didReceive(response: UNNotificationResponse, completionHandler: @escaping () -> Void)
+    #endif
     func didReceiveRemote(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void)
 }
 
@@ -31,10 +33,12 @@ public enum PamPushNotifications {
     public static func didRefresh(token: String, provider: Int64) { handler?.didRefresh(token: token, provider: provider) }
     public static func didFailToRegister(error: Error) { handler?.didFailToRegister(error: error) }
     public static func didReceive(notification: UNNotification) { handler?.didReceive(notification: notification) }
+    #if !os(tvOS)
     public static func didReceive(response: UNNotificationResponse, completionHandler: @escaping () -> Void) {
         guard let handler else { completionHandler(); return }
         handler.didReceive(response: response, completionHandler: completionHandler)
     }
+    #endif
     public static func didReceiveRemote(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void) {
         guard let handler else { completion(.noData); return }
         handler.didReceiveRemote(userInfo: userInfo, completion: completion)

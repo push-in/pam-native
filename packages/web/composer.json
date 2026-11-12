@@ -24,6 +24,9 @@
   "bin": [
     "bin/pam-native-web"
   ],
+  "scripts": {
+    "test": "phpunit"
+  },
   "config": {
     "sort-packages": true
   },

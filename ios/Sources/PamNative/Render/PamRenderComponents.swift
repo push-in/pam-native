@@ -61,19 +61,39 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        #if !os(tvOS)
         focusEffect = UIFocusHaloEffect()
+        #endif
         installHoverState()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        #if !os(tvOS)
         focusEffect = UIFocusHaloEffect()
+        #endif
         installHoverState()
     }
 
     override var canBecomeFocused: Bool {
         isEnabled && !isHidden && alpha > 0.01
     }
+
+    #if os(tvOS)
+    /// tvOS gives every UIButton a system platter (`_UIFloatingContentView`)
+    /// that covers the node's own content: PAM draws the button itself.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for view in subviews where NSStringFromClass(type(of: view)).hasPrefix("_UIFloatingContent") {
+            view.isHidden = true
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        PamTVFocus.didMoveToWindow(self)
+    }
+    #endif
 
     /// RN Pressable is `accessible` and, without its own label, announces the
     /// labels of its content (`RCTRecursiveAccessibilityLabel`), like a
@@ -208,15 +228,19 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
     }
 
     private func installHoverState() {
+        #if !os(tvOS)
         if #available(iOS 13.0, *) {
             addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hoverChanged(_:))))
         }
+        #endif
     }
 
+    #if !os(tvOS)
     @available(iOS 13.0, *)
     @objc private func hoverChanged(_ recognizer: UIHoverGestureRecognizer) {
         applyPamState(3, active: recognizer.state == .began || recognizer.state == .changed)
     }
+    #endif
 
     private func applyPamState(_ state: Int, active: Bool) {
         guard let styles = pamStateStyles[state] else { return }
@@ -708,6 +732,9 @@ final class PamVirtualListView: PamContentScrollView {
     /// tracking does not see a keyboard the engine laid the list out above
     /// (the list ends at the keyboard's top), so the release is checked here.
     private func pamFinishInteractiveDismiss(_ recognizer: UIPanGestureRecognizer) {
+        #if os(tvOS)
+        _ = recognizer
+        #else
         guard keyboardDismissMode == .interactive, let window else { return }
         let keyboard = window.keyboardLayoutGuide.layoutFrame
         guard keyboard.height > 1, keyboard.minY < window.bounds.maxY - 1 else { return }
@@ -717,6 +744,7 @@ final class PamVirtualListView: PamContentScrollView {
         ) {
             window.endEditing(true)
         }
+        #endif
     }
 
     static func releasesInsideKeyboard(location: CGPoint, keyboardTop: CGFloat) -> Bool {
@@ -1623,7 +1651,7 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         syncingText
     }
 
-    private var cachedFont: UIFont = .systemFont(ofSize: UIFont.systemFontSize)
+    private var cachedFont: UIFont = .systemFont(ofSize: PamSystemFont.size)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1847,7 +1875,7 @@ final class PamInputField: UITextField, UITextFieldDelegate, PamTextInputHost {
         if let fieldFont = font {
             cachedFont = fieldFont
         } else {
-            cachedFont = .systemFont(ofSize: UIFont.systemFontSize)
+            cachedFont = .systemFont(ofSize: PamSystemFont.size)
         }
     }
 
@@ -1944,7 +1972,7 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     private var lastContentHeight = -1
     private var syncingText = false
     private var growing = false
-    private var cachedFont: UIFont = .systemFont(ofSize: UIFont.systemFontSize)
+    private var cachedFont: UIFont = .systemFont(ofSize: PamSystemFont.size)
     private var inFlightValues: [(String, TimeInterval)] = []
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -1971,7 +1999,7 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
         alwaysBounceVertical = false
         showsHorizontalScrollIndicator = false
         translatesAutoresizingMaskIntoConstraints = true
-        font = .systemFont(ofSize: UIFont.systemFontSize)
+        font = .systemFont(ofSize: PamSystemFont.size)
         placeholderLabel.numberOfLines = 0
         placeholderLabel.isUserInteractionEnabled = false
         placeholderLabel.backgroundColor = .clear
@@ -1994,7 +2022,7 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
             guard let self else { return }
             self.automaticFocusScheduled = false
             guard self.autoFocusRequested, !self.automaticFocusApplied,
-                  self.window != nil, self.isEditable else { return }
+                  self.window != nil, self.pamIsEditable else { return }
             var ancestor: UIView? = self
             while let view = ancestor {
                 guard !view.isHidden, view.alpha > 0.01, view.isUserInteractionEnabled else { return }
@@ -2091,7 +2119,7 @@ final class PamMultilineInputField: UITextView, UITextViewDelegate, PamTextInput
     }
 
     func syncFontCache() {
-        cachedFont = font ?? .systemFont(ofSize: UIFont.systemFontSize)
+        cachedFont = font ?? .systemFont(ofSize: PamSystemFont.size)
     }
 
     // MARK: Placeholder
@@ -2468,8 +2496,8 @@ final class PamRefreshContainer: UIView {
 
     private func bind(scrollView: UIScrollView) {
         guard self.scrollView !== scrollView else { return }
-        if self.scrollView?.refreshControl === control {
-            self.scrollView?.refreshControl = nil
+        if self.scrollView?.pamRefreshControl === control {
+            self.scrollView?.pamRefreshControl = nil
         }
         self.scrollView = scrollView
         // A short or empty list must still be pullable.
@@ -2485,13 +2513,13 @@ final class PamRefreshContainer: UIView {
     private func installControl() {
         guard let scrollView else { return }
         let wanted = isEnabled && refreshCallback != nil
-        if wanted, scrollView.refreshControl !== control {
-            scrollView.refreshControl = control
+        if wanted, scrollView.pamRefreshControl !== control {
+            scrollView.pamRefreshControl = control
             if controlled { apply(true) }
-        } else if !wanted, scrollView.refreshControl === control, !control.isRefreshing {
+        } else if !wanted, scrollView.pamRefreshControl === control, !control.isRefreshing {
             // RN `enabled=false`: no new pulls; a running refresh still ends
             // through `refreshing=false`.
-            scrollView.refreshControl = nil
+            scrollView.pamRefreshControl = nil
         }
     }
 
@@ -2499,7 +2527,7 @@ final class PamRefreshContainer: UIView {
         if value, !control.isRefreshing {
             control.beginRefreshing()
             // RN: a programmatic refresh at the top reveals the spinner.
-            if !userTriggered, let scrollView, scrollView.refreshControl === control,
+            if !userTriggered, let scrollView, scrollView.pamRefreshControl === control,
                scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top {
                 scrollView.setContentOffset(
                     CGPoint(x: scrollView.contentOffset.x, y: scrollView.contentOffset.y - control.frame.height),
@@ -2679,7 +2707,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         addSubview(contentClip)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onModalPan(_:)))
+        #if !os(tvOS)
         pan.maximumNumberOfTouches = 1
+        #endif
         pan.cancelsTouchesInView = false
         pan.delegate = self
         contentClip.addGestureRecognizer(pan)
@@ -2728,6 +2758,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func observeKeyboard() {
+        #if !os(tvOS)
         let center = NotificationCenter.default
         keyboardTokens.append(center.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification,
@@ -2743,8 +2774,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         ) { [weak self] notification in
             self?.sheetKeyboardChanged(notification, hiding: true)
         })
+        #endif
     }
 
+    #if !os(tvOS)
     /// A presented sheet rides on the keyboard with the keyboard's own
     /// duration and curve, so its focused field and actions stay visible.
     private func sheetKeyboardChanged(_ notification: Notification, hiding: Bool) {
@@ -2783,6 +2816,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             self.layoutIfNeeded()
         }
     }
+    #endif
 
     static func boundedSheetKeyboardLift(requested: CGFloat, availableHeight: CGFloat, sheetHeight: CGFloat) -> CGFloat {
         min(max(0, requested), max(0, availableHeight - sheetHeight))
@@ -2805,9 +2839,13 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private func publishSurfaceKeyboard(_ inset: CGFloat, info: [AnyHashable: Any]?) {
         guard abs(inset - surfaceKeyboardInset) > 0.5 else { return }
         surfaceKeyboardInset = inset
+        #if os(tvOS)
+        onSurfaceKeyboardInset?(inset, 0, 7)
+        #else
         let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0
         let curve = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
         onSurfaceKeyboardInset?(inset, duration, curve)
+        #endif
     }
 
     /// Sheet geometry belongs to its native detent, never the engine window frame.
@@ -3512,6 +3550,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     private func ensureOrientationObserver() {
         guard orientationToken == nil else { return }
+        #if os(tvOS)
+        // A TV screen is always landscape.
+        dispatchOrientation(force: true)
+        return
+        #else
         orientationToken = orientationObserver.addObserver(
             forName: UIDevice.orientationDidChangeNotification,
             object: nil,
@@ -3520,6 +3563,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             self?.dispatchOrientation(force: false)
         }
         dispatchOrientation(force: true)
+        #endif
     }
 
     private func removeOrientationObserver() {
@@ -3539,6 +3583,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func currentOrientation() -> Int {
+        #if os(tvOS)
+        return Orientation.landscape
+        #else
         if #available(iOS 13.0, *),
            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             let interface = scene.interfaceOrientation
@@ -3549,6 +3596,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
 
         return UIDevice.current.orientation.isLandscape ? Orientation.landscape : Orientation.portrait
+        #endif
     }
 }
 
