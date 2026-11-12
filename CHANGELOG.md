@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.49.2 - 2026-11-12
+
+- Android release builds keep `PamRuntime.onNativeRemount` from R8. The JNI
+  lookup failed in minified builds, so the retained tree was never replayed
+  onto a recreated Activity: changing the font size, display size or language
+  with the app open left the window undrawn (ANR "no focused window"). Debug
+  builds hid it (no R8). `scripts/check-jni-keep-rules.py` now fails when a
+  method the bridge looks up by name has no keep rule.
+
 ## 1.49.1 - 2026-11-12
 
 - Android and iOS export `PAM_NATIVE_MODE` before PHP starts:

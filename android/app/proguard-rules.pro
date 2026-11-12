@@ -8,6 +8,8 @@
     void onNativeCallTyped(long, int, byte[]);
     void onNativeError(java.lang.String);
     void onNativeRequestReleased(java.lang.String);
+    # Retained-tree replay for a recreated Activity (configuration change).
+    boolean onNativeRemount(java.nio.ByteBuffer, long);
     # Engine text measurement (JNI GetMethodID in pam_android_bridge.cpp).
     boolean onMeasureText(long, byte[], byte[], java.lang.String, java.lang.String, float, float, float, float, float, int, boolean, boolean, int, int, int, int, float[]);
     # PHP pam_native_crypto() (Pam\Native\Crypto).

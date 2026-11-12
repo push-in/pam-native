@@ -6708,8 +6708,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.49.1',
-    'The runtime SDK contract must match the 1.49.1 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.49.2',
+    'The runtime SDK contract must match the 1.49.2 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
