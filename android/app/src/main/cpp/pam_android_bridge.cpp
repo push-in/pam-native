@@ -804,7 +804,8 @@ std::string php_memory_limit() {
         ? static_cast<uint64_t>(pages) * static_cast<uint64_t>(page_size) / (1024u * 1024u)
         : 0;
     if (ram_mb >= 6u * 1024u) return "256M";
-    if (ram_mb >= 3u * 1024u + 512u) return "192M";
+    // "3 GB" phones report ~2.7-2.9 GB of usable RAM.
+    if (ram_mb >= 2u * 1024u + 512u) return "192M";
     return "128M";
 }
 
