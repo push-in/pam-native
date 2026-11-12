@@ -21,6 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger
 
 internal class DeviceModule(private val context: Context) : NativeModule, AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
+    // Battery/power broadcasts and the network callback outlive any one
+    // Activity: on the application context they never leak a recreated
+    // surface (the registry moves watches to the new one).
+    private val appContext: Context = context.applicationContext ?: context
     private val nextId = AtomicInteger(1)
     private val watches = ConcurrentHashMap<Int, DeviceWatch>()
 
@@ -106,20 +110,20 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(broadcasts, filter, Context.RECEIVER_NOT_EXPORTED)
+            appContext.registerReceiver(broadcasts, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            context.registerReceiver(broadcasts, filter)
+            appContext.registerReceiver(broadcasts, filter)
         }
         runCatching {
-            context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network, main)
+            appContext.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network, main)
         }
     }
 
     private fun unregisterSources() {
         if (!sourcesRegistered || watches.isNotEmpty()) return
         sourcesRegistered = false
-        runCatching { context.unregisterReceiver(broadcasts) }
-        runCatching { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
+        runCatching { appContext.unregisterReceiver(broadcasts) }
+        runCatching { appContext.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
     }
 
     private fun statusPayload(): ByteArray {
