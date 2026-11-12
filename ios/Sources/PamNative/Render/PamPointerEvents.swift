@@ -49,6 +49,17 @@ final class PamContainerView: UIView, PamPointerEventsHost {
     /// Only content inside a Pressable/Button needs to let the touch through:
     /// everywhere else a container stays the hit view (z-order, sticky
     /// headers and overlays rely on that).
+    #if os(tvOS)
+    /// `focusable="true"`: the remote can land on this view (a player that
+    /// takes the keys with `captureKeys`).
+    override var canBecomeFocused: Bool { pamFocus?.focusable == true }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        PamTVFocus.didMoveToWindow(self)
+    }
+    #endif
+
     private var hasControlAncestor: Bool {
         var view = superview
         while let current = view {

@@ -886,7 +886,7 @@ public final class PamRuntime {
         )
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow)
-        let insets = window?.safeAreaInsets ?? .zero
+        let insets = PamTVCanvas.dp(window?.safeAreaInsets ?? .zero)
         let screen = window?.screen ?? UIScreen.main
         let idiom = UIDevice.current.userInterfaceIdiom
         let deviceType = switch idiom {
@@ -931,6 +931,14 @@ public final class PamRuntime {
 
     /// Window safe area seen by the runtime host view (points).
     private func currentSafeAreaInsets() -> UIEdgeInsets {
+        PamTVCanvas.dp(hostSafeAreaInsets())
+    }
+
+    private func hostSafeAreaInsets() -> UIEdgeInsets {
+        #if os(tvOS)
+        // The canvas is scaled: the window's insets, converted to dp below.
+        if let window = renderer.hostView?.window { return window.safeAreaInsets }
+        #endif
         if let host = renderer.hostView, let window = host.window {
             let insets = host.safeAreaInsets
             // The runtime boots from didFinishLaunching, before the root view

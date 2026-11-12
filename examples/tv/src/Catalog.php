@@ -78,7 +78,7 @@ final class Catalog
             'title' => $show[0],
             'meta' => $show[1],
             'color' => $show[2],
-            'summary' => $show[0].' is one of the PAM TV demo titles: every poster, row and button here is a native Android view driven by PHP.',
+            'summary' => $show[0].' is one of the PAM TV demo titles: every poster, row and button here is a native view driven by PHP.',
         ];
     }
 }

@@ -79,6 +79,22 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
         isEnabled && !isHidden && alpha > 0.01
     }
 
+    #if os(tvOS)
+    /// tvOS gives every UIButton a system platter (`_UIFloatingContentView`)
+    /// that covers the node's own content: PAM draws the button itself.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for view in subviews where NSStringFromClass(type(of: view)).hasPrefix("_UIFloatingContent") {
+            view.isHidden = true
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        PamTVFocus.didMoveToWindow(self)
+    }
+    #endif
+
     /// RN Pressable is `accessible` and, without its own label, announces the
     /// labels of its content (`RCTRecursiveAccessibilityLabel`), like a
     /// focusable Android ViewGroup reading its children. A press target that

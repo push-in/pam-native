@@ -149,6 +149,27 @@
                     ],
                     "description": "Build the PAM Native iOS application"
                 },
+                "tvos:prepare": {
+                    "bin": "packages/native/bin/pam-native",
+                    "arguments": [
+                        "tvos:prepare"
+                    ],
+                    "description": "Prepare the PAM Native Apple TV (tvOS) project"
+                },
+                "tvos:build": {
+                    "bin": "packages/native/bin/pam-native",
+                    "arguments": [
+                        "tvos:build"
+                    ],
+                    "description": "Build the PAM Native Apple TV (tvOS) application"
+                },
+                "tvos:run": {
+                    "bin": "packages/native/bin/pam-native",
+                    "arguments": [
+                        "tvos:run"
+                    ],
+                    "description": "Build, install and start the PAM Native app on the booted Apple TV Simulator"
+                },
                 "ios:run": {
                     "bin": "packages/native/bin/pam-native",
                     "arguments": [

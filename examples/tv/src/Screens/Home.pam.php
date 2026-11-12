@@ -138,7 +138,7 @@ final class Home extends Component
                                         class="tile"
                                         :backgroundColor="$show['color']"
                                         :autoFocus="$show['id'] === $resume"
-                                        accessibilityLabel="Play"
+                                        :accessibilityLabel="'Play ' . $show['title']"
                                         @focus="preview($show['id'])"
                                         @press="play($show['id'])"
                                     >
