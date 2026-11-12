@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.49.5 - 2026-11-12
+
+- Handler purity analysis no longer spikes the PHP heap on the device: it
+  reads only the analyzed method's lines (not the whole file once per
+  method) and tokenizes only a file's top-level `use` header, not the whole
+  source. A large trait or a locale table added ~10-12 MB per analysis and
+  exhausted a 128 MB `memory_limit` mid-flush ("Allowed memory size ...
+  exhausted while running Runtime::flush") on a 2 GB phone. Closure `use`
+  lists are no longer mistaken for imports.
+- Android: devices that report 2.5 GB of RAM or more ("3 GB" phones) get a
+  192 MB PHP `memory_limit`; 128 MB stays for smaller devices.
+
 ## 1.49.4 - 2026-11-12
 
 - Vertical scroll content measures each stacked child inside its own width

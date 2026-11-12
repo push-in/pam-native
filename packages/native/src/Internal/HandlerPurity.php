@@ -171,11 +171,12 @@ final class HandlerPurity
         if (!is_string($file) || $start === false || $end === false) {
             return false;
         }
-        $lines = @file($file);
-        if (!is_array($lines)) {
+        // Only the method's own lines: file() kept every line of large
+        // sources (traits, locales) in memory once per analyzed method.
+        $source = self::lines($file, $start, $end);
+        if ($source === null) {
             return false;
         }
-        $source = implode('', array_slice($lines, $start - 1, $end - $start + 1));
         $tokens = array_values(array_filter(
             token_get_all('<?php '.$source),
             static fn (mixed $token): bool => !is_array($token)
@@ -332,6 +333,24 @@ final class HandlerPurity
         return $namespace === '' ? $name : $namespace.'\\'.$name;
     }
 
+    /** Lines $start..$end (1-based, inclusive) of $file, or null when unreadable. */
+    private static function lines(string $file, int $start, int $end): ?string
+    {
+        try {
+            $reader = new \SplFileObject($file, 'rb');
+        } catch (\RuntimeException) {
+            return null;
+        }
+        $reader->seek(max(0, $start - 1));
+        $source = '';
+        for ($line = $start; $line <= $end && !$reader->eof(); $line++) {
+            $source .= (string) $reader->current();
+            $reader->next();
+        }
+
+        return $source;
+    }
+
     /** @return array<string, string> lowercase alias => class, from the file's top-level `use` statements */
     private static function imports(string $file): array
     {
@@ -341,6 +360,16 @@ final class HandlerPurity
         $imports = [];
         $source = @file_get_contents($file);
         if (is_string($source)) {
+            // Top-level `use` statements come before the first other
+            // top-level statement (a class, a function, a `return [...]`
+            // table). Tokenizing the whole file (tens of thousands of tokens
+            // for a large trait or locale table) spiked the heap on the
+            // device and exhausted a 128 MB memory_limit mid-flush. Only
+            // column-0 lines count: grouped `use` continuations and docblock
+            // lines are indented.
+            if (preg_match('/^(?!(?:<\?php|namespace\b|use\b|declare\b|\/\/|#|\/\*|\*|\}|$))\S/m', $source, $match, PREG_OFFSET_CAPTURE) === 1) {
+                $source = substr($source, 0, (int) $match[0][1]);
+            }
             $tokens = token_get_all($source);
             $depth = 0;
             $count = count($tokens);
