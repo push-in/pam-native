@@ -540,10 +540,13 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     /** Keyboard reveals scheduled whose first pass has not run yet. */
     private var pendingKeyboardReveals = 0
+    /** Scroll offset when the latest keyboard reveal was scheduled. */
+    private var keyboardRevealScheduledAt = 0
 
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return
         pendingKeyboardReveals++
+        keyboardRevealScheduledAt = primaryCurrentOffset()
         ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true, keyboardGuard = true)
     }
 
@@ -632,9 +635,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun preserveOffsetAfterUnchangedKeyboardInsets() {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
-        // A reveal scheduled but not run yet: the offset now is the one it is
-        // about to replace, and restoring it would undo the reveal.
-        if (pendingKeyboardReveals > 0) return
+        // A reveal is scheduled and nothing has scrolled since: the offset now
+        // is the one it is about to replace, and restoring it would undo the
+        // reveal. After a manual scroll the preserve still wins, as before.
+        if (pendingKeyboardReveals > 0 && primaryCurrentOffset() == keyboardRevealScheduledAt) return
         val (x, y) = snapshotOffsetPixels()
         activeScroll.postOnAnimation {
             if (
