@@ -99,11 +99,19 @@ final class LoopbackTCPConnection: @unchecked Sendable {
         }
     }
 
+    /// Closes gracefully: half-close, then drain what the client still
+    /// sends (an unread request body) before closing. Closing with unread
+    /// bytes sends a TCP reset, which can discard the response before the
+    /// client has read it.
     func cancel() {
         io.async { [self] in
             guard !closed else { return }
             closed = true
-            Darwin.shutdown(descriptor, SHUT_RDWR)
+            Darwin.shutdown(descriptor, SHUT_WR)
+            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var buffer = [UInt8](repeating: 0, count: 16_384)
+            while Darwin.recv(descriptor, &buffer, buffer.count, 0) > 0 {}
             Darwin.close(descriptor)
         }
     }
