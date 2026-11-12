@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.2 - 2026-11-12
 
 - Android release builds keep `PamRuntime.onNativeRemount` from R8. The JNI
   lookup failed in minified builds, so the retained tree was never replayed
