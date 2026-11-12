@@ -538,15 +538,12 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
     }
 
-    /** Keyboard reveals scheduled whose first pass has not run yet. */
-    private var pendingKeyboardReveals = 0
-    /** Scroll offset when the latest keyboard reveal was scheduled. */
-    private var keyboardRevealScheduledAt = 0
+    /** Bumped whenever a keyboard reveal is scheduled or scrolls. */
+    private var keyboardRevealGeneration = 0
 
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return
-        pendingKeyboardReveals++
-        keyboardRevealScheduledAt = primaryCurrentOffset()
+        keyboardRevealGeneration++
         ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true, keyboardGuard = true)
     }
 
@@ -560,13 +557,8 @@ internal class PamScrollContainer @JvmOverloads constructor(
         retry: Boolean,
         keyboardGuard: Boolean = false,
     ) {
-        val firstKeyboardPass = keyboardGuard && retry
-        if (horizontal) {
-            if (firstKeyboardPass) pendingKeyboardReveals = (pendingKeyboardReveals - 1).coerceAtLeast(0)
-            return
-        }
+        if (horizontal) return
         activeScroll.post {
-            if (firstKeyboardPass) pendingKeyboardReveals = (pendingKeyboardReveals - 1).coerceAtLeast(0)
             if (
                 !isAttachedToWindow ||
                 !target.isAttachedToWindow ||
@@ -604,7 +596,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 else -> current
             }
             val boundedNext = next.coerceIn(0, primaryMaxOffset())
-            if (boundedNext != current) scrollToPrimary(boundedNext)
+            if (boundedNext != current) {
+                if (keyboardGuard) keyboardRevealGeneration++
+                scrollToPrimary(boundedNext)
+            }
             // Keyboard insets and orientation-driven PHP layout can settle on
             // the next frame. Recheck once so the focused editor cannot be
             // left outside a newly reduced viewport after rotation.
@@ -635,17 +630,17 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun preserveOffsetAfterUnchangedKeyboardInsets() {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
-        // A reveal is scheduled and nothing has scrolled since: the offset now
-        // is the one it is about to replace, and restoring it would undo the
-        // reveal. After a manual scroll the preserve still wins, as before.
-        if (pendingKeyboardReveals > 0 && primaryCurrentOffset() == keyboardRevealScheduledAt) return
         val (x, y) = snapshotOffsetPixels()
+        val generation = keyboardRevealGeneration
         activeScroll.postOnAnimation {
             if (
                 isAttachedToWindow &&
                 !hasRequestedOffsetX &&
                 !hasRequestedOffsetY &&
-                keyboardAvoidanceInsetPx > 0
+                keyboardAvoidanceInsetPx > 0 &&
+                // A keyboard reveal scheduled or applied since the snapshot
+                // moved the offset on purpose; restoring would undo it.
+                generation == keyboardRevealGeneration
             ) {
                 activeScroll.scrollTo(x, y)
             }
