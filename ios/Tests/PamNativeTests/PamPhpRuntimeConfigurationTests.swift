@@ -32,6 +32,7 @@ final class PamPhpRuntimeConfigurationTests: XCTestCase {
             PamPhpRuntimeConfiguration.opcacheMemoryVariable,
             PamPhpRuntimeConfiguration.immutableSourcesVariable,
             PamPhpRuntimeConfiguration.opcacheDirectoryVariable,
+            PamPhpRuntimeConfiguration.modeVariable,
         ]
         defer { names.forEach { unsetenv($0) } }
         names.forEach { unsetenv($0) }
@@ -48,6 +49,7 @@ final class PamPhpRuntimeConfigurationTests: XCTestCase {
         XCTAssertEqual(String(cString: getenv(PamPhpRuntimeConfiguration.opcacheMemoryVariable)), "128")
         XCTAssertEqual(String(cString: getenv(PamPhpRuntimeConfiguration.immutableSourcesVariable)), "1")
         XCTAssertEqual(String(cString: getenv(PamPhpRuntimeConfiguration.opcacheDirectoryVariable)), "/tmp/pam-opcache")
+        XCTAssertEqual(String(cString: getenv(PamPhpRuntimeConfiguration.modeVariable)), "production")
     }
 
     func testOpcacheDirectoryIsDroppedWhenTheBuildStampChanges() throws {
