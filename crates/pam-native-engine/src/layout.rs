@@ -2447,12 +2447,30 @@ fn unconstrained_natural_scroll_extent(
     let mut grow_unit = 0.0_f32;
     let mut fixed_extent = 0.0_f32;
     for child in visible_children {
+        // A child of a vertical stack wraps inside its own width: the content
+        // width minus its horizontal margins, or its width, clamped by
+        // min/max-width (as `intrinsic_extent` and final layout do). Measuring
+        // a card with side margins across the full width found fewer lines.
+        let child_cross = if axis == Axis::Vertical {
+            let (margin_start, margin_end) = margin_cross(child, Axis::Vertical);
+            let width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner_cross)
+                .unwrap_or((inner_cross - margin_start - margin_end).max(0.0));
+            let maximum = dimension(
+                child,
+                PropKey::MaxWidth,
+                PropKey::MaxWidthPercent,
+                inner_cross,
+            );
+            constrained(width, number(child, PropKey::MinWidth), maximum)?
+        } else {
+            inner_cross
+        };
         let extent = natural_scroll_extent(
             children,
             child,
             axis,
             available_main,
-            inner_cross,
+            child_cross,
             text_scale,
             text_metrics,
             depth + 1,
@@ -6954,6 +6972,7 @@ mod tests {
                         [
                             (PropKey::AlignItems, I(2)),
                             (PropKey::PaddingVertical, F(12.0)),
+                            (PropKey::MarginHorizontal, F(24.0)),
                         ],
                     ),
                 );
