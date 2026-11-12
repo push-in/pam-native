@@ -42,7 +42,7 @@ jobs:
             pam-native-auth pam-native-background-transfer pam-native-bluetooth
             pam-native-feature-flags pam-native-firebase pam-native-health
             pam-native-intents pam-native-live-activities pam-native-maps
-            pam-native-media pam-native-media-editor pam-native-nfc pam-native-payments
+            pam-native-media pam-native-nfc pam-native-payments
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
             pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
@@ -62,7 +62,7 @@ jobs:
             pam-native-auth pam-native-background-transfer pam-native-bluetooth
             pam-native-feature-flags pam-native-firebase pam-native-health
             pam-native-intents pam-native-live-activities pam-native-maps
-            pam-native-media pam-native-media-editor pam-native-nfc pam-native-payments
+            pam-native-media pam-native-nfc pam-native-payments
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
             pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
@@ -80,7 +80,6 @@ jobs:
             PamPlugin7PushinbrPamNativeLiveActivities
             PamPlugin8PushinbrPamNativeMaps
             PamPlugin9PushinbrPamNativeMedia
-            PamPlugin10PushinbrPamNativeMediaEditor
             PamPlugin11PushinbrPamNativeNfc
             PamPlugin12PushinbrPamNativePayments
             PamPlugin13PushinbrPamNativeRealtime

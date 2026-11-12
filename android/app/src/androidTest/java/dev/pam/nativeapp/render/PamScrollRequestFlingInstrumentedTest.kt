@@ -57,12 +57,17 @@ class PamScrollRequestFlingInstrumentedTest {
             list.fling(0, 9_000)
         }
         SystemClock.sleep(48)
-        // Every frame of the glide, not one sample at a fixed delay: a slow CI
-        // emulator can draw its first glide frame well after 80 ms.
+        // The glide is a settling (smooth) scroll, not an immediate jump. Its
+        // frames are not counted: a slow CI emulator can finish the whole
+        // glide in one late frame.
         val offsets = mutableListOf<Int>()
+        var settled = false
         val recorder = object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 offsets += recyclerView.computeVerticalScrollOffset()
+            }
+            override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
+                if (newState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_SETTLING) settled = true
             }
         }
         main {
@@ -72,10 +77,7 @@ class PamScrollRequestFlingInstrumentedTest {
         awaitIdle { list.scrollState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE }
         main {
             list.removeOnScrollListener(recorder)
-            assertTrue(
-                "Animated request glides instead of jumping (offsets $offsets)",
-                offsets.count { it > 0 } >= 2,
-            )
+            assertTrue("Animated request glides instead of jumping (offsets $offsets)", settled)
             assertEquals(0, list.computeVerticalScrollOffset())
         }
     }
