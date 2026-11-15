@@ -4,7 +4,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
@@ -5029,6 +5030,7 @@ fn build_apple_intermediate(
     release: bool,
     os: AppleOs,
 ) -> Result<PathBuf, String> {
+    set_release_staging(release);
     if !cfg!(target_os = "macos") {
         return Err(format!("{} builds require macOS with Xcode", os.name()));
     }
@@ -7524,25 +7526,63 @@ fn prebuild_components(destination: &Path) -> Result<(), String> {
         return Ok(());
     }
     let php = host_php();
+    // Strict validation only rejects code (PAM2104/PAM2105): the compiled
+    // output is the same, and the runtime accepts a strict-validated cache in
+    // every mode. Release and benchmark devices run strict, so a lenient cache
+    // would be ignored there and every component recompiled on the phone.
+    let strict = run_component_prebuild(&php, destination, true)?;
+    if strict.success() {
+        return Ok(());
+    }
+    if RELEASE_STAGING.load(Ordering::Relaxed) {
+        return Err(format!(
+            "precompiling PAM components in strict mode failed ({strict}); release builds run \
+             strict, so these components would abort the app at boot (see the PAM210x errors above)"
+        ));
+    }
+    eprintln!(
+        "PAM Native warning: components fail strict validation (see above). This debug build \
+         precompiles them leniently; a release build of the same code fails."
+    );
+    let status = run_component_prebuild(&php, destination, false)?;
+    if !status.success() {
+        return Err(format!("precompiling PAM components failed ({status})"));
+    }
+    Ok(())
+}
+
+/// Whether the bundle being staged ships in a release or benchmark build,
+/// whose devices compile components in strict production mode.
+static RELEASE_STAGING: AtomicBool = AtomicBool::new(false);
+
+fn set_release_staging(release: bool) {
+    RELEASE_STAGING.store(release, Ordering::Relaxed);
+}
+
+fn run_component_prebuild(
+    php: &str,
+    destination: &Path,
+    strict: bool,
+) -> Result<ExitStatus, String> {
     let script = "require 'vendor/autoload.php';\n\
         $compiler = 'Pam\\\\Native\\\\Internal\\\\PamPhpCompiler';\n\
         if (!class_exists($compiler) || !method_exists($compiler, 'prebuild')) { exit(0); }\n\
         $count = $compiler::prebuild(getcwd(), getcwd().'/src');\n\
         fwrite(STDOUT, \"Precompiled {$count} PAM components\\n\");\n";
-    // The device runs in the default (non-strict) mode; compile under the
-    // same configuration or the runtime would ignore the prebuilt cache.
-    let status = Command::new(&php)
+    let mut command = Command::new(php);
+    command
         .arg("-r")
         .arg(script)
         .current_dir(destination)
-        .env_remove("PAM_NATIVE_MODE")
-        .env_remove("PAM_NATIVE_STRICT")
-        .status()
-        .map_err(|error| format!("cannot start {php} to precompile PAM components: {error}"))?;
-    if !status.success() {
-        return Err(format!("precompiling PAM components failed ({status})"));
+        .env_remove("PAM_NATIVE_MODE");
+    if strict {
+        command.env("PAM_NATIVE_STRICT", "1");
+    } else {
+        command.env_remove("PAM_NATIVE_STRICT");
     }
-    Ok(())
+    command
+        .status()
+        .map_err(|error| format!("cannot start {php} to precompile PAM components: {error}"))
 }
 
 fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> Result<(), String> {
@@ -7782,6 +7822,7 @@ struct BuiltApk {
 
 fn build_intermediate(options: MobileOptions, installable: bool) -> Result<BuiltApk, String> {
     let project = load_project(&options.project)?;
+    set_release_staging(options.mode == BuildMode::Release);
     if options.mode == BuildMode::Debug {
         ensure_isolated_debug_application_id(&project)?;
     }
@@ -9903,6 +9944,8 @@ fn build_update_bundle((project_path, output): (PathBuf, PathBuf)) -> Result<u8,
             .unwrap_or_default()
             .as_nanos()
     ));
+    // Update bundles reach installed (release) apps, which run strict.
+    set_release_staging(true);
     let result = (|| {
         stage_project_at(&project, &staging, true)?;
         let bundle = encode_bundle(&staging, MAX_UPDATE_BUNDLE_BYTES, "update")?;

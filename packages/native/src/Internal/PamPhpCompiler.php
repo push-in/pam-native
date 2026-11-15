@@ -425,7 +425,7 @@ final class PamPhpCompiler
             !is_array($metadata)
             || ($metadata['version'] ?? null) !== self::CACHE_VERSION
             || ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint
-            || ($metadata['strict'] ?? null) !== BuildConfiguration::strict()
+            || !self::strictnessFits($metadata['strict'] ?? null)
             || !is_string($metadata['class'] ?? null)
             || !is_string($metadata['tag'] ?? null)
             || !is_int($metadata['language'] ?? null)
@@ -585,7 +585,7 @@ final class PamPhpCompiler
             || ($metadata['version'] ?? null) !== self::CACHE_VERSION
             || ($metadata['relocatable'] ?? null) !== true
             || ($sourceFingerprint !== null && ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint)
-            || ($metadata['strict'] ?? null) !== BuildConfiguration::strict()
+            || !self::strictnessFits($metadata['strict'] ?? null)
             || !is_string($metadata['class'] ?? null)
             || !is_string($metadata['tag'] ?? null)
             || !is_int($metadata['language'] ?? null)
@@ -1131,6 +1131,16 @@ final class PamPhpCompiler
             }
             $directory = $parent;
         }
+    }
+
+    /**
+     * Strict validation only rejects code (PAM2104/PAM2105) and never changes
+     * the compiled output, so a strict-validated cache serves every mode; a
+     * lenient one only serves lenient runtimes. Release builds prebuild strict.
+     */
+    private static function strictnessFits(mixed $strict): bool
+    {
+        return $strict === true || ($strict === false && !BuildConfiguration::strict());
     }
 
     private static function validateHotPath(string $php, string $source): void
