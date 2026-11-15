@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.49.6 - 2026-11-15
+
+- Release, benchmark and update bundles precompile components in strict
+  mode, the mode those devices run since 1.49.1. The prebuilt cache was
+  compiled lenient, so a store build ignored it and compiled every component
+  on the phone after each install or update (Zé Chat on a Galaxy S10: first
+  launch 5.3 s -> 0.9 s, PSS after it 239 -> 178 MB). A strict-validated
+  cache serves every mode; a release build whose components fail strict
+  validation (PAM2104/PAM2105) now fails at build time instead of aborting
+  the app at boot. Debug builds warn and fall back to a lenient prebuild.
+- Device bundles drop package material no device reads: plugin
+  `android/`, `ios/`, `tests/`, `docs/` and `scripts/`, Markdown, licences,
+  `composer.lock`, Kotlin/Swift/Gradle/Python sources and the web/TV
+  compiler (`packages/web`, not autoloaded on Android or iOS). Apps no longer
+  list them in `.pamignore` (Zé Chat: 2 MB of plain assets -> 278 KB).
+
 ## 1.49.5 - 2026-11-12
 
 - Handler purity analysis no longer spikes the PHP heap on the device: it

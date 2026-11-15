@@ -153,6 +153,47 @@ try {
     chmod($stagedCopy.'/src/Components/Badge.pam.php', 0o644);
     exec('rm -rf '.escapeshellarg($stagedCopy));
 }
+// Release builds prebuild strict (PAM_NATIVE_STRICT=1): that cache must
+// serve strict (production) and lenient (development) runtimes alike, while a
+// lenient cache only serves lenient runtimes (strict ones recompile).
+$strictnessRoot = $prebuiltRoot.'-strictness';
+$previousMode = getenv('PAM_NATIVE_MODE');
+$previousStrict = getenv('PAM_NATIVE_STRICT');
+$bootsFromPack = static function (string $root): bool {
+    $component = PamPhpCompiler::compileDirectory($root.'/src', $root.'/.cache')[0] ?? null;
+    $booted = $component !== null
+        && str_starts_with($component->classFile, $root.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/.')
+        && (glob($root.'/.cache/*') ?: []) === [];
+    exec('rm -rf '.escapeshellarg($root.'/.cache'));
+
+    return $booted;
+};
+try {
+    putenv('PAM_NATIVE_MODE');
+    $variants = [];
+    foreach (['strict' => true, 'lenient' => false] as $label => $strictBuild) {
+        $root = $strictnessRoot.'-'.$label;
+        exec('rm -rf '.escapeshellarg($root));
+        exec('cp -R '.escapeshellarg($prebuiltRoot).' '.escapeshellarg($root));
+        exec('rm -rf '.escapeshellarg($root.'/'.PamPhpCompiler::PREBUILT_DIRECTORY));
+        putenv($strictBuild ? 'PAM_NATIVE_STRICT=1' : 'PAM_NATIVE_STRICT');
+        PamPhpCompiler::prebuild($root, $root.'/src');
+        putenv('PAM_NATIVE_STRICT');
+        $development = $bootsFromPack($root);
+        putenv('PAM_NATIVE_MODE=production');
+        $production = $bootsFromPack($root);
+        putenv('PAM_NATIVE_MODE');
+        $variants[$label] = [$development, $production];
+        exec('rm -rf '.escapeshellarg($root));
+    }
+    $assert(
+        $variants === ['strict' => [true, true], 'lenient' => [true, false]],
+        'A strict-validated prebuilt cache must serve every mode; a lenient one only development.',
+    );
+} finally {
+    putenv($previousMode === false ? 'PAM_NATIVE_MODE' : 'PAM_NATIVE_MODE='.$previousMode);
+    putenv($previousStrict === false ? 'PAM_NATIVE_STRICT' : 'PAM_NATIVE_STRICT='.$previousStrict);
+}
 foreach ([$prebuiltRoot, $prebuiltCopy] as $prebuiltDirectory) {
     exec('rm -rf '.escapeshellarg($prebuiltDirectory));
 }
