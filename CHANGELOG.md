@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.9 - 2026-11-16
 
 - iOS: a Pressable/GestureDetector with `accessibilityLabel` (or any other
   accessibility prop) stays a VoiceOver element, as on Android and in RN;
