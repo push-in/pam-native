@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.50.0 - 2026-11-16
+
+Native-level interaction release: the UI thread never waits for PHP to
+answer a touch, never builds more than the screen shows in one frame, and
+PHP re-renders only what changed — state and logic stay in PHP.
+
+- Performance: a component dirty only through a descendant keeps its last
+  render and re-renders only the path to it (call-site class/key/style
+  replayed, path copy); slot content, lazy rows, portals and PHP-built
+  children fall back to the full render. `component.patch` Profiler spans;
+  `GranularRender::enabled(false)` turns it off. (Typing in a comment field
+  inside a sheet of a large screen: 45 component renders → 15.)
+- Android: a commit creating 40+ nodes under a vertical ScrollView builds only
+  the views its viewport shows before its frame and the rest in 6 ms frame
+  slices; content scrolled, laid out or moved into view is built at once.
+  Layout, scroll offset, view order and on:layout are unchanged (60-row
+  screen on the CI emulator: worst UI frame 56 ms → 17 ms). The commit layout
+  pass lays out each new view once instead of twice. ScrollView content views
+  keep their logical order. Per-kind Perfetto sections inside
+  `PamCommit.mutations` while a trace records.
+- Navigation: `Pressable::prewarm()`, `<Link prewarm>`,
+  `<Pressable prewarm :prewarmParams prewarmMode prewarmTransition>` mount the
+  destination on press-in (validated, middleware); the press reuses it; a
+  press-out without a press releases it after 300 ms. `navigatesTo()`,
+  `Route::prewarm()`, `Navigator::intentKey()`. Android: a press whose
+  declared destination is the warm route starts the push on the tap and the
+  commit adopts the running animation. `prewarm()`/`cancelPrewarm()` mark the
+  navigator for render.
+- Gestures: an arbiter decides who owns a drag under the finger. The
+  navigator's back gesture (full screen or vertical) yields to a pager with a
+  previous page, a scrolled tab strip, a horizontal pan/swipe/Drag, a slider,
+  a drawing canvas or a zoomed photo; from the leading edge only exclusive
+  owners keep it. Shared pans yield to an inner scroller that can still
+  scroll; pull to refresh, sheets and swipeable tabs yield to owners nested
+  under the finger. New `blocksNavigationGesture` attribute.
+- Fix: both renderers ignored a lone `gestureDirection` /
+  `fullScreenGestureEnabled` change, so a route pushed over a full-screen-back
+  route (stories over a chat) went back from anywhere. Android: the back
+  gesture works over scrollable vertical lists again.
+- Native time primitives driven by PHP state, with no PHP render per tick:
+  `Text::clock()`, `countdown()`, `countdownTo()`, `ClockFormat`
+  (`clockStartedAt`, `clockEndsAt`, `clockDurationMs`, `clockOffsetMs`,
+  `clockRunning`, `clockFormat`), `Element::timeProgress()`
+  (`progressStartedAt`, `progressDurationMs`, `progressOffsetMs`,
+  `progressRunning`) and `Text::reveal()`/`revealOver()` (`revealCharMs`,
+  `revealDurationMs`, `revealKey`). They tick only on screen and catch up
+  from the wall clock; reduced motion steps fills each second and shows
+  reveals at once.
+- `BottomSheet`/`Modal` unmounted while presented (`p-if`) plays the same exit
+  as `visible = false` over a snapshot of its content before the window goes;
+  it takes no touches, notifies nothing, and a sheet reopened meanwhile
+  presents above it. Android: closing a sheet no longer drops its backdrop to
+  a third of its opacity on the first frame.
+- Protocol: extension properties 1021 (`blocksNavigationGesture`), 1022–1034
+  (time primitives), 1035–1038 (press navigation intent and warm launch).
+
 ## 1.49.13 - 2026-11-16
 
 - Templates: an event handler written as one call of a `#[PureHandler]`
