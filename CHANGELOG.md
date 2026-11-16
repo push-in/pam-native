@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.50.2 - 2026-11-16
+
+Tab switches in one cheap frame (Galaxy S10: Chats → Feed worst frame 16 → 8.7 ms,
+display-list recording 7.9 → 0.5 ms, no missed deadline). No API change.
+
+- Android: switching to a hidden route (kept-alive tab, screen under a pop)
+  records only its root: the two routes shown last keep their display lists
+  while hidden (zero-alpha RenderNode, Android 10+, not for routes with a
+  SurfaceView or WebView).
+- Android: styled views ignore the visibility flip of static backgrounds,
+  foregrounds and images, so hiding or showing a route no longer invalidates
+  every view in it.
+- Android: an image hidden in place keeps its pixels for 5 s before releasing
+  them; detached list cells still release at once.
+- Android: `PamMount.remove.<KIND>` / `PamMount.move.<KIND>` trace sections
+  name the node kind while tracing.
+- `Navigator::preload()` of a route already mounted in the stack no longer
+  builds a second, unused instance.
+
 ## 1.50.1 - 2026-11-16
 
 Frame-cost and media-loading fixes measured on a Galaxy S10 after 1.50.0. No API change.
