@@ -333,6 +333,11 @@ $assert(
         && $spanCount('component.patch', $granularShellClass) === 1,
     'Granular updates must show in the profiler as component.patch, not component.render.',
 );
+// Only the copied path is encoded again: the frame patches the child's text.
+$assert(
+    strlen((string) Runtime::lastFrame()) * 4 < strlen((string) $granularEncoding($granularShell)[0]),
+    'A granular update must send a small patch frame (siblings keep their encoded subtrees).',
+);
 // (b) The call site's class and attributes stay on the child's new element.
 $placedA = $child('a')->__pamPlacement()?->placed;
 $assert(
