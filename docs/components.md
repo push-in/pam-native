@@ -1377,11 +1377,26 @@ to a fixed instant and ignores running/offset. Counting up shows whole seconds
 elapsed (rounded down); counting down shows the seconds left rounded up and
 stops at zero. `clockFormat`: `m:ss` (default, `0:42`, `1:01:05` past an
 hour), `mm:ss` (`00:42`, minutes keep counting: `75:03`), `h:mm:ss`
-(`0:00:42`) or `seconds` (`42`) — the `ClockFormat` enum. The text content is
-the placeholder the engine measures: give the label a stable width (tabular
-digits) so ticks never relayout. The label is the text's content, so screen
-readers read the current value. It wakes once per label change; removing all
-`clock*` values shows the content again.
+(`0:00:42`) or `seconds` (`42`) — the `ClockFormat` enum
+(`ClockFormat::format($seconds)` gives the same label in PHP). The label is
+the text's content, so screen readers read the current value. It wakes once
+per label change; removing all `clock*` values shows the content again.
+
+The framework renders the clock's current label as the text: the content you
+write (`00:00` above) is only a fallback, shown when no `clock*` value is set,
+so the engine measures what is drawn and the first frame already shows the
+right time (a countdown written as `0` starts at `30`). The width follows the
+digits: when the label gains a character (`9:59` → `10:00` and `59:59` →
+`1:00:00` in `m:ss`, `99:59` → `100:00` in `mm:ss`, `9:59:59` → `10:00:00`,
+`9` → `10` in `seconds`) the component renders once, one second before the
+native clock shows it, so it is never clipped; when a countdown loses one
+(`10` → `9`, `1:00:00` → `59:59`) it renders right after, so centered text
+stays centered. That is one timer per component, armed only for the next such
+instant (none while paused or not started), waiting in the background (the
+render on return corrects the label) and cancelled on unmount — never a
+render per second. Tabular digits (`font-variant-numeric: tabular-nums`)
+still keep every other tick from shifting the text. Rich text (nested
+`Span` runs) keeps its content as written.
 
 **Timed progress** (any view): the view scales from its leading edge (also in
 RTL) to `elapsed / progressDurationMs`, with the same

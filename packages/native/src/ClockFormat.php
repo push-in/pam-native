@@ -33,6 +33,28 @@ enum ClockFormat: int
         };
     }
 
+    /**
+     * The label of [seconds] whole seconds, exactly as the native renderers
+     * draw it (Android `PamClockFormat`, iOS `PamClockFormat`); negative
+     * values read as zero.
+     */
+    public function format(int $seconds): string
+    {
+        $total = max(0, $seconds);
+        $hours = intdiv($total, 3_600);
+        $minutes = intdiv($total % 3_600, 60);
+        $rest = $total % 60;
+
+        return match ($this) {
+            self::PaddedMinutesSeconds => self::twoDigits(intdiv($total, 60)).':'.self::twoDigits($rest),
+            self::HoursMinutesSeconds => $hours.':'.self::twoDigits($minutes).':'.self::twoDigits($rest),
+            self::Seconds => (string) $total,
+            self::MinutesSeconds => $hours > 0
+                ? $hours.':'.self::twoDigits($minutes).':'.self::twoDigits($rest)
+                : $minutes.':'.self::twoDigits($rest),
+        };
+    }
+
     public static function fromTemplate(string $name): self
     {
         foreach (self::cases() as $case) {
@@ -42,5 +64,10 @@ enum ClockFormat: int
         }
 
         throw new \InvalidArgumentException("Unknown clock format {$name}; use m:ss, mm:ss, h:mm:ss or seconds.");
+    }
+
+    private static function twoDigits(int $value): string
+    {
+        return $value < 10 ? '0'.$value : (string) $value;
     }
 }

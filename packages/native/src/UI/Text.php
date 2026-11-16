@@ -9,6 +9,7 @@ use Pam\Native\ClockFormat;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\Internal\BinaryValue;
+use Pam\Native\Internal\NativeTime;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\TextBreakStrategy;
@@ -71,8 +72,10 @@ final class Text extends Element
      * background. [offsetMs] is time already counted before [startedAt] (a
      * resumed stopwatch); with [running] false, or no [startedAt], the clock
      * stands at [offsetMs]. PHP stays the source of truth: change any value
-     * and the clock follows. The text's own content is the placeholder the
-     * layout measures; give it a stable width (tabular digits).
+     * and the clock follows. The framework renders the current label as the
+     * text (the content given is replaced) and renders the component again
+     * when the label gains or loses a character (9:59 -> 10:00), so the
+     * layout always fits it; tabular digits keep every other tick in place.
      */
     public function clock(
         ?int $startedAt,
@@ -114,7 +117,8 @@ final class Text extends Element
             ->withoutProperty(PropKey::ClockOffsetMs)
             ->withoutProperty(PropKey::ClockRunning)
             ->withProperty(PropKey::ClockEndsAt, self::nonNegative($endsAt, 'endsAt'))
-            ->withProperty(PropKey::ClockFormat, $format->value);
+            ->withProperty(PropKey::ClockFormat, $format->value)
+            ->withClockLabel();
     }
 
     /**
@@ -161,7 +165,16 @@ final class Text extends Element
             ? $element->withoutProperty(PropKey::ClockRunning)
             : $element->withProperty(PropKey::ClockRunning, $running && $startedAt !== null);
 
-        return $element->withProperty(PropKey::ClockFormat, $format->value);
+        return $element->withProperty(PropKey::ClockFormat, $format->value)->withClockLabel();
+    }
+
+    /** The clock's current label as the content ({@see NativeTime::labelled()}). */
+    private function withClockLabel(): self
+    {
+        $element = NativeTime::labelled($this);
+        \assert($element instanceof self);
+
+        return $element;
     }
 
     private function withRevealKey(string|int|null $key): self
