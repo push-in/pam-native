@@ -13,14 +13,16 @@ class PamForwardBufferTest {
     }
 
     @Test
-    fun forwardBufferKeepsThatMuchMediaAheadAndStartsWithTheExoDefaults() {
-        assertEquals(PamForwardBuffer(12_000, 12_000, 2_500, 5_000), pamForwardBuffer(12))
+    fun forwardBufferKeepsThatMuchMediaAheadAndStartsAfterOneSecond() {
+        // Not ExoPlayer's 2.5 s / 5 s: a viewer shows motion within a second.
+        assertEquals(PamForwardBuffer(12_000, 12_000, 1_000, 2_000), pamForwardBuffer(12))
     }
 
     @Test
     fun shortBuffersCapThePlaybackThresholdsAtTheTarget() {
         // DefaultLoadControl rejects bufferForPlayback > minBuffer.
-        assertEquals(PamForwardBuffer(2_000, 2_000, 2_000, 2_000), pamForwardBuffer(2))
+        assertEquals(PamForwardBuffer(1_000, 1_000, 1_000, 1_000), pamForwardBuffer(1))
+        assertEquals(PamForwardBuffer(2_000, 2_000, 1_000, 2_000), pamForwardBuffer(2))
     }
 
     @Test
