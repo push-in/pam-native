@@ -2342,7 +2342,13 @@ internal class RichRecyclerAdapter(
     }
 
     private fun mountWithinBudget(holder: RichHolder, id: Long, position: Int = RecyclerView.NO_POSITION): Boolean {
-        if (!deferMounts() && (position == RecyclerView.NO_POSITION || !offscreenWhileMoving(position))) {
+        val onScreen = position != RecyclerView.NO_POSITION && shown(position)
+        // A row on screen mounts now even while the list is hidden (a pushed
+        // screen's first layout, one frame before it shows): the end of this
+        // layout mounts it anyway ([mountShown] from the layout's scroll
+        // callback), but views added to a row already laid out each asked
+        // the window for a second measure and layout pass of everything.
+        if (onScreen || !deferMounts() && position == RecyclerView.NO_POSITION) {
             return mountNow(holder, id)
         }
         // One budget per frame: the animation clock is the frame's vsync time.
