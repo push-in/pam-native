@@ -29,6 +29,20 @@ final class PamAccessibilityParityTests: XCTestCase {
         NodeSpec(id: id, parent: parent, index: 0, kind: .text, properties: [PamConstants.text: .text(value)])
     }
 
+    /// VoiceOver can descend to `view`: nothing on its path hides its
+    /// descendants and no ancestor is an element (UIKit stops at one). A
+    /// UILabel's own `isAccessibilityElement` comes from the accessibility
+    /// runtime, which unit tests do not load, so it is not asserted.
+    private func reachable(_ view: UIView) -> Bool {
+        var current: UIView? = view
+        while let candidate = current {
+            if candidate.accessibilityElementsHidden { return false }
+            if candidate !== view && candidate.isAccessibilityElement { return false }
+            current = candidate.superview
+        }
+        return true
+    }
+
     func testLabelledPressableIsAButtonElementLikeTalkBack() throws {
         let (host, renderer) = render([
             NodeSpec(id: 2, parent: 1, index: 0, kind: .pressable, properties: [
@@ -87,18 +101,20 @@ final class PamAccessibilityParityTests: XCTestCase {
                 PamConstants.accessibilityRole: .integer(26),
                 PamConstants.accessible: .flag(true),
             ]),
+            text(11, parent: 10, "Tab"),
         ])
         defer { renderer.close() }
         let list = try XCTUnwrap(host.viewWithTag(2))
         XCTAssertFalse(list.isAccessibilityElement)
         XCTAssertEqual(list.accessibilityContainerType, .list)
-        XCTAssertTrue(try XCTUnwrap(host.viewWithTag(3)).isAccessibilityElement)
+        XCTAssertTrue(try reachable(XCTUnwrap(host.viewWithTag(3))))
         let alert = try XCTUnwrap(host.viewWithTag(4))
         XCTAssertFalse(alert.isAccessibilityElement)
         XCTAssertEqual(alert.accessibilityContainerType, .semanticGroup)
         let unlabelledHeader = try XCTUnwrap(host.viewWithTag(6))
         XCTAssertFalse(unlabelledHeader.isAccessibilityElement)
-        XCTAssertTrue(try XCTUnwrap(host.viewWithTag(7)).isAccessibilityElement)
+        XCTAssertTrue(try reachable(XCTUnwrap(host.viewWithTag(5))))
+        XCTAssertTrue(try reachable(XCTUnwrap(host.viewWithTag(7))))
         let labelledHeader = try XCTUnwrap(host.viewWithTag(8))
         XCTAssertTrue(labelledHeader.isAccessibilityElement)
         XCTAssertTrue(labelledHeader.accessibilityTraits.contains(.header))
@@ -106,6 +122,7 @@ final class PamAccessibilityParityTests: XCTestCase {
         let explicit = try XCTUnwrap(host.viewWithTag(10))
         XCTAssertTrue(explicit.isAccessibilityElement)
         XCTAssertEqual(explicit.accessibilityContainerType, .none)
+        XCTAssertFalse(try reachable(XCTUnwrap(host.viewWithTag(11))), "an explicit element still groups")
 
         renderer.commit([[.update(id: 2, key: PamConstants.accessibilityRole, value: nil)]])
         XCTAssertEqual(list.accessibilityContainerType, .none)
@@ -168,7 +185,10 @@ final class PamAccessibilityParityTests: XCTestCase {
         renderer.commit([[.update(id: 3, key: PamConstants.text, value: .text("Failed"))]])
         XCTAssertEqual(announcements.count, 2, "nothing runs while VoiceOver is off")
 
+        // VoiceOver comes back: "Failed" was never heard and is not news.
         voiceOver = true
+        renderer.liveRegionAnnouncementsDidChange()
+        XCTAssertEqual(announcements.count, 2)
         renderer.commit([[
             .create(NodeSpec(id: 5, parent: 1, index: 2, kind: .text, properties: [
                 PamConstants.text: .text("Wrong password"),
@@ -178,10 +198,13 @@ final class PamAccessibilityParityTests: XCTestCase {
         ]])
         XCTAssertEqual(
             announcements.map { $0.0 },
-            ["Saved", "Code expired", "Failed", "Wrong password"],
+            ["Saved", "Code expired", "Wrong password"],
             "a region mounted into a visible screen is read, like Android"
         )
         _ = try XCTUnwrap(host.viewWithTag(5))
+
+        renderer.commit([[.update(id: 3, key: PamConstants.text, value: .text("Retry"))]])
+        XCTAssertEqual(announcements.last?.0, "Retry", "changes after VoiceOver came back are read")
     }
 
     func testAdjustableSwipesDispatchIncrementAndDecrement() throws {

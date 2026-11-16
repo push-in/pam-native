@@ -166,6 +166,7 @@ public final class PamRenderer: @unchecked Sendable {
     private(set) var statusBarBand: PamStatusBarBand?
     private var routeCoverageObserver: NSObjectProtocol?
     private var imageResidencyObserver: NSObjectProtocol?
+    private var voiceOverObserver: NSObjectProtocol?
     /// Modals mounted on the root host instead of their logical parent.
     private var liftedModals = Set<ObjectIdentifier>()
     /// Remote images that can drop their pixels away from the screen and
@@ -226,6 +227,13 @@ public final class PamRenderer: @unchecked Sendable {
         ) { [weak self] _ in
             self?.sweepImageResidency()
         }
+        voiceOverObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.liveRegionAnnouncementsDidChange()
+        }
     }
 
     deinit {
@@ -237,6 +245,9 @@ public final class PamRenderer: @unchecked Sendable {
         }
         if let imageResidencyObserver {
             NotificationCenter.default.removeObserver(imageResidencyObserver)
+        }
+        if let voiceOverObserver {
+            NotificationCenter.default.removeObserver(voiceOverObserver)
         }
     }
 
@@ -4811,7 +4822,23 @@ public final class PamRenderer: @unchecked Sendable {
     /// region's subtree).
     static func liveRegionText(_ view: UIView) -> String {
         if let own = view.accessibilityLabel, !own.isEmpty { return own }
+        // A Text node's string lives in UILabel.text (PamTextView draws it
+        // itself); UILabel only derives accessibilityLabel from it when the
+        // accessibility runtime is loaded, so read it directly.
+        if let label = view as? UILabel { return label.text ?? "" }
         return PamPressButton.contentAccessibilityLabel(of: view) ?? ""
+    }
+
+    /// VoiceOver turned on: what the live regions show now was never heard
+    /// and is not news, so it counts as announced (TalkBack drops live
+    /// region events while it is off, too). Only later changes are read.
+    /// Called from `voiceOverStatusDidChangeNotification`; no work while off.
+    func liveRegionAnnouncementsDidChange() {
+        guard !liveRegions.isEmpty, liveRegionAnnouncementsEnabled() else { return }
+        for id in liveRegions.keys.sorted() {
+            guard let view = views[id], Self.isAccessibilityVisible(view) else { continue }
+            liveRegions[id]?.announced = Self.liveRegionText(view)
+        }
     }
 
     private static func isAccessibilityVisible(_ view: UIView) -> Bool {

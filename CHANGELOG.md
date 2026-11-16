@@ -16,7 +16,8 @@
 - iOS: `accessibilityLiveRegion` polite/assertive posts a VoiceOver
   announcement (queued/interrupting) of the region's label or visible text
   when it appears with content or that content changes, as TalkBack reads
-  Android live regions. Nothing runs while VoiceOver is off.
+  Android live regions. Nothing runs while VoiceOver is off, and what
+  changed meanwhile is not read when it turns back on.
 - `accessibilityRole="adjustable"` with `on:accessibilityAction` receives
   `increment`/`decrement` from VoiceOver's swipe up/down and TalkBack's
   slider scroll forward/backward, without declaring them in
