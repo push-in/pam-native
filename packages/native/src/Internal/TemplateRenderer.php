@@ -7297,20 +7297,7 @@ final class TemplateRenderer
             return $scope instanceof Component ? $scope->__pamRememberHandler('@'.$raw, $handler) : $handler;
         }
 
-        return static function (mixed $payload = null) use (
-            $raw,
-            $scope,
-            $data,
-        ): void {
-            if ($scope instanceof Component) {
-                DependencyTracker::markDirty($scope);
-            }
-            TemplateExpression::evaluate(
-                $raw,
-                $scope,
-                [...$data, 'event' => $payload],
-            );
-        };
+        return self::callHandler($raw, $scope, $data);
     }
 
     /**
@@ -7332,20 +7319,7 @@ final class TemplateRenderer
                 );
             }
 
-            return static function (mixed $payload = '') use (
-                $raw,
-                $scope,
-                $data,
-            ): void {
-                if ($scope instanceof Component) {
-                    DependencyTracker::markDirty($scope);
-                }
-                TemplateExpression::evaluate(
-                    $raw,
-                    $scope,
-                    [...$data, 'event' => $payload],
-                );
-            };
+            return self::callHandler($raw, $scope, $data);
         }
 
         $resolved = self::value($raw, $scope, $data);
@@ -7462,6 +7436,99 @@ final class TemplateRenderer
     public static function isPureHandler(Closure $handler): bool
     {
         return self::$pureHandlers !== null && isset(self::$pureHandlers[$handler]);
+    }
+
+    /**
+     * A call expression handler (`open($post['id'])`). One whose whole
+     * expression calls a #[PureHandler] method of its component does not mark
+     * the component before it runs: like a method handler, the component
+     * re-renders only when its own state changed (a relay inside a list row
+     * re-rendered the row, the list and every ancestor on each press).
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function callHandler(string $raw, ?object $scope, array $data): Closure
+    {
+        $pure = self::pureCall($raw, $scope);
+        $handler = static function (mixed $payload = '') use ($raw, $scope, $data, $pure): void {
+            if ($scope instanceof Component && !$pure) {
+                DependencyTracker::markDirty($scope);
+            }
+            try {
+                TemplateExpression::evaluate(
+                    $raw,
+                    $scope,
+                    [...$data, 'event' => $payload],
+                );
+            } finally {
+                if ($pure && $scope !== null) {
+                    self::settlePureHandler($scope);
+                }
+            }
+        };
+        if ($pure) {
+            self::$pureHandlers ??= new \WeakMap();
+            self::$pureHandlers[$handler] = true;
+        }
+
+        return $handler;
+    }
+
+    /** @var array<string, bool> */
+    private static array $pureCalls = [];
+
+    /** Whether $raw is one call (`name(...)`) of a public #[PureHandler] method of $scope. */
+    private static function pureCall(string $raw, ?object $scope): bool
+    {
+        if (!$scope instanceof Component) {
+            return false;
+        }
+        $key = $scope::class."\0".$raw;
+        if (isset(self::$pureCalls[$key])) {
+            return self::$pureCalls[$key];
+        }
+        if (count(self::$pureCalls) >= 4096) {
+            self::$pureCalls = [];
+        }
+        $pure = false;
+        if (preg_match('/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $raw, $match, PREG_OFFSET_CAPTURE) === 1) {
+            $name = $match[1][0];
+            $close = self::closingParenthesis($raw, $match[0][1] + strlen($match[0][0]) - 1);
+            if ($close !== null && trim(substr($raw, $close + 1)) === '' && method_exists($scope, $name)) {
+                $method = new ReflectionMethod($scope, $name);
+                $pure = $method->isPublic() && !$method->isStatic() && self::pureMethod($method);
+            }
+        }
+
+        return self::$pureCalls[$key] = $pure;
+    }
+
+    /** Offset of the parenthesis closing the one at $open (quotes skipped), or null. */
+    private static function closingParenthesis(string $raw, int $open): ?int
+    {
+        $depth = 0;
+        $quote = null;
+        $length = strlen($raw);
+        for ($i = $open; $i < $length; $i++) {
+            $char = $raw[$i];
+            if ($quote !== null) {
+                if ($char === '\\') {
+                    $i++;
+                } elseif ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === "'" || $char === '"') {
+                $quote = $char;
+            } elseif ($char === '(') {
+                $depth++;
+            } elseif ($char === ')' && --$depth === 0) {
+                return $i;
+            }
+        }
+
+        return null;
     }
 
     private static function pureMethod(ReflectionMethod $method): bool

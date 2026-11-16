@@ -75,6 +75,20 @@ final class PurityProbe extends Component
     {
         PurityService::ping();
     }
+
+    public string $opened = '';
+
+    #[\Pam\Native\Attributes\PureHandler]
+    public function relay(string $id): void
+    {
+        $this->emit('open', $id);
+    }
+
+    #[\Pam\Native\Attributes\PureHandler]
+    public function open(string $id): void
+    {
+        $this->opened = $id;
+    }
 }
 ?>
 
@@ -84,6 +98,9 @@ final class PurityProbe extends Component
         <Pressable on:press="bump"><Text>bump</Text></Pressable>
         <Pressable on:press="writeStatic"><Text>static</Text></Pressable>
         <Pressable on:press="callService"><Text>service</Text></Pressable>
+        <Pressable on:press="relay('row-(1)')"><Text>relay</Text></Pressable>
+        <Pressable on:press="open('row-' . $count)"><Text>open</Text></Pressable>
+        <Pressable on:press="relay('a') || bump()"><Text>mixed</Text></Pressable>
     </Column>
 </template>
 PAM);
@@ -113,6 +130,21 @@ $renders = static function (string $method, int $kind = EventKind::Press->value)
 
     return $probe::$renders - $before;
 };
+$call = static function (string $raw) use ($probe): int {
+    foreach ((new ReflectionProperty(Runtime::class, 'eventCallbacks'))->getValue() as $key => $callback) {
+        if (!str_ends_with((string) $key, ':'.EventKind::Press->value)) {
+            continue;
+        }
+        if (((new ReflectionFunction($callback))->getStaticVariables()['raw'] ?? null) === $raw) {
+            $before = $probe::$renders;
+            [$node, $kind] = array_map('intval', explode(':', (string) $key));
+            Runtime::dispatchEvent($node, $kind, '');
+
+            return $probe::$renders - $before;
+        }
+    }
+    throw new RuntimeException("No {$raw} handler.");
+};
 $production = \Pam\Native\BuildConfiguration::mode() !== \Pam\Native\BuildMode::Development;
 $loaded = $renders('loaded', EventKind::Layout->value);
 $assert(
@@ -133,6 +165,12 @@ $assert(
         && !HandlerPurity::inferred(new ReflectionMethod($probe, 'callService')),
     'Purity inference: own private calls are pure; static writes and service calls are not.',
 );
+// 1.49.13: a call expression of a #[PureHandler] method (a relay with an
+// argument, `open($post['id'])`) renders only when the component changed.
+$relayRenders = $call("relay('row-(1)')");
+$assert($relayRenders === 0, "A call of a declared pure relay renders nothing, got {$relayRenders}.");
+$assert($call("open('row-' . \$count)") === 1, 'A call of a pure handler that changes state re-renders.');
+$assert($call("relay('a') || bump()") === 1, 'An expression beyond one call keeps re-rendering.');
 Runtime::shutdown();
 $GLOBALS['pamIdentityFrames'] = [];
 echo 'HANDLER_PURITY_OK inferred=0-render static=render service=render mode='.($production ? 'production' : 'development')."\n";
