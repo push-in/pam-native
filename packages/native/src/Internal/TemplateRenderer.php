@@ -2289,10 +2289,12 @@ final class TemplateRenderer
                 $element = $element->navigatesTo(
                     self::linkRoute($destination),
                     self::linkParams($values['navigatesToParams'] ?? []),
+                    self::pressTransition($values['prewarmTransition'] ?? null),
                 );
             }
             unset($values['navigatesTo'], $values['navigatesToParams']);
         }
+        unset($values['prewarmTransition']);
         if ($factory === null && $tag === 'Link') {
             unset($values['route'], $values['to'], $values['params'], $values['mode']);
         }
@@ -8149,7 +8151,27 @@ final class TemplateRenderer
             return $element;
         }
 
-        return $element->prewarm(self::linkRoute($route), self::linkParams($params), $mode);
+        return $element->prewarm(
+            self::linkRoute($route),
+            self::linkParams($params),
+            $mode,
+            transition: self::pressTransition($values['prewarmTransition'] ?? null),
+        );
+    }
+
+    /** `prewarmTransition="none"` (a NavigationTransition case name) or `:prewarmTransition="NavigationTransition::Fade"`. */
+    private static function pressTransition(mixed $value): ?\Pam\Native\Navigation\NavigationTransition
+    {
+        if ($value === null || $value === '' || $value instanceof \Pam\Native\Navigation\NavigationTransition) {
+            return $value === '' ? null : $value;
+        }
+        if (is_string($value)) {
+            foreach (\Pam\Native\Navigation\NavigationTransition::cases() as $case) {
+                if (strcasecmp($case->name, $value) === 0) return $case;
+            }
+        }
+
+        throw new RuntimeException('prewarmTransition must be a NavigationTransition case name, e.g. prewarmTransition="none".');
     }
 
     /** @return array<string, string|int|float|bool|null> */

@@ -532,7 +532,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
      * state) changes only when the commit confirms the push.
      */
     internal fun launchWarm(intent: String, pressed: View): Boolean {
-        if (intent.isEmpty() || intent != warmIntent || warmLaunch != null) return false
+        // `key@transition`: the press declared the motion it navigates with.
+        val at = intent.lastIndexOf('@')
+        val key = if (at < 0) intent else intent.substring(0, at)
+        val declared = if (at < 0) null else intent.substring(at + 1).toIntOrNull() ?: return false
+        if (key.isEmpty() || key != warmIntent || warmLaunch != null) return false
+        if (declared != null && resolvedTransition(declared) != resolvedTransition(warmTransition)) return false
         if (running != null || gestureSettle != null || gesturePrepared) return false
         if (predictiveBackActive || predictiveBackAwaiting || pendingPreDraw != null) return false
         if (!isAttachedToWindow || animationsDisabled() || warmDurationMs <= 0L) return false
@@ -542,7 +547,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (incoming === outgoing || outgoing.parent !== this || incoming in awaitingFirstLayout) return false
         if (!incoming.isLaidOut || incoming.width <= 0 || incoming.height <= 0) return false
         if (routeContaining(pressed) !== outgoing) return false
-        val kind = if (warmTransition == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else warmTransition
+        val kind = resolvedTransition(warmTransition)
         if (kind == TRANSITION_NONE || sharedElements.wouldFly(incoming, outgoing)) return false
         val duration = warmDurationMs.coerceAtMost(2_000L)
         val launch = WarmLaunch(incoming, outgoing, kind, duration)
@@ -584,6 +589,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         return true
     }
 
+    private fun resolvedTransition(value: Int): Int =
+        if (value == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else value
+
     /** The route (a direct child) that contains [view], or null. */
     private fun routeContaining(view: View): View? {
         var current: View = view
@@ -622,7 +630,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
         }
         settleReveal()
-        val kind = if (transition == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else transition
+        val kind = resolvedTransition(transition)
         val animator = running
         val sameMotion = kind == launch.kind && durationMs > 0L && !animationsDisabled()
         when {

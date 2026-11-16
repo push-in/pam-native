@@ -9,6 +9,7 @@ use Closure;
 use Pam\Native\Animation\TapEffect;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\PressPrewarm;
 use Pam\Native\NodeKind;
@@ -100,6 +101,11 @@ final class Pressable extends Element
      * Only navigate (the default) and push warm: a navigate() back to an
      * entry already in the stack has nothing to mount.
      *
+     * `$transition`: the action transition the press navigates with, when
+     * it overrides the route's own (`Route::navigate(..., transition:)`). The
+     * native start only runs that same motion, so a tab bar switching with
+     * `None` still warms on press-in but waits for its commit.
+     *
      * @param array<string, string|int|float|bool|null> $params
      */
     public function prewarm(
@@ -107,12 +113,13 @@ final class Pressable extends Element
         array $params = [],
         RedirectMode $mode = RedirectMode::Navigate,
         ?int $releaseAfterMs = 4_000,
+        ?NavigationTransition $transition = null,
     ): self {
         $copy = clone $this;
         $copy->prewarm = new PressPrewarm($route, $params, $mode, $releaseAfterMs);
 
         return $copy
-            ->withNavigationIntent($copy->prewarm->intent)
+            ->withNavigationIntent(self::intentWithMotion($copy->prewarm->intent, $transition))
             ->withPressInOut(EventKind::PressIn)
             ->withPressInOut(EventKind::PressOut);
     }
@@ -122,18 +129,31 @@ final class Pressable extends Element
      * when the app mounted that destination ahead itself (an idle warmup
      * with Navigator::prewarm()), the native host starts its push on the
      * frame after the tap. The press must navigate to the same route and
-     * params.
+     * params (and `$transition`, as for prewarm()).
      *
      * @param array<string, string|int|float|bool|null> $params
      */
-    public function navigatesTo(string|BackedEnum|TypedRoute $route, array $params = []): self
-    {
+    public function navigatesTo(
+        string|BackedEnum|TypedRoute $route,
+        array $params = [],
+        ?NavigationTransition $transition = null,
+    ): self {
         if ($route instanceof TypedRoute) {
             $params = [...$route->params, ...$params];
             $route = $route->name;
         }
 
-        return $this->withNavigationIntent(Navigator::intentKey($route, $params));
+        return $this->withNavigationIntent(self::intentWithMotion(Navigator::intentKey($route, $params), $transition));
+    }
+
+    /**
+     * `key@transition` when the press declares its motion: the host starts
+     * the push only when its warm route moves the same way (PlatformDefault
+     * matches the stack's default; None never starts natively).
+     */
+    private static function intentWithMotion(string $intent, ?NavigationTransition $transition): string
+    {
+        return $transition === null ? $intent : $intent.'@'.$transition->value;
     }
 
     /** @internal The destination declared by prewarm(), if any. */

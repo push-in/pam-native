@@ -133,6 +133,23 @@ class PamWarmLaunchInstrumentedTest {
     }
 
     @Test
+    fun aPressDeclaringTheSameMotionLaunches() {
+        main {
+            // PlatformDefault resolves to the same slide as the warm route's.
+            press.navigationIntent = "$INTENT@1"
+            press.performClick()
+            assertTrue(navigation.isLaunchingWarm())
+            navigation.reorderRoute(warm, 1)
+            navigation.operation = OPERATION_PUSH
+            navigation.transition = 1
+            navigation.durationMs = DURATION_MS
+            navigation.navigate(++revision)
+        }
+        awaitCondition("the adopted push ends once") { transitionEnds.get() == 1 }
+        main { assertTrue(navigation.isActiveRoute(warm)) }
+    }
+
+    @Test
     fun aPressThatNavigatesNowhereSlidesBack() {
         main { press.performClick() }
         awaitCondition("the unconfirmed push settles back", timeoutMs = DURATION_MS * 2 + 2_500L) {
@@ -178,6 +195,13 @@ class PamWarmLaunchInstrumentedTest {
     fun anotherIntentOrAPendingNavigationDoesNotLaunch() {
         main {
             press.navigationIntent = "other"
+            press.performClick()
+            assertFalse(navigation.isLaunchingWarm())
+            // The press navigates with another motion (a tab bar's None).
+            press.navigationIntent = "$INTENT@$TRANSITION_NONE"
+            press.performClick()
+            assertFalse(navigation.isLaunchingWarm())
+            press.navigationIntent = "$INTENT@$TRANSITION_FADE"
             press.performClick()
             assertFalse(navigation.isLaunchingWarm())
             press.navigationIntent = INTENT
@@ -229,6 +253,7 @@ class PamWarmLaunchInstrumentedTest {
         const val DURATION_MS = 300L
         const val OPERATION_PUSH = 2
         const val TRANSITION_SLIDE_FROM_RIGHT = 2
+        const val TRANSITION_FADE = 5
         const val TRANSITION_NONE = 8
     }
 }

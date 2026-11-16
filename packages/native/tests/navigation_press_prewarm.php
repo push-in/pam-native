@@ -47,6 +47,12 @@ $event = static fn (\Pam\Native\Element $element, EventKind $kind): Closure => $
     ?? throw new RuntimeException("Missing {$kind->name} handler.");
 $isPure = static fn (Closure $handler): bool => (new ReflectionMethod(Runtime::class, 'isPureCallback'))->invoke(null, $handler);
 
+$template = static fn (string $source): \Pam\Native\Element => TemplateRenderer::render(
+    TemplateCompiler::compile($source, 'PressPrewarm.pam', LanguageVersion::Language2),
+    null,
+    [],
+);
+
 // --- Encoding: the intent prop, the press-in/out handlers, older renderers ---
 $intent = Navigator::intentKey('chat', ['id' => '7']);
 $assert(
@@ -61,6 +67,13 @@ $assert(
         && isset($warmPress->events()[EventKind::PressIn->value], $warmPress->events()[EventKind::PressOut->value])
         && $isPure($event($warmPress, EventKind::PressIn)) && $isPure($event($warmPress, EventKind::PressOut)),
     'Pressable::prewarm() sends PressNavigationIntent and pure press-in/out handlers (no whole-tree render).',
+);
+$tabPress = Pressable::make()->prewarm('chat', ['id' => '7'], transition: NavigationTransition::None);
+$assert(
+    ($tabPress->properties()[PropKey::PressNavigationIntent->value] ?? null) === $intent.'@'.NavigationTransition::None->value
+        && ($template('<Pressable prewarm="chat" :prewarmParams="{ id: \'7\' }" prewarmTransition="fade"><Text>Tab</Text></Pressable>')
+            ->properties()[PropKey::PressNavigationIntent->value] ?? null) === $intent.'@'.NavigationTransition::Fade->value,
+    'A press that navigates with its own transition declares it (key@transition): the host only starts that same motion.',
 );
 $typedPress = Pressable::make()->prewarm(new \Pam\Native\Routing\TypedRoute('chat', ['id' => '7']));
 $assert(
@@ -89,11 +102,6 @@ $assert(
 );
 
 // Templates: <Link ... prewarm> and <Pressable prewarm=... :prewarmParams=...>.
-$template = static fn (string $source): \Pam\Native\Element => TemplateRenderer::render(
-    TemplateCompiler::compile($source, 'PressPrewarm.pam', LanguageVersion::Language2),
-    null,
-    [],
-);
 $linkElement = $template('<Link route="chat" :params="{ id: \'7\' }" prewarm><Text>Open</Text></Link>');
 $pressElement = $template('<Pressable prewarm="chat" :prewarmParams="{ id: \'7\' }"><Text>Open</Text></Pressable>');
 $offElement = $template('<Pressable :prewarm="null"><Text>Open</Text></Pressable>');

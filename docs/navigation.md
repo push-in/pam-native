@@ -138,8 +138,12 @@ flies between them; motion is not reduced; no transition, back gesture or
 navigation is pending. Anything else waits for the commit as before. The press
 must navigate synchronously to the same route and params: a press that
 navigates elsewhere drops the started push at that commit, and one that does
-not navigate slides it back ~1 s after the animation. A commit that asks for
-another motion (an action `transition:`) lands on the destination at once.
+not navigate slides it back ~1 s after the animation. A press that navigates
+with its own action transition declares it (`prewarm(..., transition:
+NavigationTransition::None)`, template `prewarmTransition="none"`): the host
+starts only that same motion, so a tab bar switching with `None` warms on
+press-in and still switches at its commit. An undeclared action transition
+lands on the destination at once when its commit arrives.
 iOS and older renderers keep the commit-driven push (the intent props are
 only sent to renderers that declare them).
 
