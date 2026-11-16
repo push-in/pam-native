@@ -2046,7 +2046,7 @@ public final class PamRenderer: @unchecked Sendable {
             flushPendingNativeInputs()
         }
         if kind == EventKind.press.rawValue || kind == EventKind.longPress.rawValue
-            || kind == EventKind.submit.rawValue {
+            || kind == EventKind.submit.rawValue || kind == EventKind.gestureBegin.rawValue {
             lastUserActionAt = CACurrentMediaTime()
         }
         sinkEvent(id, kind, payload)
@@ -7253,6 +7253,15 @@ public final class PamRenderer: @unchecked Sendable {
             return PamNativeGestureTransform.zoomedContentOwnsPan(scale: PamMotionTarget.transform(of: child).scaleX)
         }
 
+        /// A pan from the first point (scrubber, slider, handle) that is not
+        /// simultaneous owns its axis like a slider: ancestor pans (a pager's
+        /// scroll, a dismiss drag) wait for it to fail, which an off-axis
+        /// drag does at once in gestureRecognizerShouldBegin (Android parity).
+        var immediatePanOwnsTouch: Bool {
+            semanticGesture is UIPanGestureRecognizer && semanticGestureType == 2 &&
+                semanticGestureMinimumDistance <= 0 && semanticGestureComposition != 2
+        }
+
         private func isAncestorPan(_ other: UIGestureRecognizer, of recognizer: UIGestureRecognizer) -> Bool {
             guard other is UIPanGestureRecognizer, let mine = recognizer.view,
                   let theirs = other.view, theirs !== mine else { return false }
@@ -7263,7 +7272,7 @@ public final class PamRenderer: @unchecked Sendable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            gestureRecognizer === semanticGesture && zoomedPanOwnsTouch &&
+            gestureRecognizer === semanticGesture && (zoomedPanOwnsTouch || immediatePanOwnsTouch) &&
                 isAncestorPan(otherGestureRecognizer, of: gestureRecognizer)
         }
 

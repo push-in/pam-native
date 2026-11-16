@@ -383,7 +383,7 @@ class PamRuntime(
             check(handle != 0L) { "Pam Runtime failed to start" }
             val display = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
                 ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
-            nativeSetRefreshRate(handle, display?.refreshRate?.toDouble() ?: 60.0)
+            nativeSetRefreshRate(handle, display?.let(::peakRefreshRate)?.toDouble() ?: 60.0)
         }
     }
 

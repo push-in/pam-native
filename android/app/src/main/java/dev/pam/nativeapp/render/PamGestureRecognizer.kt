@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
+import android.view.ViewConfiguration
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -59,15 +60,16 @@ internal class PamGestureRecognizer(private val view: View) {
     private var velocity: VelocityTracker? = null
     private var pendingUpdate: PamGesturePayload? = null
     private var updateScheduled = false
-    private var heldPanOwnsParent = false
+    private var panOwnsParent = false
+    private var tentativeParentClaim = false
+    private val touchSlop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
 
     // A held thumbnail must retain the first MOVE before a horizontal scroll
     // ancestor intercepts it. Holding alone emits no PHP gesture event.
     private val holdPan = Runnable {
         val current = config ?: return@Runnable
         if (current.enabled && current.type == TYPE_PAN && active && !recognized) {
-            heldPanOwnsParent = true
-            view.parent?.requestDisallowInterceptTouchEvent(true)
+            claimParent()
         }
     }
 
@@ -145,8 +147,7 @@ internal class PamGestureRecognizer(private val view: View) {
 
     fun cancel(emitCancel: Boolean = false, event: MotionEvent? = null) {
         view.removeCallbacks(holdPan)
-        if (heldPanOwnsParent) view.parent?.requestDisallowInterceptTouchEvent(false)
-        heldPanOwnsParent = false
+        releaseParent()
         view.removeCallbacks(longPress)
         view.removeCallbacks(update)
         if (emitCancel && recognized) {
@@ -176,6 +177,12 @@ internal class PamGestureRecognizer(private val view: View) {
         }
         if (current.type == TYPE_PAN && current.minDurationMs > 0L) {
             view.postDelayed(holdPan, current.minDurationMs)
+        } else if (ownsImmediatePan(current)) {
+            // A pan from the first pixel (a scrubber, a slider, a handle)
+            // must get the first MOVE: a pager or list around it intercepts
+            // as soon as the finger passes its touch slop.
+            claimParent()
+            tentativeParentClaim = true
         }
         if (current.type == TYPE_PINCH || current.type == TYPE_ROTATION) {
             captureMultiPointer(event)
@@ -194,7 +201,16 @@ internal class PamGestureRecognizer(private val view: View) {
                     distance >= current.minDistance && matchesDirection(current, dx, dy)
                 ) {
                     recognized = true
+                    // A recognized exclusive/race pan owns the rest of the
+                    // touch, as on iOS: the ancestor scroll can no longer
+                    // take it over midway.
+                    if (current.composition != COMPOSITION_SIMULTANEOUS) claimParent()
+                    tentativeParentClaim = false
                     emitNow(payload(current, STATE_BEGAN, event))
+                } else if (!recognized && tentativeParentClaim && distance >= touchSlop) {
+                    // Off-axis drag: hand the touch back to the ancestors.
+                    tentativeParentClaim = false
+                    releaseParent()
                 }
                 if (recognized) schedule(payload(current, STATE_CHANGED, event))
             }
@@ -323,6 +339,24 @@ internal class PamGestureRecognizer(private val view: View) {
     private fun pointerAngle(event: MotionEvent): Float =
         atan2(event.getY(1) - event.getY(0), event.getX(1) - event.getX(0))
 
+    private fun ownsImmediatePan(current: PamGestureConfig): Boolean =
+        current.type == TYPE_PAN &&
+            current.minDistance <= 0f &&
+            current.composition != COMPOSITION_SIMULTANEOUS
+
+    private fun claimParent() {
+        if (panOwnsParent) return
+        panOwnsParent = true
+        view.parent?.requestDisallowInterceptTouchEvent(true)
+    }
+
+    private fun releaseParent() {
+        tentativeParentClaim = false
+        if (!panOwnsParent) return
+        panOwnsParent = false
+        view.parent?.requestDisallowInterceptTouchEvent(false)
+    }
+
     private fun matchesDirection(current: PamGestureConfig, dx: Float, dy: Float): Boolean =
         when (current.direction) {
             DIRECTION_LEFT -> dx < 0 && abs(dx) >= abs(dy)
@@ -352,6 +386,7 @@ internal class PamGestureRecognizer(private val view: View) {
         const val DIRECTION_HORIZONTAL = 6
         const val DIRECTION_VERTICAL = 7
         const val COMPOSITION_EXCLUSIVE = 1
+        const val COMPOSITION_SIMULTANEOUS = 2
         const val COMPOSITION_RACE = 3
         const val DEFAULT_TAP_SLOP = 12f
         const val MIN_ROTATION_RADIANS = 0.035f

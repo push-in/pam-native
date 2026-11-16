@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.49.7 - 2026-11-15
+
+- Gestures inside pagers and lists keep the drag. A pan with
+  `gestureMinDistance="0"` that is not simultaneous (a seek bar, a slider,
+  a trim handle) owns the touch from the first point on Android, and an
+  off-axis drag hands it back to the ancestors; any recognized
+  exclusive/race pan now keeps the rest of the touch instead of being
+  intercepted midway by an ancestor scroll. iOS: ancestor pans wait for an
+  immediate pan to fail. Dragging a video seek bar inside a horizontal
+  gallery no longer pages to the next video.
+- 120 Hz: the iOS host declares `CADisableMinimumFrameDurationOnPhone`, so
+  ProMotion iPhones run PAM animations and display links above 60 Hz. On
+  Android the engine sizes each frame's work for the display's peak rate
+  at its resolution (adaptive panels report 60 Hz while idle), as iOS does
+  with `maximumFramesPerSecond`.
+- Android: a Modal or BottomSheet window hides while its route is covered
+  by a full-screen route or an inactive tab and shows again when the route
+  returns, as on iOS (a sheet no longer stays on top of the screen it
+  navigated to).
+- Android: `Keyboard::dismiss()` hides the keyboard through the window when
+  no view holds focus (the field already blurred with the keyboard up).
+- A gesture start counts as a user action for list scroll requests, so an
+  index rail grabbed while its list still flings jumps instead of being
+  dropped (Android and iOS).
+
 ## 1.49.6 - 2026-11-15
 
 - Release, benchmark and update bundles precompile components in strict
