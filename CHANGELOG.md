@@ -2,7 +2,7 @@
 
 ## 1.50.1 - 2026-11-16
 
-Frame-cost fixes measured on a Galaxy S10 after 1.50.0. No API change.
+Frame-cost and media-loading fixes measured on a Galaxy S10 after 1.50.0. No API change.
 
 - Navigation: a slide dims the screen it leaves under a veil of the opaque
   backdrop instead of a hardware layer, so the first transition frame no
@@ -25,6 +25,17 @@ Frame-cost fixes measured on a Galaxy S10 after 1.50.0. No API change.
   blurred image (spoiler) never shows a sharp frame; changing `blurRadius` or
   resizing re-blurs off the UI thread. iOS runs blur and color-matrix filters
   off the main thread, cached on the shared decoded image.
+- Media networking: remote images and videos retry transient failures
+  (408/429/502/503/504, timeouts, dropped connections) with exponential
+  backoff and jitter, honoring `Retry-After` (capped at 30 s); other 4xx fail
+  at once. A 429/503 pauses its host for every image, prefetch and video, so
+  queued media waits instead of spending the rate limit. Android downloads
+  (5 threads) and decodes (3) run on separate priority lanes: visible images
+  first, a recycled cell's queued work is dropped, one download is shared
+  across sizes. First-byte timeout 7 s, up to 15 s on retries (iOS: was
+  60 s). A failed image or video loads again when shown or attached again;
+  failures no longer stick. `Cache-Control: no-store` keeps image bytes off
+  disk unless `cacheKey` is set.
 - Native clocks render and measure their current label (the template text is
   only the fallback without a clock value) and are measured again when the
   label gains or loses a character (9:59 → 10:00, 99:59 → 100:00), with one
