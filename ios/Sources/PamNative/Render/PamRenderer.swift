@@ -47,6 +47,17 @@ public final class PamRenderer: @unchecked Sendable {
         attributes: .concurrent
     )
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
+    /// Remote images waiting to load again: a transient failure parked until
+    /// the view is near the screen, or a reported failure that loads again
+    /// once the view left the screen and came back (no failure sticks).
+    private struct ImageRecovery {
+        let source: String
+        let generation: Int
+        var attempt: Int
+        var parked: Bool
+        var away = false
+    }
+    private var imageRecoveries: [Int64: ImageRecovery] = [:]
 
     private var views: [Int64: UIView] = [:]
     internal func mountedView(_ id: Int64) -> UIView? { views[id] }
@@ -5794,6 +5805,7 @@ public final class PamRenderer: @unchecked Sendable {
     /// those that came back near it (from the decoded cache when the bitmap
     /// is still there, otherwise a silent reload from the disk cache).
     private func sweepImageResidency() {
+        if !imageRecoveries.isEmpty { sweepImageRecoveries() }
         guard !residentImages.isEmpty else { return }
         for (nodeId, entry) in residentImages {
             guard let state = nodes[nodeId],
@@ -5818,6 +5830,61 @@ public final class PamRenderer: @unchecked Sendable {
                     state.imageSilentRestore = true
                     loadImage(entry.source, into: imageView, nodeId: nodeId)
                 }
+            }
+        }
+    }
+
+    private func sweepImageRecoveries() {
+        for (nodeId, entry) in imageRecoveries {
+            guard let state = nodes[nodeId],
+                  state.imageGeneration == entry.generation,
+                  let view = views[nodeId],
+                  let imageView = self.imageView(for: view) else {
+                imageRecoveries[nodeId] = nil
+                continue
+            }
+            let near = PamImageResidency.shouldHold(imageView)
+            if entry.parked {
+                guard near else { continue }
+                imageRecoveries[nodeId] = nil
+                loadImageFromNetwork(entry.source, into: imageView, nodeId: nodeId, attempt: entry.attempt)
+            } else if !near {
+                imageRecoveries[nodeId]?.away = true
+            } else if entry.away {
+                imageRecoveries[nodeId] = nil
+                loadImageFromNetwork(entry.source, into: imageView, nodeId: nodeId)
+            }
+        }
+    }
+
+    /// Visible images first, then those near the screen, then the rest.
+    private func imageTaskPriority(_ imageView: UIImageView) -> Float {
+        guard let window = imageView.window, PamImageResidency.shouldHold(imageView) else {
+            return URLSessionTask.lowPriority
+        }
+        return imageView.convert(imageView.bounds, to: window).intersects(window.bounds)
+            ? URLSessionTask.highPriority
+            : URLSessionTask.defaultPriority
+    }
+
+    /// Retries a transient failure after `delay` while the view is near the
+    /// screen; otherwise it waits (parked) until a residency sweep finds it near.
+    private func scheduleImageRetry(_ source: String, nodeId: Int64, generation: Int, attempt: Int, delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  let state = self.nodes[nodeId],
+                  state.imageGeneration == generation,
+                  let view = self.views[nodeId],
+                  let imageView = self.imageView(for: view) else { return }
+            if PamImageResidency.shouldHold(imageView) {
+                self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId, attempt: attempt)
+            } else {
+                self.imageRecoveries[nodeId] = ImageRecovery(
+                    source: source,
+                    generation: generation,
+                    attempt: attempt,
+                    parked: true
+                )
             }
         }
     }
@@ -6062,7 +6129,8 @@ public final class PamRenderer: @unchecked Sendable {
     private func loadImageFromNetwork(
         _ source: String,
         into imageView: UIImageView,
-        nodeId: Int64
+        nodeId: Int64,
+        attempt: Int = 0
     ) {
         guard let state = nodes[nodeId] else {
             return
@@ -6075,8 +6143,20 @@ public final class PamRenderer: @unchecked Sendable {
         guard let url = URL(string: resolvedSource) else { return }
 
         cancelImageLoad(for: state)
+        imageRecoveries[nodeId] = nil
         state.imageGeneration += 1
         state.imageLoading = true
+        // The host answered 429/503 a moment ago: no request until its pause ends.
+        let paused = PamMediaHostGate.shared.remaining(url.host)
+        if paused > 0 {
+            let generation = state.imageGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + paused + Double.random(in: 0...0.3)) { [weak self, weak imageView] in
+                guard let self, let imageView,
+                      self.nodes[nodeId]?.imageGeneration == generation else { return }
+                self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId, attempt: attempt)
+            }
+            return
+        }
         state.imageProgressLoaded = 0
         state.imageProgressTotal = 0
         state.imageProgressScheduled = false
@@ -6107,7 +6187,11 @@ public final class PamRenderer: @unchecked Sendable {
         default:
             requestCachePolicy = .useProtocolCachePolicy
         }
-        var request = URLRequest(url: url, cachePolicy: requestCachePolicy)
+        var request = URLRequest(
+            url: url,
+            cachePolicy: requestCachePolicy,
+            timeoutInterval: PamMediaRetry.requestTimeout(attempt: attempt)
+        )
         if cachePolicy == 5 {
             request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
             request.setValue("no-cache", forHTTPHeaderField: "Pragma")
@@ -6116,6 +6200,7 @@ public final class PamRenderer: @unchecked Sendable {
             state.properties[PamConstants.imageRequestHeaders]?.textOrNil()
         ).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         let task = imageSession.dataTask(with: request)
+        task.priority = imageTaskPriority(imageView)
         let context = ImageLoadContext(
             nodeId: nodeId,
             generation: generation,
@@ -6189,7 +6274,8 @@ public final class PamRenderer: @unchecked Sendable {
             let checksum = state.properties[PamConstants.mediaCacheChecksum]?.textOrNil()
             let cacheLimit = state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0
             let pinned = state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false
-            if cachePolicy != 5 && [3, 4, 5, 6, 8].contains(mediaPolicy) {
+            // `Cache-Control: no-store` keeps the bytes off disk unless the app named the cache key.
+            if cachePolicy != 5 && [3, 4, 5, 6, 8].contains(mediaPolicy) && !(context.noStore && cacheKey == nil) {
                 let identity = PamMediaDiskCache.shared.identity(
                     source: context.source,
                     stableKey: cacheKey
@@ -6297,8 +6383,28 @@ public final class PamRenderer: @unchecked Sendable {
                   state.imageGeneration == context.generation else {
                 return
             }
+            if context.failureTransient, attempt < PamMediaRetry.maxImageRetries {
+                let delay = context.failureStatus.flatMap {
+                    PamMediaRetry.delay(status: $0, retryAfter: context.failureRetryAfter, attempt: attempt)
+                } ?? PamMediaRetry.backoff(attempt: attempt)
+                context.retrying = true
+                self.scheduleImageRetry(
+                    source,
+                    nodeId: context.nodeId,
+                    generation: context.generation,
+                    attempt: attempt + 1,
+                    delay: delay
+                )
+                return
+            }
             state.imageLoading = false
             state.imageProgressScheduled = false
+            self.imageRecoveries[context.nodeId] = ImageRecovery(
+                source: source,
+                generation: context.generation,
+                attempt: 0,
+                parked: false
+            )
             if state.properties[PamConstants.onImageError] == nil {
                 return
             }
@@ -6310,6 +6416,15 @@ public final class PamRenderer: @unchecked Sendable {
             guard let self else { return }
             guard let state = self.nodes[context.nodeId],
                   state.imageGeneration == context.generation else {
+                return
+            }
+            if context.retrying {
+                // A retry is scheduled: still loading, nothing to report yet.
+                if let task = context.task {
+                    self.imageSessionDelegate.unregister(taskIdentifier: task.taskIdentifier)
+                    self.imageLoadContexts[task.taskIdentifier] = nil
+                }
+                state.imageTask = nil
                 return
             }
             state.imageLoading = false
