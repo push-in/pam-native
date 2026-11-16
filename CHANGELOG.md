@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.49.13 - 2026-11-16
+
+- Templates: an event handler written as one call of a `#[PureHandler]`
+  method (`on:press="open($post['id'])"`, a relay with an argument) no longer
+  marks its component before it runs: like a method-name handler, the
+  component re-renders only when its own state changed. Inside list rows
+  each such press re-rendered the row, the list and every ancestor screen.
+  Any other expression (`relay('a') || bump()`) keeps marking its component.
+
 ## 1.49.12 - 2026-11-16
 
 - Navigation: the host's transition-end and gesture callbacks and a system
