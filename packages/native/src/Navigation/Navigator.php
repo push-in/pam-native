@@ -753,9 +753,21 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             'routeId' => $this->resolveRouteId($route, $validatedParams),
             'params' => $validatedParams,
         ];
-        if (isset($this->parked[$this->parkKey($route, $validatedParams)])) {
+        $parkKey = $this->parkKey($route, $validatedParams);
+        if (isset($this->parked[$parkKey])) {
             // The kept-alive screen is reused as is: nothing to build ahead.
             return true;
+        }
+        foreach ($this->stack as $mounted) {
+            // A screen already mounted in the stack (a tab below the current
+            // one) is what navigate() returns to: a second instance built
+            // ahead was never used and stayed in the preload cache.
+            if (
+                isset($this->routeInstances[$this->entryKey($mounted)])
+                && $this->parkKey($mounted['name'], $mounted['params']) === $parkKey
+            ) {
+                return true;
+            }
         }
         $key = $this->preloadKey($route, $entry['params']);
         unset($this->preloaded[$key]);
