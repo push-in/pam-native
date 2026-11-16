@@ -141,6 +141,94 @@ private class CellViewShape(private val kind: Int, private val keys: LongArray) 
     override fun hashCode(): Int = hash
 }
 
+/** A commit creating fewer nodes builds them all at once. */
+private const val SLICED_MOUNT_MIN_CREATES = 40
+
+/** UI-thread budget of one mount slice (less any commit in the same frame). */
+private const val SLICED_MOUNT_SLICE_NANOS = 6_000_000L
+
+/** Content within this much of a scroll's viewport mounts with it (a fling's frame, shadows). */
+private const val SLICED_MOUNT_MIN_OVERSCAN_DP = 64f
+private const val SLICED_MOUNT_OVERSCAN_FRACTION = 0.25f
+
+/** Kinds whose views may be built after the frame (plain views drawn at their engine frame). */
+private val SLICED_MOUNT_KINDS: java.util.EnumSet<NodeKind> = java.util.EnumSet.of(
+    NodeKind.VIEW,
+    NodeKind.COLUMN,
+    NodeKind.ROW,
+    NodeKind.TEXT,
+    NodeKind.IMAGE,
+    NodeKind.IMAGE_BACKGROUND,
+    NodeKind.PRESSABLE,
+    NodeKind.SPACER,
+)
+
+/** Properties that draw a node away from its engine frame, over time or at once. */
+private val SLICED_MOUNT_MOVING_KEYS: java.util.EnumSet<PropKey> = java.util.EnumSet.of(
+    PropKey.TRANSLATION_X,
+    PropKey.TRANSLATION_Y,
+    PropKey.TRANSLATION_X_PERCENT,
+    PropKey.TRANSLATION_Y_PERCENT,
+    PropKey.SCALE_X,
+    PropKey.SCALE_Y,
+    PropKey.ROTATION,
+    PropKey.GESTURE_DRAG,
+    PropKey.GESTURE_NATIVE_TRANSFORM,
+    PropKey.STICKY_HEADER,
+    PropKey.ANIMATION_KIND,
+    PropKey.ANIMATE_CHANGES,
+    PropKey.ANIMATION_KEYFRAMES,
+    PropKey.ANIMATION_PROGRAM,
+    PropKey.WORKLET_PROGRAM,
+    PropKey.WORKLET_TARGET,
+    PropKey.TRANSITION_SPEC,
+)
+
+/**
+ * Properties of a node whose view must exist from its first frame: the
+ * moving ones, and timers, observers, focus and shared-element hooks that
+ * would start late or miss events while the view waits.
+ */
+private val SLICED_MOUNT_BLOCKING_KEYS: java.util.EnumSet<PropKey> =
+    java.util.EnumSet.copyOf(SLICED_MOUNT_MOVING_KEYS).apply {
+        addAll(
+            listOf(
+                PropKey.ANIMATION_RESTART_KEY,
+                PropKey.ON_ANIMATION_COMPLETE,
+                PropKey.SHIMMER_ENABLED,
+                PropKey.ON_INTERSECT,
+                PropKey.ON_CLICK_OUTSIDE,
+                PropKey.ON_MUTATE,
+                PropKey.ON_RESIZE,
+                PropKey.ON_TEXT_LAYOUT,
+                PropKey.ON_ROUTE_COVERED,
+                PropKey.ON_ROUTE_FOCUSED,
+                PropKey.AUTO_FOCUS,
+                PropKey.FOCUSABLE,
+                PropKey.FOCUS_GROUP,
+                PropKey.NEXT_FOCUS_UP,
+                PropKey.NEXT_FOCUS_DOWN,
+                PropKey.NEXT_FOCUS_LEFT,
+                PropKey.NEXT_FOCUS_RIGHT,
+                PropKey.ON_KEY_DOWN,
+                PropKey.CAPTURE_KEYS,
+                PropKey.MEDIA_CLOCK,
+                PropKey.MEDIA_PROGRESS,
+                PropKey.KEYBOARD_PROGRESS,
+                PropKey.SHARED_TRANSITION_TAG,
+                PropKey.SHARED_TRANSITION_CONFIG,
+                PropKey.ACCESSIBILITY_LIVE_REGION,
+                // ViewRef operations (measure, focus) expect a laid-out view.
+                PropKey.NATIVE_REF,
+            ),
+        )
+    }
+
+private val MOUNT_CREATE_SECTIONS = NodeKind.entries.map { "PamMount.create." + it.name }.toTypedArray()
+private val MOUNT_ATTACH_SECTIONS = NodeKind.entries.map { "PamMount.attach." + it.name }.toTypedArray()
+private val MOUNT_PROPS_SECTIONS = NodeKind.entries.map { "PamMount.props." + it.name }.toTypedArray()
+private val MOUNT_EVENTS_SECTIONS = NodeKind.entries.map { "PamMount.events." + it.name }.toTypedArray()
+
 private val POOLED_CELL_KINDS = setOf(
     NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
 )
@@ -1060,12 +1148,39 @@ class PamRenderer(
     /** Ancestors already invalidated by [applyLayout] in the running commit. */
     private var layoutInvalidatedAncestors: HashSet<View>? = null
 
+    /** Nodes the running layout pass has yet to lay out (see [applyLayoutPass]). */
+    private var layoutPassPending: HashSet<Long>? = null
+
+    /**
+     * Lays out [ids] in order, each ancestor invalidated once. A host whose
+     * frame changed re-lays its hosted children out; a child the pass lays
+     * out later anyway (after its host) is skipped there, so a mount lays
+     * each new view out once instead of twice. A child laid out earlier in
+     * the pass (listed before its host) is still re-laid out.
+     */
+    private fun applyLayoutPass(ids: Collection<Long>) {
+        val pending = HashSet(ids)
+        layoutInvalidatedAncestors = HashSet()
+        layoutPassPending = pending
+        try {
+            for (id in ids) {
+                pending.remove(id)
+                applyLayout(id)
+            }
+        } finally {
+            layoutInvalidatedAncestors = null
+            layoutPassPending = null
+        }
+    }
+
     fun commit(batches: List<List<Mutation>>) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
         // The frame the pool was built for has arrived: no more prewarming.
         prewarmActive = false
+        refreshMountTraceDetail()
+        lastCommitStartNanos = System.nanoTime()
         val profileCommit = BuildConfig.DEBUG && Log.isLoggable(COMMIT_PERF_TAG, Log.DEBUG)
         val commitStarted = if (profileCommit) System.nanoTime() else 0L
         val retainedScrollOffsets = buildMap {
@@ -1107,6 +1222,15 @@ class PamRenderer(
         if (localModalIds.isNotEmpty()) prepareModalSharedRemovals(batches)
         cellsToMaterialize = LinkedHashSet()
         deferRowOrder = true
+        // A commit that builds many views mounts what a vertical ScrollView
+        // shows now and the rest over the next frames (see deferMount).
+        mountCandidates = if (slicedMountEnabled && countCreates(batches) >= SLICED_MOUNT_MIN_CREATES) {
+            ArrayList()
+        } else {
+            null
+        }
+        commitDirtyLayouts = dirtyLayouts
+        try {
         pamTraceSection("PamCommit.mutations") {
             try {
             batches.forEach { rawBatch ->
@@ -1123,12 +1247,12 @@ class PamRenderer(
                         }
                         is Mutation.Remove -> {
                             markListOf(mutation.id)
-                            remove(mutation.id)
+                            mountTraceSection("PamMount.remove") { remove(mutation.id) }
                             needsModalSync = true
                             needsVirtualListSync = true
                         }
                         is Mutation.Update -> {
-                            update(mutation.id, mutation.key, mutation.value)
+                            mountTraceSection("PamMount.update") { update(mutation.id, mutation.key, mutation.value) }
                             if (
                                 mutation.key == PropKey.VALUE ||
                                 mutation.key == PropKey.ACCESSIBILITY_LABEL
@@ -1150,7 +1274,7 @@ class PamRenderer(
                         }
                         is Mutation.Move -> {
                             markListOf(mutation.id)
-                            move(mutation.id, mutation.parent, mutation.index)
+                            mountTraceSection("PamMount.move") { move(mutation.id, mutation.parent, mutation.index) }
                             markListOf(mutation.id)
                             needsVirtualListSync = true
                         }
@@ -1186,6 +1310,13 @@ class PamRenderer(
                 flushRowOrder()
             }
         }
+        if (mountCandidates != null || pendingMountRoots.isNotEmpty()) {
+            pamTraceSection("PamCommit.slicedMount") { resolvePendingMounts(explicitlyUpdatedScrollOffsets) }
+        }
+        } finally {
+            mountCandidates = null
+            commitDirtyLayouts = null
+        }
         val mutationsNanos = if (profileCommit) {
             System.nanoTime() - commitStarted - scrollSnapshotNanos
         } else 0L
@@ -1217,13 +1348,8 @@ class PamRenderer(
             if (!deferOffscreenCell(cellRoot)) materializeCell(cellRoot, holder)
         }
         pamTraceSection("PamCommit.layout") {
-            layoutInvalidatedAncestors = HashSet()
-            try {
-                dirtyLayouts.forEach(::applyLayout)
-                dirtyLayouts.forEach(::queueLayoutEvent)
-            } finally {
-                layoutInvalidatedAncestors = null
-            }
+            applyLayoutPass(dirtyLayouts)
+            dirtyLayouts.forEach(::queueLayoutEvent)
         }
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {
@@ -1235,6 +1361,7 @@ class PamRenderer(
         }
         ensureFocusedInputVisibleAfterCommit()
         scheduleIdlePrewarm()
+        lastCommitEndNanos = System.nanoTime()
         if (profileCommit) {
             Log.d(
                 COMMIT_PERF_TAG,
@@ -1560,6 +1687,7 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
+        cancelPendingMounts()
         if (nodes.size() > 0) {
             val count = nodes.size()
             val depths = HashMap<Long, Int>(count)
@@ -1600,6 +1728,7 @@ class PamRenderer(
         prewarmActive = false
         main.removeCallbacks(prewarmSlice)
         destroyed = true
+        cancelPendingMounts()
         if (idlePrewarmScheduled) {
             Looper.myQueue().removeIdleHandler(idlePrewarm)
             idlePrewarmScheduled = false
@@ -1665,17 +1794,417 @@ class PamRenderer(
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
         if (state.kind == NodeKind.STATUS_BAR) statusBarIds.add(spec.id)
         addChild(state.parent, state.id, fresh = true)
+        if (deferMount(state)) return
         if (!state.virtual && virtualListAncestor(state.parent) == null) {
-            val view = createView(spec.kind, state)
-            if (view is TextView) {
-                state.defaultHighlightColor = view.highlightColor
-            }
-            putView(spec.id, view)
-            attachHosted(view, state)
-            applyInitialProperties(view, state)
-            (view as? TextView)?.let { applyTextAlignment(it, state) }
-            installEvents(view, state)
+            buildHostedView(state)
         }
+    }
+
+    /** Creates, attaches and configures the view of hosted node [state]. */
+    private fun buildHostedView(state: NodeState) {
+        val kind = state.kind
+        val view = mountTraceSection(MOUNT_CREATE_SECTIONS, kind) { createView(kind, state) }
+        if (view is TextView) {
+            state.defaultHighlightColor = view.highlightColor
+        }
+        putView(state.id, view)
+        mountTraceSection(MOUNT_ATTACH_SECTIONS, kind) { attachHosted(view, state) }
+        mountTraceSection(MOUNT_PROPS_SECTIONS, kind) { applyInitialProperties(view, state) }
+        (view as? TextView)?.let { applyTextAlignment(it, state) }
+        mountTraceSection(MOUNT_EVENTS_SECTIONS, kind) { installEvents(view, state) }
+    }
+
+    /**
+     * Detailed mount sections (per node kind: create, attach, properties,
+     * events; text and image work) only while a trace is recording, checked
+     * once per commit: thousands of sections per commit would cost more than
+     * the work they measure when nothing records them.
+     */
+    private var mountTraceDetail = false
+
+    private inline fun <T> mountTraceSection(names: Array<String>, kind: NodeKind, block: () -> T): T {
+        if (!mountTraceDetail) return block()
+        android.os.Trace.beginSection(names[kind.ordinal])
+        try {
+            return block()
+        } finally {
+            android.os.Trace.endSection()
+        }
+    }
+
+    private inline fun <T> mountTraceSection(name: String, block: () -> T): T {
+        if (!mountTraceDetail) return block()
+        android.os.Trace.beginSection(name)
+        try {
+            return block()
+        } finally {
+            android.os.Trace.endSection()
+        }
+    }
+
+    private fun refreshMountTraceDetail() {
+        mountTraceDetail = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && android.os.Trace.isEnabled()
+    }
+
+    // ---------------------------------------------------------------------
+    // Sliced mount
+    // ---------------------------------------------------------------------
+
+    /**
+     * Nodes without views yet: subtrees a heavy commit created outside the
+     * viewport of a vertical ScrollView. Every descendant of a pending node
+     * is pending. Later commits keep their properties and frames current in
+     * the node state, which the view build applies; nothing visible waits.
+     */
+    private val pendingMounts = HashSet<Long>()
+
+    /** Roots of the pending subtrees (their hosts have views), in mount order. */
+    private val pendingMountRoots = ArrayDeque<Long>()
+
+    /** Topmost nodes the running commit created under a ScrollView, resolved once its frames arrived. */
+    private var mountCandidates: ArrayList<Long>? = null
+
+    /** The running commit's layout set: views built during it are laid out by its layout pass. */
+    private var commitDirtyLayouts: MutableSet<Long>? = null
+    private var mountSliceScheduled = false
+    private var mountPreDrawInstalled = false
+
+    /** False builds every view inside its commit (the measurement baseline of the mount budget test). */
+    internal var slicedMountEnabled = true
+
+    /** Nodes whose views wait for a mount slice (tests and diagnostics). */
+    internal fun pendingMountCount(): Int = pendingMounts.size
+
+    private fun countCreates(batches: List<List<Mutation>>): Int {
+        var count = 0
+        for (batch in batches) {
+            for (mutation in batch) if (mutation is Mutation.Create) count++
+        }
+        return count
+    }
+
+    /**
+     * Whether [state], just created, waits for [resolvePendingMounts] instead
+     * of building its view now: its parent is pending, or the running commit
+     * is heavy and it lives under a ScrollView whose viewport decides.
+     */
+    private fun deferMount(state: NodeState): Boolean {
+        if (pendingMounts.isNotEmpty() && state.parent in pendingMounts) {
+            pendingMounts += state.id
+            return true
+        }
+        val candidates = mountCandidates ?: return false
+        if (mountDeferralScroll(state.parent) == null) return false
+        pendingMounts += state.id
+        candidates += state.id
+        return true
+    }
+
+    /**
+     * The nearest ScrollView above [parent] when content under it may mount
+     * after the frame: a vertical, non-paged scroll whose offset follows the
+     * user only (no end anchor, kept position or testID target), reached
+     * through plain containers that draw at their engine frames (no
+     * transform, drag or animation moving them). Null mounts now.
+     */
+    private fun mountDeferralScroll(parent: Long): Long? {
+        var current = parent
+        var depth = 0
+        while (current != 0L) {
+            val state = nodes[current] ?: return null
+            if (state.kind == NodeKind.SCROLL) return current.takeIf { scrollAllowsSlicedMount(state) }
+            if (state.kind !in SLICED_MOUNT_KINDS) return null
+            for (key in state.properties.keys) if (key in SLICED_MOUNT_MOVING_KEYS) return null
+            current = state.parent
+            if (++depth > MAX_VIRTUAL_DEPTH) return null
+        }
+        return null
+    }
+
+    private fun scrollAllowsSlicedMount(state: NodeState): Boolean =
+        !state.flag(PropKey.SCROLL_HORIZONTAL, false) &&
+            !state.flag(PropKey.SCROLL_PAGING_ENABLED, false) &&
+            !state.flag(PropKey.SCROLL_ANCHOR_TO_END, false) &&
+            !state.flag(PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION, false) &&
+            state.properties[PropKey.SCROLL_PAGE_TRANSFORM] == null &&
+            state.textOrNull(PropKey.SCROLL_TARGET_TEST_ID).isNullOrEmpty()
+
+    /** The content band (engine dp, overscan included) a scroll shows; outside it a subtree may wait. */
+    private class MountWindow(val top: Float, val bottom: Float)
+
+    /**
+     * [ahead]: the band a mount slice keeps built around the viewport (a
+     * quarter of it), so scrolling finds rows ready; otherwise only the
+     * viewport and a thin margin (shadows, a frame of fling), which is what
+     * a commit must build before its frame.
+     */
+    private fun mountWindow(scrollId: Long, unstableScrolls: Set<Long>, ahead: Boolean): MountWindow? {
+        if (scrollId in unstableScrolls) return null
+        val frame = frames[scrollId] ?: return null
+        if (frame.height <= 0f) return null
+        val scroll = views[scrollId] as? PamScrollContainer ?: return null
+        val offset = scroll.settledOffsetY() ?: return null
+        val top = frame.y + offset / resourcesDensity()
+        val overscan = if (ahead) {
+            maxOf(SLICED_MOUNT_MIN_OVERSCAN_DP, frame.height * SLICED_MOUNT_OVERSCAN_FRACTION)
+        } else {
+            SLICED_MOUNT_MIN_OVERSCAN_DP
+        }
+        return MountWindow(top - overscan, top + frame.height + overscan)
+    }
+
+    /**
+     * Whether the whole subtree of [id] may wait: only plain kinds without
+     * properties that must act from the first frame (animations, observers,
+     * focus, shared elements, transforms), and no frame inside [window]
+     * (children overflowing their parent included).
+     */
+    private fun subtreeMayWait(id: Long, window: MountWindow): Boolean {
+        val state = nodes[id] ?: return true
+        if (state.kind !in SLICED_MOUNT_KINDS) return false
+        for (key in state.properties.keys) if (key in SLICED_MOUNT_BLOCKING_KEYS) return false
+        val frame = frames[id] ?: return false
+        if (frame.y < window.bottom && frame.y + frame.height > window.top) return false
+        val kids = children[id] ?: return true
+        for (child in kids) if (!subtreeMayWait(child, window)) return false
+        return true
+    }
+
+    /** Whether pending root [root] must be built now (it came into view, or may no longer wait). */
+    private fun pendingRootDue(
+        root: Long,
+        unstableScrolls: Set<Long>,
+        windows: HashMap<Long, MountWindow?>,
+        ahead: Boolean,
+    ): Boolean {
+        val state = nodes[root] ?: return false
+        val scroll = mountDeferralScroll(state.parent) ?: return true
+        val window = windows.getOrPut(scroll) { mountWindow(scroll, unstableScrolls, ahead) } ?: return true
+        return !subtreeMayWait(root, window)
+    }
+
+    /**
+     * After a commit's mutations: builds the pending subtrees it brought into
+     * view (or made unable to wait), then resolves its new subtrees top-down,
+     * building what the viewport shows and queueing each subtree that lies
+     * wholly outside it for the mount slices.
+     */
+    private fun resolvePendingMounts(unstableScrolls: Set<Long>) {
+        val windows = HashMap<Long, MountWindow?>()
+        if (pendingMountRoots.isNotEmpty()) {
+            val due = ArrayList<Long>()
+            val waiting = ArrayList<Long>(pendingMountRoots.size)
+            for (root in pendingMountRoots) {
+                when {
+                    root !in pendingMounts -> Unit
+                    pendingRootDue(root, unstableScrolls, windows, ahead = false) -> due += root
+                    else -> waiting += root
+                }
+            }
+            pendingMountRoots.clear()
+            pendingMountRoots.addAll(waiting)
+            due.forEach(::hostPendingSubtree)
+        }
+        mountCandidates?.forEach { candidate ->
+            if (candidate !in pendingMounts) return@forEach
+            val parent = nodes[candidate]?.parent ?: return@forEach
+            val window = mountDeferralScroll(parent)?.let { scroll ->
+                windows.getOrPut(scroll) { mountWindow(scroll, unstableScrolls, ahead = false) }
+            }
+            resolveMount(candidate, window, unstableScrolls, windows)
+        }
+        scheduleMountSlice()
+    }
+
+    private fun resolveMount(
+        id: Long,
+        window: MountWindow?,
+        unstableScrolls: Set<Long>,
+        windows: HashMap<Long, MountWindow?>,
+    ) {
+        if (id !in pendingMounts) return
+        val state = nodes[id]
+        if (state == null) {
+            pendingMounts.remove(id)
+            return
+        }
+        if (window != null && subtreeMayWait(id, window)) {
+            pendingMountRoots.addLast(id)
+            return
+        }
+        pendingMounts.remove(id)
+        if (!state.virtual && views[id] == null) {
+            buildHostedView(state)
+            if (frames[id] != null) commitDirtyLayouts?.add(id)
+        }
+        // Content of a nested ScrollView is placed against that scroll's viewport.
+        val childWindow = if (state.kind == NodeKind.SCROLL) {
+            if (scrollAllowsSlicedMount(state)) {
+                windows.getOrPut(id) { mountWindow(id, unstableScrolls, ahead = false) }
+            } else {
+                null
+            }
+        } else {
+            window
+        }
+        children[id]?.toList()?.forEach { child -> resolveMount(child, childWindow, unstableScrolls, windows) }
+    }
+
+    /**
+     * Builds every view of pending subtree [root] (its host has a view), in
+     * tree order. Inside a commit the commit's layout pass lays them out;
+     * otherwise they are laid out here, each ancestor invalidated once, and
+     * their texts measured, so the next traversal finds them ready.
+     */
+    private fun hostPendingSubtree(root: Long) {
+        val commitLayouts = commitDirtyLayouts
+        if (commitLayouts != null) {
+            hostPendingNode(root, commitLayouts)
+            return
+        }
+        val built = ArrayList<Long>()
+        hostPendingNode(root, built)
+        if (built.isEmpty()) return
+        applyLayoutPass(built)
+        built.forEach { id -> views[id]?.let(::premeasureCellText) }
+    }
+
+    private fun hostPendingNode(id: Long, laidOut: MutableCollection<Long>) {
+        if (!pendingMounts.remove(id)) return
+        val state = nodes[id] ?: return
+        if (!state.virtual && views[id] == null) {
+            // The commit that created the node already reported its on:layout;
+            // applying the property now must not report the same frame again.
+            val reportedLayout = lastLayoutEvents[id]
+            buildHostedView(state)
+            if (reportedLayout != null && lastLayoutEvents[id] == null) lastLayoutEvents[id] = reportedLayout
+            if (frames[id] != null) laidOut += id
+        }
+        children[id]?.toList()?.forEach { child -> hostPendingNode(child, laidOut) }
+    }
+
+    /** Builds the pending subtree containing [id], if any (a move into or out of it). */
+    private fun hostPendingMountContaining(id: Long) {
+        if (pendingMounts.isEmpty() || id !in pendingMounts) return
+        var top = id
+        while (true) {
+            val parent = nodes[top]?.parent ?: break
+            if (parent !in pendingMounts) break
+            top = parent
+        }
+        pendingMountRoots.remove(top)
+        hostPendingSubtree(top)
+    }
+
+    private val mountSlice = Choreographer.FrameCallback { frameTimeNanos -> runMountSlice(frameTimeNanos) }
+
+    /**
+     * Safety net for offsets that change during a traversal (a layout pass
+     * clamping a scroll): pending content that is now in view is built and
+     * the draw is redone, so it is never drawn missing.
+     */
+    private val mountPreDraw = android.view.ViewTreeObserver.OnPreDrawListener {
+        if (pendingMountRoots.isEmpty()) {
+            uninstallMountPreDraw()
+            return@OnPreDrawListener true
+        }
+        !hostRevealedPendingMounts(ahead = false)
+    }
+
+    private fun scheduleMountSlice() {
+        if (pendingMountRoots.isEmpty() || destroyed) {
+            uninstallMountPreDraw()
+            return
+        }
+        if (!mountPreDrawInstalled) {
+            mountPreDrawInstalled = true
+            host.viewTreeObserver.addOnPreDrawListener(mountPreDraw)
+        }
+        if (mountSliceScheduled) return
+        mountSliceScheduled = true
+        Choreographer.getInstance().postFrameCallback(mountSlice)
+    }
+
+    private fun uninstallMountPreDraw() {
+        if (!mountPreDrawInstalled) return
+        mountPreDrawInstalled = false
+        host.viewTreeObserver.let { if (it.isAlive) it.removeOnPreDrawListener(mountPreDraw) }
+    }
+
+    private fun cancelPendingMounts() {
+        pendingMounts.clear()
+        pendingMountRoots.clear()
+        if (mountSliceScheduled) {
+            mountSliceScheduled = false
+            Choreographer.getInstance().removeFrameCallback(mountSlice)
+        }
+        uninstallMountPreDraw()
+    }
+
+    /** Builds the pending subtrees now in (or, [ahead], near) view; true when any was built. */
+    private fun hostRevealedPendingMounts(ahead: Boolean): Boolean {
+        if (pendingMountRoots.isEmpty()) return false
+        val windows = HashMap<Long, MountWindow?>()
+        var built = false
+        val waiting = ArrayList<Long>(pendingMountRoots.size)
+        val due = ArrayList<Long>()
+        for (root in pendingMountRoots) {
+            when {
+                root !in pendingMounts -> Unit
+                pendingRootDue(root, emptySet(), windows, ahead) -> due += root
+                else -> waiting += root
+            }
+        }
+        if (due.isEmpty() && waiting.size == pendingMountRoots.size) return false
+        pendingMountRoots.clear()
+        pendingMountRoots.addAll(waiting)
+        for (root in due) {
+            hostPendingSubtree(root)
+            built = true
+        }
+        if (built) afterMountSlice()
+        return built
+    }
+
+    private var lastCommitStartNanos = 0L
+    private var lastCommitEndNanos = 0L
+
+    /**
+     * One mount slice, in the frame's animation phase (after input, before
+     * the traversal): first whatever scrolled into (or near) view, at any
+     * cost, then queued subtrees in tree order for [SLICED_MOUNT_SLICE_NANOS]
+     * less what a commit already took in this frame (at least one subtree,
+     * so a busy frame still progresses).
+     */
+    private fun runMountSlice(frameTimeNanos: Long) {
+        mountSliceScheduled = false
+        if (destroyed || pendingMountRoots.isEmpty()) {
+            uninstallMountPreDraw()
+            return
+        }
+        pamTraceSection("PamMount.slice") {
+            val started = System.nanoTime()
+            // A commit that already ran in this frame used part of its budget.
+            val spent = if (lastCommitEndNanos >= frameTimeNanos) lastCommitEndNanos - lastCommitStartNanos else 0L
+            hostRevealedPendingMounts(ahead = true)
+            val deadline = started + (SLICED_MOUNT_SLICE_NANOS - spent).coerceAtLeast(0L)
+            var built = 0
+            while (pendingMountRoots.isNotEmpty() && (built == 0 || System.nanoTime() < deadline)) {
+                val root = pendingMountRoots.removeFirst()
+                if (root !in pendingMounts) continue
+                hostPendingSubtree(root)
+                built++
+            }
+            if (built > 0) afterMountSlice()
+        }
+        scheduleMountSlice()
+    }
+
+    /** What a commit does after building views, for views a slice built. */
+    private fun afterMountSlice() {
+        // Modal triggers are bound to pressables that exist.
+        if (localModalIds.isNotEmpty()) syncLocalModalTriggers()
+        scheduleIdlePrewarm()
     }
 
     /**
@@ -2062,6 +2591,8 @@ class PamRenderer(
 
     private fun remove(id: Long) {
         val state = nodes[id] ?: return
+        // A pending node has no view to release (its queue entry is dropped lazily).
+        if (pendingMounts.isNotEmpty()) pendingMounts.remove(id)
         val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
         (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
@@ -2136,6 +2667,11 @@ class PamRenderer(
             state.properties[key] = value
         }
         val shouldBeVirtual = isLayoutOnly(state)
+        if (pendingMounts.isNotEmpty() && id in pendingMounts) {
+            // No view yet (nor below it): the view build applies the state.
+            state.virtual = shouldBeVirtual
+            return
+        }
         val cellRoot = virtualCellRoot(id)
         if (cellRoot != null && state.virtual != shouldBeVirtual) {
             val holder = virtualCellHolder(cellRoot)
@@ -2191,6 +2727,9 @@ class PamRenderer(
 
     private fun move(id: Long, parent: Long, index: Int) {
         val state = nodes[id] ?: return
+        // Moves keep their usual paths: a pending node (or destination) is built first.
+        hostPendingMountContaining(id)
+        hostPendingMountContaining(parent)
         if (state.parent == parent && nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) {
             // A keyed row keeps its holder and native subtree when a page or
             // loading header changes its adapter index. RecyclerView's diff
@@ -3068,7 +3607,7 @@ class PamRenderer(
             is PamNavigationHost -> parent.insert(view, index)
             is PamTabHost -> parent.insertScene(view, index)
             is PamModalHost -> parent.insert(view, index)
-            is PamScrollContainer -> parent.insert(view)
+            is PamScrollContainer -> parent.insert(view, index)
             else -> {
                 if (parent is ViewGroup && nodes[parentId]?.kind == NodeKind.CUSTOM_VIEW) {
                     parent.addView(view, index.coerceIn(0, parent.childCount))
@@ -3885,14 +4424,14 @@ class PamRenderer(
         // Each image and press property used to start a load or reconfigure
         // the pressable: done once, with every property in place.
         if (initialPressablePending) configurePressable(view, state)
-        if (initialImageLoadPending) loadImage(view, state)
-        if (text != null && textUpdates != null) {
+        if (initialImageLoadPending) mountTraceSection("PamMount.image") { loadImage(view, state) }
+        if (text != null && textUpdates != null) mountTraceSection("PamMount.text") {
             if (textUpdates.typeface) applyTypeface(text, state)
             if (textUpdates.size) applyTextSizing(text, state)
             if (textUpdates.letterSpacing) applyLetterSpacing(text, state)
             if (textUpdates.content) applyTextContent(text, state)
         }
-        if (backgroundUpdate?.requested == true) {
+        if (backgroundUpdate?.requested == true) mountTraceSection("PamMount.background") {
             updateBackground(view, state, backgroundUpdate.backgroundColor, backgroundUpdate.borderColor)
         }
     }
@@ -9605,8 +10144,12 @@ class PamRenderer(
     }
 
     private fun applyHostedChildLayouts(parentId: Long) {
+        val passPending = layoutPassPending
         children[parentId]?.forEach { childId ->
-            if (views[childId] == null) {
+            if (passPending != null && childId in passPending) {
+                // The running layout pass reaches it (or, layout-only, its
+                // hosted children) after this host.
+            } else if (views[childId] == null) {
                 // Layout-only Row/Column/View nodes have no Android View of
                 // their own. Their nearest materialized descendants are
                 // hosted directly by this ancestor and must be reconciled

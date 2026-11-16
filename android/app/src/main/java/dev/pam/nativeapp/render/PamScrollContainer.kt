@@ -160,9 +160,24 @@ internal class PamScrollContainer @JvmOverloads constructor(
         applyConfiguration()
     }
 
-    fun insert(child: View) {
-        content.addView(child)
+    /** Adds [child] to the content at [index] (its logical place), or last when [index] is negative. */
+    fun insert(child: View, index: Int = -1) {
+        if (index < 0) content.addView(child) else content.addView(child, index.coerceAtMost(content.childCount))
         requestOffsetApplication()
+    }
+
+    /**
+     * The vertical offset (pixels) the content is about to be drawn at, or
+     * null while it is not known: a requested non-zero offset or an end
+     * anchor still waits for layout, or a glide is running. A sliced mount
+     * builds the rows around this offset first.
+     */
+    fun settledOffsetY(): Int? {
+        if (horizontal || offsetAnimator != null) return null
+        // A request aimed at a testID looks the target view up: it must exist.
+        if (anchorToEnd || maintainVisibleContentPosition || scrollTargetTestId.isNotEmpty()) return null
+        if (hasRequestedOffsetY) return if (requestedOffsetY == 0) 0 else null
+        return scrollYOf(activeScroll)
     }
 
     fun setHorizontal(value: Boolean) {
