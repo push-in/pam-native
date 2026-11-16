@@ -62,6 +62,9 @@ final class Runtime
     private static bool $cycleCollection = false;
     private static int $cycleRootBudget = self::CYCLE_ROOT_BUDGET;
     private static ?Closure $backHandler = null;
+
+    /** The back handler re-renders what it changes itself (the navigation coordinator). */
+    private static bool $backTracked = false;
     private static ?Closure $appStateHandler = null;
     private static ?Closure $dimensionsHandler = null;
     /** @var array<int, Closure(WindowMetrics): void> */
@@ -579,7 +582,13 @@ final class Runtime
     {
         try {
             if ($eventKind === EventKind::Back->value) {
-                DependencyTracker::invalidateAll();
+                // An app's own back handler may change any state; the
+                // navigation coordinator's pop re-renders only the navigators
+                // it changed (a full re-render of every kept-alive screen
+                // delayed each Back by ~200 ms on a large app).
+                if (!self::$backTracked) {
+                    DependencyTracker::invalidateAll();
+                }
                 self::$backHandler?->__invoke();
                 self::afterDispatch();
 
@@ -982,6 +991,7 @@ final class Runtime
         self::$nextRequestId = 1;
         self::$moduleTransport = null;
         self::$backHandler = null;
+        self::$backTracked = false;
         self::$appStateHandler = null;
         self::$dimensionsHandler = null;
         self::$memoryPressureHandler = null;
@@ -1032,9 +1042,11 @@ final class Runtime
         return self::$lastFrame;
     }
 
-    public static function onBack(Closure $handler): void
+    /** @param bool $tracked the handler marks what it changes (no full re-render) */
+    public static function onBack(Closure $handler, bool $tracked = false): void
     {
         self::$backHandler = $handler;
+        self::$backTracked = $tracked;
     }
 
     public static function onAppState(Closure $handler): void
