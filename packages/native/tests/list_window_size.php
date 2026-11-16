@@ -433,4 +433,38 @@ $narrow = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'fling-narrow');
 $narrow->configure(5);
 $narrow->extend(10, 13);
 $assert($narrow->extend(14, 17, null, [14, 30]) && $narrow->state()[0] === [[6, 39]], 'A narrow window releases what is behind the path in the same frame (got '.json_encode($narrow->state()[0]).').');
+// A pager (pagingEnabled with a row height) plans its first frame by
+// pages, not by the 900 pt fallback screen: windowSize 3 builds the page it
+// opens at and one on each side (it built 5 and released 2 once reported).
+$pages = static fn (string $prefix): \Pam\Native\Internal\LazyRows => \Pam\Native\Internal\LazyRows::compose(array_map(
+    static fn (int $row): WindowView => WindowView::make(Text::make("page {$row}"))->key("{$prefix}-{$row}"),
+    range(0, 29),
+));
+$pager = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'pager');
+$pager->configure(3);
+$pager->startAt(10);
+$pager->plan(760.0, true);
+$assert($pager->firstRows($pages('pager')) === [[9, 12]], 'A pager opens with its page and one on each side (got '.json_encode($pager->firstRows($pages('pager'))).').');
+$pagerTop = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'pager-top');
+$pagerTop->configure(3);
+$pagerTop->plan(760.0, true);
+$assert($pagerTop->firstRows($pages('top')) === [[0, 2]], 'A pager at its top builds its first page and the next (got '.json_encode($pagerTop->firstRows($pages('top'))).').');
+$unsized = \Pam\Native\Internal\ListWindow::for(new stdClass(), 'pager-unsized');
+$unsized->configure(3);
+$unsized->startAt(10);
+$unsized->plan(null, true);
+[[$unsizedFrom, $unsizedTo]] = $unsized->firstRows($pages('unsized'));
+$assert($unsizedTo - $unsizedFrom > 3, 'A pager without a row height keeps the fallback screen (got '.$unsizedFrom.'..'.$unsizedTo.').');
+$builtPager = WindowList::make(...array_map(
+    static fn (int $row): WindowView => WindowView::make(Text::make("built page {$row}"))->key("built-page-{$row}"),
+    range(0, 29),
+))->key('built-pager')->estimatedRowHeight(760.0)->pagingEnabled()->windowSize(3);
+$builtPagerTree = new ($windowTree::class)();
+$builtPagerTree->apply((new TreeEncoder())->encode($builtPager)['frame']);
+$builtPagerList = $builtPagerTree->with(PropKey::ListWindowed->value);
+$builtPages = count(array_filter(
+    $builtPagerTree->children($builtPagerList),
+    static fn (int $id): bool => !isset($builtPagerTree->nodes[$id]['props'][PropKey::ListPlaceholder->value]),
+));
+$assert($builtPages === 2, 'A builder pager at its top builds two pages (got '.$builtPages.').');
 echo "LIST_WINDOW_SIZE_OK rows=50 window=3 heights=measured encoder=pruned builder=1 fling=path\n";

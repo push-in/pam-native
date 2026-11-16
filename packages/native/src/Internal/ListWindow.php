@@ -67,6 +67,9 @@ final class ListWindow
     private int $size = 5;
     private float $estimate = 600.0;
 
+    /** `pagingEnabled` with a row height: each row is one viewport (a Reels pager). */
+    private bool $paging = false;
+
     /** @var list<array{0: int, 1: int}>|null materialized [start, end) rows */
     private ?array $ranges = null;
 
@@ -145,6 +148,20 @@ final class ListWindow
         $this->initialIndex = $index !== null && $index > 0 ? $index : null;
     }
 
+    /**
+     * The row height estimate and paging of the list, known when it renders:
+     * the first frame is planned with them instead of the defaults (a pager
+     * of 3 pages opened with 5 and released 2 once the host reported).
+     */
+    public function plan(?float $rowHeight, bool $paging): void
+    {
+        $sized = $rowHeight !== null && $rowHeight > 0;
+        if ($sized) {
+            $this->estimate = $rowHeight;
+        }
+        $this->paging = $paging && $sized;
+    }
+
     public function size(): int
     {
         return $this->size;
@@ -171,9 +188,11 @@ final class ListWindow
             self::$lists[$listId] = WeakReference::create($this);
         }
         $estimate = $properties[PropKey::ListRowHeight->value] ?? null;
-        if ((is_float($estimate) || is_int($estimate)) && $estimate > 0) {
+        $sized = (is_float($estimate) || is_int($estimate)) && $estimate > 0;
+        if ($sized) {
             $this->estimate = (float) $estimate;
         }
+        $this->paging = $sized && ($properties[PropKey::ScrollPagingEnabled->value] ?? false) === true;
         $keys = $list->lazyRows?->keys ?? [];
         if ($this->reported && $this->ranges !== null && $this->keys !== [] && $keys !== $this->keys) {
             // Rows joined or left before the window (an older page above a
@@ -458,22 +477,33 @@ final class ListWindow
         return $mapped;
     }
 
-    /** Viewport top the list opens at: a screen above its initial row's bottom. */
+    /**
+     * Viewport top the list opens at: a screen above its initial row's
+     * bottom, or the initial row's top in a pager (its pages snap there).
+     */
     private function plannedOffset(): float
     {
         if ($this->initialIndex === null || $this->keys === []) {
             return 0.0;
         }
         $last = min($this->initialIndex, count($this->keys) - 1);
+        $top = 0.0;
         $bottom = 0.0;
         foreach ($this->keys as $row => $key) {
+            $top = $bottom;
             $bottom += $this->heights[$key] ?? (isset($this->fixed[$row]) ? 0.0 : $this->estimate);
             if ($row >= $last) {
                 break;
             }
         }
 
-        return max(0.0, $bottom - self::VIEWPORT_FALLBACK);
+        return $this->paging ? $top : max(0.0, $bottom - self::VIEWPORT_FALLBACK);
+    }
+
+    /** Viewport height planned before the host reports: one page in a pager. */
+    private function viewport(): float
+    {
+        return $this->paging ? $this->estimate : self::VIEWPORT_FALLBACK;
     }
 
     /**
@@ -483,9 +513,13 @@ final class ListWindow
      */
     private function rowsAround(float $offset): array
     {
-        $margin = ($this->size - 1) / 2 * self::VIEWPORT_FALLBACK;
-        $from = $offset - $margin;
-        $to = $offset + self::VIEWPORT_FALLBACK + $margin;
+        $viewport = $this->viewport();
+        $margin = ($this->size - 1) / 2 * $viewport;
+        // A pager's pages touch the window's edges exactly: the page ending
+        // at its top or starting at its bottom is outside it.
+        $edge = $this->paging ? 0.5 : 0.0;
+        $from = $offset - $margin + $edge;
+        $to = $offset + $viewport + $margin - $edge;
         $start = null;
         $end = 0;
         $top = 0.0;

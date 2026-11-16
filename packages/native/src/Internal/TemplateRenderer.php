@@ -1904,6 +1904,11 @@ final class TemplateRenderer
                         ? self::intValue($values['initialScrollIndex'], 'VirtualizedList initialScrollIndex')
                         : null,
                 );
+                $rowHeight = $values['estimatedRowHeight'] ?? $values['rowHeight'] ?? null;
+                $listWindow->plan(
+                    $rowHeight !== null ? self::floatValue($rowHeight, 'VirtualizedList estimatedRowHeight') : null,
+                    isset($values['pagingEnabled']) && self::boolValue($values['pagingEnabled'], 'VirtualizedList pagingEnabled'),
+                );
             }
             $childData['__pamListLoop'] = [$listPath, $listWindow !== null];
             $listLoop = true;
