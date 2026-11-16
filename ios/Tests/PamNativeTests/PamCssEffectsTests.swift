@@ -119,7 +119,9 @@ final class PamCssEffectsTests: XCTestCase {
             context.fill(CGRect(x: 20, y: 0, width: 20, height: 40))
         }
         imageView.image = checker
-        let output = try XCTUnwrap(imageView.image?.cgImage)
+        // Blurred off the main thread: nothing (never the sharp image) until then.
+        XCTAssertNil(imageView.image)
+        let output = try XCTUnwrap(Self.awaitImage(imageView)?.cgImage)
         XCTAssertEqual(PamRenderTestSupport.pixel(output, 0, 0) >> 24, 0xFF, "edges stay opaque")
         let edge = (PamRenderTestSupport.pixel(output, output.width / 2, output.height / 2) >> 16) & 0xFF
         XCTAssertGreaterThan(edge, 40)
@@ -128,6 +130,42 @@ final class PamCssEffectsTests: XCTestCase {
         // Like Android: blurred on a downscaled copy, displayed at the same point size.
         XCTAssertEqual(try XCTUnwrap(imageView.image).size, checker.size)
         XCTAssertLessThan(output.width, try XCTUnwrap(checker.cgImage).width)
+    }
+
+    func testASpoilerNeverShowsSharpAndACachedBlurShowsAtOnce() throws {
+        let (_, renderer, view) = PamRenderTestSupport.render([
+            PamConstants.blurRadius: .decimal(16),
+        ], kind: .image)
+        defer { renderer.close() }
+        let imageView = try XCTUnwrap(view as? PamImageView)
+        let photo = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 20)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        }
+        imageView.image = photo
+        XCTAssertNil(imageView.image, "no sharp frame while the blur runs")
+        let blurred = try XCTUnwrap(Self.awaitImage(imageView))
+        XCTAssertFalse(blurred === photo)
+        // Reveal is immediate (the original is kept); hiding again reuses the cached blur.
+        imageView.pamFilter = PamImageFilter()
+        XCTAssertTrue(imageView.image === photo)
+        imageView.pamFilter = PamImageFilter(blurSigma: 16)
+        XCTAssertTrue(imageView.image === blurred, "cached blur in the same pass")
+        // A recycled cell bound to the same decoded image paints at once.
+        let row = PamImageView(frame: imageView.frame)
+        row.contentMode = imageView.contentMode
+        row.pamFilter = PamImageFilter(blurSigma: 16)
+        row.image = photo
+        XCTAssertTrue(row.image === blurred)
+    }
+
+    /// Spins the main run loop until the view shows an image (filters land asynchronously).
+    private static func awaitImage(_ view: UIImageView, timeout: TimeInterval = 5) -> UIImage? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while view.image == nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        return view.image
     }
 
     func testIconBlurFadesInsteadOfFillingItsBox() throws {

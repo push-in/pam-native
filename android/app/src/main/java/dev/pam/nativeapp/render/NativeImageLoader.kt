@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.util.LruCache
+import android.widget.ImageView
 import dev.pam.nativeapp.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -67,6 +68,8 @@ internal data class NativeImageResult(
     val width: Int,
     val height: Int,
     val animatedBytes: ByteArray? = null,
+    /** Set when [bitmap] is already blurred (the view's `blurRadius`). */
+    val blur: PamImageBlur? = null,
 )
 
 internal class NativeImageCallbacks(
@@ -373,8 +376,10 @@ internal class NativeImageLoader(
         active[view] = pending
         view.onImageSizeChanged = { width, height ->
             begin(view, token, width, height)
+            refreshStaleBlur(view, token)
         }
         view.onShownChanged = { shown -> onShownChanged(view, shown) }
+        view.onBlurChanged = { blurChanged(view, token) }
         callbacks.onStart()
         // Keep already rendered pixels on screen while a changed request is
         // resolved. Reconciliation must never flash a blank/placeholder frame.
@@ -407,6 +412,7 @@ internal class NativeImageLoader(
         active.remove(view)?.takeIf { !it.finished }?.decodedKey?.let(::cancelOrphanThumbnail)
         view.onImageSizeChanged = null
         view.onShownChanged = null
+        view.onBlurChanged = null
         view.setImageDrawable(null)
     }
 
@@ -440,7 +446,10 @@ internal class NativeImageLoader(
         if (!closed.compareAndSet(false, true)) return
         generation.incrementAndGet()
         main.removeCallbacksAndMessages(null)
-        active.keys.forEach { view -> view.onImageSizeChanged = null }
+        active.keys.forEach { view ->
+            view.onImageSizeChanged = null
+            view.onBlurChanged = null
+        }
         active.clear()
         connections.toList().forEach(HttpURLConnection::disconnect)
         connections.clear()
@@ -451,16 +460,25 @@ internal class NativeImageLoader(
         synchronized(inlineCache) { inlineCache.evictAll() }
     }
 
+    /**
+     * Resolves the view's image at [measuredWidth] x [measuredHeight]. With
+     * [syncOnly], only a memory-cache hit or an inline glyph is shown; it
+     * returns false when a load would have to start instead.
+     */
     private fun begin(
         view: PamImageView,
         token: Long,
         measuredWidth: Int,
         measuredHeight: Int,
-    ) {
+        syncOnly: Boolean = false,
+    ): Boolean {
         val pending = active[view]
             ?.takeIf { it.token == token && !it.finished }
-            ?: return
-        if (pending.request.sourceSet == null) {
+            ?: return true
+        // A blurred image is decoded to the heap and blurred on a worker,
+        // then cached blurred: no GPU readback and no blur on this thread.
+        val blur = blurTarget(view, measuredWidth, measuredHeight)
+        if (pending.request.sourceSet == null && blur == null) {
             PamPreloadedImages.get(pending.request.source)?.let { bitmap ->
                 // Preloaded by Image::prefetch(asset://): painted in this
                 // frame, before layout, at full resolution (ImageView scales).
@@ -470,10 +488,10 @@ internal class NativeImageLoader(
                     NativeImageResult(pending.request.source, bitmap, bitmap.width, bitmap.height, null),
                     animate = false,
                 )
-                return
+                return true
             }
         }
-        if (measuredWidth <= 0 || measuredHeight <= 0) return
+        if (measuredWidth <= 0 || measuredHeight <= 0) return true
 
         val source = resolveSource(
             pending.request.source,
@@ -483,15 +501,15 @@ internal class NativeImageLoader(
         )
         if (source.isBlank()) {
             finishError(view, pending, "Image source is empty.")
-            return
+            return true
         }
         val key = decodedKey(
             source,
             pending.request,
             measuredWidth,
             measuredHeight,
-        )
-        if (pending.decodedKey == key) return
+        ) + blur?.keySuffix().orEmpty()
+        if (pending.decodedKey == key) return true
         pending.decodedKey = key
         // Classifies a packaged file before the cache lookup (inline cache or photos).
         val assetBytes = if (smallAssets[source] == null) smallAssetBytes(source) else null
@@ -514,19 +532,21 @@ internal class NativeImageLoader(
                         bitmap.width,
                         bitmap.height,
                         bitmap.animatedBytes,
+                        bitmap.blur,
                     ),
                     animate = false,
                 )
-                return
+                return true
             }
         }
 
         if (isSynchronousInlineSource(source) || smallAssets[source] == true) {
             // A bundled glyph (tens of bytes to a few KiB) decodes in well
             // under a millisecond: paint it in the frame that lays the view
-            // out, like a font glyph, instead of a frame later.
+            // out, like a font glyph, instead of a frame later. Its blur (an
+            // icon's shadow) is a heap bitmap downscaled to σ ≈ 4: as cheap.
             val decoded = runCatching {
-                decode(
+                val glyph = decode(
                     if (isInlineImageSource(source)) {
                         loadDataUri(source)
                     } else {
@@ -539,10 +559,12 @@ internal class NativeImageLoader(
                     repeat = pending.request.repeat,
                     inline = true,
                     contain = pending.request.contain,
+                    heap = blur != null,
                 )
+                blur?.let { target -> blurred(glyph, target) } ?: glyph
             }.getOrElse { error ->
                 finishError(view, pending, safeError(error))
-                return
+                return true
             }
             if (
                 pending.request.cachePolicy != IMAGE_CACHE_NONE &&
@@ -560,10 +582,15 @@ internal class NativeImageLoader(
                     decoded.width,
                     decoded.height,
                     decoded.animatedBytes,
+                    decoded.blur,
                 ),
                 animate = false,
             )
-            return
+            return true
+        }
+        if (syncOnly) {
+            pending.decodedKey = null
+            return false
         }
 
         val future = runCatching {
@@ -576,7 +603,8 @@ internal class NativeImageLoader(
                             pending.request,
                             measuredWidth,
                             measuredHeight,
-                        )?.let { thumbnail ->
+                            heap = blur != null,
+                        )?.let { blur?.let { target -> blurred(it, target) } ?: it }?.let { thumbnail ->
                             if (
                                 !closed.get() &&
                                 pending.request.cachePolicy != IMAGE_CACHE_NONE &&
@@ -590,6 +618,7 @@ internal class NativeImageLoader(
                                 thumbnail.bitmap,
                                 thumbnail.width,
                                 thumbnail.height,
+                                blur = thumbnail.blur,
                             )
                         }
                         val bytes = loadBytes(
@@ -601,7 +630,8 @@ internal class NativeImageLoader(
                                 }
                             },
                             partial = partial@{ partialBytes ->
-                                if (!pending.request.progressiveRenderingEnabled) {
+                                // A blurred image shows only once blurred.
+                                if (!pending.request.progressiveRenderingEnabled || blur != null) {
                                     return@partial
                                 }
                                 val preview = runCatching {
@@ -630,7 +660,8 @@ internal class NativeImageLoader(
                             repeat = pending.request.repeat,
                             inline = isInline(source),
                             contain = pending.request.contain,
-                        )
+                            heap = blur != null,
+                        ).let { sharp -> blur?.let { target -> blurred(sharp, target) } ?: sharp }
                         if (
                             !closed.get() &&
                             pending.request.cachePolicy != IMAGE_CACHE_NONE &&
@@ -645,6 +676,7 @@ internal class NativeImageLoader(
                             decoded.width,
                             decoded.height,
                             decoded.animatedBytes,
+                            decoded.blur,
                         )
                     },
                     imageExecutor(source),
@@ -652,7 +684,7 @@ internal class NativeImageLoader(
             }
         }.getOrElse { error ->
             finishError(view, pending, safeError(error))
-            return
+            return true
         }
 
         future.whenComplete { decoded, error ->
@@ -675,6 +707,96 @@ internal class NativeImageLoader(
                 }
             }
         }
+        return true
+    }
+
+    /** σ and geometry of the view's blur, read on the UI thread for a worker. */
+    private class BlurTarget(
+        val viewSigma: Float,
+        val width: Int,
+        val height: Int,
+        val scaleType: ImageView.ScaleType?,
+    ) {
+        /** The blurred decode is cached apart from the sharp one, per σ and drawn size. */
+        fun keySuffix(): String = "\u0000blur\u0000$viewSigma\u0000${width}x$height\u0000${scaleType?.ordinal}"
+    }
+
+    private fun blurTarget(view: PamImageView, width: Int, height: Int): BlurTarget? =
+        view.blurSigma.takeIf { it > 0f }?.let { sigma -> BlurTarget(sigma, width, height, view.scaleType) }
+
+    /**
+     * Worker thread: blurs a heap decode at the σ it is drawn with (σ is
+     * authored in view px; see [PamBitmapBlur.bitmapSigma]) and drops the
+     * sharp pixels. An animated image shows its first frame, blurred.
+     */
+    private fun blurred(decoded: DecodedBitmap, target: BlurTarget): DecodedBitmap {
+        val sharp = decoded.bitmap
+        val sourceWidth = sharp.width
+        val sourceHeight = sharp.height
+        val sigma = PamBitmapBlur.bitmapSigma(target.viewSigma, target.width, target.height, sourceWidth, sourceHeight, target.scaleType)
+        val output = PamBitmapBlur.blur(sharp, sigma)
+        // The sharp decode is this load's own: nothing else holds it.
+        if (output !== sharp) sharp.recycle()
+        // Uploads the small texture on the RenderThread now, not in the first frame that draws it.
+        output.prepareToDraw()
+        return DecodedBitmap(
+            output,
+            decoded.width,
+            decoded.height,
+            null,
+            PamImageBlur(sourceWidth, sourceHeight, target.viewSigma, sigma),
+        )
+    }
+
+    /**
+     * The view's blur changed. A load in flight for the previous blur is
+     * dropped (its result never shows); a finished image is resolved again
+     * silently unless it already shows this blur.
+     */
+    private fun blurChanged(view: PamImageView, token: Long) {
+        val pending = active[view]?.takeIf { it.token == token } ?: return
+        // Released: showing again resolves it with the current blur.
+        if (pending.released) return
+        if (pending.finished) {
+            refreshStaleBlur(view, token)
+            return
+        }
+        pending.decodedKey = null
+        resolveAgain(view, pending)
+    }
+
+    /**
+     * A finished image whose shown blur (or sharpness) no longer fits the
+     * view (the blur changed, or the view resized past the σ tolerance) is
+     * resolved again without load events and without a cross-fade. The shown
+     * blurred pixels stay until the new ones arrive.
+     */
+    private fun refreshStaleBlur(view: PamImageView, token: Long) {
+        val pending = active[view]
+            ?.takeIf { it.token == token && it.finished && !it.released && !it.failed }
+            ?: return
+        if (view.showsWantedBlur()) return
+        if (pending.restoringCallbacks == null) {
+            pending.restoringCallbacks = pending.callbacks
+            pending.callbacks = NativeImageCallbacks()
+        }
+        pending.finished = false
+        pending.decodedKey = null
+        resolveAgain(view, pending)
+    }
+
+    /**
+     * A memory-cache hit shows in this frame. A load starts after the current
+     * batch of property changes instead: a rebound cell may get its new
+     * source in the same batch, and the old one must not be decoded for it.
+     */
+    private fun resolveAgain(view: PamImageView, pending: ActiveRequest) {
+        if (begin(view, pending.token, view.width, view.height, syncOnly = true)) return
+        main.post {
+            if (active[view] === pending && !pending.finished && pending.decodedKey == null) {
+                begin(view, pending.token, view.width, view.height)
+            }
+        }
     }
 
     private fun showPlaceholder(
@@ -685,6 +807,7 @@ internal class NativeImageLoader(
             ?: pending.request.defaultSource
             ?: return
         val token = pending.token
+        val blur = blurTarget(view, view.width, view.height)
         CompletableFuture.supplyAsync(
             {
                 runCatching {
@@ -708,17 +831,18 @@ internal class NativeImageLoader(
                         1f,
                         repeat = pending.request.repeat,
                         inline = isInline(source),
-                    ).bitmap
+                        heap = blur != null,
+                    ).let { sharp -> blur?.let { target -> blurred(sharp, target) } ?: sharp }
                 }.getOrNull()
             },
             imageExecutor(source),
-        ).whenComplete { bitmap, _ ->
-            if (bitmap == null) return@whenComplete
+        ).whenComplete { placeholder, _ ->
+            if (placeholder == null) return@whenComplete
             main.post {
                 val latest = active[view]
                     ?.takeIf { it.token == token && !it.finished }
                     ?: return@post
-                display(view, bitmap, latest.request.repeat, 0)
+                display(view, placeholder.bitmap, latest.request.repeat, 0, placeholder.blur)
             }
         }
     }
@@ -752,8 +876,9 @@ internal class NativeImageLoader(
         if (!pending.released) return
         pending.released = false
         val cached = pending.decodedKey?.let { key -> synchronized(cache) { cache.get(key) } }
-        if (cached != null) {
-            display(view, cached.bitmap, pending.request.repeat, 0)
+        // The blur may have changed while hidden: only a matching entry shows.
+        if (cached != null && view.blurMatches(cached.blur)) {
+            display(view, cached.bitmap, pending.request.repeat, 0, cached.blur)
             return
         }
         pending.restoringCallbacks = pending.callbacks
@@ -825,12 +950,19 @@ internal class NativeImageLoader(
                 view,
                 result.bitmap,
                 pending.request.repeat,
-                if (animate && fadesIn(pending)) pending.request.fadeDurationMs else 0,
+                // A silent re-resolve (restore, blur change) swaps in place.
+                if (animate && pending.restoringCallbacks == null && fadesIn(pending)) pending.request.fadeDurationMs else 0,
+                result.blur,
             )
         }
         pending.callbacks.onSuccess(result)
         pending.callbacks.onEnd()
         endRestore(pending)
+        // The blur changed in a way no request saw (never expected): resolve
+        // it again rather than leave a sharp image refused or a wrong σ.
+        if (!animated && !view.showsWantedBlur()) {
+            main.post { refreshStaleBlur(view, pending.token) }
+        }
     }
 
     private fun finishError(
@@ -858,6 +990,7 @@ internal class NativeImageLoader(
             return
         }
         pending.finished = true
+        pending.failed = true
         pending.callbacks.onError(message)
         pending.callbacks.onEnd()
         endRestore(pending)
@@ -901,8 +1034,10 @@ internal class NativeImageLoader(
         bitmap: Bitmap,
         repeat: Boolean,
         fadeDurationMs: Int,
+        blur: PamImageBlur? = null,
     ) {
-        val next = view.bitmapDrawable(bitmap, repeat)
+        // Null: a sharp bitmap while the view has a blur (never shown).
+        val next = view.bitmapDrawable(bitmap, repeat, blur) ?: return
         val previous = view.drawable
         if (fadeDurationMs > 0 && previous != null) {
             val transition = TransitionDrawable(arrayOf(previous, next)).apply {
@@ -948,6 +1083,7 @@ internal class NativeImageLoader(
         request: NativeImageRequest,
         targetWidth: Int,
         targetHeight: Int,
+        heap: Boolean = false,
     ): DecodedBitmap? {
         val cell = isMediaStoreThumbnailCandidate(source, request.resizeMethod, targetWidth, targetHeight)
         if (!cell && !isMediaStoreVideoPosterCandidate(source, targetWidth, targetHeight)) {
@@ -982,8 +1118,11 @@ internal class NativeImageLoader(
             error(if (signal.isCanceled) "Image load was cancelled." else "Video thumbnail is unavailable.")
         }
         val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight).let { scaled ->
-            // GPU-only on API 28+, keeping the 16-bit format of the decode.
-            if (
+            // GPU-only on API 28+, keeping the 16-bit format of the decode;
+            // a thumbnail to blur stays on the heap (blurred next).
+            if (heap) {
+                scaled
+            } else if (
                 nativeBitmapStorage(
                     sdk = Build.VERSION.SDK_INT,
                     inline = false,
@@ -1300,6 +1439,8 @@ internal class NativeImageLoader(
         repeat: Boolean = false,
         inline: Boolean = false,
         contain: Boolean = false,
+        /** A heap bitmap, never a GPU one, and no texture upload: it is blurred next. */
+        heap: Boolean = false,
     ): DecodedBitmap {
         val bounds = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
@@ -1333,7 +1474,7 @@ internal class NativeImageLoader(
         val storage = nativeBitmapStorage(
             sdk = Build.VERSION.SDK_INT,
             inline = inline,
-            allowHardware = true,
+            allowHardware = !heap,
             pixels = plan.width.toLong() * plan.height,
             mimeType = bounds.outMimeType,
         )
@@ -1371,7 +1512,7 @@ internal class NativeImageLoader(
         // A scaled decode carries the target "density"; restore the display
         // density so BitmapDrawable's intrinsic size stays the pixel size.
         if (plan.scaled) bitmap.density = context.resources.displayMetrics.densityDpi
-        if (bitmap.config != Bitmap.Config.HARDWARE) {
+        if (bitmap.config != Bitmap.Config.HARDWARE && !heap) {
             // Starts the GPU texture upload now, on the RenderThread, instead
             // of inside the frame that first draws the image: a 1080x2042
             // feed photo spent 8.5 ms of a scroll frame in "Texture upload" on
@@ -1702,6 +1843,7 @@ internal class NativeImageLoader(
         var retryAttempts: Int = 0,
         var released: Boolean = false,
         var animated: Boolean = false,
+        var failed: Boolean = false,
         var restoringCallbacks: NativeImageCallbacks? = null,
         val startedAt: Long = android.os.SystemClock.uptimeMillis(),
     )
@@ -1711,6 +1853,8 @@ internal class NativeImageLoader(
         val width: Int,
         val height: Int,
         val animatedBytes: ByteArray? = null,
+        /** Set when [bitmap] is blurred (cached under the blurred key). */
+        val blur: PamImageBlur? = null,
     )
 
     private companion object {

@@ -139,7 +139,14 @@ compile to the same native gradient; children render on top like `<View>`.
   shared Choreographer callback for every shimmer).
 * `<Image blurRadius="28">` (and `filter: blur()` on images) blurs the
   decoded bitmap once, like React Native: every API level, opaque edges,
-  no per-frame GPU work (σ = the radius in dp).
+  no per-frame GPU work (σ = the radius in dp). The image loader decodes it
+  to the heap and blurs it on its worker threads (never on the UI thread,
+  never a GPU readback) and caches the blurred bitmap per σ and size, so a
+  recycled row paints it in the bind frame. A blurred image never shows
+  sharp (a spoiler): until its blur is ready the view keeps the previous
+  blurred pixels or stays empty. Changing `blurRadius` (revealing a spoiler)
+  or resizing the image past ~5 % of σ resolves it again without load
+  events; an animated GIF/WebP shows its first frame blurred.
 * `text-shadow: x y <blur> <color>` maps the blur to Android's
   `setShadowLayer` radius exactly like React Native `textShadowRadius`.
 * Modal/BottomSheet scrims: `backdropColor="rgba(0,0,0,.28)"`.

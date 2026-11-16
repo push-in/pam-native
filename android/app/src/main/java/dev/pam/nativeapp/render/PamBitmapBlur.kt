@@ -15,31 +15,26 @@ import kotlin.math.sqrt
  * edges so they stay opaque to their bounds; an image with a transparent
  * border (an icon, a glyph used as a shadow) fades into transparency
  * instead, so its blur never becomes a filled rectangle. Works on every API
- * level and costs nothing per frame once the image is displayed.
+ * level and costs nothing per frame once the image is displayed. Images are
+ * blurred by [NativeImageLoader] on its worker threads, from a heap decode,
+ * and cached blurred: the UI thread never blurs nor reads a GPU bitmap back.
  */
 internal object PamBitmapBlur {
     /**
-     * The last blur of each live source bitmap. Images draw from the shared
-     * memory cache, so a list cell rebinding (a feed backdrop, a glyph shadow
-     * repeated in every row) gets the same source bitmap back: reusing its
-     * blur keeps a GPU readback and a box blur off the UI thread on every
-     * bind while scrolling. Entries go with their source (weak keys); the
-     * blurred copies are small (downscaled to σ ≈ 4).
+     * Test hook: called before every blur with whether its source is a GPU
+     * (HARDWARE) bitmap, which costs a readback on the RenderThread.
      */
-    private val blurred = java.util.WeakHashMap<Bitmap, Pair<Float, Bitmap>>()
+    @Volatile
+    internal var blurObserver: ((hardwareSource: Boolean) -> Unit)? = null
 
+    /**
+     * Worker thread: a blurred, downscaled heap copy of [source] (σ in its
+     * pixels). The image loader decodes blurred images to the heap, so this
+     * never reads a GPU bitmap back; a HARDWARE source still works (copied).
+     */
     fun blur(source: Bitmap, sigma: Float): Bitmap {
         if (sigma <= 0f || source.width <= 0 || source.height <= 0) return source
-        synchronized(blurred) {
-            blurred[source]?.takeIf { (applied, bitmap) -> abs(applied - sigma) < 0.05f && !bitmap.isRecycled }
-                ?.let { return it.second }
-        }
-        val output = blurUncached(source, sigma)
-        if (output !== source) synchronized(blurred) { blurred[source] = sigma to output }
-        return output
-    }
-
-    private fun blurUncached(source: Bitmap, sigma: Float): Bitmap {
+        blurObserver?.invoke(source.config == Bitmap.Config.HARDWARE)
         val readable = if (source.config == Bitmap.Config.HARDWARE) {
             source.copy(Bitmap.Config.ARGB_8888, false) ?: return source
         } else {
@@ -56,6 +51,13 @@ internal object PamBitmapBlur {
         output.setPixels(pixels, 0, width, 0, 0, width, height)
         return output
     }
+
+    /**
+     * Two blur σ (px) look the same: within 5 % (at least 0.05 px). A shown
+     * blur is kept, not redone, when its view resizes within that margin.
+     */
+    fun sigmaMatches(applied: Float, wanted: Float): Boolean =
+        abs(applied - wanted) <= max(0.05f, wanted * 0.05f)
 
     /**
      * σ authored in view pixels → σ in the bitmap's own pixels, through the

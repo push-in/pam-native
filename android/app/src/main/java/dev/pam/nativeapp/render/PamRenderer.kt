@@ -1036,6 +1036,7 @@ class PamRenderer(
             is PamImageView -> {
                 view.setImageDrawable(null)
                 view.onImageSizeChanged = null
+                view.onBlurChanged = null
                 view.retainPixels = false
             }
             // Modal trigger actions are re-installed by the commit pass.

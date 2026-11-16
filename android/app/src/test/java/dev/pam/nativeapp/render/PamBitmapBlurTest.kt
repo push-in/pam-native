@@ -19,6 +19,15 @@ class PamBitmapBlurTest {
     }
 
     @Test
+    fun aShownBlurIsKeptWithinFivePercentOfTheWantedSigma() {
+        assertTrue(PamBitmapBlur.sigmaMatches(10.4f, 10f))
+        assertTrue(!PamBitmapBlur.sigmaMatches(10.6f, 10f))
+        // At least 0.05 px for tiny σ.
+        assertTrue(PamBitmapBlur.sigmaMatches(0.54f, 0.5f))
+        assertTrue(!PamBitmapBlur.sigmaMatches(20f, 10f))
+    }
+
+    @Test
     fun aGlyphOnATransparentCanvasFadesInsteadOfFillingTheBox() {
         val size = 48
         val pixels = IntArray(size * size)
