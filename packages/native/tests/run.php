@@ -6413,6 +6413,24 @@ $assert(
     $boundedPreloadFactories === 20,
     'Speculative routes must use a 16-entry LRU bound and be releasable under memory pressure.',
 );
+$mountedPreloadFactories = 0;
+$mountedPreloads = Router::stack('inbox')
+    ->route('inbox', static function () use (&$mountedPreloadFactories): Screen {
+        $mountedPreloadFactories++;
+        return Screen::make(Text::make('Inbox'));
+    })
+    ->route('feed', static fn () => Screen::make(Text::make('Feed')))
+    ->build();
+$mountedPreloads->render();
+$mountedPreloads->push('feed');
+$mountedPreloads->render();
+$assert(
+    $mountedPreloads->preload('inbox')
+        && $mountedPreloadFactories === 1
+        && $mountedPreloads->preload('inbox', ['folder' => 'work'])
+        && $mountedPreloadFactories === 2,
+    'preload of a route already mounted in the stack (a tab below) must not build a second, never-used instance.',
+);
 $prewarmBuilds = 0;
 $prewarmFlags = [];
 $prewarmScreen = new class extends Component implements NavigationLifecycleAware {
@@ -6716,8 +6734,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.50.1',
-    'The runtime SDK contract must match the 1.50.1 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.50.2',
+    'The runtime SDK contract must match the 1.50.2 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

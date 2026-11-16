@@ -27,6 +27,23 @@ internal class PamTextView(context: Context) : TextView(context) {
             invalidate()
         }
 
+    /** Inside onVisibilityAggregated: drawable visibility invalidations are filtered ([drawsSameWhenHidden]). */
+    private var aggregatingVisibility = false
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        aggregatingVisibility = true
+        try {
+            super.onVisibilityAggregated(isVisible)
+        } finally {
+            aggregatingVisibility = false
+        }
+    }
+
+    override fun invalidateDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (aggregatingVisibility && drawsSameWhenHidden(drawable)) return
+        super.invalidateDrawable(drawable)
+    }
+
     /** The full text set by the renderer; [getText] may hold its tail-truncated copy. */
     private var sourceText: CharSequence? = null
     private var settingTruncated = false

@@ -229,6 +229,16 @@ internal fun coverScaledThumbnail(bitmap: Bitmap, targetWidth: Int, targetHeight
 }
 
 /**
+ * How long an image hidden in place (its route covered, its tab left) keeps
+ * its pixels before giving them back, like a hidden player's decoder
+ * (PamMediaView's HIDDEN_RELEASE_MS).
+ */
+internal const val HIDDEN_IMAGE_RELEASE_MS = 5_000L
+
+/** A detached image (a recycled cell) releases at once; one hidden in place waits [HIDDEN_IMAGE_RELEASE_MS]. */
+internal fun deferHiddenImageRelease(detaching: Boolean): Boolean = !detaching
+
+/**
  * Whether a hidden view may give its decoded pixels back: it is restored
  * from the memory cache, or from the disk cache for `releaseWhenHidden`.
  */
@@ -273,9 +283,17 @@ internal class InFlightImageLoads<T> {
     private val loads = ConcurrentHashMap<String, CompletableFuture<T>>()
 
     fun share(key: String, start: () -> CompletableFuture<T>): CompletableFuture<T> {
-        loads[key]?.let { return it }
+        while (true) {
+            val existing = loads[key] ?: break
+            // A failed load is reported to its callers before it leaves the
+            // map (CompletableFuture runs the dependents registered last
+            // first), so a caller told of the failure may ask again while it
+            // is still registered: it starts a new load instead of failing.
+            if (!existing.isCompletedExceptionally) return existing
+            loads.remove(key, existing)
+        }
         val created = CompletableFuture<T>()
-        loads.putIfAbsent(key, created)?.let { return it }
+        loads.putIfAbsent(key, created)?.let { return share(key, start) }
         created.whenComplete { _, _ -> loads.remove(key, created) }
         try {
             start().whenComplete { value, error ->
@@ -1048,6 +1066,12 @@ internal class NativeImageLoader(
      * the memory cache, or decodes it again silently (no repeated load
      * events) when it was evicted meanwhile. Animated, inline and
      * non-memory-cacheable requests are kept.
+     *
+     * A detached view releases at once. A view hidden in place keeps its
+     * pixels for [HIDDEN_IMAGE_RELEASE_MS] first: a tab left and selected
+     * again (or a route popped back) within that time shows them untouched,
+     * instead of every image of the screen being cleared on the hide frame
+     * and drawn again, with its display list, on the show frame.
      */
     private fun onShownChanged(view: PamImageView, shown: Boolean) {
         if (closed.get()) return
@@ -1064,9 +1088,24 @@ internal class NativeImageLoader(
             ) {
                 return
             }
-            pending.released = true
-            view.setImageDrawable(null)
+            // Detaching (a recycled cell) reports while its ancestors still show it.
+            if (!deferHiddenImageRelease(detaching = view.isShown)) {
+                releaseHidden(view, pending)
+                return
+            }
+            if (pending.releaseTask != null) return
+            val task = Runnable {
+                pending.releaseTask = null
+                if (active[view] === pending && !view.isShown) releaseHidden(view, pending)
+            }
+            pending.releaseTask = task
+            main.postDelayed(task, HIDDEN_IMAGE_RELEASE_MS)
             return
+        }
+        pending.releaseTask?.let { task ->
+            // Shown again within the grace period: its pixels never left.
+            main.removeCallbacks(task)
+            pending.releaseTask = null
         }
         if (pending.parked) {
             // A transient failure waited for the view to come back.
@@ -1098,6 +1137,12 @@ internal class NativeImageLoader(
         pending.finished = false
         pending.decodedKey = null
         begin(view, pending.token, view.width, view.height)
+    }
+
+    private fun releaseHidden(view: PamImageView, pending: ActiveRequest) {
+        if (pending.released || view.drawable == null) return
+        pending.released = true
+        view.setImageDrawable(null)
     }
 
     private fun isReleasable(request: NativeImageRequest): Boolean =
@@ -2155,6 +2200,8 @@ internal class NativeImageLoader(
         var animated: Boolean = false,
         var failed: Boolean = false,
         var restoringCallbacks: NativeImageCallbacks? = null,
+        /** The pending release of an image hidden in place ([HIDDEN_IMAGE_RELEASE_MS]). */
+        var releaseTask: Runnable? = null,
         val startedAt: Long = android.os.SystemClock.uptimeMillis(),
     )
 

@@ -1502,9 +1502,22 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         if (visibility == VISIBLE) repairEmptyRichHolders()
     }
 
+    /** Inside onVisibilityAggregated: drawable visibility invalidations are filtered ([drawsSameWhenHidden]). */
+    private var aggregatingVisibility = false
+
     override fun onVisibilityAggregated(isVisible: Boolean) {
-        super.onVisibilityAggregated(isVisible)
+        aggregatingVisibility = true
+        try {
+            super.onVisibilityAggregated(isVisible)
+        } finally {
+            aggregatingVisibility = false
+        }
         if (isVisible) repairEmptyRichHolders()
+    }
+
+    override fun invalidateDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (aggregatingVisibility && drawsSameWhenHidden(drawable)) return
+        super.invalidateDrawable(drawable)
     }
 
     override fun draw(canvas: Canvas) {

@@ -323,6 +323,19 @@ it to some entries (the own-profile tab, not visited profiles). At most three
 entries per route are parked; `reset()` and restored state release them.
 Parked screens receive blur/focus events, not `navigationRemoved()`.
 
+Switching between kept-alive destinations is a reorder of mounted routes and
+a visibility swap: nothing is removed or created. On Android 10+ the two
+routes shown last before the current one keep their display lists while
+hidden (drawn at zero alpha, nothing reaches the GPU), and styled views
+ignore the visibility flip of their backgrounds and images, so the screen
+shown again records only its root instead of every view (a route holding a
+`SurfaceView` or `WebView` is not kept). Its images keep their pixels for 5 s
+after it is hidden (a detached list cell still releases at once), so a quick
+switch back redraws nothing. Do not gate content on focus for this: a covered
+route already releases its media natively (below), and state a focus listener
+changes while the screen is hidden is rendered into it on the next global
+invalidation (theme, metrics), adding removes and creates to the switch.
+
 `NavigationLifecycleAware::navigationRemoved()` runs once when a route instance
 leaves both the stack and keep-alive storage. Covering a route with `push()` only
 blurs it. An outgoing screen receives removal after its exit animation; discarded

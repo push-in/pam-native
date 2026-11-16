@@ -26,6 +26,23 @@ internal class PamScrollContainer @JvmOverloads constructor(
     initialPersistentScrollbar: Boolean = false,
     initialIndicatorStyle: ScrollIndicatorStyle = ScrollIndicatorStyle.AUTO,
 ) : FrameLayout(context) {
+    /** Inside onVisibilityAggregated: drawable visibility invalidations are filtered ([drawsSameWhenHidden]). */
+    private var aggregatingVisibility = false
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        aggregatingVisibility = true
+        try {
+            super.onVisibilityAggregated(isVisible)
+        } finally {
+            aggregatingVisibility = false
+        }
+    }
+
+    override fun invalidateDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (aggregatingVisibility && drawsSameWhenHidden(drawable)) return
+        super.invalidateDrawable(drawable)
+    }
+
     private var horizontal = initialHorizontal
     private var scrollEnabled = true
     private var showsIndicator = false

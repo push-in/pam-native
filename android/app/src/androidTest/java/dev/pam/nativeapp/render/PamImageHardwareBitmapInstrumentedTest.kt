@@ -13,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import android.content.Intent
 import dev.pam.nativeapp.PamTestActivity
@@ -103,11 +104,22 @@ class PamImageHardwareBitmapInstrumentedTest {
             // Decoded at the cover size of the 300 px view, not 1200x900.
             assertEquals(300, bitmap.height)
             assertEquals(400, bitmap.width)
+            val shown = image.drawable
             container.visibility = View.INVISIBLE
-            assertNull("A hidden image releases its pixels", image.drawable)
+            assertSame("Hidden in place, it keeps its pixels for a while", shown, image.drawable)
+            container.visibility = View.VISIBLE
+            assertSame("Shown again within the grace period, nothing was redrawn", shown, image.drawable)
+            container.visibility = View.INVISIBLE
+        }
+        Thread.sleep(HIDDEN_IMAGE_RELEASE_MS + 400)
+        instrumentation.runOnMainSync {
+            assertNull("Still hidden after the grace period, it releases its pixels", image.drawable)
             container.visibility = View.VISIBLE
             assertNotNull("Shown again, the memory cache restores it in the same frame", image.drawable)
             assertEquals(1, loads)
+            // A detached view (a recycled cell) releases at once.
+            container.removeView(image)
+            assertNull("Detached, it releases its pixels at once", image.drawable)
         }
         instrumentation.runOnMainSync {
             loader.close()
