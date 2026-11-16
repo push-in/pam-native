@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.49.10 - 2026-11-16
+
+- `Route::openInitial($uri)` opens a link without a transition, settled
+  before the next frame (React Navigation's initial state from a deep link),
+  the stack under it kept for Back. It matches routes.php links itself, so it
+  works with `Route::linking(false)`, runs middleware like `Route::open()`
+  and builds no screen while resolving the link (`Navigator::openInitial()`
+  only knew the native stack's own deep links and mounted the current screen
+  looking for a nested handler).
+- Android: gesture `translationX/Y` are in the detector's own space, as iOS
+  `translation(in: view)`: under a scaled or rotated ancestor (or detector)
+  the screen delta is mapped through the inverse of their scale and rotation,
+  so `x - translationX` stays the touch-down point, `velocityX/Y` (already
+  local) agree with it, and a native `Drag` (`atTouch`, `bounds`) follows the
+  finger. Pan and swipe distance/direction use the same space; tap slop and
+  the pager hand-back stay in screen pixels. Without scale or rotation the
+  values are unchanged.
+- iOS: a native pan transform (`gestureNativeTransform`) on a rotated or
+  scaled detector, or inside a scaled canvas, follows the finger again. The
+  renderer handed it the detector-space translation, which
+  `parentSpaceVector` then mapped through the same transforms a second time
+  (a story layer inside a 0.69 canvas moved about 1.45x the finger, a rotated
+  one off its axis); it now gets `translation(in: nil)`. PHP's
+  `translationX/Y` stay in the detector's space. Android's native transform
+  likewise maps the screen delta (not the payload's detector-space
+  translation) once into the target's parent, now also for the pan a focal
+  pinch owns.
+- iOS: `PushEventHandler` gains `didLaunch(response:)` and
+  `didLaunch(remoteNotification:)`, with empty default implementations. The
+  host forwards UIScene `connectionOptions.notificationResponse` (the
+  notification tap that launched the app, which reaches no other callback)
+  from `scene(_:willConnectTo:options:)`, and
+  `launchOptions[.remoteNotification]` from `didFinishLaunching` once the
+  plugins are built, both before PHP boots, so a plugin can hand PHP the
+  launching notification.
+- Android: a pushed route's players are created on the frame that lays the
+  route out, before its transition shows it: the route is being revealed,
+  not covered, so the decoder starts a frame (and that layout) earlier. A
+  route mounted hidden without a transition, or a reveal another push
+  supersedes, still allocates nothing.
+
 ## 1.49.9 - 2026-11-16
 
 - iOS: a Pressable/GestureDetector with `accessibilityLabel` (or any other

@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.graphics.Matrix
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.VelocityTracker
@@ -43,6 +44,13 @@ internal data class PamGesturePayload(
     /** Centroid of the first two pointers (the pinch focus), in this view's coordinates. */
     val focalX: Float = x,
     val focalY: Float = y,
+    /**
+     * The finger's screen displacement (rawX/rawY delta). [translationX] is
+     * the detector's space (PHP, drags); a native transform maps this one
+     * once into its target's parent, as iOS maps `translation(in: nil)`.
+     */
+    val screenTranslationX: Float = translationX,
+    val screenTranslationY: Float = translationY,
 )
 
 internal class PamGestureRecognizer(private val view: View) {
@@ -62,6 +70,11 @@ internal class PamGestureRecognizer(private val view: View) {
     private var updateScheduled = false
     private var panOwnsParent = false
     private var tentativeParentClaim = false
+    /** Screen-to-detector map of the event being handled ([PamGestureSpace]). */
+    private val localSpace = FloatArray(4)
+    private var localSpaceTransformed = false
+    private val matrixValues = FloatArray(9)
+    private val displacement = FloatArray(2)
     private val touchSlop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
 
     // A held thumbnail must retain the first MOVE before a horizontal scroll
@@ -117,6 +130,7 @@ internal class PamGestureRecognizer(private val view: View) {
     fun onTouch(event: MotionEvent) {
         val current = config ?: return
         if (!current.enabled || emit == null) return
+        if (active && event.actionMasked != MotionEvent.ACTION_DOWN) refreshLocalSpace()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> begin(event, current)
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -192,8 +206,9 @@ internal class PamGestureRecognizer(private val view: View) {
     private fun move(event: MotionEvent, current: PamGestureConfig) {
         if (!active || event.pointerCount !in current.minPointers..current.maxPointers) return
         velocity?.addMovement(event)
-        val dx = event.rawX - startPageX
-        val dy = event.rawY - startPageY
+        val local = displacementTo(event.rawX, event.rawY)
+        val dx = local[0]
+        val dy = local[1]
         val distance = hypot(dx, dy)
         when (current.type) {
             TYPE_PAN -> {
@@ -207,7 +222,9 @@ internal class PamGestureRecognizer(private val view: View) {
                     if (current.composition != COMPOSITION_SIMULTANEOUS) claimParent()
                     tentativeParentClaim = false
                     emitNow(payload(current, STATE_BEGAN, event))
-                } else if (!recognized && tentativeParentClaim && distance >= touchSlop) {
+                } else if (!recognized && tentativeParentClaim &&
+                    hypot(event.rawX - startPageX, event.rawY - startPageY) >= touchSlop
+                ) {
                     // Off-axis drag: hand the touch back to the ancestors.
                     tentativeParentClaim = false
                     releaseParent()
@@ -245,15 +262,20 @@ internal class PamGestureRecognizer(private val view: View) {
         velocity?.addMovement(event)
         velocity?.computeCurrentVelocity(1_000)
         view.removeCallbacks(longPress)
-        val dx = event.rawX - startPageX
-        val dy = event.rawY - startPageY
+        // A tap's slop is physical (screen pixels); a swipe's distance and
+        // direction are the detector's, like a pan.
+        val screenDx = event.rawX - startPageX
+        val screenDy = event.rawY - startPageY
+        val local = displacementTo(event.rawX, event.rawY)
+        val dx = local[0]
+        val dy = local[1]
         val duration = event.eventTime - beganAt
         if (!cancelled && !recognized) {
             when (current.type) {
                 TYPE_TAP -> if (
                     duration >= current.minDurationMs &&
-                    hypot(dx, dy) <= current.minDistance.coerceAtLeast(DEFAULT_TAP_SLOP) &&
-                    matchesDirection(current, dx, dy)
+                    hypot(screenDx, screenDy) <= current.minDistance.coerceAtLeast(DEFAULT_TAP_SLOP) &&
+                    matchesDirection(current, screenDx, screenDy)
                 ) {
                     recognized = true
                     emitNow(payload(current, STATE_BEGAN, event))
@@ -307,6 +329,9 @@ internal class PamGestureRecognizer(private val view: View) {
         } else {
             0f
         }
+        val translation = displacementTo(pageX, pageY)
+        val translationX = translation[0]
+        val translationY = translation[1]
         return PamGesturePayload(
             type = current.type,
             state = state,
@@ -314,8 +339,8 @@ internal class PamGestureRecognizer(private val view: View) {
             y = y,
             pageX = pageX,
             pageY = pageY,
-            translationX = pageX - startPageX,
-            translationY = pageY - startPageY,
+            translationX = translationX,
+            translationY = translationY,
             velocityX = velocity?.xVelocity ?: 0f,
             velocityY = velocity?.yVelocity ?: 0f,
             scale = scale,
@@ -324,7 +349,25 @@ internal class PamGestureRecognizer(private val view: View) {
             timestamp = event?.eventTime ?: SystemClock.uptimeMillis(),
             focalX = if (event != null && event.pointerCount >= 2) (event.getX(0) + event.getX(1)) / 2f else x,
             focalY = if (event != null && event.pointerCount >= 2) (event.getY(0) + event.getY(1)) / 2f else y,
+            screenTranslationX = pageX - startPageX,
+            screenTranslationY = pageY - startPageY,
         )
+    }
+
+    private fun refreshLocalSpace() {
+        localSpaceTransformed = PamGestureSpace.screenToLocal(view, localSpace, matrixValues)
+    }
+
+    /**
+     * The finger's displacement since touch-down in the detector's space
+     * (iOS `translation(in: view)`), in a reused array. Without a scaled or
+     * rotated ancestor it is the screen delta, unchanged.
+     */
+    private fun displacementTo(rawX: Float, rawY: Float): FloatArray {
+        displacement[0] = rawX - startPageX
+        displacement[1] = rawY - startPageY
+        if (localSpaceTransformed) PamGestureSpace.map(localSpace, displacement)
+        return displacement
     }
 
     private fun captureMultiPointer(event: MotionEvent) {
@@ -391,4 +434,86 @@ internal class PamGestureRecognizer(private val view: View) {
         const val DEFAULT_TAP_SLOP = 12f
         const val MIN_ROTATION_RADIANS = 0.035f
     }
+}
+
+/**
+ * Gesture displacements in the detector's own space, like iOS
+ * `translation(in: view)`. Android reports the finger in screen pixels
+ * (`rawX`/`rawY`); under a scaled or rotated ancestor (a story sticker) that
+ * is not the space the detector, its children and a drag target move in. The
+ * linear part (scale, rotation, skew) of the detector's and its ancestors'
+ * matrices maps a local vector to the screen, and its inverse maps a
+ * displacement back. Offsets (left/top, scroll, translation) never apply to a
+ * displacement, so a detector without scale or rotation keeps the screen
+ * delta exactly. A 3D rotation contributes its affine part.
+ *
+ * Linear maps are row-major `[a, b, c, d]`: x' = a·x + b·y, y' = c·x + d·y.
+ */
+internal object PamGestureSpace {
+    fun identity(out: FloatArray) {
+        out[0] = 1f
+        out[1] = 0f
+        out[2] = 0f
+        out[3] = 1f
+    }
+
+    fun isIdentity(linear: FloatArray): Boolean =
+        linear[0] == 1f && linear[1] == 0f && linear[2] == 0f && linear[3] == 1f
+
+    /** [into] = [a, b, c, d] · [into]: [into] maps from an inner space, the new map ends one ancestor further out. */
+    fun concatOuter(a: Float, b: Float, c: Float, d: Float, into: FloatArray) {
+        val m0 = into[0]
+        val m1 = into[1]
+        val m2 = into[2]
+        val m3 = into[3]
+        into[0] = a * m0 + b * m2
+        into[1] = a * m1 + b * m3
+        into[2] = c * m0 + d * m2
+        into[3] = c * m1 + d * m3
+    }
+
+    /** Inverts [linear] in place; false (unchanged) when it is singular or not finite. */
+    fun invert(linear: FloatArray): Boolean {
+        val determinant = linear[0] * linear[3] - linear[1] * linear[2]
+        if (!determinant.isFinite() || abs(determinant) < MIN_DETERMINANT) return false
+        val a = linear[0]
+        linear[0] = linear[3] / determinant
+        linear[1] = -linear[1] / determinant
+        linear[2] = -linear[2] / determinant
+        linear[3] = a / determinant
+        return true
+    }
+
+    /** Maps the vector in [vector] (x, y) through [linear], in place. */
+    fun map(linear: FloatArray, vector: FloatArray) {
+        val x = vector[0]
+        val y = vector[1]
+        vector[0] = linear[0] * x + linear[1] * y
+        vector[1] = linear[2] * x + linear[3] * y
+    }
+
+    /**
+     * Fills [out] with the map from a screen displacement to [view]'s space.
+     * False when no matrix on the way scales or rotates (or it cannot be
+     * inverted): the screen delta is used as it is. [values] is scratch.
+     */
+    fun screenToLocal(view: View, out: FloatArray, values: FloatArray): Boolean {
+        identity(out)
+        var node: View? = view
+        while (node != null) {
+            val matrix = node.matrix
+            if (!matrix.isIdentity) {
+                matrix.getValues(values)
+                val a = values[Matrix.MSCALE_X]
+                val b = values[Matrix.MSKEW_X]
+                val c = values[Matrix.MSKEW_Y]
+                val d = values[Matrix.MSCALE_Y]
+                if (a != 1f || b != 0f || c != 0f || d != 1f) concatOuter(a, b, c, d, out)
+            }
+            node = node.parent as? View
+        }
+        return !isIdentity(out) && invert(out)
+    }
+
+    private const val MIN_DETERMINANT = 1e-9f
 }

@@ -3,7 +3,7 @@
 # at the given version: splits the directory history, drops the monorepo path
 # repository from composer.json, tags and pushes. Run from main after a release.
 #
-#   scripts/publish-web.sh 1.49.9
+#   scripts/publish-web.sh 1.49.10
 set -euo pipefail
 
 version=${1:?usage: scripts/publish-web.sh <version>}

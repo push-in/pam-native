@@ -294,6 +294,54 @@ unlink($configDir.'/config/middleware.php');
 rmdir($configDir.'/config');
 rmdir($configDir);
 
+// --- Route::openInitial(): a launch link settled without a transition (Route::linking(false) apps)
+Route::flush();
+MiddlewareRegistry::reset();
+App::middleware(['auth' => Authenticate::class]);
+require __DIR__.'/Fixtures/RoutesApp/routes.php';
+Route::linking(false);
+Authenticate::$signedIn = true;
+$initialRouter = new RouteNavigator(RouteCollection::current());
+RouteCollection::activate($initialRouter);
+$initialStack = $initialRouter->root();
+$stackField = static fn (string $name): mixed => (new ReflectionProperty(Navigator::class, $name))->getValue($initialStack);
+$revision = $stackField('revision');
+$assert(
+    Route::openInitial('https://example.com/nope') === false && Route::openInitial('') === false
+        && $stackField('revision') === $revision && $initialStack->currentRoute() === 'tabs',
+    'An unknown link is not opened and leaves the stack untouched.',
+);
+$assert(
+    Route::openInitial('app://chat/42?unread=3') === true
+        && array_column($initialStack->getState()['routes'], 'name') === ['tabs', 'chat']
+        && Route::current()?->params() === ['id' => '42', 'unread' => 3],
+    'openInitial() routes a routes.php link with Route::linking(false): '.json_encode($initialStack->getState()['routes']),
+);
+$assert(
+    $stackField('operation')->name === 'Idle' && $stackField('actionTransition') === null && $stackField('outgoing') === null,
+    'openInitial() settles the stack: no transition runs, the link is simply there on the next frame.',
+);
+$assert(
+    $stackField('routeInstances') === [] && $initialRouter->screen() === null,
+    'openInitial() builds no screen before the frame (Navigator::open() mounted the current one looking for a nested link handler).',
+);
+$frame = $initialStack->render()->toElement();
+$assert(
+    count($frame->children) === 2,
+    'The first frame shows the linked screen with the stack under it for Back.',
+);
+$assert(
+    Route::open('app://settings') === true && $stackField('operation')->name === 'Push',
+    'Route::open() keeps its transition.',
+);
+Authenticate::$signedIn = false;
+$assert(
+    Route::openInitial('app://chat/7') === true && $initialStack->currentRoute() === 'login'
+        && $stackField('operation')->name === 'Idle',
+    'Middleware still runs: a redirected launch link settles on the redirect target.',
+);
+Authenticate::$signedIn = true;
+
 Route::flush();
 MiddlewareRegistry::reset();
 echo "Architecture v2 routing tests passed.\n";

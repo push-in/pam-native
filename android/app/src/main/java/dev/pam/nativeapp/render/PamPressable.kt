@@ -336,16 +336,20 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             }
         }
         when (payload.type) {
+            // The finger moves in screen pixels and the target translates in
+            // its parent's space, which the detector's and every ancestor's
+            // scale or rotation transforms: the screen delta is mapped once,
+            // as iOS maps `translation(in: nil)`. (`payload.translationX/Y` are
+            // already in the detector's space, for PHP and drags.)
             2, 5 -> if (focalZoomTargets[translationTarget] == true) {
                 // A focal pinch owns the translation of this surface: follow it
                 // and resume panning from wherever the pinch leaves the content.
-                nativeBaseTranslationX = translationTarget.translationX - payload.translationX
-                nativeBaseTranslationY = translationTarget.translationY - payload.translationY
+                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.screenTranslationX, payload.screenTranslationY)
+                nativeBaseTranslationX = translationTarget.translationX - deltaX
+                nativeBaseTranslationY = translationTarget.translationY - deltaY
                 nativeGestureTransformActive = false
             } else {
-                // The finger moves in screen pixels; the target translates in its
-                // parent's space, which a scaled or rotated ancestor transforms.
-                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.translationX, payload.translationY)
+                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.screenTranslationX, payload.screenTranslationY)
                 val translatedX = nativeBaseTranslationX + deltaX
                 translationTarget.translationX = if (nativeTranslationLimitX > 0f) {
                     translatedX.coerceIn(-nativeTranslationLimitX, nativeTranslationLimitX)

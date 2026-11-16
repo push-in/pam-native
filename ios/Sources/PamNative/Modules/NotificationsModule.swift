@@ -22,6 +22,23 @@ public protocol PushEventHandler: AnyObject {
     func didReceive(response: UNNotificationResponse, completionHandler: @escaping () -> Void)
     #endif
     func didReceiveRemote(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void)
+    #if !os(tvOS)
+    /// The notification tap that launched the app. Under UIScene it only
+    /// arrives in `connectionOptions.notificationResponse`; the host forwards
+    /// it before PHP boots.
+    func didLaunch(response: UNNotificationResponse)
+    #endif
+    /// `launchOptions[.remoteNotification]` of a launch, forwarded after the
+    /// plugins are built and before PHP boots.
+    func didLaunch(remoteNotification: [AnyHashable: Any])
+}
+
+/// Launch hooks are optional: a handler that does not need them keeps compiling.
+public extension PushEventHandler {
+    #if !os(tvOS)
+    func didLaunch(response: UNNotificationResponse) {}
+    #endif
+    func didLaunch(remoteNotification: [AnyHashable: Any]) {}
 }
 
 public enum PamPushNotifications {
@@ -42,5 +59,11 @@ public enum PamPushNotifications {
     public static func didReceiveRemote(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void) {
         guard let handler else { completion(.noData); return }
         handler.didReceiveRemote(userInfo: userInfo, completion: completion)
+    }
+    #if !os(tvOS)
+    public static func didLaunch(response: UNNotificationResponse) { handler?.didLaunch(response: response) }
+    #endif
+    public static func didLaunch(remoteNotification userInfo: [AnyHashable: Any]) {
+        handler?.didLaunch(remoteNotification: userInfo)
     }
 }

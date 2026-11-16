@@ -275,6 +275,12 @@ internal class PamDragController(private val host: ViewGroup) {
         config?.group?.takeIf(String::isNotEmpty)?.let(::unregister)
     }
 
+    /**
+     * [x]/[y] (the pointer) and the translations are in the detector's space,
+     * as the gesture payload reports them, so `atTouch` anchors at the touch
+     * point and the target follows the finger under a scaled or rotated
+     * ancestor.
+     */
     fun begin(x: Float = 0f, y: Float = 0f, translationX: Float = 0f, translationY: Float = 0f) {
         val current = config ?: return
         runner?.cancel()

@@ -39,6 +39,16 @@ Templates use the same native contract:
 </GestureDetector>
 ```
 
+`x`/`y`, `translationX`/`translationY` and `velocityX`/`velocityY` are in the
+detector's own space on both platforms (UIKit `translation(in: view)`):
+under a scaled or rotated ancestor, or on a detector that is itself scaled or
+rotated, the finger's screen movement is mapped through the inverse of those
+transforms, so `x - translationX` stays the touch-down point inside the
+detector. `pageX`/`pageY` stay in window coordinates. Without scale or
+rotation the translation is the screen delta. To move something in a parent
+space (a layer on its canvas), map the translation back through the
+detector's own rotation and scale, or use the `pageX`/`pageY` delta.
+
 Handlers that also need item context may pass `$event` explicitly. PAM decodes
 the wire payload according to the method's `GestureEvent` type instead of
 exposing the encoded transport string:
@@ -65,11 +75,13 @@ rate. `on:gestureBegin`, `on:gestureEnd` and `on:gestureCancel` remain
 available for semantic state updates; omit `on:gestureUpdate` to keep PHP out
 of the frame loop.
 
-The finger moves in screen pixels and the child translates in its parent's
-space: under a scaled or rotated ancestor (a layer on a logical canvas drawn
-at a uniform scale, a layer committed at 2x) the translation is mapped
-through the inverse of those transforms, so the child keeps following the
-finger. Pinch and rotation are relative and need no mapping.
+The translation is already in the detector's space and the child moves in
+its parent's: under a scaled or rotated ancestor (a layer on a logical canvas
+drawn at a uniform scale, a layer committed at 2x) the child keeps following
+the finger. Pinch and rotation are relative and need no mapping. A native
+`Drag` (`atTouch`, `bounds`) works in the same space, so a slider inside a
+scaled and rotated sticker tracks the finger without counter-transforming its
+touch area.
 
 ```pam
 <GestureDetector

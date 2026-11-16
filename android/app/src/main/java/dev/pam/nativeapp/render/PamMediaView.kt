@@ -87,7 +87,8 @@ internal class PamMediaView(
 ) : FrameLayout(context),
     MediaController.MediaPlayerControl,
     TextureView.SurfaceTextureListener,
-    PamSharedContentView {
+    PamSharedContentView,
+    PamRouteCoverage.Aware {
     private val video = TextureView(context)
     private val poster = PamImageView(context)
     private val main = Handler(Looper.getMainLooper())
@@ -727,8 +728,14 @@ internal class PamMediaView(
         }
     }
 
+    /** A route about to show (a push laid out first) is not covering: the player prepares while it lays out. */
+    override fun onRouteCoverageChanged() {
+        if (isAttachedToWindow) syncVisibility()
+    }
+
     private fun syncCoverage() {
-        val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
+        val nowCovered = isAttachedToWindow && !keepAliveWhenCovered &&
+            PamRouteCoverage.isCovered(this, revealing = true)
         if (nowCovered == covered) return
         covered = nowCovered
         if (nowCovered) releaseDecoder() else if (!suspended && !hiddenRelease && !idleSurface) restoreAfterCover() else if (!suspended && idleSurface) ensureVideoAttached()

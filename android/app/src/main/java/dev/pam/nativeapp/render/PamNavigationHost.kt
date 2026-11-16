@@ -215,6 +215,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
+        if (child === revealing) revealing = null
         if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
         // A route leaves at rest: mounted again later (kept alive, parked) it
@@ -754,6 +755,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         abortGesture()
         clearSharedElements()
         clearPendingTransition()
+        revealing = null
         running?.cancel()
         running = null
         restoreIdleRoutes()
@@ -796,6 +798,31 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         invalidate()
     }
 
+    /**
+     * The route the scheduled transition shows on its next frame: mounted
+     * hidden and laid out first, it is not covered for media
+     * ([PamRouteCoverage.isCovered] with `revealing`). Its players are
+     * created and prepare while it lays out, a frame (and that layout)
+     * before it shows, instead of when the transition starts.
+     */
+    private var revealing: View? = null
+
+    internal fun isRevealing(route: View): Boolean = revealing === route
+
+    private fun reveal(route: View) {
+        if (revealing === route) return
+        settleReveal()
+        revealing = route
+        PamRouteCoverage.dispatchChanged(route)
+    }
+
+    /** Ends a reveal: a route the transition did not show is covered again (its media release). */
+    private fun settleReveal() {
+        val route = revealing ?: return
+        revealing = null
+        if (route.parent === this && route.visibility != View.VISIBLE) PamRouteCoverage.dispatchChanged(route)
+    }
+
     private fun clearPendingTransition() {
         val listener = pendingPreDraw ?: return
         pendingObserver
@@ -813,6 +840,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         takePredictiveBackVerdict()
         abortGesture()
         if (childCount == 0) {
+            settleReveal()
             restoreIdleRoutes()
             return
         }
@@ -821,6 +849,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             // Mounted in this frame: lay it out on the next one, then show it
             // (mount and first layout never share a frame).
             releaseFirstLayout(top)
+            reveal(top)
             scheduleTransition()
             return
         }
@@ -840,12 +869,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
             else -> {
                 showOnlyTop()
+                settleReveal()
                 restoreIdleRoutes()
                 return
             }
         }
         if (incoming in awaitingFirstLayout) {
             releaseFirstLayout(incoming)
+            reveal(incoming)
             scheduleTransition()
             return
         }
@@ -856,6 +887,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             predictiveBackCommitted = false
             predictiveBackProgress = 0f
             finish(incoming, outgoing)
+            settleReveal()
             return
         }
 
@@ -869,6 +901,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 }
             }
         }
+        // Only now: the incoming route is visible, so its media never see it covered in between.
+        settleReveal()
 
         prepareSharedElements(incoming, outgoing, popping = operation == OPERATION_POP)
 

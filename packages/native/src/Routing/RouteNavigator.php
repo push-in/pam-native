@@ -312,6 +312,27 @@ final class RouteNavigator implements NavigationLinkHandler
 
     public function open(string $uri): bool
     {
+        return $this->openLink($uri);
+    }
+
+    /**
+     * Opens a link as the screen that is simply there, like React
+     * Navigation's initial state from a deep link: the same matching and
+     * middleware as open(), with no transition, settled before the next
+     * frame (the stack under it stays for Back). Works with
+     * Route::linking(false): the links are this router's, not the native
+     * stack's, and no screen is built to look for a nested link handler.
+     */
+    public function openInitial(string $uri): bool
+    {
+        if (!$this->openLink($uri, NavigationTransition::None, 0)) return false;
+        $this->stack->settle();
+
+        return true;
+    }
+
+    private function openLink(string $uri, ?NavigationTransition $transition = null, ?int $durationMs = null): bool
+    {
         if ($uri === '' || strlen($uri) > 8_192) return false;
         $parts = parse_url($uri);
         if ($parts === false) return false;
@@ -335,7 +356,7 @@ final class RouteNavigator implements NavigationLinkHandler
                     }
                 }
                 try {
-                    return $this->navigate($route->routeName(), $params);
+                    return $this->navigate($route->routeName(), $params, transition: $transition, durationMs: $durationMs);
                 } catch (InvalidArgumentException) {
                     return false;
                 }

@@ -145,6 +145,50 @@ final class PamNativeGestureTransformTests: XCTestCase {
         XCTAssertEqual(PamNativeGestureTransform.parentSpaceVector(CGPoint(x: 12, y: -4), for: content), CGPoint(x: 12, y: -4))
     }
 
+    /// Story editor layer: the detector is rotated 30° and committed at 2x
+    /// inside a canvas drawn at 0.69. The renderer hands the native transform
+    /// the window-space translation (`translation(in: nil)`) and it maps it
+    /// once into the target's superview, so the target moves exactly with the
+    /// finger. The detector-space translation (the PHP payload) mapped again
+    /// would undo those transforms twice.
+    func testNativePanUnderARotatedScaledDetectorMovesWithTheFinger() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let canvas = UIView(frame: window.bounds)
+        canvas.transform = CGAffineTransform(scaleX: 0.69, y: 0.69)
+        let detector = UIView(frame: CGRect(x: 100, y: 300, width: 200, height: 80))
+        detector.transform = CGAffineTransform(rotationAngle: .pi / 6).scaledBy(x: 2, y: 2)
+        let target = UIView(frame: detector.bounds)
+        window.addSubview(canvas)
+        canvas.addSubview(detector)
+        detector.addSubview(target)
+        let finger = CGPoint(x: 40, y: 25)
+
+        func displacement(for translation: CGPoint) -> CGPoint {
+            PamMotionTarget.setTransform(PamMotionTransform(), on: target)
+            let start = target.convert(CGPoint.zero, to: window)
+            var pan = PamNativeGestureTransform()
+            pan.begin(on: target)
+            _ = pan.apply(
+                on: target, type: 2, translation: translation, scale: 1, rotation: 0,
+                minimumScale: 1, maximumScale: 4, translationLimitX: 0
+            )
+            let end = target.convert(CGPoint.zero, to: window)
+            return CGPoint(x: end.x - start.x, y: end.y - start.y)
+        }
+
+        let moved = displacement(for: finger)
+        XCTAssertEqual(moved.x, finger.x, accuracy: 0.01)
+        XCTAssertEqual(moved.y, finger.y, accuracy: 0.01)
+
+        // What the detector reports to PHP for the same finger movement.
+        let origin = detector.convert(CGPoint.zero, from: window)
+        let tip = detector.convert(finger, from: window)
+        let local = CGPoint(x: tip.x - origin.x, y: tip.y - origin.y)
+        XCTAssertEqual(hypot(local.x, local.y), hypot(finger.x, finger.y) / 1.38, accuracy: 0.01)
+        let doubled = displacement(for: local)
+        XCTAssertGreaterThan(hypot(doubled.x - finger.x, doubled.y - finger.y), 10)
+    }
+
     func testBoundedPhotoTransformKeepsTheContainedContentCoveringTheViewport() {
         let page = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 700))
         // Portrait 3:4 at 2x: 720x960 may move 180 horizontally, 130 vertically.

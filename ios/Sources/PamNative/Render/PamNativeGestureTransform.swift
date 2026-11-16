@@ -39,8 +39,10 @@ struct PamNativeGestureTransform {
         var current = PamMotionTarget.transform(of: view)
         switch type {
         case 2, 5:
-            // The finger moves in screen points; the view translates in its
-            // superview's space, which a scaled or rotated ancestor transforms.
+            // `translation` is in window points (not the detector's space);
+            // the view translates in its superview's space, which the
+            // detector's and every other ancestor's scale or rotation
+            // transforms: mapped once, here.
             let translation = Self.parentSpaceVector(translation, for: view)
             if Self.focalZoomTargets.contains(ObjectIdentifier(view)) {
                 // Resume panning from wherever the focal pinch leaves the content.

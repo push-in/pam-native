@@ -1,0 +1,272 @@
+package dev.pam.nativeapp.render
+
+import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import kotlin.math.abs
+
+/**
+ * Pan translations are in the detector's space, like iOS
+ * `translation(in: view)`: under a scaled or rotated ancestor (a story
+ * sticker box) the finger's screen delta is mapped back, so `x - translation`
+ * stays the touch-down point and a drag target follows the finger. Without
+ * scale or rotation the translation is the screen delta, bit for bit.
+ *
+ * Events go through a root that hit-tests the transformed box, so the
+ * detector sees local `x`/`y` as on a device while `rawX`/`rawY` stay screen
+ * coordinates.
+ */
+@RunWith(AndroidJUnit4::class)
+class PamGestureLocalSpaceInstrumentedTest {
+    @Test
+    fun panUnderAScaledRotatedBoxReportsTheDetectorSpace() {
+        // Box at 2x, rotated 90° clockwise around its centre (100, 50): the
+        // detector's x axis points down the screen at 2 px per unit.
+        val f = fixture(scale = 2f, rotation = 90f)
+        main {
+            f.send(MotionEvent.ACTION_DOWN, 100f, 50f, 0L)
+            for (step in 1..5) f.send(MotionEvent.ACTION_MOVE, 100f, 50f + 8f * step, 8L * step)
+            f.send(MotionEvent.ACTION_UP, 100f, 98f, 48L)
+        }
+        val end = f.payloads.last { it.state == STATE_ENDED }
+        assertEquals("48 px down the screen are 24 units along the detector's x", 24f, end.translationX, 0.01f)
+        assertEquals(0f, end.translationY, 0.01f)
+        for (payload in f.payloads) {
+            assertEquals("x - translationX is the touch-down point", 100f, payload.x - payload.translationX, 0.01f)
+            assertEquals(50f, payload.y - payload.translationY, 0.01f)
+        }
+        assertTrue("Velocity is local too: along +x (${end.velocityX}, ${end.velocityY})", end.velocityX > 0f)
+        assertTrue(abs(end.velocityY) < end.velocityX / 10f)
+    }
+
+    @Test
+    fun withoutScaleOrRotationTheTranslationIsTheScreenDelta() {
+        // Offsets (a translated box) never apply to a displacement.
+        val f = fixture(scale = 1f, rotation = 0f, boxTranslationX = 30f)
+        main {
+            f.send(MotionEvent.ACTION_DOWN, 130f, 50f, 0L)
+            for (step in 1..5) f.send(MotionEvent.ACTION_MOVE, 130f + 8f * step, 53f, 8L * step)
+            f.send(MotionEvent.ACTION_UP, 177f, 53f, 48L)
+        }
+        val end = f.payloads.last { it.state == STATE_ENDED }
+        assertEquals(47f, end.translationX, 0f)
+        assertEquals(3f, end.translationY, 0f)
+        assertEquals(100f, end.x - end.translationX, 0.001f)
+        assertEquals(177f, end.pageX, 0f)
+        assertTrue(end.velocityX > 0f)
+    }
+
+    @Test
+    fun atTouchDragFollowsTheFingerUnderAScaledBox() {
+        // Box at 2x around (100, 50): local x = (screen x + 100) / 2.
+        val drag = requireNotNull(PamDragConfig.parse("axis=x\ntouch=0\nmin=0\nmax=1000\nsnapOnRelease=0"))
+        val f = fixture(scale = 2f, rotation = 0f, drag = drag)
+        main {
+            f.send(MotionEvent.ACTION_DOWN, 60f, 50f, 0L)
+            f.send(MotionEvent.ACTION_MOVE, 100f, 50f, 16L)
+            f.send(MotionEvent.ACTION_MOVE, 180f, 50f, 32L)
+            f.send(MotionEvent.ACTION_UP, 180f, 50f, 40L)
+        }
+        // Screen-space deltas anchored the thumb at 60 and moved it 120 (180).
+        assertEquals("The thumb sits under the finger (local 140)", 140f, f.target.translationX, 0.01f)
+    }
+
+    @Test
+    fun atTouchDragWithoutTransformIsUnchanged() {
+        val drag = requireNotNull(PamDragConfig.parse("axis=x\ntouch=0\nmin=0\nmax=1000\nsnapOnRelease=0"))
+        val f = fixture(scale = 1f, rotation = 0f, drag = drag)
+        main {
+            f.send(MotionEvent.ACTION_DOWN, 60f, 50f, 0L)
+            f.send(MotionEvent.ACTION_MOVE, 100f, 50f, 16L)
+            f.send(MotionEvent.ACTION_MOVE, 180f, 50f, 32L)
+            f.send(MotionEvent.ACTION_UP, 180f, 50f, 40L)
+        }
+        assertEquals(180f, f.target.translationX, 0f)
+    }
+
+    /**
+     * Story editor layer: the detector itself is rotated 30° and committed at
+     * 2x inside a canvas drawn at 0.69, and its native transform moves its
+     * child. The screen delta is mapped once into the child's parent (the
+     * detector), so the child moves exactly with the finger, while PHP still
+     * gets the detector-space translation.
+     *
+     * The 2x goes through [PamPressable.configure] (`targetScaleX`), as the
+     * renderer sets a Pressable's `scaleX`: a touch-down restores the
+     * Pressable's own scale to it, so a raw `View.scaleX` would drop to 1.
+     */
+    @Test
+    fun nativePanUnderARotatedScaledDetectorMovesWithTheFinger() {
+        lateinit var root: FrameLayout
+        lateinit var target: View
+        val payloads = mutableListOf<PamGesturePayload>()
+        main {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            target = View(context)
+            val detector = PamPressable(context).apply {
+                addView(target, FrameLayout.LayoutParams(200, 80))
+                configureGesture(
+                    PamGestureConfig(
+                        type = 2,
+                        enabled = true,
+                        minPointers = 1,
+                        maxPointers = 1,
+                        direction = 1,
+                        composition = 1,
+                        minDistance = 2f,
+                        minDurationMs = 0L,
+                    ),
+                    callback = { payloads += it },
+                    nativeTransform = true,
+                )
+                configure(
+                    pressOpacity = 1f,
+                    pressScale = 1f,
+                    targetOpacity = 1f,
+                    targetScaleX = 2f,
+                    targetScaleY = 2f,
+                    delayLongPressMs = 500L,
+                    delayPressInMs = 0L,
+                    delayPressOutMs = 0L,
+                    retentionLeft = 0f,
+                    retentionTop = 0f,
+                    retentionRight = 0f,
+                    retentionBottom = 0f,
+                    androidDisableSound = true,
+                )
+                rotation = 30f
+                scaleX = 2f
+                scaleY = 2f
+            }
+            val canvas = FrameLayout(context).apply {
+                scaleX = 0.69f
+                scaleY = 0.69f
+                addView(detector, FrameLayout.LayoutParams(200, 80).apply {
+                    leftMargin = 100
+                    topMargin = 300
+                })
+            }
+            root = FrameLayout(context).apply {
+                addView(canvas, FrameLayout.LayoutParams(800, 800))
+                measure(
+                    View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                )
+                layout(0, 0, 800, 800)
+            }
+        }
+        lateinit var start: FloatArray
+        lateinit var end: FloatArray
+        main {
+            start = pointInRoot(target, root)
+            // The detector's centre (200, 340 in the canvas) is (262, 358.6) on screen.
+            fun send(action: Int, x: Float, y: Float, at: Long) {
+                val event = MotionEvent.obtain(DOWN_TIME, DOWN_TIME + at, action, x, y, 0)
+                try { root.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            send(MotionEvent.ACTION_DOWN, 262f, 358.6f, 0L)
+            send(MotionEvent.ACTION_MOVE, 272f, 363.6f, 16L)
+            send(MotionEvent.ACTION_MOVE, 302f, 383.6f, 32L)
+            send(MotionEvent.ACTION_UP, 302f, 383.6f, 40L)
+            end = pointInRoot(target, root)
+            assertEquals("The detector keeps its committed 2x", 2f, (target.parent as View).scaleX, 0f)
+        }
+        assertEquals("The child moves with the finger (x)", 40f, end[0] - start[0], 0.05f)
+        assertEquals("The child moves with the finger (y)", 25f, end[1] - start[1], 0.05f)
+        val reported = payloads.last { it.state == STATE_ENDED }
+        assertEquals(
+            "PHP still gets the detector-space translation (screen / 1.38)",
+            47.17f / 1.38f,
+            kotlin.math.hypot(reported.translationX, reported.translationY),
+            0.05f,
+        )
+    }
+
+    /** [view]'s origin in [root]'s coordinates, through every matrix on the way. */
+    private fun pointInRoot(view: View, root: View): FloatArray {
+        val point = floatArrayOf(0f, 0f)
+        var node = view
+        while (node !== root) {
+            node.matrix.mapPoints(point)
+            val parent = node.parent as View
+            point[0] += node.left - parent.scrollX
+            point[1] += node.top - parent.scrollY
+            node = parent
+        }
+        return point
+    }
+
+    private class Fixture(
+        val root: FrameLayout,
+        val target: View,
+        val payloads: MutableList<PamGesturePayload>,
+    ) {
+        fun send(action: Int, x: Float, y: Float, at: Long) {
+            val event = MotionEvent.obtain(DOWN_TIME, DOWN_TIME + at, action, x, y, 0)
+            try { root.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+    }
+
+    private fun fixture(
+        scale: Float,
+        rotation: Float,
+        boxTranslationX: Float = 0f,
+        drag: PamDragConfig? = null,
+    ): Fixture {
+        lateinit var fixture: Fixture
+        main {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val payloads = mutableListOf<PamGesturePayload>()
+            val target = View(context)
+            val detector = PamPressable(context).apply {
+                addView(target, FrameLayout.LayoutParams(20, 100))
+                configureGesture(
+                    PamGestureConfig(
+                        type = 2,
+                        enabled = true,
+                        minPointers = 1,
+                        maxPointers = 1,
+                        direction = 1,
+                        composition = 1,
+                        minDistance = 1f,
+                        minDurationMs = 0L,
+                    ),
+                    callback = { payloads += it },
+                )
+                if (drag != null) configureDrag(drag, null)
+            }
+            val box = FrameLayout(context).apply {
+                scaleX = scale
+                scaleY = scale
+                this.rotation = rotation
+                translationX = boxTranslationX
+                addView(detector, FrameLayout.LayoutParams(200, 100))
+            }
+            val root = FrameLayout(context).apply {
+                addView(box, FrameLayout.LayoutParams(200, 100))
+                measure(
+                    View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+                )
+                layout(0, 0, 400, 400)
+            }
+            fixture = Fixture(root, target, payloads)
+        }
+        return fixture
+    }
+
+    private fun main(block: () -> Unit) {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(block)
+    }
+
+    private companion object {
+        const val DOWN_TIME = 1_000L
+        const val STATE_ENDED = 3
+    }
+}
