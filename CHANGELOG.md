@@ -29,8 +29,9 @@ Frame-cost fixes measured on a Galaxy S10 after 1.50.0. No API change.
   only the fallback without a clock value) and are measured again when the
   label gains or loses a character (9:59 → 10:00, 99:59 → 100:00), with one
   timer per component and no per-second render. `ClockFormat::format()`.
-- Tests: the sliced mount's absolute frame budgets apply on reference-speed
-  hosts; slower CI runners check the relative guarantee.
+- Tests: the sliced mount budget test checks each slice's mount work on any
+  host (internal `mountSliceObserver`); whole-frame budgets apply only on
+  hardware GL (SwiftShader CI emulators skip them).
 
 ## 1.50.0 - 2026-11-16
 
