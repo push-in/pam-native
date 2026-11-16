@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.49.11 - 2026-11-16
+
+- `PamPhpCompiler::prebuild()` streams the component pack to disk instead of
+  holding every compiled class and template twice (once per entry, once in
+  the packed string): a 444-component app peaked at 124 MB and a release
+  build ran out of the CLI's 128 MB `memory_limit`; it now peaks at 68 MB.
+  The pack is byte-identical.
+
 ## 1.49.10 - 2026-11-16
 
 - `Route::openInitial($uri)` opens a link without a transition, settled
