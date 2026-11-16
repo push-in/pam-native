@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.annotation.SuppressLint
 import android.animation.ValueAnimator
 import android.app.Dialog
 import android.content.Context
@@ -1903,6 +1904,9 @@ internal class PamModalHost @JvmOverloads constructor(
      * draw commands (no pixels): decoded bitmaps, hardware ones included,
      * are shared with the views being removed.
      */
+    // Ghosts sit at the removed views' physical frames (View.left/top), so
+    // LEFT is the right gravity in RTL too.
+    @SuppressLint("RtlHardcoded")
     private fun recordContentGhosts(): List<View> {
         val ghosts = ArrayList<View>(1)
         for (index in 0 until content.childCount) {
@@ -2253,6 +2257,7 @@ internal fun recordModalPicture(view: View): Picture? = runCatching {
 }.getOrNull()
 
 /** A removed Modal view's last picture, drawn where the view was while the Modal exits. */
+@SuppressLint("ViewConstructor") // Created only by the renderer, never inflated.
 private class PamModalExitGhost(context: Context, private val picture: Picture) : View(context) {
     override fun onDraw(canvas: Canvas) {
         if (
