@@ -3277,7 +3277,6 @@ class PamRenderer(
     /** The node whose initial properties are being applied (deferred image load / press configuration). */
     private var initialPropertiesState: NodeState? = null
     private var initialImageLoadPending = false
-    private var initialPressablePending = false
 
     private val cellProfile: CellProfile? =
         if (BuildConfig.DEBUG && Log.isLoggable(CELL_PROFILE_TAG, Log.DEBUG)) CellProfile() else null
@@ -4456,10 +4455,8 @@ class PamRenderer(
         state.initialTextUpdates = textUpdates
         state.initialBackgroundUpdate = backgroundUpdate
         state.applyingInitialProperties = true
-        state.pressableConfiguredDuringInitialization = false
         initialPropertiesState = state
         initialImageLoadPending = false
-        initialPressablePending = false
         initialTimePending = false
         try {
             val keyProfile = cellKeyProfile
@@ -4478,12 +4475,12 @@ class PamRenderer(
             state.initialTextUpdates = null
             state.initialBackgroundUpdate = null
             state.applyingInitialProperties = false
-            state.pressableConfiguredDuringInitialization = false
             initialPropertiesState = null
         }
         // Each image and press property used to start a load or reconfigure
-        // the pressable: done once, with every property in place.
-        if (initialPressablePending) configurePressable(view, state)
+        // the pressable: done once, with every property in place (the
+        // pressable by installEvents, which every caller runs next with the
+        // callbacks in place too).
         if (initialImageLoadPending) mountTraceSection("PamMount.image") { loadImage(view, state) }
         if (text != null && textUpdates != null) mountTraceSection("PamMount.text") {
             if (textUpdates.typeface) applyTypeface(text, state)
@@ -7635,10 +7632,8 @@ class PamRenderer(
 
     private fun configurePressable(view: View, state: NodeState) {
         val pressable = view as? PamPressable ?: return
-        if (state.applyingInitialProperties && state === initialPropertiesState) {
-            initialPressablePending = true
-            return
-        }
+        // Mounting: installEvents configures it once, after every property.
+        if (state.applyingInitialProperties && state === initialPropertiesState) return
         pressable.onPressedStateChanged = if (state.properties[PropKey.NATIVE_STATE_STYLES] != null) {
             { pressed -> applyNativeStyleState(pressable, state, NativeStyleState.PRESSED, pressed) }
         } else {
@@ -11793,10 +11788,6 @@ class PamRenderer(
             get() = extras?.initialBackgroundUpdate
             set(value) { extras().initialBackgroundUpdate = value }
 
-        var pressableConfiguredDuringInitialization: Boolean
-            get() = extras?.pressableConfiguredDuringInitialization ?: false
-            set(value) { extras().pressableConfiguredDuringInitialization = value }
-
         var textWatcherInstalled: Boolean
             get() = extras?.textWatcherInstalled ?: false
             set(value) { extras().textWatcherInstalled = value }
@@ -12114,7 +12105,6 @@ class PamRenderer(
     private class NodeExtras {
         var initialTextUpdates: PamInitialTextUpdates? = null
         var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null
-        var pressableConfiguredDuringInitialization: Boolean = false
         var textWatcherInstalled: Boolean = false
         var pendingChange: Runnable? = null
         var nativeValue: String = ""
