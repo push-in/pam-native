@@ -244,6 +244,19 @@ internal class PamSharedElements(private val host: ViewGroup) {
         return if (view.getGlobalVisibleRect(visible)) visible.width().toLong() * visible.height() else Long.MAX_VALUE
     }
 
+    /**
+     * True when a push from [outgoing] to [incoming] would fly an element
+     * (a tag on both sides, or a launch flight in progress): such a push
+     * waits for its commit instead of starting natively on the press.
+     */
+    fun wouldFly(incoming: View, outgoing: View): Boolean {
+        if (launch != null || flights.isNotEmpty()) return true
+        val sources = taggedViews(outgoing)
+        if (sources.isEmpty()) return false
+        val destinations = taggedViews(incoming)
+        return sources.keys.any(destinations::containsKey)
+    }
+
     fun prepare(incoming: View, outgoing: View, defaultDurationMs: Long, popping: Boolean = false) {
         clear()
         val launched = launch?.takeIf { !popping && it.source.isAttachedToWindow && isInside(it.source, outgoing) }

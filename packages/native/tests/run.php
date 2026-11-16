@@ -7682,5 +7682,6 @@ require __DIR__.'/arch_v2_locale.php';
 require __DIR__.'/arch_v2_testing.php';
 require __DIR__.'/arch_v2_navigation_modes.php';
 require __DIR__.'/arch_v2_focus_order.php';
+require __DIR__.'/navigation_press_prewarm.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

@@ -32,6 +32,27 @@ final class NavigationHost extends Element
             ->withProperty(PropKey::NavigationGestureThreshold, 0.35);
     }
 
+    /**
+     * The screen mounted ahead by Navigator::prewarm() (the host's first
+     * child) and the motion its push will use. A pressed Pressable whose
+     * navigation intent matches `$intent` starts that push natively on the
+     * frame after the tap; the commit of the push then adopts the running
+     * transition instead of starting it. Sent only to renderers that
+     * implement it (older ones keep waiting for the commit).
+     */
+    public function warmRoute(string $intent, NavigationTransition $transition, int $durationMs): self
+    {
+        $contract = \Pam\Native\RendererContract::current();
+        if ($intent === '' || !$contract->supportsProperty(PropKey::NavigationWarmDurationMs->value)) {
+            return $this;
+        }
+
+        return $this
+            ->withProperty(PropKey::NavigationWarmIntent, $intent)
+            ->withProperty(PropKey::NavigationWarmTransition, $transition->value)
+            ->withProperty(PropKey::NavigationWarmDurationMs, max(0, min(2_000, $durationMs)));
+    }
+
     public function gestureNavigation(
         bool $enabled = true,
         float $edgeWidth = 24.0,

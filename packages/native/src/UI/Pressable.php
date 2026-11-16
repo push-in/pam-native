@@ -4,19 +4,29 @@ declare(strict_types=1);
 
 namespace Pam\Native\UI;
 
+use BackedEnum;
 use Closure;
 use Pam\Native\Animation\TapEffect;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\Navigation\Navigator;
+use Pam\Native\Navigation\PressPrewarm;
 use Pam\Native\NodeKind;
 use Pam\Native\PressEvent;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
+use Pam\Native\RendererContract;
+use Pam\Native\Routing\RedirectMode;
+use Pam\Native\Routing\TypedRoute;
 
 use function is_string;
 
 final class Pressable extends Element
 {
+    private ?PressPrewarm $prewarm = null;
+    private ?Closure $pressInHandler = null;
+    private ?Closure $pressOutHandler = null;
+
     public static function make(Renderable|false|null ...$children): self
     {
         return (new self(NodeKind::Pressable))->withChildren($children);
@@ -60,12 +70,76 @@ final class Pressable extends Element
 
     public function onPressIn(Closure $handler): self
     {
-        return $this->withPressEvent(EventKind::PressIn, $handler);
+        $copy = clone $this;
+        $copy->pressInHandler = $handler;
+
+        return $copy->withPressInOut(EventKind::PressIn);
     }
 
     public function onPressOut(Closure $handler): self
     {
-        return $this->withPressEvent(EventKind::PressOut, $handler);
+        $copy = clone $this;
+        $copy->pressOutHandler = $handler;
+
+        return $copy->withPressInOut(EventKind::PressOut);
+    }
+
+    /**
+     * Declares where this press navigates and mounts it ahead: on press-in
+     * the destination is mounted hidden (Route::prewarm(), same validation
+     * and middleware as the navigation), the press that navigates to the
+     * same route and params reuses it, and a press that ends without
+     * navigating (finger lifted outside, a scroll took the touch, a long
+     * press) releases it shortly after. Unused, it is released after
+     * `$releaseAfterMs`. The app's own onPressIn/onPressOut still run.
+     *
+     * The press itself still has to navigate (onPress, or a Link). Where the
+     * renderer supports it, the push of the warm screen starts natively on
+     * the frame after the tap and the navigation's commit adopts it.
+     *
+     * Only navigate (the default) and push warm: a navigate() back to an
+     * entry already in the stack has nothing to mount.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function prewarm(
+        string|BackedEnum|TypedRoute $route,
+        array $params = [],
+        RedirectMode $mode = RedirectMode::Navigate,
+        ?int $releaseAfterMs = 4_000,
+    ): self {
+        $copy = clone $this;
+        $copy->prewarm = new PressPrewarm($route, $params, $mode, $releaseAfterMs);
+
+        return $copy
+            ->withNavigationIntent($copy->prewarm->intent)
+            ->withPressInOut(EventKind::PressIn)
+            ->withPressInOut(EventKind::PressOut);
+    }
+
+    /**
+     * Declares where this press navigates without mounting it on press-in:
+     * when the app mounted that destination ahead itself (an idle warmup
+     * with Navigator::prewarm()), the native host starts its push on the
+     * frame after the tap. The press must navigate to the same route and
+     * params.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function navigatesTo(string|BackedEnum|TypedRoute $route, array $params = []): self
+    {
+        if ($route instanceof TypedRoute) {
+            $params = [...$route->params, ...$params];
+            $route = $route->name;
+        }
+
+        return $this->withNavigationIntent(Navigator::intentKey($route, $params));
+    }
+
+    /** @internal The destination declared by prewarm(), if any. */
+    public function pressPrewarm(): ?PressPrewarm
+    {
+        return $this->prewarm;
     }
 
     public function onPressMove(Closure $handler): self
@@ -180,6 +254,47 @@ final class Pressable extends Element
         return $typed
             ? static fn (string $payload = ''): mixed => $handler(PressEvent::fromPayload($payload))
             : static fn (mixed $payload = ''): mixed => $handler(is_string($payload) ? '' : $payload);
+    }
+
+    private function withNavigationIntent(string $intent): self
+    {
+        // Older renderers do not implement the native launch: the press
+        // then simply waits for the navigation's commit.
+        return RendererContract::current()->supportsProperty(PropKey::PressNavigationIntent->value)
+            ? $this->withProperty(PropKey::PressNavigationIntent, $intent)
+            : $this;
+    }
+
+    /**
+     * Press-in/out handler: the app's (decoded to a PressEvent) after the
+     * declared prewarm. With an app handler the wrapper is as pure as that
+     * handler (the prewarm marks only the navigator dirty); without one it
+     * is a #[PureHandler]: a press-in re-renders the navigator only.
+     */
+    private function withPressInOut(EventKind $kind): self
+    {
+        $handler = $kind === EventKind::PressIn ? $this->pressInHandler : $this->pressOutHandler;
+        $prewarm = $this->prewarm;
+        if ($prewarm === null) {
+            return $handler === null ? $this : $this->withPressEvent($kind, $handler);
+        }
+        $pressIn = $kind === EventKind::PressIn;
+        if ($handler === null) {
+            return $this->withEvent(
+                $kind,
+                #[\Pam\Native\Attributes\PureHandler] static function (mixed $payload = '') use ($prewarm, $pressIn): void {
+                    $pressIn ? $prewarm->pressIn() : $prewarm->pressOut();
+                },
+            );
+        }
+
+        return $this->withEvent(
+            $kind,
+            static function (string $payload = '') use ($handler, $prewarm, $pressIn): void {
+                $pressIn ? $prewarm->pressIn() : $prewarm->pressOut();
+                $handler(PressEvent::fromPayload($payload));
+            },
+        );
     }
 
     private function withPressEvent(EventKind $kind, Closure $handler): self

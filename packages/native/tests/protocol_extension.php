@@ -80,10 +80,15 @@ $assert(
         && ($focusTemplate[1016] ?? null) === 'grid' && ($focusTemplate[PropKey::AutoFocus->value] ?? null) === true,
     'Templates map focusable, focusGroup, focusRing, captureKeys, nextFocus* and autoFocus on any view.',
 );
+$assert(
+    PropKey::PressNavigationIntent->value === 1021 && PropKey::NavigationWarmIntent->value === 1022
+        && PropKey::NavigationWarmTransition->value === 1023 && PropKey::NavigationWarmDurationMs->value === 1024,
+    'Press prewarm and the native launch of a warm route use 1021-1024.',
+);
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::FocusRing->value
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::NavigationWarmDurationMs->value
         && $local->eventCeiling === max(array_filter(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()), static fn (int $v): bool => $v < 1001))
         && $local->extensionEventCeiling === EventKind::KeyDown->value,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',

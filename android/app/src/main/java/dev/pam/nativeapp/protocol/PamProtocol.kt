@@ -731,7 +731,11 @@ enum class PropKey(val value: Int) {
     NEXT_FOCUS_LEFT(1017),
     NEXT_FOCUS_RIGHT(1018),
     FOCUS_GROUP(1019),
-    FOCUS_RING(1020);
+    FOCUS_RING(1020),
+    PRESS_NAVIGATION_INTENT(1021),
+    NAVIGATION_WARM_INTENT(1022),
+    NAVIGATION_WARM_TRANSITION(1023),
+    NAVIGATION_WARM_DURATION_MS(1024);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

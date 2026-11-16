@@ -750,6 +750,10 @@ pub enum PropKey {
     NextFocusRight = 1018,
     FocusGroup = 1019,
     FocusRing = 1020,
+    PressNavigationIntent = 1021,
+    NavigationWarmIntent = 1022,
+    NavigationWarmTransition = 1023,
+    NavigationWarmDurationMs = 1024,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1320,6 +1324,10 @@ impl TryFrom<u16> for PropKey {
             1018 => Ok(Self::NextFocusRight),
             1019 => Ok(Self::FocusGroup),
             1020 => Ok(Self::FocusRing),
+            1021 => Ok(Self::PressNavigationIntent),
+            1022 => Ok(Self::NavigationWarmIntent),
+            1023 => Ok(Self::NavigationWarmTransition),
+            1024 => Ok(Self::NavigationWarmDurationMs),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2265,13 +2273,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1020 {
+        for value in EXTENSION_BASE..=1024 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1021).is_err());
+        assert!(PropKey::try_from(1025).is_err());
     }
 
     #[test]

@@ -25,6 +25,13 @@ internal data class PamPressPointer(
 internal class PamPressable(context: Context) : PamContainer(context) {
     private var pressedBackground: PamPressedBackground? = null
 
+    /**
+     * Where this press navigates (`Pressable::prewarm()`/`navigatesTo()`):
+     * a navigation host whose warm route carries the same intent starts
+     * that push on the tap, before the press reaches the app.
+     */
+    var navigationIntent: String? = null
+
     internal fun configurePressedBackground(shape: android.graphics.drawable.GradientDrawable, base: Int, pressed: Int?) {
         if (pressed == null) {
             pressedBackground?.reset()
@@ -675,7 +682,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         clickPointer = null
         playTapEffect(pointer, PamTapEffect.TRIGGER_TAP)
         // A shared element inside this press starts flying on this frame,
-        // before the press reaches the app (SharedTransitionStyle::launchOnTap).
+        // before the press reaches the app (SharedTransitionStyle::launchOnTap);
+        // otherwise a warm route this press navigates to starts its push.
         PamNavigationHost.pressed(this)
         localOnPress?.invoke()
         onPress?.invoke(pointer)
