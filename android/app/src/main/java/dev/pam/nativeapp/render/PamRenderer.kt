@@ -956,6 +956,8 @@ class PamRenderer(
     }
     /** Nodes bound to a player position (`mediaClock` texts, `mediaProgress` fills). */
     private val mediaBoundIds = LinkedHashSet<Long>()
+    /** A node's initial properties include native time primitives ([syncTimeBinding] once at the end). */
+    private var initialTimePending = false
     private val mediaBoundViews: () -> List<View> = {
         if (mediaBoundIds.isEmpty()) emptyList() else mediaBoundIds.mapNotNull { views[it] }
     }
@@ -1064,6 +1066,7 @@ class PamRenderer(
         (views[id] as? PamScrollContainer)?.let { scrollKeyboardInsets.remove(it)?.close() }
         routeListeners.remove(id)
         if (mediaBoundIds.remove(id)) views[id]?.let(::clearMediaBinding)
+        views[id]?.let(PamTimeBinding::clear)
         scrollContainers.remove(id)
         pressableIds.remove(id)
         inputIds.remove(id)
@@ -4401,6 +4404,7 @@ class PamRenderer(
         initialPropertiesState = state
         initialImageLoadPending = false
         initialPressablePending = false
+        initialTimePending = false
         try {
             val keyProfile = cellKeyProfile
             if (keyProfile == null) {
@@ -4434,6 +4438,58 @@ class PamRenderer(
         if (backgroundUpdate?.requested == true) mountTraceSection("PamMount.background") {
             updateBackground(view, state, backgroundUpdate.backgroundColor, backgroundUpdate.borderColor)
         }
+        // Clocks, fills and reveals start once, with every value and the text in place.
+        if (initialTimePending) {
+            initialTimePending = false
+            syncTimeBinding(view, state)
+        }
+    }
+
+    /**
+     * Native time primitives: `clock*` (Text), `progress*` (any view) and
+     * `reveal*` (Text) follow PHP's values frame by frame in [PamTimeBinding],
+     * with no render per tick.
+     */
+    private fun syncTimeBinding(view: View, state: NodeState) {
+        val properties = state.properties
+        fun millis(key: PropKey): Long? = when (val value = properties[key]) {
+            is PropValue.Integer -> value.value
+            is PropValue.Decimal -> value.value.takeIf(Double::isFinite)?.toLong()
+            else -> null
+        }
+        fun running(key: PropKey): Boolean = (properties[key] as? PropValue.Flag)?.value ?: true
+        val clockStart = millis(PropKey.CLOCK_STARTED_AT)
+        val clockEnd = millis(PropKey.CLOCK_ENDS_AT)
+        val clockDuration = millis(PropKey.CLOCK_DURATION_MS)
+        val clockOffset = millis(PropKey.CLOCK_OFFSET_MS)
+        val clock = if (view is TextView && (clockStart != null || clockEnd != null || clockDuration != null || clockOffset != null)) {
+            PamClockSpec(
+                PamTimeSource(clockStart, clockOffset ?: 0L, running(PropKey.CLOCK_RUNNING)),
+                clockDuration,
+                clockEnd,
+                (millis(PropKey.CLOCK_FORMAT) ?: PamClockFormat.MINUTES_SECONDS.toLong()).toInt(),
+            )
+        } else {
+            null
+        }
+        val progressStart = millis(PropKey.PROGRESS_STARTED_AT)
+        val progressDuration = millis(PropKey.PROGRESS_DURATION_MS)
+        val progress = if (progressStart != null || progressDuration != null) {
+            PamProgressSpec(
+                PamTimeSource(progressStart, millis(PropKey.PROGRESS_OFFSET_MS) ?: 0L, running(PropKey.PROGRESS_RUNNING)),
+                progressDuration ?: 0L,
+            )
+        } else {
+            null
+        }
+        val revealChar = millis(PropKey.REVEAL_CHAR_MS) ?: 0L
+        val revealDuration = millis(PropKey.REVEAL_DURATION_MS) ?: 0L
+        val reveal = if (view is PamTextView && (revealChar > 0 || revealDuration > 0)) {
+            PamRevealSpec(revealChar, revealDuration, (properties[PropKey.REVEAL_KEY] as? PropValue.Text)?.value)
+        } else {
+            null
+        }
+        PamTimeBinding.sync(view, clock, progress, reveal)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -4905,6 +4961,20 @@ class PamRenderer(
                 view.setTag(dev.pam.nativeapp.R.id.pam_media_progress, value.text(key))
                 mediaBoundIds.add(state.id)
             }
+            PropKey.CLOCK_STARTED_AT,
+            PropKey.CLOCK_ENDS_AT,
+            PropKey.CLOCK_DURATION_MS,
+            PropKey.CLOCK_OFFSET_MS,
+            PropKey.CLOCK_RUNNING,
+            PropKey.CLOCK_FORMAT,
+            PropKey.PROGRESS_STARTED_AT,
+            PropKey.PROGRESS_DURATION_MS,
+            PropKey.PROGRESS_OFFSET_MS,
+            PropKey.PROGRESS_RUNNING,
+            PropKey.REVEAL_CHAR_MS,
+            PropKey.REVEAL_DURATION_MS,
+            PropKey.REVEAL_KEY,
+            -> if (state.applyingInitialProperties) initialTimePending = true else syncTimeBinding(view, state)
             PropKey.ANIMATION_PROGRAM -> configureMotionProgram(view, state)
             PropKey.ANIMATION_RESTART_KEY -> restartAnimations(view, state)
             PropKey.TRANSITION_SPEC -> state.transitionRules = PamTransitionSpec.parse(value.text(key))
@@ -5958,6 +6028,20 @@ class PamRenderer(
                 view.scaleX = 1f
                 if (state.properties[PropKey.MEDIA_CLOCK] == null) mediaBoundIds.remove(state.id)
             }
+            PropKey.CLOCK_STARTED_AT,
+            PropKey.CLOCK_ENDS_AT,
+            PropKey.CLOCK_DURATION_MS,
+            PropKey.CLOCK_OFFSET_MS,
+            PropKey.CLOCK_RUNNING,
+            PropKey.CLOCK_FORMAT,
+            PropKey.PROGRESS_STARTED_AT,
+            PropKey.PROGRESS_DURATION_MS,
+            PropKey.PROGRESS_OFFSET_MS,
+            PropKey.PROGRESS_RUNNING,
+            PropKey.REVEAL_CHAR_MS,
+            PropKey.REVEAL_DURATION_MS,
+            PropKey.REVEAL_KEY,
+            -> syncTimeBinding(view, state)
             PropKey.TRANSITION_SPEC -> state.transitionRules = emptyMap()
             PropKey.PRESS_DOUBLE_TAP_DELAY_MS,
             PropKey.PRESS_TAP_EFFECT,
@@ -12163,6 +12247,8 @@ class PamRenderer(
             PropKey.ON_ROUTE_COVERED,
             PropKey.ON_ROUTE_FOCUSED,
             PropKey.MEDIA_PROGRESS,
+            PropKey.PROGRESS_STARTED_AT,
+            PropKey.PROGRESS_DURATION_MS,
             // Sticky headers are positioned natively while scrolling.
             PropKey.STICKY_HEADER,
             // A semantic value on a layout container is also its Android tag.

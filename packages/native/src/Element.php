@@ -581,6 +581,36 @@ abstract class Element implements Renderable
         return $this->withProperty(PropKey::MediaProgress, \Pam\Native\Animation\Drag::ref($ref));
     }
 
+    /**
+     * A fill driven by time, natively: the view scales from its leading edge
+     * to `elapsed / durationMs`, where elapsed is [offsetMs] plus, while
+     * [running], the time since [startedAt] (epoch ms). The renderer moves it
+     * every frame while on screen (in 1 s steps with reduced motion, never
+     * jumping to full) and stops while hidden or once full; PHP only starts,
+     * pauses (running false, offset = time so far) or changes it. It owns
+     * the view's horizontal scale, like {@see mediaProgress()}.
+     */
+    final public function timeProgress(
+        ?int $startedAt,
+        int $durationMs,
+        int $offsetMs = 0,
+        bool $running = true,
+    ): static {
+        if ($durationMs < 0 || $offsetMs < 0 || ($startedAt !== null && $startedAt < 0)) {
+            throw new InvalidArgumentException('timeProgress() times cannot be negative.');
+        }
+        $element = $startedAt === null
+            ? $this->withoutProperty(PropKey::ProgressStartedAt)
+            : $this->withProperty(PropKey::ProgressStartedAt, $startedAt);
+        $element = $element
+            ->withProperty(PropKey::ProgressDurationMs, $durationMs)
+            ->withProperty(PropKey::ProgressOffsetMs, $offsetMs);
+
+        return $running && $startedAt !== null
+            ? $element->withoutProperty(PropKey::ProgressRunning)
+            : $element->withProperty(PropKey::ProgressRunning, false);
+    }
+
     final public function toElement(): Element
     {
         return $this;

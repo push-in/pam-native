@@ -7664,6 +7664,7 @@ passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg(__DIR__.'/navigation_memo
 $assert($navigationMemoryStatus === 0, 'Navigation memory regression harness must pass.');
 require __DIR__.'/media_idle_surface.php';
 require __DIR__.'/media_autoplay_visible.php';
+require __DIR__.'/native_time.php';
 require __DIR__.'/arch_v2_signals.php';
 require __DIR__.'/arch_v2_signal_fanout.php';
 require __DIR__.'/arch_v2_signal_rendering.php';

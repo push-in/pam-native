@@ -752,6 +752,19 @@ pub enum PropKey {
     FocusRing = 1020,
     // Gesture arbitration.
     BlocksNavigationGesture = 1021,
+    ClockStartedAt = 1022,
+    ClockEndsAt = 1023,
+    ClockDurationMs = 1024,
+    ClockOffsetMs = 1025,
+    ClockRunning = 1026,
+    ClockFormat = 1027,
+    ProgressStartedAt = 1028,
+    ProgressDurationMs = 1029,
+    ProgressOffsetMs = 1030,
+    ProgressRunning = 1031,
+    RevealCharMs = 1032,
+    RevealDurationMs = 1033,
+    RevealKey = 1034,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1323,6 +1336,19 @@ impl TryFrom<u16> for PropKey {
             1019 => Ok(Self::FocusGroup),
             1020 => Ok(Self::FocusRing),
             1021 => Ok(Self::BlocksNavigationGesture),
+            1022 => Ok(Self::ClockStartedAt),
+            1023 => Ok(Self::ClockEndsAt),
+            1024 => Ok(Self::ClockDurationMs),
+            1025 => Ok(Self::ClockOffsetMs),
+            1026 => Ok(Self::ClockRunning),
+            1027 => Ok(Self::ClockFormat),
+            1028 => Ok(Self::ProgressStartedAt),
+            1029 => Ok(Self::ProgressDurationMs),
+            1030 => Ok(Self::ProgressOffsetMs),
+            1031 => Ok(Self::ProgressRunning),
+            1032 => Ok(Self::RevealCharMs),
+            1033 => Ok(Self::RevealDurationMs),
+            1034 => Ok(Self::RevealKey),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2268,13 +2294,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1021 {
+        for value in EXTENSION_BASE..=1034 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1022).is_err());
+        assert!(PropKey::try_from(1035).is_err());
     }
 
     #[test]

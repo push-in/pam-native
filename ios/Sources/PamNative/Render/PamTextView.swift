@@ -39,6 +39,42 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         }
     }
 
+    /// The renderer's last `text`, shown again when `nativeText` is cleared.
+    private var rendererText: String?
+
+    /// UIKit's text (and accessibility label) is the native clock while one
+    /// is set; the renderer's texts are kept for when it is cleared.
+    override var text: String? {
+        get { super.text }
+        set {
+            rendererText = newValue
+            super.text = nativeText ?? newValue
+        }
+    }
+
+    /// A native clock label (`clock*`, `PamTimeBinding`) drawn instead of the
+    /// content's text, in its style. It is also the label's `text`, so
+    /// VoiceOver reads the current value.
+    var nativeText: String? {
+        didSet {
+            guard nativeText != oldValue else { return }
+            super.text = nativeText ?? rendererText
+            invalidateDrawnText()
+        }
+    }
+
+    /// Typewriter reveal (`reveal*`): UTF-16 end of the part drawn, -1 for
+    /// all. The whole text keeps its layout and stays the accessible text.
+    var revealEnd: Int = -1 {
+        didSet { if revealEnd != oldValue { setNeedsDisplay() } }
+    }
+
+    /// The drawn string whose graphemes a reveal counts.
+    var revealContent: String {
+        guard let content = pamContent else { return text ?? "" }
+        return attributed(content).string
+    }
+
     /// Pressed inline run slot (`EventKind.spanPress`).
     var onSpanPress: ((Int) -> Void)? {
         didSet { updateInteraction() }
@@ -171,14 +207,66 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
             return
         }
         let result = currentLayout(content)
+        let box = textBox(for: result)
+        context.saveGState()
+        defer { context.restoreGState() }
+        if revealEnd >= 0 {
+            clipReveal(result, box: box, options: content.options, in: context)
+        }
         PamTextLayout.draw(
             result,
             in: context,
-            bounds: textBox(for: result),
+            bounds: box,
             color: textColor ?? .label,
             options: content.options,
             traits: traitCollection
         )
+    }
+
+    /// Clips to the revealed part (Android `PamTextView.clipReveal`): every
+    /// line above the one holding `revealEnd`, and that line up to the
+    /// character's caret from the paragraph's start side.
+    private func clipReveal(_ result: PamTextLayoutResult, box: CGRect, options: PamTextDrawOptions, in context: CGContext) {
+        let far: CGFloat = 1_000_000
+        let end = revealEnd
+        guard end > 0,
+              let index = result.lines.firstIndex(where: { end < $0.range.location + $0.range.length })
+                ?? (result.lines.isEmpty ? nil : result.lines.count - 1)
+        else {
+            context.clip(to: CGRect.zero)
+            return
+        }
+        let line = result.lines[index]
+        let top = box.minY + line.top
+        var rects: [CGRect] = []
+        if index > 0 { rects.append(CGRect(x: -far, y: -far, width: 2 * far, height: top + far)) }
+        let origin = box.minX + PamTextLayout.horizontalOffset(
+            line, boxWidth: box.width, alignment: options.alignment, widest: result.size.width
+        )
+        let x = origin + CTLineGetOffsetForStringIndex(line.line, end, nil)
+        let regionTop = index == 0 ? -far : top
+        // The revealed glyphs' shadow below the line stays visible.
+        let bottom = top + line.height + options.shadowRadius + max(0, options.shadowOffset.height)
+        if Self.isRightToLeft(line.line) {
+            rects.append(CGRect(x: x, y: regionTop, width: far, height: bottom - regionTop))
+        } else {
+            rects.append(CGRect(x: -far, y: regionTop, width: x + far, height: bottom - regionTop))
+        }
+        context.clip(to: rects)
+    }
+
+    private static func isRightToLeft(_ line: CTLine) -> Bool {
+        guard let runs = CTLineGetGlyphRuns(line) as? [CTRun], let first = runs.first else { return false }
+        return CTRunGetStatus(first).contains(.rightToLeft)
+    }
+
+    /// The drawn text changed but not the box (a native clock tick).
+    private func invalidateDrawnText() {
+        cachedAttributed = nil
+        cachedLayout = nil
+        fitScaleWidth = -1
+        fitScaleHeight = -1
+        setNeedsDisplay()
     }
 
     // MARK: Marquee (`ellipsizeMode="marquee"`)
@@ -194,6 +282,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     override func didMoveToWindow() {
         super.didMoveToWindow()
         updateMarquee()
+        pamTimeBinding?.refresh()
     }
 
     private func marqueeLayout(_ content: PamTextContent) -> PamTextLayoutResult {
@@ -266,7 +355,12 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
         if scale == 1, let cachedAttributed { return cachedAttributed }
         var style = content.style
         style.fontScale *= scale
-        let value = PamTextLayout.content(raw: content.text, spansWire: content.spans, style: style)
+        // A native clock keeps the content's style but not its runs.
+        let value = PamTextLayout.content(
+            raw: nativeText ?? content.text,
+            spansWire: nativeText == nil ? content.spans : nil,
+            style: style
+        )
         if scale == 1 { cachedAttributed = value }
         return value
     }
@@ -405,7 +499,7 @@ final class PamTextView: UILabel, UIGestureRecognizerDelegate, PamPointerEventsH
     }
 
     private func copyTextToPasteboard() {
-        let value = pamContent?.text ?? text ?? ""
+        let value = nativeText ?? pamContent?.text ?? text ?? ""
         guard !value.isEmpty else { return }
         UIPasteboard.general.string = value
     }

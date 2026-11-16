@@ -3,6 +3,8 @@ package dev.pam.nativeapp.render
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Path
+import android.text.Layout
 import android.text.TextUtils
 import android.view.MotionEvent
 import android.widget.TextView
@@ -51,12 +53,52 @@ internal class PamTextView(context: Context) : TextView(context) {
     /** The full text the renderer set (what `onTextLayout` measures), not the tail-truncated copy on screen. */
     internal fun sourceContent(): CharSequence? = sourceText
 
+    /** The renderer's last text, shown again when [nativeText] is cleared. */
+    private var rendererText: CharSequence? = null
+    private var settingNative = false
+
+    /**
+     * A native clock label (`clock*`, [PamTimeBinding]) shown instead of the
+     * renderer's text and in its style; the renderer's later texts (a
+     * restyle, the initial content) keep being replaced while it is set.
+     * It is the text's content, so screen readers read the current value.
+     */
+    internal var nativeText: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            settingNative = true
+            try {
+                setText(value?.let { PamNativeTime.restyle(it, rendererText) } ?: rendererText)
+            } finally {
+                settingNative = false
+            }
+        }
+
+    /**
+     * Typewriter reveal (`reveal*`): UTF-16 end of the part drawn, -1 for
+     * all. The whole text keeps its layout (hidden characters hold their
+     * place) and stays the accessible content; drawing is clipped per line.
+     */
+    internal var revealEnd: Int = -1
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+    private val revealClip = Path()
+
     override fun setText(text: CharSequence?, type: BufferType?) {
+        var shown = text
+        if (!settingTruncated && !settingNative) {
+            rendererText = text
+            nativeText?.let { shown = PamNativeTime.restyle(it, text) }
+        }
         if (!settingTruncated) {
-            sourceText = text
+            sourceText = shown
             truncatedFor = null
         }
-        super.setText(text, type)
+        super.setText(shown, type)
         // A new text at an already laid-out width gets no measure pass when
         // its size does not change: truncate it here against that width.
         if (!settingTruncated && width > 0) {
@@ -154,14 +196,45 @@ internal class PamTextView(context: Context) : TextView(context) {
 
     override fun onDraw(canvas: Canvas) {
         val offset = blockOffset()
-        if (offset == 0f) {
+        if (offset == 0f && revealEnd < 0) {
             super.onDraw(canvas)
             return
         }
         val save = canvas.save()
-        canvas.translate(if (layoutDirection == LAYOUT_DIRECTION_RTL) -offset else offset, 0f)
+        if (offset != 0f) canvas.translate(if (layoutDirection == LAYOUT_DIRECTION_RTL) -offset else offset, 0f)
+        clipReveal(canvas)
         super.onDraw(canvas)
         canvas.restoreToCount(save)
+    }
+
+    /**
+     * Clips to the revealed part: every line above the one holding
+     * [revealEnd], and that line up to the character's caret (from the
+     * paragraph's start side, so right-to-left text reveals from the right).
+     */
+    private fun clipReveal(canvas: Canvas) {
+        val end = revealEnd
+        val layout = layout ?: return
+        if (end < 0 || end >= layout.text.length) return
+        revealClip.rewind()
+        if (end > 0) {
+            val left = totalPaddingLeft.toFloat()
+            val top = totalPaddingTop.toFloat()
+            val line = layout.getLineForOffset(end)
+            val lineTop = top + layout.getLineTop(line)
+            if (line > 0) revealClip.addRect(-REVEAL_FAR, -REVEAL_FAR, REVEAL_FAR, lineTop, Path.Direction.CW)
+            val x = left + layout.getPrimaryHorizontal(end)
+            val regionTop = if (line == 0) -REVEAL_FAR else lineTop
+            // The revealed glyphs' shadow below the line stays visible.
+            val bottom = top + layout.getLineBottom(line) + shadowRadius + shadowDy.coerceAtLeast(0f)
+            if (layout.getParagraphDirection(line) == Layout.DIR_RIGHT_TO_LEFT) {
+                revealClip.addRect(x, regionTop, REVEAL_FAR, bottom, Path.Direction.CW)
+            } else {
+                revealClip.addRect(-REVEAL_FAR, regionTop, x, bottom, Path.Direction.CW)
+            }
+        }
+        // An empty path clips everything: nothing revealed yet.
+        canvas.clipPath(revealClip)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -176,5 +249,9 @@ internal class PamTextView(context: Context) : TextView(context) {
         } finally {
             shifted.recycle()
         }
+    }
+
+    private companion object {
+        const val REVEAL_FAR = 1_000_000f
     }
 }

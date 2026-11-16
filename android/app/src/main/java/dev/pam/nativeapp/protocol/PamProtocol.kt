@@ -733,7 +733,20 @@ enum class PropKey(val value: Int) {
     FOCUS_GROUP(1019),
     FOCUS_RING(1020),
     // Gesture arbitration.
-    BLOCKS_NAVIGATION_GESTURE(1021);
+    BLOCKS_NAVIGATION_GESTURE(1021),
+    CLOCK_STARTED_AT(1022),
+    CLOCK_ENDS_AT(1023),
+    CLOCK_DURATION_MS(1024),
+    CLOCK_OFFSET_MS(1025),
+    CLOCK_RUNNING(1026),
+    CLOCK_FORMAT(1027),
+    PROGRESS_STARTED_AT(1028),
+    PROGRESS_DURATION_MS(1029),
+    PROGRESS_OFFSET_MS(1030),
+    PROGRESS_RUNNING(1031),
+    REVEAL_CHAR_MS(1032),
+    REVEAL_DURATION_MS(1033),
+    REVEAL_KEY(1034);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

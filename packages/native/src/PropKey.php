@@ -575,4 +575,18 @@ enum PropKey: int
     case FocusRing = 1020;
     // Gesture arbitration.
     case BlocksNavigationGesture = 1021;
+    // Native time primitives: clocks, timed progress and text reveal.
+    case ClockStartedAt = 1022;
+    case ClockEndsAt = 1023;
+    case ClockDurationMs = 1024;
+    case ClockOffsetMs = 1025;
+    case ClockRunning = 1026;
+    case ClockFormat = 1027;
+    case ProgressStartedAt = 1028;
+    case ProgressDurationMs = 1029;
+    case ProgressOffsetMs = 1030;
+    case ProgressRunning = 1031;
+    case RevealCharMs = 1032;
+    case RevealDurationMs = 1033;
+    case RevealKey = 1034;
 }

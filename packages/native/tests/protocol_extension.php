@@ -108,7 +108,7 @@ try {
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::BlocksNavigationGesture->value
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::RevealKey->value
         && $local->eventCeiling === max(array_filter(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()), static fn (int $v): bool => $v < 1001))
         && $local->extensionEventCeiling === EventKind::KeyDown->value,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',

@@ -72,12 +72,16 @@ final class PamContainerView: UIView, PamPointerEventsHost, PamAccessibilityAdju
     /// `focusable="true"`: the remote can land on this view (a player that
     /// takes the keys with `captureKeys`).
     override var canBecomeFocused: Bool { pamFocus?.focusable == true }
+    #endif
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        #if os(tvOS)
         PamTVFocus.didMoveToWindow(self)
+        #endif
+        // A timed fill (`progress*`) resumes on screen, stops off it.
+        pamTimeBinding?.refresh()
     }
-    #endif
 
     private var hasControlAncestor: Bool {
         var view = superview
