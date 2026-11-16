@@ -175,6 +175,15 @@ public final class PamRenderer: @unchecked Sendable {
     private var routeListeners: [Int64: PamRouteFocusTracker] = [:]
     /// Nodes bound to a player position (`mediaClock`, `mediaProgress`).
     private var mediaBoundIds: Set<Int64> = []
+    /// Mounted `accessibilityLiveRegion` polite/assertive nodes and what
+    /// VoiceOver last announced for each (`announceLiveRegions`).
+    private var liveRegions: [Int64: PamLiveRegion] = [:]
+    /// Posts a live region announcement; tests capture it.
+    var liveRegionAnnouncer: (NSAttributedString) -> Void = { announcement in
+        UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
+    /// Live regions are only read while VoiceOver runs; tests force it on.
+    var liveRegionAnnouncementsEnabled: () -> Bool = { UIAccessibility.isVoiceOverRunning }
 
     public init(
         hostView: UIView,
@@ -367,6 +376,9 @@ public final class PamRenderer: @unchecked Sendable {
             scheduleStatusBarResolve()
         }
         PamSafeAreaInspector.scheduleScan(of: host)
+        if !outerCommit, !liveRegions.isEmpty {
+            announceLiveRegions()
+        }
     }
 
     private func scheduleStatusBarResolve() {
@@ -684,6 +696,7 @@ public final class PamRenderer: @unchecked Sendable {
         workletAnimators.removeValue(forKey: id)?.stop()
         motion.remove(id)
         localModalActions[id] = nil
+        liveRegions[id] = nil
         keyboardInsetObservers.removeValue(forKey: id)?.reset()
         layoutEvents.forget(id)
 
@@ -4620,17 +4633,64 @@ public final class PamRenderer: @unchecked Sendable {
             traits.insert(.updatesFrequently)
         }
 
+        // A Pressable/Button is a button by default, as UIKit makes it without
+        // accessibility props and Android announces a clickable view.
+        let pressable = view is PamPressButton
+        if pressable && role == 1 {
+            traits.insert(.button)
+        }
+
         // UIKit computes an input's traits on every read (the editing state
         // marks the field that has the keyboard); assigning them freezes that.
         if !textInput || !traits.subtracting(Self.inputBaseTraits(view)).isEmpty {
             view.accessibilityTraits = traits
         }
-        view.isAccessibilityElement =
-            explicitlyAccessible ??
-            (textInput
-                ? importance != 3
-                : (role != 1 && role != 17 && role != 34 && importance != 3))
+        let ownLabel = state.properties[PamConstants.accessibilityLabel]?.textOrNil()
+        let element = Self.accessibilityElementPolicy(
+            role: role,
+            importance: importance,
+            explicitlyAccessible: explicitlyAccessible,
+            textInput: textInput,
+            pressable: pressable,
+            groupsChildren: Self.groupsAccessibilityChildren(view),
+            labelled: ownLabel?.isEmpty == false
+        )
+        view.isAccessibilityElement = element.isElement
+        if let containerType = element.containerType {
+            view.accessibilityContainerType = containerType
+        } else if Self.groupsAccessibilityChildren(view) {
+            view.accessibilityContainerType = .none
+        }
         view.accessibilityElementsHidden = importance == 4
+
+        let liveRegion = Int(
+            state.properties[PamConstants.accessibilityLiveRegion]?.integerOrNil() ?? 1
+        )
+        if liveRegion == 2 || liveRegion == 3 {
+            liveRegions[state.id, default: PamLiveRegion()].assertive = liveRegion == 3
+        } else if liveRegions[state.id] != nil {
+            liveRegions[state.id] = nil
+        }
+
+        // VoiceOver's swipe up/down on an adjustable node arrives as the
+        // `increment`/`decrement` accessibility action (Android: scroll
+        // forward/backward), without declaring them in accessibilityActions.
+        if let adjustable = view as? PamAccessibilityAdjustable {
+            let nodeId = state.id
+            adjustable.pamAccessibilityAdjust =
+                role == 6 && state.properties[PamConstants.onAccessibilityAction] != nil
+                ? { [weak self] increment in
+                    guard let self,
+                          self.nodes[nodeId]?.properties[PamConstants.onAccessibilityAction] != nil
+                    else { return }
+                    self.dispatchEvent(
+                        nodeId,
+                        EventKind.accessibilityAction.rawValue,
+                        Data(PamRenderer.adjustableActionName(increment: increment).utf8)
+                    )
+                }
+                : nil
+        }
 
         let explicitValue =
             state.properties[PamConstants.accessibilityValueText]?.textOrNil()
@@ -4686,6 +4746,110 @@ public final class PamRenderer: @unchecked Sendable {
             }
         } else {
             view.accessibilityCustomActions = nil
+        }
+    }
+
+    /// Whether a node is one VoiceOver element and, when it is not, how it
+    /// groups its children. Android's TalkBack reaches the children of any
+    /// non-focusable ViewGroup; UIKit hides everything below an element, so
+    /// container roles (alert, menu, menubar, radiogroup, tablist, toolbar,
+    /// grid, list) and label-less header/text/listitem/summary views that
+    /// hold children stay containers instead of silent single elements.
+    static func accessibilityElementPolicy(
+        role: Int,
+        importance: Int,
+        explicitlyAccessible: Bool?,
+        textInput: Bool,
+        pressable: Bool,
+        groupsChildren: Bool,
+        labelled: Bool
+    ) -> (isElement: Bool, containerType: UIAccessibilityContainerType?) {
+        let containerType = groupsChildren && !pressable && !textInput
+            ? accessibilityContainerType(role: role)
+            : nil
+        if let explicitlyAccessible {
+            return (explicitlyAccessible, explicitlyAccessible ? nil : containerType)
+        }
+        if textInput {
+            return (importance != 3, nil)
+        }
+        // RN `Pressable` is `accessible` by default, whatever its role.
+        if pressable {
+            return (importance != 3 && importance != 4, nil)
+        }
+        if containerType != nil {
+            return (false, containerType)
+        }
+        if groupsChildren, !labelled, [10, 24, 27, 33].contains(role) {
+            return (false, nil)
+        }
+        return (role != 1 && role != 17 && role != 34 && importance != 3, nil)
+    }
+
+    static func accessibilityContainerType(role: Int) -> UIAccessibilityContainerType? {
+        switch role {
+        case 32:
+            return .list
+        case 7, 14, 15, 20, 26, 30, 31:
+            return .semanticGroup
+        default:
+            return nil
+        }
+    }
+
+    /// Views that lay out child nodes (as opposed to text, image or control leaves).
+    static func groupsAccessibilityChildren(_ view: UIView) -> Bool {
+        view is PamContainerView || view is PamSafeAreaView || view is UIScrollView
+    }
+
+    static func adjustableActionName(increment: Bool) -> String {
+        increment ? "increment" : "decrement"
+    }
+
+    /// What VoiceOver announces for a live region: its own label, else the
+    /// visible labels and texts of its content (as TalkBack reads the
+    /// region's subtree).
+    static func liveRegionText(_ view: UIView) -> String {
+        if let own = view.accessibilityLabel, !own.isEmpty { return own }
+        return PamPressButton.contentAccessibilityLabel(of: view) ?? ""
+    }
+
+    private static func isAccessibilityVisible(_ view: UIView) -> Bool {
+        guard view.window != nil else { return false }
+        var current: UIView? = view
+        while let candidate = current {
+            if candidate.isHidden || candidate.alpha <= 0.01 || candidate.accessibilityElementsHidden {
+                return false
+            }
+            current = candidate.superview
+        }
+        return true
+    }
+
+    /// VoiceOver counterpart of Android live regions: a visible polite or
+    /// assertive region whose spoken content changed (it appeared with
+    /// content, or its label or a descendant's text changed) is announced
+    /// once. Polite queues behind current speech; assertive interrupts it.
+    /// Nothing runs while VoiceOver is off.
+    private func announceLiveRegions() {
+        guard liveRegionAnnouncementsEnabled() else { return }
+        for id in liveRegions.keys.sorted() {
+            guard let region = liveRegions[id] else { continue }
+            guard nodes[id] != nil else {
+                liveRegions[id] = nil
+                continue
+            }
+            // A recycled list cell keeps what was announced for its row.
+            guard let view = views[id] else { continue }
+            guard Self.isAccessibilityVisible(view) else { continue }
+            let text = Self.liveRegionText(view)
+            guard text != region.announced else { continue }
+            liveRegions[id]?.announced = text
+            guard !text.isEmpty else { continue }
+            liveRegionAnnouncer(NSAttributedString(
+                string: text,
+                attributes: [.accessibilitySpeechQueueAnnouncement: !region.assertive]
+            ))
         }
     }
 
@@ -7988,6 +8152,18 @@ private final class PamBorderLayers {
         right.removeFromSuperlayer()
         bottom.removeFromSuperlayer()
     }
+}
+
+private struct PamLiveRegion {
+    var assertive = false
+    /// nil until the region was first read while visible.
+    var announced: String?
+}
+
+/// Views that take VoiceOver's adjustable swipes (role `adjustable`).
+protocol PamAccessibilityAdjustable: AnyObject {
+    /// true = swipe up (increment), false = swipe down (decrement).
+    var pamAccessibilityAdjust: ((Bool) -> Void)? { get set }
 }
 
 private struct AccessibilityActionSpec {

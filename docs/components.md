@@ -170,6 +170,34 @@ See the official [Android custom accessibility action](https://developer.android
 and [Apple `UIAccessibilityCustomAction`](https://developer.apple.com/documentation/uikit/uiaccessibilitycustomaction)
 contracts for platform behavior.
 
+### Sliders, containers and live regions
+
+- An `accessibilityRole="adjustable"` node with an `on:accessibilityAction`
+  handler receives `increment` and `decrement` from VoiceOver's swipe up/down
+  and TalkBack's slider gestures (scroll forward/backward) without declaring
+  them in `accessibilityActions`. Expose the position with
+  `accessibilityValueMin/Max/Now` or `accessibilityValueText`.
+- A `Pressable`/`GestureDetector` is one screen-reader element by default, as
+  in React Native; `role` generic reads as a button. Use `accessible="false"`
+  to expose its children separately (nested buttons inside a labelled row).
+- Container roles (`alert`, `menu`, `menubar`, `radiogroup`, `tablist`,
+  `toolbar`, `grid`, `list`) on a `View`/`Row`/`Column` keep their children
+  reachable: iOS sets `accessibilityContainerType` (`list` or `semanticGroup`)
+  instead of turning the container into one element. A `header`, `text`,
+  `listitem` or `summary` container without `accessibilityLabel` also leaves
+  its children reachable.
+- `accessibilityLiveRegion="polite"` (queued) or `"assertive"` (interrupts):
+  Android uses the platform live region; iOS posts a VoiceOver announcement
+  of the region's label, or of its visible text, when it appears with content
+  or that content changes.
+- `AccessibilityCheckedState::None` (`accessibilityCheckedState="none"`, `0`)
+  is the same as leaving the state out.
+- An accessibility attribute no renderer applies on a native tag (React
+  Native's `accessibilityElementsHidden`, `accessibilityState`, `aria-*`, or a
+  typo) is `PAM2302`: a warning in development, an error in strict and release
+  builds. Use `importantForAccessibility="no-hide-descendants"` to hide a
+  decorative subtree.
+
 ## Register components
 
 Register one or more source directories before running the root component:

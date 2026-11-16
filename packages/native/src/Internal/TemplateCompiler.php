@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\BuildConfiguration;
 use Pam\Native\LanguageVersion;
 use RuntimeException;
 
@@ -172,6 +173,10 @@ final class TemplateCompiler
         LanguageVersion $language,
     ): void
     {
+        if ($node->kind === 1 && $node->attributes !== []) {
+            self::validateAccessibilityAttributes($node);
+        }
+
         $forAttribute = self::directiveAttribute($node, 'p-for', 'v-for');
         if ($forAttribute !== null) {
             $directive = $node->attributes[$forAttribute];
@@ -203,6 +208,43 @@ final class TemplateCompiler
 
         foreach ($node->children as $child) {
             self::validateContracts($child, $language);
+        }
+    }
+
+    /** React Native accessibility props and the PAM attribute that replaces them. */
+    private const ACCESSIBILITY_REPLACEMENTS = [
+        'accessibilityElementsHidden' => 'importantForAccessibility="no-hide-descendants"',
+        'accessibilityState' => 'accessibilitySelected, accessibilityCheckedState, accessibilityExpanded or accessibilityBusy',
+        'accessibilityValue' => 'accessibilityValueMin/Max/Now/Text',
+        'aria-label' => 'accessibilityLabel',
+        'aria-hidden' => 'importantForAccessibility="no-hide-descendants"',
+        'onAccessibilityAction' => 'on:accessibilityAction',
+    ];
+
+    /**
+     * PAM2302: an accessibility attribute no renderer applies (a React Native
+     * prop PAM does not have, or a typo) warns in development and fails
+     * strict builds, instead of being dropped in silence.
+     */
+    private static function validateAccessibilityAttributes(CompiledTemplateNode $node): void
+    {
+        $names = [];
+        foreach ($node->attributes as $name => $_) {
+            $names[] = (string) $name;
+        }
+        $unknown = TemplateRenderer::unknownAccessibilityAttributes($node->name, $names);
+        if ($unknown === []) {
+            return;
+        }
+        $location = "{$node->source}:{$node->line}:{$node->column}";
+        foreach ($unknown as $attribute) {
+            $replacement = self::ACCESSIBILITY_REPLACEMENTS[ltrim($attribute, ':')] ?? null;
+            $message = "PAM2302 {$node->name} has no accessibility attribute {$attribute}"
+                .($replacement === null ? '' : "; use {$replacement}");
+            if (BuildConfiguration::strict()) {
+                throw new RuntimeException("{$message} at {$location}.");
+            }
+            DevWarnings::warn($message, $location);
         }
     }
 

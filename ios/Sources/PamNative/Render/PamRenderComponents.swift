@@ -27,7 +27,7 @@ enum PamMaterialElevation {
     }
 }
 
-final class PamPressButton: UIButton, PamPointerEventsHost {
+final class PamPressButton: UIButton, PamPointerEventsHost, PamAccessibilityAdjustable {
     static let minimumTouchTarget: CGFloat = 44
     /// RN `pressRetentionOffset` default (top/left/right 20, bottom 30).
     static let defaultPressRetention = UIEdgeInsets(top: 20, left: 20, bottom: 30, right: 20)
@@ -106,6 +106,16 @@ final class PamPressButton: UIButton, PamPointerEventsHost {
             return Self.contentAccessibilityLabel(of: self)
         }
         set { super.accessibilityLabel = newValue }
+    }
+
+    var pamAccessibilityAdjust: ((Bool) -> Void)?
+
+    override func accessibilityIncrement() {
+        if let adjust = pamAccessibilityAdjust { adjust(true) } else { super.accessibilityIncrement() }
+    }
+
+    override func accessibilityDecrement() {
+        if let adjust = pamAccessibilityAdjust { adjust(false) } else { super.accessibilityDecrement() }
     }
 
     static func contentAccessibilityLabel(of view: UIView) -> String? {

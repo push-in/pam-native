@@ -1288,7 +1288,6 @@ foreach ([
     FormStatus::cases(),
     TabPresentation::cases(),
     AccessibilityRole::cases(),
-    AccessibilityCheckedState::cases(),
     AccessibilityImportance::cases(),
     AccessibilityLiveRegion::cases(),
     FontStyle::cases(),
@@ -1319,6 +1318,15 @@ foreach ([
         );
     }
 }
+
+// 0 is the renderers' "no checked state" (the property left out); the
+// announced states stay sequential from 1.
+$assert(
+    array_map(static fn (AccessibilityCheckedState $state): int => $state->value, AccessibilityCheckedState::cases())
+        === [0, 1, 2, 3]
+        && AccessibilityCheckedState::None->value === 0,
+    'AccessibilityCheckedState must keep None = 0 and sequential announced states.',
+);
 
 $loadingState = AsyncValue::loading(['cached']);
 $assert(
@@ -7619,6 +7627,7 @@ require __DIR__.'/refresh_control.php';
 require __DIR__.'/drag_text.php';
 require __DIR__.'/error_reporting.php';
 require __DIR__.'/conditional_identity.php';
+require __DIR__.'/accessibility_contract.php';
 require __DIR__.'/expression_codegen.php';
 require __DIR__.'/prebuilt_components.php';
 require __DIR__.'/prebuilt_recovery.php';

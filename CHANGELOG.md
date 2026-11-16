@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- iOS: a Pressable/GestureDetector with `accessibilityLabel` (or any other
+  accessibility prop) stays a VoiceOver element, as on Android and in RN;
+  role generic reads as a button. Before, the first accessibility prop turned
+  it into an unreachable node. `accessible="false"` still exposes its
+  children.
+- iOS: container roles (alert, menu, menubar, radiogroup, tablist, toolbar,
+  grid, list) on a View/Row/Column set `accessibilityContainerType`
+  (`list`/`semanticGroup`) and keep their children reachable instead of
+  becoming one silent element; a header/text/listitem/summary container
+  without a label does the same. A label-less View element with an
+  interactive role reads its content (RN `RCTRecursiveAccessibilityLabel`).
+- iOS: `accessibilityLiveRegion` polite/assertive posts a VoiceOver
+  announcement (queued/interrupting) of the region's label or visible text
+  when it appears with content or that content changes, as TalkBack reads
+  Android live regions. Nothing runs while VoiceOver is off.
+- `accessibilityRole="adjustable"` with `on:accessibilityAction` receives
+  `increment`/`decrement` from VoiceOver's swipe up/down and TalkBack's
+  slider scroll forward/backward, without declaring them in
+  `accessibilityActions`.
+- `AccessibilityCheckedState::None` (`0`, template `none`) documents "no
+  checked state"; Android treats it like the absent property.
+- Templates report accessibility attributes no renderer applies on native
+  tags (RN `accessibilityElementsHidden`, `accessibilityState`, `aria-*`,
+  typos) as `PAM2302`: a development warning, an error in strict/release
+  builds.
+
 ## 1.49.7 - 2026-11-15
 
 - Gestures inside pagers and lists keep the drag. A pan with
