@@ -110,6 +110,9 @@ internal class PamMediaView(
     private var creatingPlayer = false
     @Volatile private var playerGeneration = 0L
 
+    /** The current Media3 player's first frame reached the surface before it reported ready. */
+    private var frameBeforeReady = false
+
     /**
      * Covered-route policy: while the route holding this player is covered
      * by a full-screen route (or its tab is inactive) the decoder, player
@@ -930,6 +933,11 @@ internal class PamMediaView(
             refreshBindings(startAt, durationMs / 1_000.0)
             mediaController?.isEnabled = true
             applyVideoTransform()
+            // Ready is announced after the first frame: when that frame was
+            // latched already, the poster goes now, not on a next frame (a
+            // paused player draws none; a playing one only after play()).
+            // A resume (seek above) waits for the frame at its position.
+            if (frameBeforeReady && startAt <= 0 && poster.visibility != GONE) poster.visibility = GONE
             onReady?.invoke()
             onReadyDetails?.invoke(width, height, durationMs / 1_000.0)
         }
@@ -1051,6 +1059,7 @@ internal class PamMediaView(
             videoHeightPx = 0
         }
         creatingPlayer = false
+        frameBeforeReady = false
         playerGeneration++
         bufferedPercentage = 0
         mediaController?.isEnabled = false
@@ -1158,6 +1167,8 @@ internal class PamMediaView(
         if (videoWidthPx <= 0 || videoHeightPx <= 0) applyVideoTransform()
         if (prepared && poster.visibility != GONE) {
             poster.visibility = GONE
+        } else if (!prepared && exo != null) {
+            frameBeforeReady = true
         }
     }
 
