@@ -278,6 +278,87 @@ final class RouteNavigator implements NavigationLinkHandler
         }
     }
 
+    /**
+     * Mounts a destination hidden under the current screen (Navigator::prewarm())
+     * after the same checks navigate() runs: params validated against the
+     * screen, middleware allowing it. Tabs and unknown routes are not warmed.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function prewarm(
+        string|BackedEnum|TypedRoute $target,
+        array $params = [],
+        ?int $releaseAfterMs = 4_000,
+    ): bool {
+        $warm = $this->warmable($target, $params);
+        if ($warm === null) return false;
+        $this->navigating++;
+        try {
+            return $this->stack->prewarm($warm[0], $warm[1], $releaseAfterMs);
+        } finally {
+            if (--$this->navigating === 0) $this->verdicts = [];
+        }
+    }
+
+    /**
+     * @internal Press-in prewarm of a Pressable (Pressable::prewarm()): the
+     * warm token when this press mounted the screen, else null.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function pressPrewarm(
+        string|BackedEnum|TypedRoute $target,
+        array $params,
+        string $intent,
+        RedirectMode $mode,
+        ?int $releaseAfterMs,
+    ): ?int {
+        if ($mode !== RedirectMode::Navigate && $mode !== RedirectMode::Push) return null;
+        $warm = $this->warmable($target, $params);
+        if ($warm === null) return null;
+        $this->navigating++;
+        try {
+            return $this->stack->pressPrewarm(
+                $warm[0],
+                $warm[1],
+                $intent,
+                $mode === RedirectMode::Navigate,
+                $releaseAfterMs,
+            );
+        } finally {
+            if (--$this->navigating === 0) $this->verdicts = [];
+        }
+    }
+
+    /** @internal See Navigator::releasePressPrewarm(). */
+    public function releasePressPrewarm(int $token): bool
+    {
+        return $this->stack->releasePressPrewarm($token);
+    }
+
+    /**
+     * The route name and validated params a prewarm may mount, or null.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     * @return array{0: string, 1: array<string, string|int|float|bool|null>}|null
+     */
+    private function warmable(string|BackedEnum|TypedRoute $target, array $params): ?array
+    {
+        if ($target instanceof TypedRoute) {
+            $params = [...$target->params, ...$params];
+            $target = $target->name;
+        }
+        $route = $this->routes->find($target);
+        if ($route === null || $route->kind === RouteKind::Tab || $route->kind === RouteKind::Tabs) return null;
+        try {
+            $params = $this->validate($route, $params);
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+
+        return [$route->routeName(), $params];
+    }
+
     public function back(): bool
     {
         return $this->stack->goBack();

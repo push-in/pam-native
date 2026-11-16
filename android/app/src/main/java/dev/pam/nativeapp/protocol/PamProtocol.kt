@@ -746,7 +746,11 @@ enum class PropKey(val value: Int) {
     PROGRESS_RUNNING(1031),
     REVEAL_CHAR_MS(1032),
     REVEAL_DURATION_MS(1033),
-    REVEAL_KEY(1034);
+    REVEAL_KEY(1034),
+    PRESS_NAVIGATION_INTENT(1035),
+    NAVIGATION_WARM_INTENT(1036),
+    NAVIGATION_WARM_TRANSITION(1037),
+    NAVIGATION_WARM_DURATION_MS(1038);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

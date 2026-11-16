@@ -4662,6 +4662,14 @@ class PamRenderer(
             -> configureNavigationPresentation(view, state)
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
+            PropKey.NAVIGATION_WARM_INTENT ->
+                (view as? PamNavigationHost)?.warmIntent = value.text(key)
+            PropKey.NAVIGATION_WARM_TRANSITION ->
+                (view as? PamNavigationHost)?.warmTransition = value.integer().toInt()
+            PropKey.NAVIGATION_WARM_DURATION_MS ->
+                (view as? PamNavigationHost)?.warmDurationMs = value.integer()
+            PropKey.PRESS_NAVIGATION_INTENT ->
+                (view as? PamPressable)?.navigationIntent = value.text(key)
             PropKey.TAB_ITEMS,
             PropKey.TAB_SELECTED_INDEX,
             PropKey.TAB_POSITION,
@@ -5778,6 +5786,14 @@ class PamRenderer(
                 view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, null)
             PropKey.SHARED_TRANSITION_CONFIG ->
                 view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_config, null)
+            PropKey.NAVIGATION_WARM_INTENT ->
+                (view as? PamNavigationHost)?.warmIntent = null
+            PropKey.NAVIGATION_WARM_TRANSITION ->
+                (view as? PamNavigationHost)?.warmTransition = PamNavigationHost.TRANSITION_PLATFORM_DEFAULT
+            PropKey.NAVIGATION_WARM_DURATION_MS ->
+                (view as? PamNavigationHost)?.warmDurationMs = 0L
+            PropKey.PRESS_NAVIGATION_INTENT ->
+                (view as? PamPressable)?.navigationIntent = null
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
             -> (view as? PamRecyclerList)?.setItems(null)

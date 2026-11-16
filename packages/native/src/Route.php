@@ -197,6 +197,26 @@ final class Route
     }
 
     /**
+     * Mounts a destination hidden under the current screen, after the same
+     * param validation and middleware as navigate(), so the navigation that
+     * follows with the same route and params reuses it and starts its
+     * transition at once (Navigator::prewarm()). Released after
+     * `$releaseAfterMs` unused (null: until another navigation). In a
+     * template, prefer `<Pressable prewarm="route" :prewarmParams="...">` or
+     * `<Link ... prewarm>`, which warm on press-in and release on a
+     * cancelled press.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public static function prewarm(
+        string|BackedEnum|TypedRoute $route,
+        array $params = [],
+        ?int $releaseAfterMs = 4_000,
+    ): bool {
+        return self::navigator()->prewarm($route, $params, $releaseAfterMs);
+    }
+
+    /**
      * Goes back one step, like the system Back: the open child navigator
      * (tabs, nested stack) first, then this stack. A Back that a screen
      * cancels (beforeRemove, "leave without saving?") is still consumed and

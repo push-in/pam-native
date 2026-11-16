@@ -765,6 +765,10 @@ pub enum PropKey {
     RevealCharMs = 1032,
     RevealDurationMs = 1033,
     RevealKey = 1034,
+    PressNavigationIntent = 1035,
+    NavigationWarmIntent = 1036,
+    NavigationWarmTransition = 1037,
+    NavigationWarmDurationMs = 1038,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1349,6 +1353,10 @@ impl TryFrom<u16> for PropKey {
             1032 => Ok(Self::RevealCharMs),
             1033 => Ok(Self::RevealDurationMs),
             1034 => Ok(Self::RevealKey),
+            1035 => Ok(Self::PressNavigationIntent),
+            1036 => Ok(Self::NavigationWarmIntent),
+            1037 => Ok(Self::NavigationWarmTransition),
+            1038 => Ok(Self::NavigationWarmDurationMs),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2294,13 +2302,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1034 {
+        for value in EXTENSION_BASE..=1038 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1035).is_err());
+        assert!(PropKey::try_from(1039).is_err());
     }
 
     #[test]

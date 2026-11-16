@@ -589,4 +589,9 @@ enum PropKey: int
     case RevealCharMs = 1032;
     case RevealDurationMs = 1033;
     case RevealKey = 1034;
+    // Press-in prewarm and the native launch of a warm route.
+    case PressNavigationIntent = 1035;
+    case NavigationWarmIntent = 1036;
+    case NavigationWarmTransition = 1037;
+    case NavigationWarmDurationMs = 1038;
 }

@@ -2376,6 +2376,22 @@ final class TemplateRenderer
         if ($factory === null && $tag === 'Icon') {
             unset($values['name'], $values['font'], $values['size'], $values['color']);
         }
+        if ($factory === null && $element instanceof Pressable && array_key_exists('prewarm', $values)) {
+            $element = self::pressPrewarm($element, $tag, $values);
+            unset($values['prewarm'], $values['prewarmParams'], $values['prewarmMode']);
+        }
+        if ($factory === null && $element instanceof Pressable && array_key_exists('navigatesTo', $values)) {
+            $destination = $values['navigatesTo'];
+            if ($destination !== null && $destination !== false && $destination !== '') {
+                $element = $element->navigatesTo(
+                    self::linkRoute($destination),
+                    self::linkParams($values['navigatesToParams'] ?? []),
+                    self::pressTransition($values['prewarmTransition'] ?? null),
+                );
+            }
+            unset($values['navigatesTo'], $values['navigatesToParams']);
+        }
+        unset($values['prewarmTransition']);
         if ($factory === null && $tag === 'Link') {
             unset($values['route'], $values['to'], $values['params'], $values['mode']);
         }
@@ -8364,6 +8380,61 @@ final class TemplateRenderer
         }
 
         throw new RuntimeException('Link requires a route="name" (or :route="Routes::name(...)") attribute.');
+    }
+
+    /**
+     * `<Link route="chat" :params="..." prewarm>` mounts the Link's own
+     * destination on press-in; `<Pressable prewarm="chat"
+     * :prewarmParams="{ id: $id }">` (or `:prewarm="Routes::chat(id: $id)"`)
+     * declares the destination of a press whose handler navigates. A false,
+     * null or empty value (`:prewarm="selecting ? null : 'chat'"`) disables
+     * it. Replace and reset do not warm.
+     *
+     * @param array<string, mixed> $values
+     */
+    private static function pressPrewarm(Pressable $element, string $tag, array $values): Pressable
+    {
+        $prewarm = $values['prewarm'];
+        if ($prewarm === null || $prewarm === false || $prewarm === 'false' || $prewarm === '0' || $prewarm === 0) {
+            return $element;
+        }
+        if ($tag === 'Link') {
+            $route = $values['route'] ?? $values['to'] ?? null;
+            $params = $values['params'] ?? [];
+            $mode = \Pam\Native\UI\Link::mode($values['mode'] ?? null);
+        } else {
+            if ($prewarm === '' || $prewarm === true) {
+                throw new RuntimeException('Pressable prewarm needs a route: prewarm="name" or :prewarm="Routes::name(...)".');
+            }
+            $route = $prewarm;
+            $params = $values['prewarmParams'] ?? [];
+            $mode = \Pam\Native\UI\Link::mode($values['prewarmMode'] ?? null);
+        }
+        if ($mode !== \Pam\Native\Routing\RedirectMode::Navigate && $mode !== \Pam\Native\Routing\RedirectMode::Push) {
+            return $element;
+        }
+
+        return $element->prewarm(
+            self::linkRoute($route),
+            self::linkParams($params),
+            $mode,
+            transition: self::pressTransition($values['prewarmTransition'] ?? null),
+        );
+    }
+
+    /** `prewarmTransition="none"` (a NavigationTransition case name) or `:prewarmTransition="NavigationTransition::Fade"`. */
+    private static function pressTransition(mixed $value): ?\Pam\Native\Navigation\NavigationTransition
+    {
+        if ($value === null || $value === '' || $value instanceof \Pam\Native\Navigation\NavigationTransition) {
+            return $value === '' ? null : $value;
+        }
+        if (is_string($value)) {
+            foreach (\Pam\Native\Navigation\NavigationTransition::cases() as $case) {
+                if (strcasecmp($case->name, $value) === 0) return $case;
+            }
+        }
+
+        throw new RuntimeException('prewarmTransition must be a NavigationTransition case name, e.g. prewarmTransition="none".');
     }
 
     /** @return array<string, string|int|float|bool|null> */
