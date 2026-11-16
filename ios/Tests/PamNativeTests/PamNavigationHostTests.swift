@@ -478,6 +478,106 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertTrue(first.subviews.allSatisfy { !$0.isHidden })
         XCTAssertTrue(second.subviews.allSatisfy { !$0.isHidden })
     }
+
+    func testASlidePushDimsTheScreenBelowUnderAVeilOfTheOpaqueBackdrop() {
+        let completed = expectation(description: "push")
+        let host = veilTestHost(onEnd: { completed.fulfill() })
+        host.backgroundColor = .black
+        let first = UIView()
+        let second = UIView()
+        first.backgroundColor = .white
+        second.backgroundColor = .white
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        host.transition = 2
+        host.navigate(1)
+        // Model values are the destination's: the screen below stays opaque
+        // and unrasterized under a veil of the backdrop at the 18% dim.
+        XCTAssertTrue(host.veiledRouteForTesting === first)
+        XCTAssertEqual(first.alpha, 1)
+        XCTAssertFalse(first.layer.shouldRasterize)
+        XCTAssertEqual(host.veilAlphaForTesting, 0.18, accuracy: 0.0001)
+        XCTAssertEqual(host.veilColorForTesting?.cgColor, UIColor.black.cgColor)
+        let firstIndex = host.subviews.firstIndex { $0 === first } ?? -1
+        let veilIndex = host.subviews.firstIndex { $0 !== first && $0 !== second } ?? -1
+        let secondIndex = host.subviews.firstIndex { $0 === second } ?? -1
+        XCTAssertEqual(veilIndex, firstIndex + 1, "the veil sits right above the screen it dims")
+        XCTAssertLessThan(veilIndex, secondIndex, "and under the incoming screen")
+        wait(for: [completed], timeout: 1)
+        XCTAssertNil(host.veiledRouteForTesting)
+        XCTAssertEqual(host.subviews.count, 2)
+        XCTAssertEqual(first.alpha, 1)
+    }
+
+    func testAnUnknownBackdropOrAPopKeepsTheRasterizedFade() {
+        let pushed = expectation(description: "push")
+        let host = veilTestHost(onEnd: { pushed.fulfill() })
+        let first = UIView()
+        let second = UIView()
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        host.transition = 2
+        host.navigate(1)
+        // No background up the tree and no window: nothing known behind it.
+        XCTAssertNil(host.veiledRouteForTesting)
+        XCTAssertTrue(first.layer.shouldRasterize)
+        XCTAssertEqual(first.alpha, 0.82, accuracy: 0.0001)
+        wait(for: [pushed], timeout: 1)
+
+        let popped = expectation(description: "pop")
+        host.setGestureNavigation(
+            enabled: false, edgeWidth: 24, threshold: 0.35,
+            onPop: nil, onTransitionEnd: { popped.fulfill() },
+            onGestureStart: nil, onGestureEnd: nil, onGestureCancel: nil
+        )
+        host.backgroundColor = .black
+        host.operation = 3
+        host.navigate(2)
+        // A pop fades the top screen over the one below, not over the backdrop.
+        XCTAssertNil(host.veiledRouteForTesting)
+        XCTAssertTrue(second.layer.shouldRasterize)
+        XCTAssertEqual(second.alpha, 0.82, accuracy: 0.0001)
+        wait(for: [popped], timeout: 1)
+        XCTAssertFalse(second.layer.shouldRasterize)
+    }
+
+    func testTheBackdropIsTheFirstOpaqueSquareBackgroundUpTheTree() {
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        container.backgroundColor = .red
+        let host = veilTestHost(onEnd: nil)
+        container.addSubview(host)
+        let route = UIView()
+        host.insert(route, index: 0)
+        XCTAssertEqual(host.backdropColor(under: route, reach: .zero)?.cgColor, UIColor.red.cgColor)
+
+        host.backgroundColor = UIColor.blue.withAlphaComponent(0.5)
+        XCTAssertNil(host.backdropColor(under: route, reach: .zero), "a translucent fill blends")
+        host.backgroundColor = .clear
+        XCTAssertEqual(host.backdropColor(under: route, reach: .zero)?.cgColor, UIColor.red.cgColor)
+
+        let below = UIView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        below.backgroundColor = .green
+        container.insertSubview(below, belowSubview: host)
+        XCTAssertNil(host.backdropColor(under: route, reach: .zero), "a view drawn under the host")
+        below.isHidden = true
+        XCTAssertNotNil(host.backdropColor(under: route, reach: .zero))
+
+        container.layer.cornerRadius = 12
+        XCTAssertNil(host.backdropColor(under: route, reach: .zero), "rounded corners show what is behind")
+    }
+
+    private func veilTestHost(onEnd: (() -> Void)?) -> PamNavigationHost {
+        let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        host.operation = 2
+        host.transition = 8
+        host.duration = 0.05
+        host.setGestureNavigation(
+            enabled: false, edgeWidth: 24, threshold: 0.35,
+            onPop: nil, onTransitionEnd: onEnd,
+            onGestureStart: nil, onGestureEnd: nil, onGestureCancel: nil
+        )
+        return host
+    }
 }
 
 private final class MovedToWindowCounter: UIView {

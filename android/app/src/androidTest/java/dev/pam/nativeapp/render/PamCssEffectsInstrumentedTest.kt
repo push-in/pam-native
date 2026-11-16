@@ -286,7 +286,8 @@ class PamCssEffectsInstrumentedTest {
         instrumentation.runOnMainSync {
             val image = PamImageView(instrumentation.targetContext)
             image.setBlur(20f)
-            val drawable = image.bitmapDrawable(source, false)
+            assertEquals("a sharp bitmap never shows under a blur", null, image.bitmapDrawable(source, false))
+            val drawable = requireNotNull(image.bitmapDrawable(blurred, false, PamImageBlur(200, 100, 20f, 20f)))
             assertEquals("intrinsic size is preserved", 200, drawable.intrinsicWidth)
             assertEquals(100, drawable.intrinsicHeight)
         }

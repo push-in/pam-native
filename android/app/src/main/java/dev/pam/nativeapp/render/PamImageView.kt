@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Shader
@@ -10,6 +11,29 @@ import android.graphics.drawable.TransitionDrawable
 import android.graphics.Path
 import android.graphics.RectF
 import android.widget.ImageView
+
+/**
+ * A bitmap blurred by [NativeImageLoader] off the UI thread: [sourceWidth] x
+ * [sourceHeight] is the sharp decode's size (the drawable's intrinsic size),
+ * [viewSigma] the authored σ in view px and [bitmapSigma] the σ applied in the
+ * sharp decode's pixels (see [PamBitmapBlur.bitmapSigma]).
+ */
+internal data class PamImageBlur(
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+    val viewSigma: Float,
+    val bitmapSigma: Float,
+)
+
+/** A blurred (downscaled) bitmap drawn at its sharp source's intrinsic size. */
+internal class PamBlurredDrawable(
+    resources: Resources,
+    bitmap: Bitmap,
+    val blur: PamImageBlur,
+) : BitmapDrawable(resources, bitmap) {
+    override fun getIntrinsicWidth(): Int = blur.sourceWidth
+    override fun getIntrinsicHeight(): Int = blur.sourceHeight
+}
 
 internal class PamImageView(context: Context) : ImageView(context), PamSharedContentView {
     var onImageSizeChanged: ((Int, Int) -> Unit)? = null
@@ -32,47 +56,72 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
     private val clipPath = Path()
     private val clipBounds = RectF()
     private var cornerRadii = FloatArray(8)
-    private var sourceBitmap: Bitmap? = null
-    private var sourceRepeat = false
-    private var blurSigma = 0f
-    /** σ in bitmap pixels the current drawable was blurred with (0 = none). */
-    private var appliedBitmapSigma = 0f
+
+    /** RN `blurRadius` / CSS `filter: blur()` σ in view px (0 = none). */
+    var blurSigma = 0f
+        private set
+
+    /**
+     * Set by [NativeImageLoader]: the blur changed, so the image is resolved
+     * again (from the memory cache in this frame, or blurred off the UI thread).
+     */
+    var onBlurChanged: (() -> Unit)? = null
 
     /** RN `blurRadius` / CSS `filter: blur()` on an image, σ in px. */
     fun setBlur(sigma: Float) {
         val normalized = sigma.coerceAtLeast(0f)
         if (normalized == blurSigma) return
         blurSigma = normalized
-        sourceBitmap?.let { bitmap -> setImageDrawable(bitmapDrawable(bitmap, sourceRepeat)) }
+        // A sharp image never shows under a blur (a chat spoiler): it goes in
+        // this frame. A blurred one stays until the loader brings the new blur.
+        if (normalized > 0f && drawable != null && appliedBlur == null) setImageDrawable(null)
+        onBlurChanged?.invoke()
     }
 
-    /** Drawable for a decoded bitmap, blurred when a blur radius is set. */
-    fun bitmapDrawable(bitmap: Bitmap, repeat: Boolean): Drawable {
-        sourceBitmap = bitmap
-        sourceRepeat = repeat
-        // Not laid out yet: the drawn scale is unknown, so onSizeChanged blurs
-        // it once (nothing draws before layout).
-        if (blurSigma <= 0f || width <= 0 || height <= 0) {
-            appliedBitmapSigma = 0f
-            return BitmapDrawable(resources, bitmap).apply {
-                if (repeat) setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-            }
+    /** Blur of the shown drawable (null: sharp or nothing). */
+    val appliedBlur: PamImageBlur?
+        get() {
+            val current = drawable
+            val shown = (current as? TransitionDrawable)?.let { it.getDrawable(it.numberOfLayers - 1) } ?: current
+            return (shown as? PamBlurredDrawable)?.blur
         }
-        // σ is authored in view pixels; the bitmap is blurred in its own pixels.
-        val bitmapSigma = PamBitmapBlur.bitmapSigma(blurSigma, width, height, bitmap.width, bitmap.height, scaleType)
-        appliedBitmapSigma = bitmapSigma
-        val blurred = PamBitmapBlur.blur(bitmap, bitmapSigma)
-        val width = bitmap.width
-        val height = bitmap.height
-        // Keep the source's intrinsic size so scale types lay out identically.
-        return object : BitmapDrawable(resources, blurred) {
-            override fun getIntrinsicWidth(): Int = width
-            override fun getIntrinsicHeight(): Int = height
+
+    /**
+     * Whether an image blurred with [blur] (null: sharp) looks as this view's
+     * blur asks at its current size and scale type.
+     */
+    fun blurMatches(blur: PamImageBlur?): Boolean {
+        if (blurSigma <= 0f) return blur == null
+        if (blur == null || !PamBitmapBlur.sigmaMatches(blur.viewSigma, blurSigma)) return false
+        if (width <= 0 || height <= 0) return true
+        val wanted = PamBitmapBlur.bitmapSigma(blurSigma, width, height, blur.sourceWidth, blur.sourceHeight, scaleType)
+        return PamBitmapBlur.sigmaMatches(blur.bitmapSigma, wanted)
+    }
+
+    /**
+     * True unless a blur is set and the shown image is missing, sharp or
+     * blurred at another σ, or no blur is set and a blurred image shows.
+     */
+    fun showsWantedBlur(): Boolean {
+        val shown = appliedBlur
+        if (blurSigma <= 0f && shown == null) return true
+        return drawable != null && blurMatches(shown)
+    }
+
+    /**
+     * Drawable for a decoded bitmap. A bitmap the loader blurred ([blur])
+     * keeps its sharp size as intrinsic size, so scale types lay out
+     * identically. Null for a sharp bitmap while a blur is set: it never shows.
+     */
+    fun bitmapDrawable(bitmap: Bitmap, repeat: Boolean, blur: PamImageBlur? = null): Drawable? {
+        if (blur != null) return PamBlurredDrawable(resources, bitmap, blur)
+        if (blurSigma > 0f) return null
+        return BitmapDrawable(resources, bitmap).apply {
+            if (repeat) setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
         }
     }
 
     override fun setImageDrawable(drawable: Drawable?) {
-        if (drawable == null) sourceBitmap = null
         // PAM's layout engine sizes this view; a new drawable never changes
         // its frame. ImageView would otherwise requestLayout() whenever the
         // intrinsic size changes, so every photo arriving in a 30-image grid
@@ -111,11 +160,16 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
             else -> null
         } ?: return
         val bitmap = bitmapDrawable.bitmap ?: return
+        // Blurred images are heap bitmaps: only a sharp GPU bitmap is copied.
         if (bitmap.config != Bitmap.Config.HARDWARE) return
         val copy = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return
         copy.density = bitmap.density
         val tiled = bitmapDrawable.tileModeX == Shader.TileMode.REPEAT
-        setImageDrawable(bitmapDrawable(copy, tiled))
+        setImageDrawable(
+            BitmapDrawable(resources, copy).apply {
+                if (tiled) setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+            },
+        )
     }
 
     init {
@@ -135,19 +189,10 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
     ) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         rebuildClipPath()
-        reblurForSize(width, height)
+        // The loader re-blurs a shown blur that no longer fits the new size.
         if (width > 0 && height > 0) {
             onImageSizeChanged?.invoke(width, height)
         }
-    }
-
-    /** A blurred image laid out after decoding (or resized) re-blurs at its drawn scale. */
-    private fun reblurForSize(width: Int, height: Int) {
-        if (blurSigma <= 0f || width <= 0 || height <= 0) return
-        val bitmap = sourceBitmap ?: return
-        val sigma = PamBitmapBlur.bitmapSigma(blurSigma, width, height, bitmap.width, bitmap.height, scaleType)
-        if (kotlin.math.abs(sigma - appliedBitmapSigma) < 0.05f) return
-        setImageDrawable(bitmapDrawable(bitmap, sourceRepeat))
     }
 
     override val sharedFit: Int?
@@ -165,7 +210,8 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
 
     /** Until the decoded image arrives (the loader replaces the drawable). */
     override fun adoptSharedPlaceholder(content: PamSharedContent): Boolean {
-        if (hasSharedContent) return false
+        // A blurred image never adopts a (possibly sharp) flight's content.
+        if (hasSharedContent || blurSigma > 0f) return false
         setImageDrawable(content.drawable)
         return true
     }

@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.util.LruCache
+import android.widget.ImageView
 import dev.pam.nativeapp.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -67,6 +68,8 @@ internal data class NativeImageResult(
     val width: Int,
     val height: Int,
     val animatedBytes: ByteArray? = null,
+    /** Set when [bitmap] is already blurred (the view's `blurRadius`). */
+    val blur: PamImageBlur? = null,
 )
 
 internal class NativeImageCallbacks(
@@ -296,9 +299,18 @@ internal class NativeImageLoader(
     private val context: Context,
 ) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newFixedThreadPool(3) { runnable ->
-        Thread(runnable, "pam-image").apply { isDaemon = true }
-    }
+    // Downloads and decodes run on separate lanes: a slow or rate-limited
+    // response holds a network thread, never a decoder, and visible images
+    // (then nearby, then hidden ones) take the next free thread of each.
+    private val networkLane = MediaWorkLane("pam-image-net", IMAGE_NETWORK_THREADS)
+    private val decodeLane = MediaWorkLane("pam-image", DECODE_THREADS)
+    /** Highest priority of the views waiting for each decoded key (written on the main thread). */
+    private val demand = ConcurrentHashMap<String, Int>()
+    private val networkJobs = ConcurrentHashMap<String, NetworkJob>()
+    private val pendingDecodeBytes = AtomicLong()
+    private val visibleRect = android.graphics.Rect()
+    private var demandRefreshPosted = false
+    private val refreshDemandRunnable = Runnable { refreshDemand() }
     // Tiny bundled/data-URI assets (for example icon masks) must never queue
     // behind remote photos, animated WebP decoding or disk reads. They are
     // part of the first interactive frame, so keep an isolated serial lane.
@@ -354,6 +366,7 @@ internal class NativeImageLoader(
                 sameSignature = current?.signature == signature,
                 finished = current?.finished == true,
                 hasDrawable = view.drawable != null,
+                failed = current?.failed == true,
             )
         ) {
             checkNotNull(current)
@@ -373,8 +386,10 @@ internal class NativeImageLoader(
         active[view] = pending
         view.onImageSizeChanged = { width, height ->
             begin(view, token, width, height)
+            refreshStaleBlur(view, token)
         }
         view.onShownChanged = { shown -> onShownChanged(view, shown) }
+        view.onBlurChanged = { blurChanged(view, token) }
         callbacks.onStart()
         // Keep already rendered pixels on screen while a changed request is
         // resolved. Reconciliation must never flash a blank/placeholder frame.
@@ -399,14 +414,19 @@ internal class NativeImageLoader(
             requestHeaders = requestHeaders,
             mediaCacheKey = cacheKey,
         )
-        return loadRemote(source, request, { _, _ -> }, {}).size.toLong()
+        return loadRemote(source, request, { _, _ -> }, {}, prefetch = true).size.toLong()
     }
 
     fun cancel(view: PamImageView) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        active.remove(view)?.takeIf { !it.finished }?.decodedKey?.let(::cancelOrphanThumbnail)
+        active.remove(view)?.takeIf { !it.finished }?.decodedKey?.let { key ->
+            cancelOrphanThumbnail(key)
+            // Its queued download or decode is dropped unless another view wants it.
+            scheduleDemandRefresh()
+        }
         view.onImageSizeChanged = null
         view.onShownChanged = null
+        view.onBlurChanged = null
         view.setImageDrawable(null)
     }
 
@@ -440,27 +460,43 @@ internal class NativeImageLoader(
         if (!closed.compareAndSet(false, true)) return
         generation.incrementAndGet()
         main.removeCallbacksAndMessages(null)
-        active.keys.forEach { view -> view.onImageSizeChanged = null }
+        active.keys.forEach { view ->
+            view.onImageSizeChanged = null
+            view.onBlurChanged = null
+        }
         active.clear()
         connections.toList().forEach(HttpURLConnection::disconnect)
         connections.clear()
         inFlight.cancelAll()
-        executor.shutdownNow()
+        networkLane.close()
+        decodeLane.close()
+        networkJobs.values.forEach { job -> job.future.cancel(false) }
+        networkJobs.clear()
+        demand.clear()
         inlineExecutor.shutdownNow()
         synchronized(cache) { cache.evictAll() }
         synchronized(inlineCache) { inlineCache.evictAll() }
     }
 
+    /**
+     * Resolves the view's image at [measuredWidth] x [measuredHeight]. With
+     * [syncOnly], only a memory-cache hit or an inline glyph is shown; it
+     * returns false when a load would have to start instead.
+     */
     private fun begin(
         view: PamImageView,
         token: Long,
         measuredWidth: Int,
         measuredHeight: Int,
-    ) {
+        syncOnly: Boolean = false,
+    ): Boolean {
         val pending = active[view]
             ?.takeIf { it.token == token && !it.finished }
-            ?: return
-        if (pending.request.sourceSet == null) {
+            ?: return true
+        // A blurred image is decoded to the heap and blurred on a worker,
+        // then cached blurred: no GPU readback and no blur on this thread.
+        val blur = blurTarget(view, measuredWidth, measuredHeight)
+        if (pending.request.sourceSet == null && blur == null) {
             PamPreloadedImages.get(pending.request.source)?.let { bitmap ->
                 // Preloaded by Image::prefetch(asset://): painted in this
                 // frame, before layout, at full resolution (ImageView scales).
@@ -470,10 +506,10 @@ internal class NativeImageLoader(
                     NativeImageResult(pending.request.source, bitmap, bitmap.width, bitmap.height, null),
                     animate = false,
                 )
-                return
+                return true
             }
         }
-        if (measuredWidth <= 0 || measuredHeight <= 0) return
+        if (measuredWidth <= 0 || measuredHeight <= 0) return true
 
         val source = resolveSource(
             pending.request.source,
@@ -483,15 +519,15 @@ internal class NativeImageLoader(
         )
         if (source.isBlank()) {
             finishError(view, pending, "Image source is empty.")
-            return
+            return true
         }
         val key = decodedKey(
             source,
             pending.request,
             measuredWidth,
             measuredHeight,
-        )
-        if (pending.decodedKey == key) return
+        ) + blur?.keySuffix().orEmpty()
+        if (pending.decodedKey == key) return true
         pending.decodedKey = key
         // Classifies a packaged file before the cache lookup (inline cache or photos).
         val assetBytes = if (smallAssets[source] == null) smallAssetBytes(source) else null
@@ -514,19 +550,21 @@ internal class NativeImageLoader(
                         bitmap.width,
                         bitmap.height,
                         bitmap.animatedBytes,
+                        bitmap.blur,
                     ),
                     animate = false,
                 )
-                return
+                return true
             }
         }
 
         if (isSynchronousInlineSource(source) || smallAssets[source] == true) {
             // A bundled glyph (tens of bytes to a few KiB) decodes in well
             // under a millisecond: paint it in the frame that lays the view
-            // out, like a font glyph, instead of a frame later.
+            // out, like a font glyph, instead of a frame later. Its blur (an
+            // icon's shadow) is a heap bitmap downscaled to σ ≈ 4: as cheap.
             val decoded = runCatching {
-                decode(
+                val glyph = decode(
                     if (isInlineImageSource(source)) {
                         loadDataUri(source)
                     } else {
@@ -539,10 +577,12 @@ internal class NativeImageLoader(
                     repeat = pending.request.repeat,
                     inline = true,
                     contain = pending.request.contain,
+                    heap = blur != null,
                 )
+                blur?.let { target -> blurred(glyph, target) } ?: glyph
             }.getOrElse { error ->
                 finishError(view, pending, safeError(error))
-                return
+                return true
             }
             if (
                 pending.request.cachePolicy != IMAGE_CACHE_NONE &&
@@ -560,100 +600,29 @@ internal class NativeImageLoader(
                     decoded.width,
                     decoded.height,
                     decoded.animatedBytes,
+                    decoded.blur,
                 ),
                 animate = false,
             )
-            return
+            return true
+        }
+        if (syncOnly) {
+            pending.decodedKey = null
+            return false
         }
 
+        // Registered before the job is queued: a lane drops a job no view wants.
+        demand.merge(key, viewPriority(view), ::maxOf)
+        val attempt = pending.retryAttempts
         val future = runCatching {
             inFlight.share(key) {
-                CompletableFuture.supplyAsync(
-                    supply@{
-                        mediaStoreThumbnail(
-                            source,
-                            key,
-                            pending.request,
-                            measuredWidth,
-                            measuredHeight,
-                        )?.let { thumbnail ->
-                            if (
-                                !closed.get() &&
-                                pending.request.cachePolicy != IMAGE_CACHE_NONE &&
-                                pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
-                                pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
-                            ) {
-                                synchronized(memory) { memory.put(key, thumbnail) }
-                            }
-                            return@supply NativeImageResult(
-                                source,
-                                thumbnail.bitmap,
-                                thumbnail.width,
-                                thumbnail.height,
-                            )
-                        }
-                        val bytes = loadBytes(
-                            source = source,
-                            request = pending.request,
-                            progress = { loaded, total ->
-                                main.post {
-                                    dispatchProgress(key, loaded, total)
-                                }
-                            },
-                            partial = partial@{ partialBytes ->
-                                if (!pending.request.progressiveRenderingEnabled) {
-                                    return@partial
-                                }
-                                val preview = runCatching {
-                                    decode(
-                                        partialBytes,
-                                        measuredWidth,
-                                        measuredHeight,
-                                        pending.request.resizeMethod,
-                                        pending.request.resizeMultiplier,
-                                        repeat = pending.request.repeat,
-                                        inline = isInline(source),
-                                        contain = pending.request.contain,
-                                    )
-                                }.getOrNull()?.bitmap ?: return@partial
-                                main.post {
-                                    displayPartial(key, preview)
-                                }
-                            },
-                        )
-                        val decoded = decode(
-                            bytes,
-                            measuredWidth,
-                            measuredHeight,
-                            pending.request.resizeMethod,
-                            pending.request.resizeMultiplier,
-                            repeat = pending.request.repeat,
-                            inline = isInline(source),
-                            contain = pending.request.contain,
-                        )
-                        if (
-                            !closed.get() &&
-                            pending.request.cachePolicy != IMAGE_CACHE_NONE &&
-                            pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
-                            pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
-                        ) {
-                            synchronized(memory) { memory.put(key, decoded) }
-                        }
-                        NativeImageResult(
-                            source,
-                            decoded.bitmap,
-                            decoded.width,
-                            decoded.height,
-                            decoded.animatedBytes,
-                        )
-                    },
-                    imageExecutor(source),
-                )
+                startLoad(source, key, pending.request, measuredWidth, measuredHeight, blur, memory, attempt)
             }
         }.getOrElse { error ->
-            finishError(view, pending, safeError(error))
-            return
+            finishError(view, pending, safeError(error), error)
+            return true
         }
+        scheduleDemandRefresh()
 
         future.whenComplete { decoded, error ->
             main.post {
@@ -665,7 +634,7 @@ internal class NativeImageLoader(
                     }
                     ?: return@post
                 if (error != null || decoded == null) {
-                    finishError(view, latest, safeError(error))
+                    finishError(view, latest, safeError(error), error)
                 } else {
                     finishSuccess(
                         view,
@@ -673,6 +642,352 @@ internal class NativeImageLoader(
                         decoded,
                     )
                 }
+            }
+        }
+        return true
+    }
+
+    /**
+     * Loads and decodes [source] for [key]: MediaStore thumbnails, local
+     * files and the disk cache on the decode lane; a disk miss downloads on
+     * the network lane (shared by every size of the same image) and decodes
+     * back on the decode lane. A queued step no view wants any more is
+     * dropped with [MediaNotWantedException].
+     */
+    private fun startLoad(
+        source: String,
+        key: String,
+        request: NativeImageRequest,
+        width: Int,
+        height: Int,
+        blur: BlurTarget?,
+        memory: LruCache<String, DecodedBitmap>,
+        attempt: Int,
+    ): CompletableFuture<NativeImageResult> {
+        val result = CompletableFuture<NativeImageResult>()
+        val cacheable = request.cachePolicy != IMAGE_CACHE_NONE &&
+            request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+            request.mediaCachePolicy != MEDIA_CACHE_DISK
+        fun decodeAndKeep(bytes: ByteArray): NativeImageResult {
+            val decoded = decode(
+                bytes,
+                width,
+                height,
+                request.resizeMethod,
+                request.resizeMultiplier,
+                repeat = request.repeat,
+                inline = isInline(source),
+                contain = request.contain,
+                heap = blur != null,
+            ).let { sharp -> blur?.let { target -> blurred(sharp, target) } ?: sharp }
+            if (!closed.get() && cacheable) synchronized(memory) { memory.put(key, decoded) }
+            return NativeImageResult(
+                source,
+                decoded.bitmap,
+                decoded.width,
+                decoded.height,
+                decoded.animatedBytes,
+                decoded.blur,
+            )
+        }
+        val first = Runnable {
+            mediaStoreThumbnail(source, key, request, width, height, heap = blur != null)
+                ?.let { blur?.let { target -> blurred(it, target) } ?: it }
+                ?.let { thumbnail ->
+                    if (!closed.get() && cacheable) synchronized(memory) { memory.put(key, thumbnail) }
+                    result.complete(
+                        NativeImageResult(source, thumbnail.bitmap, thumbnail.width, thumbnail.height, blur = thumbnail.blur),
+                    )
+                    return@Runnable
+                }
+            if (!isRemoteImageSource(source)) {
+                result.complete(decodeAndKeep(loadBytes(source, request, progress = { _, _ -> })))
+                return@Runnable
+            }
+            readCachedRemote(source, request)?.let { cached ->
+                result.complete(decodeAndKeep(cached))
+                return@Runnable
+            }
+            val progress = { loaded: Long, total: Long ->
+                main.post { dispatchProgress(key, loaded, total) }
+                Unit
+            }
+            val partial = partial@{ partialBytes: ByteArray ->
+                // A blurred image shows only once blurred.
+                if (!request.progressiveRenderingEnabled || blur != null) return@partial
+                val preview = runCatching {
+                    decode(
+                        partialBytes,
+                        width,
+                        height,
+                        request.resizeMethod,
+                        request.resizeMultiplier,
+                        repeat = request.repeat,
+                        inline = isInline(source),
+                        contain = request.contain,
+                    )
+                }.getOrNull()?.bitmap ?: return@partial
+                main.post { displayPartial(key, preview) }
+            }
+            fetchRemote(source, request, key, MEDIA_PRIORITY_DROP, attempt, progress, partial)
+                .whenComplete { bytes, error ->
+                    if (error != null || bytes == null) {
+                        result.completeExceptionally(mediaRootCause(error) ?: IllegalStateException("Image request failed."))
+                        return@whenComplete
+                    }
+                    val size = bytes.size.toLong()
+                    pendingDecodeBytes.addAndGet(size)
+                    decodeLane.submit(
+                        KeyJob(key, result, onDrop = { pendingDecodeBytes.addAndGet(-size) }) {
+                            try {
+                                result.complete(decodeAndKeep(bytes))
+                            } finally {
+                                pendingDecodeBytes.addAndGet(-size)
+                            }
+                        },
+                    )
+                }
+        }
+        if (isInline(source)) {
+            inlineExecutor.execute {
+                runCatching { first.run() }.onFailure(result::completeExceptionally)
+            }
+        } else {
+            decodeLane.submit(KeyJob(key, result, onDrop = {}) { first.run() })
+        }
+        return result
+    }
+
+    /** A decode-lane step of [key]: as urgent as the views that want it, dropped when none does. */
+    private inner class KeyJob(
+        private val key: String,
+        private val result: CompletableFuture<NativeImageResult>,
+        private val onDrop: () -> Unit,
+        private val work: () -> Unit,
+    ) : MediaWorkLane.Job() {
+        override fun priority(): Int = if (closed.get()) MEDIA_PRIORITY_DROP else demand[key] ?: MEDIA_PRIORITY_DROP
+
+        override fun run() {
+            if (result.isDone) return
+            try {
+                work()
+            } catch (error: Throwable) {
+                result.completeExceptionally(error)
+            }
+        }
+
+        override fun drop() {
+            onDrop()
+            result.completeExceptionally(MediaNotWantedException())
+        }
+    }
+
+    /**
+     * One download of a remote image (all sizes and views of it share it).
+     * It waits in the queue while its host is paused (429/503) or decoded
+     * bytes pile up, and runs as urgently as the most visible view wanting it.
+     */
+    private inner class NetworkJob(
+        private val id: String,
+        private val source: String,
+        private val request: NativeImageRequest,
+        private val basePriority: Int,
+        private val attempt: Int,
+        private val progress: (Long, Long) -> Unit,
+        private val partial: (ByteArray) -> Unit,
+    ) : MediaWorkLane.Job() {
+        val future = CompletableFuture<ByteArray>()
+        val wanters: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        private val host = runCatching { URI(source).host }.getOrNull()
+        private val counted = AtomicBoolean(basePriority < 0)
+
+        init {
+            if (counted.get()) PamMediaHostGate.backlog.incrementAndGet()
+        }
+
+        private fun uncount() {
+            if (counted.compareAndSet(true, false)) PamMediaHostGate.backlog.decrementAndGet()
+        }
+
+        override fun priority(): Int {
+            if (closed.get()) return MEDIA_PRIORITY_DROP
+            var best = basePriority
+            for (wanter in wanters) {
+                val wanted = demand[wanter] ?: continue
+                if (wanted > best) best = wanted
+            }
+            return best
+        }
+
+        override fun waitMs(): Long {
+            val paused = PamMediaHostGate.remainingMs(host)
+            if (paused > 0) return paused
+            return if (pendingDecodeBytes.get() > MAX_PENDING_DECODE_BYTES) DECODE_BACKLOG_WAIT_MS else 0
+        }
+
+        override fun run() {
+            uncount()
+            try {
+                future.complete(downloadRemote(source, request, attempt, progress, partial))
+            } catch (error: Throwable) {
+                future.completeExceptionally(error)
+            } finally {
+                networkJobs.remove(id, this)
+            }
+        }
+
+        override fun drop() {
+            uncount()
+            networkJobs.remove(id, this)
+            future.completeExceptionally(MediaNotWantedException())
+        }
+    }
+
+    /** The download of [source], shared with a queued or running one of the same bytes. */
+    private fun fetchRemote(
+        source: String,
+        request: NativeImageRequest,
+        wanter: String?,
+        basePriority: Int,
+        attempt: Int,
+        progress: (Long, Long) -> Unit,
+        partial: (ByteArray) -> Unit,
+    ): CompletableFuture<ByteArray> {
+        val id = diskFile(source, parseHeaders(request.requestHeaders), request.mediaCacheKey).name +
+            "\u0000" + request.cachePolicy + "\u0000" + request.mediaCachePolicy
+        while (true) {
+            networkJobs[id]?.let { existing ->
+                wanter?.let(existing.wanters::add)
+                if (!existing.future.isDone) return existing.future
+                networkJobs.remove(id, existing)
+            }
+            val job = NetworkJob(id, source, request, basePriority, attempt, progress, partial)
+            wanter?.let(job.wanters::add)
+            if (networkJobs.putIfAbsent(id, job) == null) {
+                networkLane.submit(job)
+                return job.future
+            }
+            job.drop()
+        }
+    }
+
+    /** Main thread: how urgently [view] needs its image now. */
+    private fun viewPriority(view: PamImageView): Int = when {
+        !view.isAttachedToWindow || !view.isShown -> MEDIA_PRIORITY_HIDDEN
+        view.getGlobalVisibleRect(visibleRect) -> MEDIA_PRIORITY_VISIBLE
+        else -> MEDIA_PRIORITY_NEAR
+    }
+
+    /**
+     * Recomputes [demand] from the views still waiting (main thread). It
+     * runs again while jobs are queued, so a cell scrolled on screen jumps
+     * ahead and one scrolled away or recycled stops costing a request.
+     */
+    private fun scheduleDemandRefresh() {
+        if (demandRefreshPosted || closed.get()) return
+        demandRefreshPosted = true
+        main.postDelayed(refreshDemandRunnable, DEMAND_REFRESH_MS)
+    }
+
+    private fun refreshDemand() {
+        demandRefreshPosted = false
+        if (closed.get()) return
+        val fresh = HashMap<String, Int>()
+        active.forEach { (view, pending) ->
+            val key = pending.decodedKey ?: return@forEach
+            if (!pending.finished) fresh.merge(key, viewPriority(view), ::maxOf)
+        }
+        // Add before removing: a worker never sees a wanted key missing.
+        demand.putAll(fresh)
+        demand.keys.removeAll { it !in fresh }
+        if (networkLane.queued > 0 || decodeLane.queued > 0) scheduleDemandRefresh()
+    }
+
+    /** σ and geometry of the view's blur, read on the UI thread for a worker. */
+    private class BlurTarget(
+        val viewSigma: Float,
+        val width: Int,
+        val height: Int,
+        val scaleType: ImageView.ScaleType?,
+    ) {
+        /** The blurred decode is cached apart from the sharp one, per σ and drawn size. */
+        fun keySuffix(): String = "\u0000blur\u0000$viewSigma\u0000${width}x$height\u0000${scaleType?.ordinal}"
+    }
+
+    private fun blurTarget(view: PamImageView, width: Int, height: Int): BlurTarget? =
+        view.blurSigma.takeIf { it > 0f }?.let { sigma -> BlurTarget(sigma, width, height, view.scaleType) }
+
+    /**
+     * Worker thread: blurs a heap decode at the σ it is drawn with (σ is
+     * authored in view px; see [PamBitmapBlur.bitmapSigma]) and drops the
+     * sharp pixels. An animated image shows its first frame, blurred.
+     */
+    private fun blurred(decoded: DecodedBitmap, target: BlurTarget): DecodedBitmap {
+        val sharp = decoded.bitmap
+        val sourceWidth = sharp.width
+        val sourceHeight = sharp.height
+        val sigma = PamBitmapBlur.bitmapSigma(target.viewSigma, target.width, target.height, sourceWidth, sourceHeight, target.scaleType)
+        val output = PamBitmapBlur.blur(sharp, sigma)
+        // The sharp decode is this load's own: nothing else holds it.
+        if (output !== sharp) sharp.recycle()
+        // Uploads the small texture on the RenderThread now, not in the first frame that draws it.
+        output.prepareToDraw()
+        return DecodedBitmap(
+            output,
+            decoded.width,
+            decoded.height,
+            null,
+            PamImageBlur(sourceWidth, sourceHeight, target.viewSigma, sigma),
+        )
+    }
+
+    /**
+     * The view's blur changed. A load in flight for the previous blur is
+     * dropped (its result never shows); a finished image is resolved again
+     * silently unless it already shows this blur.
+     */
+    private fun blurChanged(view: PamImageView, token: Long) {
+        val pending = active[view]?.takeIf { it.token == token } ?: return
+        // Released: showing again resolves it with the current blur.
+        if (pending.released) return
+        if (pending.finished) {
+            refreshStaleBlur(view, token)
+            return
+        }
+        pending.decodedKey = null
+        resolveAgain(view, pending)
+    }
+
+    /**
+     * A finished image whose shown blur (or sharpness) no longer fits the
+     * view (the blur changed, or the view resized past the σ tolerance) is
+     * resolved again without load events and without a cross-fade. The shown
+     * blurred pixels stay until the new ones arrive.
+     */
+    private fun refreshStaleBlur(view: PamImageView, token: Long) {
+        val pending = active[view]
+            ?.takeIf { it.token == token && it.finished && !it.released && !it.failed }
+            ?: return
+        if (view.showsWantedBlur()) return
+        if (pending.restoringCallbacks == null) {
+            pending.restoringCallbacks = pending.callbacks
+            pending.callbacks = NativeImageCallbacks()
+        }
+        pending.finished = false
+        pending.decodedKey = null
+        resolveAgain(view, pending)
+    }
+
+    /**
+     * A memory-cache hit shows in this frame. A load starts after the current
+     * batch of property changes instead: a rebound cell may get its new
+     * source in the same batch, and the old one must not be decoded for it.
+     */
+    private fun resolveAgain(view: PamImageView, pending: ActiveRequest) {
+        if (begin(view, pending.token, view.width, view.height, syncOnly = true)) return
+        main.post {
+            if (active[view] === pending && !pending.finished && pending.decodedKey == null) {
+                begin(view, pending.token, view.width, view.height)
             }
         }
     }
@@ -685,6 +1000,7 @@ internal class NativeImageLoader(
             ?: pending.request.defaultSource
             ?: return
         val token = pending.token
+        val blur = blurTarget(view, view.width, view.height)
         CompletableFuture.supplyAsync(
             {
                 runCatching {
@@ -708,17 +1024,18 @@ internal class NativeImageLoader(
                         1f,
                         repeat = pending.request.repeat,
                         inline = isInline(source),
-                    ).bitmap
+                        heap = blur != null,
+                    ).let { sharp -> blur?.let { target -> blurred(sharp, target) } ?: sharp }
                 }.getOrNull()
             },
-            imageExecutor(source),
-        ).whenComplete { bitmap, _ ->
-            if (bitmap == null) return@whenComplete
+            placeholderExecutor(source),
+        ).whenComplete { placeholder, _ ->
+            if (placeholder == null) return@whenComplete
             main.post {
                 val latest = active[view]
                     ?.takeIf { it.token == token && !it.finished }
                     ?: return@post
-                display(view, bitmap, latest.request.repeat, 0)
+                display(view, placeholder.bitmap, latest.request.repeat, 0, placeholder.blur)
             }
         }
     }
@@ -736,7 +1053,9 @@ internal class NativeImageLoader(
         if (closed.get()) return
         val pending = active[view] ?: return
         if (!shown) {
+            if (!pending.finished) scheduleDemandRefresh()
             if (
+                pending.failed ||
                 pending.released ||
                 !pending.finished ||
                 pending.animated ||
@@ -749,11 +1068,29 @@ internal class NativeImageLoader(
             view.setImageDrawable(null)
             return
         }
+        if (pending.parked) {
+            // A transient failure waited for the view to come back.
+            pending.parked = false
+            begin(view, pending.token, view.width, view.height)
+            return
+        }
+        if (pending.failed) {
+            // No failure sticks: shown or attached again, it loads again.
+            pending.failed = false
+            pending.finished = false
+            pending.retryAttempts = 0
+            pending.decodedKey = null
+            pending.callbacks.onStart()
+            begin(view, pending.token, view.width, view.height)
+            return
+        }
+        if (!pending.finished) scheduleDemandRefresh()
         if (!pending.released) return
         pending.released = false
         val cached = pending.decodedKey?.let { key -> synchronized(cache) { cache.get(key) } }
-        if (cached != null) {
-            display(view, cached.bitmap, pending.request.repeat, 0)
+        // The blur may have changed while hidden: only a matching entry shows.
+        if (cached != null && view.blurMatches(cached.blur)) {
+            display(view, cached.bitmap, pending.request.repeat, 0, cached.blur)
             return
         }
         pending.restoringCallbacks = pending.callbacks
@@ -773,8 +1110,24 @@ internal class NativeImageLoader(
         }
     }
 
-    private fun imageExecutor(source: String) =
-        if (isInline(source)) inlineExecutor else executor
+    /** Placeholders (usually packaged files) decode ahead of every queued photo. */
+    private fun placeholderExecutor(source: String): java.util.concurrent.Executor =
+        if (isInline(source)) {
+            inlineExecutor
+        } else {
+            java.util.concurrent.Executor { work ->
+                decodeLane.submit(
+                    object : MediaWorkLane.Job() {
+                        override fun priority(): Int = if (closed.get()) MEDIA_PRIORITY_DROP else MEDIA_PRIORITY_VISIBLE + 1
+
+                        override fun run() = work.run()
+
+                        // Only a closing loader drops it: nobody waits for that placeholder.
+                        override fun drop() = Unit
+                    },
+                )
+            }
+        }
 
     private fun memoryCacheFor(source: String) =
         if (isInline(source)) inlineCache else cache
@@ -825,39 +1178,61 @@ internal class NativeImageLoader(
                 view,
                 result.bitmap,
                 pending.request.repeat,
-                if (animate && fadesIn(pending)) pending.request.fadeDurationMs else 0,
+                // A silent re-resolve (restore, blur change) swaps in place.
+                if (animate && pending.restoringCallbacks == null && fadesIn(pending)) pending.request.fadeDurationMs else 0,
+                result.blur,
             )
         }
         pending.callbacks.onSuccess(result)
         pending.callbacks.onEnd()
         endRestore(pending)
+        // The blur changed in a way no request saw (never expected): resolve
+        // it again rather than leave a sharp image refused or a wrong σ.
+        if (!animated && !view.showsWantedBlur()) {
+            main.post { refreshStaleBlur(view, pending.token) }
+        }
     }
 
     private fun finishError(
         view: PamImageView,
         pending: ActiveRequest,
         message: String,
+        error: Throwable? = null,
     ) {
-        if (active[view] !== pending || pending.finished) return
-        if (
-            shouldRetryImageRequest(
-                attempts = pending.retryAttempts,
-                attached = view.isAttachedToWindow,
-            )
-        ) {
+        if (active[view] !== pending || pending.finished || closed.get()) return
+        val cause = mediaRootCause(error)
+        // Dropped from a queue while this view still wanted it (it was hidden
+        // or recycled a moment): ask again at once.
+        val delay = if (cause is java.util.concurrent.CancellationException) {
+            0L
+        } else {
+            mediaRetryDelayMs(cause, pending.retryAttempts, kotlin.random.Random.nextDouble())
+        }
+        if (shouldRetryImageRequest(pending.retryAttempts, transient = delay != null)) {
             pending.retryAttempts++
             pending.decodedKey = null
+            if (!view.isAttachedToWindow) {
+                // Detached (a recycled or not yet attached cell): nothing is
+                // requested until it is attached and shown again.
+                pending.parked = true
+                return
+            }
             main.postDelayed(
                 {
-                    if (active[view] === pending && !pending.finished) {
-                        begin(view, pending.token, view.width, view.height)
+                    if (active[view] === pending && !pending.finished && !closed.get()) {
+                        if (view.isAttachedToWindow && view.isShown) {
+                            begin(view, pending.token, view.width, view.height)
+                        } else {
+                            pending.parked = true
+                        }
                     }
                 },
-                RETRY_BASE_DELAY_MS * pending.retryAttempts,
+                checkNotNull(delay),
             )
             return
         }
         pending.finished = true
+        pending.failed = true
         pending.callbacks.onError(message)
         pending.callbacks.onEnd()
         endRestore(pending)
@@ -901,8 +1276,10 @@ internal class NativeImageLoader(
         bitmap: Bitmap,
         repeat: Boolean,
         fadeDurationMs: Int,
+        blur: PamImageBlur? = null,
     ) {
-        val next = view.bitmapDrawable(bitmap, repeat)
+        // Null: a sharp bitmap while the view has a blur (never shown).
+        val next = view.bitmapDrawable(bitmap, repeat, blur) ?: return
         val previous = view.drawable
         if (fadeDurationMs > 0 && previous != null) {
             val transition = TransitionDrawable(arrayOf(previous, next)).apply {
@@ -948,6 +1325,7 @@ internal class NativeImageLoader(
         request: NativeImageRequest,
         targetWidth: Int,
         targetHeight: Int,
+        heap: Boolean = false,
     ): DecodedBitmap? {
         val cell = isMediaStoreThumbnailCandidate(source, request.resizeMethod, targetWidth, targetHeight)
         if (!cell && !isMediaStoreVideoPosterCandidate(source, targetWidth, targetHeight)) {
@@ -982,8 +1360,11 @@ internal class NativeImageLoader(
             error(if (signal.isCanceled) "Image load was cancelled." else "Video thumbnail is unavailable.")
         }
         val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight).let { scaled ->
-            // GPU-only on API 28+, keeping the 16-bit format of the decode.
-            if (
+            // GPU-only on API 28+, keeping the 16-bit format of the decode;
+            // a thumbnail to blur stays on the heap (blurred next).
+            if (heap) {
+                scaled
+            } else if (
                 nativeBitmapStorage(
                     sdk = Build.VERSION.SDK_INT,
                     inline = false,
@@ -1140,27 +1521,50 @@ internal class NativeImageLoader(
         }
     }
 
+    /**
+     * Synchronous remote load (Image::prefetch and the non-render callers):
+     * the disk cache, else one download on the calling thread. A prefetch
+     * waits for a paused host and lets visible downloads go first.
+     */
     private fun loadRemote(
         source: String,
         request: NativeImageRequest,
         progress: (Long, Long) -> Unit,
         partial: (ByteArray) -> Unit,
+        prefetch: Boolean = false,
     ): ByteArray {
+        readCachedRemote(source, request)?.let { return it }
+        if (prefetch) yieldToVisibleLoads(source)
+        return downloadRemote(source, request, 0, progress, partial)
+    }
+
+    private fun yieldToVisibleLoads(source: String) {
+        val host = runCatching { URI(source).host }.getOrNull()
+        val started = System.nanoTime()
+        while (!closed.get()) {
+            val waited = (System.nanoTime() - started) / 1_000_000
+            val paused = PamMediaHostGate.remainingMs(host)
+            val busy = PamMediaHostGate.backlog.get() > 0 && waited < PREFETCH_YIELD_MAX_MS
+            if (paused <= 0 && !busy) return
+            if (waited >= MEDIA_RETRY_MAX_MS + PREFETCH_YIELD_MAX_MS) return
+            Thread.sleep(if (paused > 0) paused.coerceAtMost(1_000) else 100)
+        }
+    }
+
+    /**
+     * The disk-cache part of a remote load: cached bytes (and, for
+     * stale-while-revalidate, a background refresh), or null when it must be
+     * downloaded. Throws when the request may only use the cache.
+     */
+    private fun readCachedRemote(
+        source: String,
+        request: NativeImageRequest,
+    ): ByteArray? {
         validateRemote(URI(source), null)
         val headers = parseHeaders(request.requestHeaders)
-        val origin = URI(source)
         val cacheFile = diskFile(source, headers, request.mediaCacheKey)
         val identity = cacheIdentity(source, request)
-        val diskEnabled = request.cachePolicy != IMAGE_CACHE_NONE &&
-            request.mediaCachePolicy in setOf(
-            MEDIA_CACHE_DISK,
-            MEDIA_CACHE_MEMORY_AND_DISK,
-            MEDIA_CACHE_CACHE_FIRST,
-            MEDIA_CACHE_NETWORK_FIRST,
-            MEDIA_CACHE_CACHE_ONLY,
-            MEDIA_CACHE_STALE_WHILE_REVALIDATE,
-        )
-        val readDiskFirst = diskEnabled &&
+        val readDiskFirst = remoteDiskEnabled(request) &&
             request.cachePolicy !in setOf(IMAGE_CACHE_RELOAD, IMAGE_CACHE_NONE) &&
             request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
         if (readDiskFirst) {
@@ -1171,15 +1575,16 @@ internal class NativeImageLoader(
             if (request.mediaCachePolicy == MEDIA_CACHE_STALE_WHILE_REVALIDATE) {
                 readDisk(cacheFile)?.let { stale ->
                     requestCallbacks(identity) { callbacks -> callbacks.onCacheHit(true, identity) }
-                    executor.execute {
-                        runCatching {
-                            loadRemote(
-                                source,
-                                request.copy(mediaCachePolicy = MEDIA_CACHE_NETWORK_FIRST),
-                                progress,
-                                partial,
-                            )
-                        }
+                    if (!closed.get()) {
+                        fetchRemote(
+                            source,
+                            request.copy(mediaCachePolicy = MEDIA_CACHE_NETWORK_FIRST),
+                            wanter = null,
+                            basePriority = MEDIA_PRIORITY_PREFETCH,
+                            attempt = 0,
+                            progress = { _, _ -> },
+                            partial = {},
+                        )
                     }
                     return stale
                 }
@@ -1192,17 +1597,52 @@ internal class NativeImageLoader(
         ) {
             error("Image is not available in the local cache.")
         }
+        return null
+    }
 
+    private fun remoteDiskEnabled(request: NativeImageRequest): Boolean =
+        request.cachePolicy != IMAGE_CACHE_NONE &&
+            request.mediaCachePolicy in setOf(
+                MEDIA_CACHE_DISK,
+                MEDIA_CACHE_MEMORY_AND_DISK,
+                MEDIA_CACHE_CACHE_FIRST,
+                MEDIA_CACHE_NETWORK_FIRST,
+                MEDIA_CACHE_CACHE_ONLY,
+                MEDIA_CACHE_STALE_WHILE_REVALIDATE,
+            )
+
+    /**
+     * Downloads [source], following redirects by hand. The bytes are cached
+     * on disk under the image's own key (its cacheKey, else the requested
+     * URL), never under a redirect target, so a signed CDN URL behind an API
+     * redirect is fetched once. A 429/503 pauses the host for every loader.
+     */
+    private fun downloadRemote(
+        source: String,
+        request: NativeImageRequest,
+        attempt: Int,
+        progress: (Long, Long) -> Unit,
+        partial: (ByteArray) -> Unit,
+    ): ByteArray {
+        validateRemote(URI(source), null)
+        val headers = parseHeaders(request.requestHeaders)
+        val origin = URI(source)
+        val cacheFile = diskFile(source, headers, request.mediaCacheKey)
+        val identity = cacheIdentity(source, request)
+        val diskEnabled = remoteDiskEnabled(request)
         return try {
             var current = source
             var previous: URI? = null
             repeat(MAX_REDIRECTS + 1) { redirect ->
             val uri = URI(current)
             validateRemote(uri, previous)
+            PamMediaHostGate.remainingMs(uri.host).takeIf { it > 0 }?.let { paused ->
+                throw MediaHostPausedException(uri.host, paused)
+            }
             val connection = URL(current).openConnection() as HttpURLConnection
             connections += connection
             connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
+            connection.readTimeout = imageReadTimeoutMs(attempt)
             connection.instanceFollowRedirects = false
             connection.useCaches = request.cachePolicy != IMAGE_CACHE_NONE
             if (request.cachePolicy == IMAGE_CACHE_NONE) {
@@ -1225,9 +1665,12 @@ internal class NativeImageLoader(
                     current = uri.resolve(location).toString()
                     return@repeat
                 }
-                require(status in 200..299) {
-                    "Image request failed with HTTP $status."
+                if (status !in 200..299) {
+                    val retryAfter = parseRetryAfterMs(connection.getHeaderField("Retry-After"))
+                    if (status in MEDIA_HOST_PAUSE_STATUS) PamMediaHostGate.pause(uri.host, retryAfter)
+                    throw MediaHttpException(status, retryAfter, "Image")
                 }
+                PamMediaHostGate.succeeded(uri.host)
                 val contentType = connection.contentType.orEmpty()
                     .substringBefore(';')
                     .trim()
@@ -1263,7 +1706,11 @@ internal class NativeImageLoader(
                         "Image checksum verification failed."
                     }
                 }
-                if (diskEnabled) {
+                // `Cache-Control: no-store` keeps the bytes off disk, unless
+                // the app named the cache key itself (it owns that policy).
+                val noStore = request.mediaCacheKey == null &&
+                    connection.getHeaderField("Cache-Control")?.contains("no-store", ignoreCase = true) == true
+                if (diskEnabled && !noStore) {
                     writeDisk(
                         cacheFile,
                         bytes,
@@ -1300,6 +1747,8 @@ internal class NativeImageLoader(
         repeat: Boolean = false,
         inline: Boolean = false,
         contain: Boolean = false,
+        /** A heap bitmap, never a GPU one, and no texture upload: it is blurred next. */
+        heap: Boolean = false,
     ): DecodedBitmap {
         val bounds = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
@@ -1333,7 +1782,7 @@ internal class NativeImageLoader(
         val storage = nativeBitmapStorage(
             sdk = Build.VERSION.SDK_INT,
             inline = inline,
-            allowHardware = true,
+            allowHardware = !heap,
             pixels = plan.width.toLong() * plan.height,
             mimeType = bounds.outMimeType,
         )
@@ -1371,7 +1820,7 @@ internal class NativeImageLoader(
         // A scaled decode carries the target "density"; restore the display
         // density so BitmapDrawable's intrinsic size stays the pixel size.
         if (plan.scaled) bitmap.density = context.resources.displayMetrics.densityDpi
-        if (bitmap.config != Bitmap.Config.HARDWARE) {
+        if (bitmap.config != Bitmap.Config.HARDWARE && !heap) {
             // Starts the GPU texture upload now, on the RenderThread, instead
             // of inside the frame that first draws the image: a 1080x2042
             // feed photo spent 8.5 ms of a scroll frame in "Texture upload" on
@@ -1700,8 +2149,11 @@ internal class NativeImageLoader(
         var decodedKey: String? = null,
         var finished: Boolean = false,
         var retryAttempts: Int = 0,
+        /** A transient failure waits for the view to be attached and shown before it retries. */
+        var parked: Boolean = false,
         var released: Boolean = false,
         var animated: Boolean = false,
+        var failed: Boolean = false,
         var restoringCallbacks: NativeImageCallbacks? = null,
         val startedAt: Long = android.os.SystemClock.uptimeMillis(),
     )
@@ -1711,6 +2163,8 @@ internal class NativeImageLoader(
         val width: Int,
         val height: Int,
         val animatedBytes: ByteArray? = null,
+        /** Set when [bitmap] is blurred (cached under the blurred key). */
+        val blur: PamImageBlur? = null,
     )
 
     private companion object {
@@ -1734,12 +2188,17 @@ internal class NativeImageLoader(
         const val PLACEHOLDER_EDGE = 512
         const val TARGET_BUCKET = 64
         const val CONNECT_TIMEOUT_MS = 5_000
-        const val READ_TIMEOUT_MS = 15_000
+        const val DECODE_THREADS = 3
+        const val DEMAND_REFRESH_MS = 150L
+        /** Downloaded bytes waiting for a decoder above this hold new downloads back. */
+        const val MAX_PENDING_DECODE_BYTES = 24L * 1024 * 1024
+        const val DECODE_BACKLOG_WAIT_MS = 50L
+        /** Prefetches (Image::prefetch) wait at most this long for visible downloads to drain. */
+        const val PREFETCH_YIELD_MAX_MS = 10_000L
         const val MAX_REDIRECTS = 5
         const val MAX_HEADERS = 32
         const val MAX_HEADER_BYTES = 4_096
         const val MAX_ERROR_BYTES = 512
-        const val RETRY_BASE_DELAY_MS = 32L
         val HEADER_NAME = Regex("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$")
         val REDIRECT_STATUS = setOf(301, 302, 303, 307, 308)
         val JPEG_CONTENT_TYPES = setOf("image/jpeg", "image/jpg")
@@ -1753,16 +2212,38 @@ private fun memoryCacheBytes(context: Context): Int {
     return nativeImageMemoryCacheBytes(manager.memoryClass, manager.isLowRamDevice)
 }
 
+/** A failed request is never reused: the same image bound again loads again. */
 internal fun shouldReuseImageRequest(
     sameSignature: Boolean,
     finished: Boolean,
     hasDrawable: Boolean,
-): Boolean = sameSignature && (!finished || hasDrawable)
+    failed: Boolean = false,
+): Boolean = sameSignature && !failed && (!finished || hasDrawable)
 
+/** Transient failures retry (with backoff) [IMAGE_MAX_TRANSIENT_RETRIES] times before onError; permanent ones never. */
 internal fun shouldRetryImageRequest(
     attempts: Int,
-    attached: Boolean,
-): Boolean = attached && attempts < 2
+    transient: Boolean,
+): Boolean = transient && attempts < IMAGE_MAX_TRANSIENT_RETRIES
+
+/**
+ * Parallel downloads per loader: more than the 3 decoders, so a few slow or
+ * held responses never stall the visible images queued behind them.
+ */
+internal const val IMAGE_NETWORK_THREADS = 5
+
+/** About 90 s of backoff (0.5 s doubling to 30 s) before a transient failure is reported. */
+internal const val IMAGE_MAX_TRANSIENT_RETRIES = 8
+
+/** Read timeout (time to the first byte, then between reads) per attempt: short first, longer on retries. */
+internal fun imageReadTimeoutMs(attempt: Int): Int = when {
+    attempt <= 0 -> 7_000
+    attempt == 1 -> 11_000
+    else -> 15_000
+}
+
+internal fun isRemoteImageSource(source: String): Boolean =
+    source.startsWith("https://", ignoreCase = true) || source.startsWith("http://", ignoreCase = true)
 
 internal const val IMAGE_RESIZE_AUTO = 1
 internal const val IMAGE_RESIZE_RESIZE = 2

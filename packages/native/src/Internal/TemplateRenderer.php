@@ -3108,6 +3108,10 @@ final class TemplateRenderer
         if (isset($values['model'])) {
             throw new RuntimeException('The model attribute is only valid on Input.');
         }
+        if (self::FAST_KINDS[$tag] === NodeKind::Text && NativeTime::hasClock($properties)) {
+            // A native clock's label replaces the content (Text::clock()).
+            $element = NativeTime::labelled($element);
+        }
 
         if ($prebuilt === null && $pressEvents === null && $styleKey !== null) {
             // Wire-encode the properties from the element's template: its
@@ -4369,8 +4373,13 @@ final class TemplateRenderer
                 $batch[$key->value] = $value;
             }
         }
+        if ($batch === []) {
+            return $element;
+        }
+        $element = $element->__pamWithProperties($batch);
 
-        return $batch === [] ? $element : $element->__pamWithProperties($batch);
+        // A native clock's label replaces the content (Text::clock()).
+        return $element->kind === NodeKind::Text ? NativeTime::labelled($element) : $element;
     }
 
     /**

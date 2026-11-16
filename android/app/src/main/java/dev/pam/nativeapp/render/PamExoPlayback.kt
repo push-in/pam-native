@@ -13,8 +13,14 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -95,7 +101,9 @@ internal class PamExoPlayback(
         fun onVideoSize(width: Int, height: Int)
         fun onBuffering(buffering: Boolean)
         fun onCompletion()
-        fun onError(message: String)
+
+        /** [transient]: a network or rate-limit failure worth preparing again later; false for 4xx and bad media. */
+        fun onError(message: String, transient: Boolean)
     }
 
     private data class Snapshot(
@@ -146,8 +154,19 @@ internal class PamExoPlayback(
         owner.post {
             if (released.get()) return@post
             runCatching {
+                // A paused host (429/503 seen by an image or another player)
+                // fails the load before a request, so the retry policy waits.
+                val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(appContext)) { spec ->
+                    val paused = PamMediaHostGate.remainingMs(spec.uri.host)
+                    if (paused > 0) throw MediaHostPausedException(spec.uri.host.orEmpty(), paused)
+                    spec
+                }
                 val current = ExoPlayer.Builder(appContext)
                     .setLooper(owner.looper)
+                    .setMediaSourceFactory(
+                        DefaultMediaSourceFactory(dataSource)
+                            .setLoadErrorHandlingPolicy(PamMediaLoadErrorPolicy()),
+                    )
                     .setLoadControl(
                         DefaultLoadControl.Builder()
                             .setBufferDurationsMs(
@@ -208,7 +227,8 @@ internal class PamExoPlayback(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        dispatch { listener.onError("Media playback failed (${error.errorCodeName})") }
+                        val transient = isTransientPlaybackError(error)
+                        dispatch { listener.onError("Media playback failed (${error.errorCodeName})", transient) }
                     }
                 })
                 current.setMediaItem(MediaItem.fromUri(uri))
@@ -217,7 +237,7 @@ internal class PamExoPlayback(
                 runCatching { player?.release() }
                 player = null
                 snapshot = snapshot.copy(playing = false)
-                dispatch { listener.onError(error.message ?: "Media source could not be prepared.") }
+                dispatch { listener.onError(error.message ?: "Media source could not be prepared.", false) }
                 owner.postDelayed({ ownerThread.quitSafely() }, OWNER_QUIT_DELAY_MS)
             }
         }
@@ -236,7 +256,7 @@ internal class PamExoPlayback(
                 operation(current)
                 sample(current)
             }.onFailure { error ->
-                dispatch { listener.onError(error.message ?: "Media command failed.") }
+                dispatch { listener.onError(error.message ?: "Media command failed.", false) }
             }
         }
     }
@@ -351,3 +371,84 @@ internal fun mediaContext(context: android.content.Context): android.content.Con
 /** How long a released player's owner thread outlives it (late codec events). */
 private const val OWNER_QUIT_DELAY_MS = 3_000L
 private const val FIRST_FRAME_FALLBACK_MS = 400L
+
+/**
+ * Media loads retry like images: 429/503/502/504/408 and network errors back
+ * off exponentially with jitter (honoring `Retry-After`, which also pauses
+ * the host for every image and player), up to [PLAYER_LOAD_RETRIES] times
+ * before the player fails; 4xx and bad media fail at once. ExoPlayer's
+ * default gave up after three retries of at most a few seconds, shorter than
+ * one rate-limit window.
+ */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+internal class PamMediaLoadErrorPolicy(
+    private val random: () -> Double = { kotlin.random.Random.nextDouble() },
+) : DefaultLoadErrorHandlingPolicy(PLAYER_LOAD_RETRIES) {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        val error = loadErrorInfo.exception
+        val attempt = (loadErrorInfo.errorCount - 1).coerceAtLeast(0)
+        mediaHttpFailure(error)?.let { failure ->
+            return mediaRetryDelayMs(failure, attempt, random()) ?: C.TIME_UNSET
+        }
+        causeOf<MediaHostPausedException>(error)?.let { paused ->
+            return mediaRetryDelayMs(paused, attempt, random()) ?: C.TIME_UNSET
+        }
+        if (causeOf<HttpDataSource.HttpDataSourceException>(error) != null) {
+            return mediaBackoffMs(attempt, random())
+        }
+        return super.getRetryDelayMsFor(loadErrorInfo)
+    }
+
+    /** A rate-limited or overloaded server is retried, never excluded as a broken track or location. */
+    override fun getFallbackSelectionFor(
+        fallbackOptions: LoadErrorHandlingPolicy.FallbackOptions,
+        loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo,
+    ): LoadErrorHandlingPolicy.FallbackSelection? {
+        val status = causeOf<HttpDataSource.InvalidResponseCodeException>(loadErrorInfo.exception)?.responseCode
+        if (status != null && status in MEDIA_TRANSIENT_STATUS) return null
+        return super.getFallbackSelectionFor(fallbackOptions, loadErrorInfo)
+    }
+
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int = PLAYER_LOAD_RETRIES
+}
+
+/** The HTTP status of a failed media load as a [MediaHttpException] (pausing the host on 429/503). */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+internal fun mediaHttpFailure(error: Throwable?): MediaHttpException? {
+    val response = causeOf<HttpDataSource.InvalidResponseCodeException>(error) ?: return null
+    val retryAfter = parseRetryAfterMs(
+        // The status line is the entry with a null name.
+        response.headerFields.entries
+            .firstOrNull { entry -> (entry.key as String?)?.equals("Retry-After", ignoreCase = true) == true }
+            ?.value?.firstOrNull(),
+    )
+    if (response.responseCode in MEDIA_HOST_PAUSE_STATUS) {
+        PamMediaHostGate.pause(response.dataSpec.uri.host, retryAfter)
+    }
+    return MediaHttpException(response.responseCode, retryAfter)
+}
+
+/** Whether a failed player is worth preparing again later (network or rate limit, not 4xx or bad media). */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+internal fun isTransientPlaybackError(error: Throwable?): Boolean {
+    causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.let { return it.responseCode in MEDIA_TRANSIENT_STATUS }
+    if (causeOf<MediaHostPausedException>(error) != null) return true
+    if (causeOf<HttpDataSource.HttpDataSourceException>(error) != null) return true
+    return (error as? PlaybackException)?.errorCode in setOf(
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_TIMEOUT,
+    )
+}
+
+internal inline fun <reified T : Throwable> causeOf(error: Throwable?): T? {
+    var current = error
+    var depth = 0
+    while (current != null && depth++ < 8) {
+        if (current is T) return current
+        current = current.cause?.takeIf { it !== current }
+    }
+    return null
+}
+
+internal const val PLAYER_LOAD_RETRIES = 8

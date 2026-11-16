@@ -64,6 +64,8 @@ abstract class Component implements Renderable
     /** @var array<int, Disposable> resources released on unmount, by object id */
     private array $pamOwned = [];
     private ?\Pam\Native\System\ComponentTimers $pamTimers = null;
+    /** Renders again when a native clock label changes length (created on first need). */
+    private ?Internal\ClockRemeasure $pamClocks = null;
     /** Scope of the last setup(): watchers, composables and lifecycle hooks. */
     private ?\Pam\Native\Signals\EffectScope $pamScope = null;
     /** @var array<string, mixed>|null parameters of the route that created this screen */
@@ -123,6 +125,7 @@ abstract class Component implements Renderable
         'pamHandlers',
         'pamOwned',
         'pamTimers',
+        'pamClocks',
         'pamScope',
         'pamRouteParams',
         'pamRouteContext',
@@ -419,6 +422,8 @@ abstract class Component implements Renderable
             }
             ComponentLifecycle::beginComponentRender($this);
             DependencyTracker::begin($this);
+            Internal\NativeTime::beginRender();
+            $clocksRendered = false;
             try {
                 $this->rendering();
             if ($this instanceof Restorable) {
@@ -475,10 +480,16 @@ abstract class Component implements Renderable
                 $this->pamLastElement = $element;
                 $this->pamEpoch = DependencyTracker::epoch();
                 $this->pamSnapshot = $this->pamOwnState();
+                $clocksRendered = true;
 
                 return $element;
             } finally {
                 DependencyTracker::end($this);
+                $clockDue = Internal\NativeTime::endRender();
+                // A failed render keeps the last element, and its clock render.
+                if ($clocksRendered) {
+                    $this->__pamClockRenderAt($clockDue);
+                }
             }
         }
 
@@ -1071,16 +1082,43 @@ abstract class Component implements Renderable
         $this->pamOwned[spl_object_id($resource)] = $resource;
     }
 
+    /**
+     * @internal Renders this component again at [dueMs] (epoch ms) so the
+     * engine measures a native clock label that changed length; null
+     * cancels. [merge] keeps an earlier instant already armed.
+     */
+    final public function __pamClockRenderAt(?int $dueMs, bool $merge = false): void
+    {
+        if ($dueMs === null && $this->pamClocks === null) {
+            return;
+        }
+        ($this->pamClocks ??= new Internal\ClockRemeasure())->schedule($this, $dueMs, $merge);
+    }
+
+    /** @internal Instant of the pending clock render (tests, diagnostics), null for none. */
+    final public function __pamClockRenderDue(): ?int
+    {
+        return $this->pamClocks?->due();
+    }
+
+    /** @internal True while the pending clock render waits for the foreground. */
+    final public function __pamClockRenderSuspended(): bool
+    {
+        return $this->pamClocks?->suspended() ?? false;
+    }
+
     /** @internal The component was paused (app in the background). */
     final public function __pamSuspendResources(): void
     {
         $this->pamTimers?->suspend();
+        $this->pamClocks?->suspend();
     }
 
     /** @internal The component resumed. */
     final public function __pamResumeResources(): void
     {
         $this->pamTimers?->resume();
+        $this->pamClocks?->resume();
     }
 
     /** @internal The component unmounted: release owned resources and timers. */
@@ -1114,6 +1152,7 @@ abstract class Component implements Renderable
             }
         }
         $this->pamTimers?->cancelAll();
+        $this->pamClocks?->cancel();
         if ($failure !== null) {
             throw $failure;
         }

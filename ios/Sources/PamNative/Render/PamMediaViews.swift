@@ -199,7 +199,47 @@ final class PamMediaView: UIView {
         } else {
             if autoplayFraction > 0 { PamMediaVisibility.join(self) }
             if awaitingScreen { PamMediaVisibility.awaitScreen(self) }
+            if failedSource != nil, failedSource == source {
+                // Back on screen: a video that failed prepares again.
+                playbackRecoveries = 0
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.window != nil else { return }
+                    self.reloadFailedSource()
+                }
+            }
         }
+    }
+
+    /// The remote source whose player failed: the failed player is released
+    /// (poster shown) and the source prepares again when the view returns to
+    /// a window, or after a backoff while it stays near the screen. A
+    /// rate-limited feed video recovers instead of staying black until rebound.
+    private var failedSource: String?
+    private var playbackRecoveries = 0
+
+    private func playbackFailed(_ item: AVPlayerItem) {
+        guard let url = (item.asset as? AVURLAsset)?.url, !url.isFileURL else { return }
+        let failed = source
+        failedSource = failed
+        releasePlayer()
+        guard playbackRecoveries < PamMediaRetry.maxPlaybackRecoveries else { return }
+        let delay = max(
+            PamMediaRetry.backoff(attempt: playbackRecoveries + 2),
+            PamMediaHostGate.shared.remaining(url.host)
+        )
+        let generation = sourceGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.sourceGeneration == generation, self.failedSource == failed,
+                  PamImageResidency.shouldHold(self) else { return }
+            self.playbackRecoveries += 1
+            self.reloadFailedSource()
+        }
+    }
+
+    private func reloadFailedSource() {
+        guard let failed = failedSource, failed == source, player == nil else { return }
+        source = ""
+        setSource(failed)
     }
 
     func setKeepAliveWhenCovered(_ value: Bool) {
@@ -306,6 +346,10 @@ final class PamMediaView: UIView {
 
     func setSource(_ value: String) {
         guard value != source else { return }
+        if value != failedSource {
+            failedSource = nil
+            playbackRecoveries = 0
+        }
         source = value
         if value != resumeSource {
             resumeSource = ""
@@ -559,6 +603,8 @@ final class PamMediaView: UIView {
                 guard let self, self.player?.currentItem === item else { return }
                 switch item.status {
                 case .readyToPlay:
+                    self.failedSource = nil
+                    self.playbackRecoveries = 0
                     let resuming = !self.resumeSource.isEmpty && self.resumeSource == self.source
                     // A recycled view playing a source again resumes where it
                     // stopped (visible autoplay, React Native feed rule).
@@ -613,6 +659,7 @@ final class PamMediaView: UIView {
                     }
                     #endif
                     self.onError?(item.error?.localizedDescription ?? "Media could not be loaded")
+                    self.playbackFailed(item)
                 case .unknown:
                     break
                 @unknown default:

@@ -2,13 +2,25 @@
 
 declare(strict_types=1);
 
+use Pam\Native\AppState;
 use Pam\Native\ClockFormat;
+use Pam\Native\Component;
+use Pam\Native\Element;
+use Pam\Native\Internal\CompiledTemplateNode;
+use Pam\Native\Internal\ComponentLifecycle;
+use Pam\Native\Internal\DependencyTracker;
+use Pam\Native\Internal\NativeTime;
+use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
+use Pam\Native\ModuleResultStatus;
 use Pam\Native\PropKey;
 use Pam\Native\ProtocolMismatchException;
+use Pam\Native\Renderable;
 use Pam\Native\RendererContract;
+use Pam\Native\UI\Column;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 
@@ -187,5 +199,308 @@ try {
         'A renderer declaring 1034 receives progress and reveal properties.',
     );
 } finally {
+    RendererContract::use(null);
+}
+
+// --- Clock labels: the framework renders what the native clock shows -------
+// ClockFormat::format() is Android/iOS PamClockFormat.format(), value for value.
+$formats = [
+    [ClockFormat::MinutesSeconds, 42, '0:42'], [ClockFormat::MinutesSeconds, 3_665, '1:01:05'],
+    [ClockFormat::MinutesSeconds, -5, '0:00'], [ClockFormat::MinutesSeconds, 0, '0:00'],
+    [ClockFormat::MinutesSeconds, 599, '9:59'], [ClockFormat::MinutesSeconds, 600, '10:00'],
+    [ClockFormat::MinutesSeconds, 3_599, '59:59'], [ClockFormat::MinutesSeconds, 3_600, '1:00:00'],
+    [ClockFormat::MinutesSeconds, 36_000, '10:00:00'], [ClockFormat::MinutesSeconds, 360_061, '100:01:01'],
+    [ClockFormat::PaddedMinutesSeconds, 42, '00:42'], [ClockFormat::PaddedMinutesSeconds, 4_503, '75:03'],
+    [ClockFormat::PaddedMinutesSeconds, 5_999, '99:59'], [ClockFormat::PaddedMinutesSeconds, 6_000, '100:00'],
+    [ClockFormat::PaddedMinutesSeconds, -1, '00:00'], [ClockFormat::PaddedMinutesSeconds, 60_000, '1000:00'],
+    [ClockFormat::HoursMinutesSeconds, 42, '0:00:42'], [ClockFormat::HoursMinutesSeconds, 3_661, '1:01:01'],
+    [ClockFormat::HoursMinutesSeconds, 35_999, '9:59:59'], [ClockFormat::HoursMinutesSeconds, 36_000, '10:00:00'],
+    [ClockFormat::HoursMinutesSeconds, -7, '0:00:00'],
+    [ClockFormat::Seconds, 42, '42'], [ClockFormat::Seconds, 0, '0'], [ClockFormat::Seconds, 9, '9'],
+    [ClockFormat::Seconds, 10, '10'], [ClockFormat::Seconds, 100, '100'], [ClockFormat::Seconds, -3, '0'],
+];
+foreach ($formats as [$format, $seconds, $label]) {
+    $assert($format->format($seconds) === $label, "{$format->templateName()} formats {$seconds} as {$label}.");
+}
+
+$at = 1_763_300_000_000;
+$props = static fn (Text $text): array => $text->toElement()->properties();
+$labelAt = static fn (Text $text, int $now): ?string => NativeTime::clockLabel($props($text), $now);
+// PamNativeTimeTest (Android) cases.
+$up = Text::make('')->clock($at, ClockFormat::PaddedMinutesSeconds, 2_000);
+$assert(
+    $labelAt($up, $at) === '00:02' && $labelAt($up, $at + 42_999) === '00:44' && $labelAt($up, $at - 500) === '00:02',
+    'A clock counts up from its start and offset; a start in the future stands at the offset.',
+);
+$assert(
+    $labelAt(Text::make('')->clock($at, offsetMs: 61_000, running: false), $at + 99_000) === '1:01'
+        && $labelAt(Text::make('')->clock(null), $at) === '0:00',
+    'A paused or unstarted clock stands at its offset.',
+);
+$deadline = Text::make('')->countdownTo($at + 5_000);
+$timer = Text::make('')->countdown(30_000, $at, ClockFormat::MinutesSeconds, 10_000);
+$assert(
+    $labelAt($deadline, $at) === '5' && $labelAt($deadline, $at + 1) === '5' && $labelAt($deadline, $at + 4_999) === '1'
+        && $labelAt($deadline, $at + 5_000) === '0' && $labelAt($deadline, $at + 9_000) === '0'
+        && $labelAt($timer, $at) === '0:20' && $labelAt($timer, $at + 5_000) === '0:15' && $labelAt($timer, $at + 25_000) === '0:00'
+        && $labelAt(Text::make('')->countdown(30_000, $at, offsetMs: 10_000, running: false), $at + 9_000) === '20',
+    'Countdowns round up, stop at zero and hold while paused.',
+);
+$assert(NativeTime::clockLabel([PropKey::Text->value => 'x'], $at) === null, 'A Text without clock values has no clock label.');
+
+$clockSeconds = 0;
+NativeTime::useClock(static function () use (&$clockSeconds, $at): int {
+    return $at + $clockSeconds;
+});
+try {
+    // The initial label is computed: the placeholder is only measured when no clock is on.
+    $text = static fn (Element $element): mixed => $element->properties()[PropKey::Text->value] ?? null;
+    $assert(
+        $text(Text::make('00:00')->clock($at - 42_300, ClockFormat::PaddedMinutesSeconds)->toElement()) === '00:42'
+            && $text(Text::make('0:00')->clock($at - 7_200_000)->toElement()) === '2:00:00'
+            && $text(Text::make('0')->countdown(30_000, $at)->toElement()) === '30'
+            && $text(Text::make('0')->countdown(90_000, null, ClockFormat::MinutesSeconds)->toElement()) === '1:30'
+            && $text(Text::make('0:00')->clock($at - 5_000, offsetMs: 125_000, running: false)->toElement()) === '2:05'
+            && $text(Text::make('5')->countdownTo($at + 12_000)->toElement()) === '12'
+            && $text(Text::make('x')->countdownTo($at - 1)->toElement()) === '0',
+        'Text::clock()/countdown()/countdownTo() render the current label, not the placeholder.',
+    );
+    $assert(
+        $text(Text::make('0:00')->property(PropKey::ClockStartedAt, $at - 61_000)->toElement()) === '1:01'
+            && $text(Text::make('Live')->toElement()) === 'Live',
+        'A clock set through property() is labelled too; other texts keep their content.',
+    );
+    $clockTree = TemplateRenderer::render(
+        TemplateCompiler::compile(
+            '<Column>'
+            .'<Text :clockStartedAt="$startedAt" clockFormat="mm:ss">00:00</Text>'
+            .'<Text :clockStartedAt="$missing" clockFormat="m:ss">--:--</Text>'
+            .'<Text clockDurationMs="10000" :clockStartedAt="$startedAt" clockFormat="seconds">0</Text>'
+            .'</Column>',
+            'native-clock-label.pam.php',
+        ),
+        new class ($at) {
+            public ?int $missing = null;
+
+            public function __construct(public int $startedAt)
+            {
+            }
+        },
+        [],
+    );
+    [$tUp, $tOff, $tDown] = $clockTree->children();
+    $assert(
+        $text($tUp) === '00:00' && $text($tOff) === '--:--' && $text($tDown) === '10',
+        'Templates render the clock label; a Text whose clock is off keeps its content.',
+    );
+
+    // Styled templates take the fast path, with pre-encoded properties.
+    $compiled = TemplateCompiler::compile(
+        '<Column class="bar"><Text class="time" :clockStartedAt="$startedAt" clockFormat="m:ss">0:00</Text></Column>',
+        'native-clock-fast.pam.php',
+    );
+    $fast = new CompiledTemplateNode(
+        kind: $compiled->kind,
+        name: $compiled->name,
+        attributes: [
+            ...$compiled->attributes,
+            '__pamStyles' => json_encode(
+                ScopedStyleCompiler::compile('.bar { padding: 4px } .time { font-size: 14px }', 'native-clock-fast.pam'),
+                JSON_THROW_ON_ERROR,
+            ),
+        ],
+        source: $compiled->source,
+        line: $compiled->line,
+        column: $compiled->column,
+        value: $compiled->value,
+    );
+    $fast->children = $compiled->children;
+    $fastScope = new class ($at - 9_000) {
+        public function __construct(public int $startedAt)
+        {
+        }
+    };
+    $labels = [];
+    $consistent = true;
+    RendererContract::use(RendererContract::fromJson('{"abi":1,"events":[79,1001],"properties":[543,1034],"protocol":[1,1]}'));
+    foreach ([0, 600_000, 3_000_000, 3_600_000] as $clockSeconds) {
+        $clockText = TemplateRenderer::render($fast, $fastScope, [])->children()[0];
+        $labels[] = $text($clockText);
+        $cached = $clockText->encodedProperties;
+        $prebuiltClocks = ($prebuiltClocks ?? 0) + ($cached === null ? 0 : 1);
+        $consistent = $consistent && ($cached === null || $cached[0] === $clockText->properties());
+        $frame = (new TreeEncoder(false))->encode(Column::make($clockText))['frame'];
+        $consistent = $consistent && is_string($frame) && str_contains($frame, (string) end($labels));
+    }
+    $assert(
+        $labels === ['0:09', '10:09', '50:09', '1:00:09'] && $consistent && $prebuiltClocks > 0,
+        'Fast-path template clocks render the label of each render and encode it.',
+    );
+
+    // The next instant the label changes length, in every format.
+    $change = static fn (Text $text, int $now): ?int => NativeTime::clockLengthChangeAt($props($text), $now);
+    $assert(
+        $change(Text::make('')->clock($at), $at) === $at + 600_000
+            && $change(Text::make('')->clock($at), $at + 600_000) === $at + 3_600_000
+            && $change(Text::make('')->clock($at), $at + 3_600_000) === $at + 36_000_000
+            && $change(Text::make('')->clock($at, ClockFormat::PaddedMinutesSeconds), $at) === $at + 6_000_000
+            && $change(Text::make('')->clock($at, ClockFormat::PaddedMinutesSeconds), $at + 6_000_000) === $at + 60_000_000
+            && $change(Text::make('')->clock($at, ClockFormat::HoursMinutesSeconds), $at) === $at + 36_000_000
+            && $change(Text::make('')->clock($at, ClockFormat::Seconds), $at) === $at + 10_000
+            && $change(Text::make('')->clock($at, ClockFormat::Seconds), $at + 10_000) === $at + 100_000,
+        'Counting up, the label gains a character at 10:00, 1:00:00, 100:00, 10:00:00 and 10 s.',
+    );
+    $assert(
+        $change(Text::make('')->clock($at, offsetMs: 590_000), $at) === $at + 10_000
+            && $change(Text::make('')->clock($at + 5_000, ClockFormat::Seconds, 3_000), $at) === $at + 12_000,
+        'The offset counts toward the change; a start in the future delays it.',
+    );
+    $assert(
+        $change(Text::make('')->countdown(100_000, $at), $at) === $at + 1_000
+            && $change(Text::make('')->countdown(100_000, $at), $at + 1_000) === $at + 91_000
+            && $change(Text::make('')->countdown(100_000, $at), $at + 91_000) === null
+            && $change(Text::make('')->countdown(3_600_000, $at, ClockFormat::MinutesSeconds), $at) === $at + 1_000
+            && $change(Text::make('')->countdown(3_600_000, $at, ClockFormat::MinutesSeconds), $at + 1_000) === $at + 3_001_000
+            && $change(Text::make('')->countdown(6_000_000, $at, ClockFormat::PaddedMinutesSeconds), $at) === $at + 1_000
+            && $change(Text::make('')->countdown(36_000_000, $at, ClockFormat::HoursMinutesSeconds), $at) === $at + 1_000
+            && $change(Text::make('')->countdown(36_000_000, $at, ClockFormat::HoursMinutesSeconds), $at + 1_000) === null
+            && $change(Text::make('')->countdownTo($at + 10_500), $at) === $at + 1_500
+            && $change(Text::make('')->countdown(20_000, $at + 2_000, offsetMs: 5_000), $at) === $at + 8_000,
+        'Counting down, the label loses a character at 99, 59:59, 99:59, 9:59:59 and 9 s left.',
+    );
+    $assert(
+        $change(Text::make('')->clock($at, offsetMs: 9_000, running: false), $at) === null
+            && $change(Text::make('')->clock(null, offsetMs: 590_000), $at) === null
+            && $change(Text::make('')->countdown(30_000, null), $at) === null
+            && $change(Text::make('')->countdownTo($at - 1), $at) === null,
+        'A paused, unstarted or finished clock never changes length.',
+    );
+
+    // Layout: counting up, the longer label is rendered (and measured) a
+    // little before the native clock shows it; counting down, right after.
+    $layout = static fn (Text $text, int $now): ?array => NativeTime::clockLayout($props($text), $now);
+    $lead = NativeTime::CLOCK_GROWTH_LEAD_MS;
+    $assert(
+        $layout(Text::make('')->clock($at), $at + 590_000) === ['9:50', $at + 600_000 - $lead]
+            && $layout(Text::make('')->clock($at), $at + 600_000 - $lead) === ['10:00', $at + 3_600_000 - $lead]
+            && $layout(Text::make('')->countdown(100_000, $at), $at) === ['100', $at + 1_000]
+            && $layout(Text::make('')->clock($at, running: false), $at + 900_000) === ['0:00', null],
+        'clockLayout() leads growth by CLOCK_GROWTH_LEAD_MS and follows shrinking.',
+    );
+
+    // One timer per component renders it again at the next length change.
+    $clockSeconds = 0;
+    $fixture = new class extends Component {
+        public ?int $startedAt = null;
+        public bool $running = true;
+        public int $offsetMs = 0;
+        public bool $shown = true;
+        public string $title = 'Call';
+
+        public function render(): Renderable
+        {
+            return Column::make(
+                Text::make($this->title),
+                $this->shown
+                    ? Text::make('00:00')->clock($this->startedAt, ClockFormat::PaddedMinutesSeconds, $this->offsetMs, $this->running)
+                    : null,
+                $this->shown ? Text::make('0')->countdown(30_000, $this->startedAt) : null,
+            );
+        }
+    };
+    $renderClock = static function () use ($fixture): Element {
+        ComponentLifecycle::beginRender();
+        $element = $fixture->toElement();
+        ComponentLifecycle::finishRender();
+        ComponentLifecycle::commit();
+
+        return $element;
+    };
+    $renderClock();
+    $assert($fixture->__pamClockRenderDue() === null, 'A clock that has not started arms nothing.');
+    $fixture->startedAt = $at - 25_000;
+    TestDiagnostics::$moduleCall = null;
+    $rendered = $renderClock();
+    $call = TestDiagnostics::$moduleCall;
+    $assert(
+        $text($rendered->children()[1]) === '00:25' && $text($rendered->children()[2]) === '5'
+            && $fixture->__pamClockRenderDue() === $at + 6_000_000 - 25_000 - $lead
+            && $call !== null && $call['module'] === 'timers' && $call['method'] === 'after',
+        'A running clock arms one timer for its next length change (the countdown never shrinks below 5).',
+    );
+    $armedClock = $call['requestId'];
+    $fixture->title = 'Call with Ana';
+    TestDiagnostics::$moduleCall = null;
+    $renderClock();
+    $assert(
+        TestDiagnostics::$moduleCall === null && $fixture->__pamClockRenderDue() === $at + 6_000_000 - 25_000 - $lead,
+        'Rendering again for the same instant keeps the armed timer.',
+    );
+    $fixture->startedAt = $at - 15_000;
+    $fixture->title = 'Call';
+    $renderClock();
+    $assert(
+        $fixture->__pamClockRenderDue() === $at + 6_000
+            && TestDiagnostics::$moduleCall['method'] === 'after' && TestDiagnostics::$moduleCall['requestId'] !== $armedClock,
+        'A sooner change (the countdown reaching 9) re-arms the one timer.',
+    );
+    $armedClock = TestDiagnostics::$moduleCall['requestId'];
+    $clockSeconds = 6_000;
+    Runtime::dispatchModuleResult($armedClock, ModuleResultStatus::Success->value, '');
+    $assert(
+        DependencyTracker::isDirty($fixture) && $fixture->__pamClockRenderDue() === null,
+        'The timer marks its component dirty when the label changes length.',
+    );
+    $rendered = $renderClock();
+    $assert(
+        $text($rendered->children()[2]) === '9' && $fixture->__pamClockRenderDue() === $at + 6_000_000 - 15_000 - $lead,
+        'The render it causes measures the new label and arms the next change.',
+    );
+
+    ComponentLifecycle::appState(AppState::Background);
+    $assert($fixture->__pamClockRenderSuspended(), 'In the background the timer waits (no PHP wake-up).');
+    TestDiagnostics::$moduleCall = null;
+    $clockSeconds = 6_000_000;
+    ComponentLifecycle::appState(AppState::Active);
+    $assert(
+        !$fixture->__pamClockRenderSuspended() && TestDiagnostics::$moduleCall['method'] === 'after',
+        'Back in the foreground the overdue render is armed at once.',
+    );
+    Runtime::dispatchModuleResult(TestDiagnostics::$moduleCall['requestId'], ModuleResultStatus::Success->value, '');
+    $rendered = $renderClock();
+    $assert($text($rendered->children()[1]) === '100:15', 'The render on return corrects the label.');
+
+    $fixture->running = false;
+    $fixture->offsetMs = 5_000_000;
+    TestDiagnostics::$moduleCall = null;
+    $renderClock();
+    $assert(
+        $fixture->__pamClockRenderDue() === null && TestDiagnostics::$moduleCall['method'] === 'cancel',
+        'Pausing every clock cancels the timer; no timer while paused.',
+    );
+    TestDiagnostics::$moduleCall = null;
+    $fixture->title = 'Paused';
+    $renderClock();
+    $assert(TestDiagnostics::$moduleCall === null, 'A paused clock arms nothing on later renders.');
+
+    $fixture->running = true;
+    $renderClock();
+    $assert($fixture->__pamClockRenderDue() !== null, 'Resuming arms it again.');
+    $fixture->shown = false;
+    $renderClock();
+    $assert($fixture->__pamClockRenderDue() === null, 'Removing the clock texts cancels the timer.');
+    $fixture->shown = true;
+    $renderClock();
+    TestDiagnostics::$moduleCall = null;
+    ComponentLifecycle::beginRender();
+    ComponentLifecycle::finishRender();
+    ComponentLifecycle::commit();
+    $assert(
+        $fixture->__pamClockRenderDue() === null && TestDiagnostics::$moduleCall['method'] === 'cancel',
+        'Unmounting cancels the timer.',
+    );
+    ComponentLifecycle::shutdown();
+} finally {
+    NativeTime::useClock(null);
     RendererContract::use(null);
 }

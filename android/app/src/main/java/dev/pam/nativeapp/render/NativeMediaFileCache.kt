@@ -139,6 +139,11 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         }
     }
 
+    /**
+     * Downloads with the image loader's resilience: a 429/503 pauses the host
+     * (honoring Retry-After) and transient failures retry with backoff a few
+     * times; 4xx and size/checksum failures fail at once.
+     */
     private fun download(
         request: MediaCacheRequest,
         identity: String,
@@ -146,7 +151,29 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         target: File,
         callbacks: MediaCacheCallbacks,
     ): File {
+        var attempt = 0
+        while (true) {
+            try {
+                return downloadOnce(request, identity, fileKey, target, callbacks)
+            } catch (error: Throwable) {
+                if (closed.get() || attempt >= DOWNLOAD_RETRIES) throw error
+                val delay = mediaRetryDelayMs(error, attempt, kotlin.random.Random.nextDouble()) ?: throw error
+                attempt++
+                Thread.sleep(delay)
+            }
+        }
+    }
+
+    private fun downloadOnce(
+        request: MediaCacheRequest,
+        identity: String,
+        fileKey: String,
+        target: File,
+        callbacks: MediaCacheCallbacks,
+    ): File {
         check(!closed.get()) { "Media cache is closed." }
+        val host = URL(request.source).host
+        PamMediaHostGate.remainingMs(host).takeIf { it > 0 }?.let { throw MediaHostPausedException(host, it) }
         root.mkdirs()
         val temporary = File(root, "$fileKey.${System.nanoTime()}.pending")
         val connection = URL(request.source).openConnection() as HttpURLConnection
@@ -155,9 +182,13 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         connection.instanceFollowRedirects = true
         connection.setRequestProperty("Accept", "video/*,audio/*,application/octet-stream")
         try {
-            require(connection.responseCode in 200..299) {
-                "Media request failed with HTTP ${connection.responseCode}."
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                val retryAfter = parseRetryAfterMs(connection.getHeaderField("Retry-After"))
+                if (status in MEDIA_HOST_PAUSE_STATUS) PamMediaHostGate.pause(connection.url.host, retryAfter)
+                throw MediaHttpException(status, retryAfter)
             }
+            PamMediaHostGate.succeeded(connection.url.host)
             val expected = connection.contentLengthLong
             val maximum = effectiveMax(request)
             require(expected in -1..maximum) { "Media exceeds its cache size limit." }
@@ -230,6 +261,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
         /** How long a streaming player gets the bandwidth before the cache copy starts. */
         const val STREAMED_DOWNLOAD_DELAY_MS = 4_000L
+        const val DOWNLOAD_RETRIES = 4
         // `cacheMaxBytes` also bounds one file (up to 2 GB); the directory
         // keeps at most 256 MB (the RN app's media/image disk budget).
         const val DEFAULT_DISK_BYTES = 256L * 1024 * 1024

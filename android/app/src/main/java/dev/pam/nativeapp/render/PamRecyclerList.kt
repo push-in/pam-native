@@ -1935,9 +1935,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            val target = aheadTarget()
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
+            // A first fill (no row laid out yet: a list just mounted or
+            // emptied) lays out the viewport only. That frame builds every
+            // visible row already; the row past the edge (shown, so mounted
+            // at once) and the ones ahead come from the next frame on
+            // (scheduleRampAhead after this layout).
+            if (childCount > 0) {
+                val target = aheadTarget()
+                rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+                rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
+            }
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
@@ -2017,9 +2024,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            val target = aheadTarget()
-            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
-            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
+            // A first fill (no row laid out yet: a list just mounted or
+            // emptied) lays out the viewport only. That frame builds every
+            // visible row already; the row past the edge (shown, so mounted
+            // at once) and the ones ahead come from the next frame on
+            // (scheduleRampAhead after this layout).
+            if (childCount > 0) {
+                val target = aheadTarget()
+                rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, target, extraLayoutStep)
+                rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, target, extraLayoutStep)
+            }
             extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
             extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
@@ -2342,7 +2356,13 @@ internal class RichRecyclerAdapter(
     }
 
     private fun mountWithinBudget(holder: RichHolder, id: Long, position: Int = RecyclerView.NO_POSITION): Boolean {
-        if (!deferMounts() && (position == RecyclerView.NO_POSITION || !offscreenWhileMoving(position))) {
+        val onScreen = position != RecyclerView.NO_POSITION && shown(position)
+        // A row on screen mounts now even while the list is hidden (a pushed
+        // screen's first layout, one frame before it shows): the end of this
+        // layout mounts it anyway ([mountShown] from the layout's scroll
+        // callback), but views added to a row already laid out each asked
+        // the window for a second measure and layout pass of everything.
+        if (onScreen || !deferMounts() && position == RecyclerView.NO_POSITION) {
             return mountNow(holder, id)
         }
         // One budget per frame: the animation clock is the frame's vsync time.

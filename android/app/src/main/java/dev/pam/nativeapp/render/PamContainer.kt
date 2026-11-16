@@ -84,6 +84,9 @@ internal open class PamContainer(context: Context) :
         }
     }
 
+    /** Paints something of its own under its children besides its background (a backdrop filter, a shimmer). */
+    internal fun paintsUnderChildren(): Boolean = backdrop != null || shimmer?.enabled == true
+
     /** `<Shimmer>` skeleton sweep drawn over the background, under the children. */
     fun setShimmer(enabled: Boolean, color: Int, durationMs: Long) {
         val effect = shimmer ?: if (enabled) PamShimmer(this).also { shimmer = it } else return

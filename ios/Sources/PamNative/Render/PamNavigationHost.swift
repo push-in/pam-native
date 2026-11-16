@@ -90,6 +90,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     /// transforms and never overrides the newer visibility.
     private var transitionGeneration = 0
     private var routeViews: [UIView] = []
+    /// A route dimmed toward a known opaque backdrop stays opaque under a
+    /// view of that color at the dim amount (`startVeil(over:reach:)`).
+    private var veil: UIView?
+    private weak var veiledRoute: UIView?
+    private var veilToken = 0
+    private var gestureVeilToken: Int?
     private var routeControllers: [ObjectIdentifier: PamRouteViewController] = [:]
     private weak var containerController: UIViewController?
     private var navigationController: UINavigationController?
@@ -222,7 +228,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             routeControllers[ObjectIdentifier(view)] = PamRouteViewController(routeView: view)
         }
         if navigationController == nil, view.superview !== self {
-            insertSubview(view, at: min(max(index, 0), subviews.count))
+            insertSubview(view, at: subviewPosition(forRoute: index, limit: subviews.count))
         }
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -241,7 +247,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         routeViews.remove(at: current)
         routeViews.insert(view, at: min(max(index, 0), routeViews.count))
         if navigationController == nil, view.superview === self {
-            insertSubview(view, at: min(max(index, 0), max(subviews.count - 1, 0)))
+            insertSubview(view, at: subviewPosition(forRoute: index, limit: max(subviews.count - 1, 0)))
         }
         showTopAfterNavigation(view)
         syncControllerStack()
@@ -249,6 +255,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
 
     func removeRoute(_ view: UIView) {
         trace("remove route=\(routeViews.firstIndex(where: { $0 === view }) ?? -1)")
+        if view === veiledRoute { endVeil() }
         routeViews.removeAll { $0 === view }
         routeControllers.removeValue(forKey: ObjectIdentifier(view))
         view.removeFromSuperview()
@@ -376,9 +383,26 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         applyProgress(0, incoming: incoming, outgoing: outgoing, kind: kind)
-        // The outgoing screen only fades/slides: rasterize it once instead
-        // of compositing its translucent subtree offscreen every frame.
-        let outgoingRasterized = outgoing?.layer.shouldRasterize ?? true
+        // A slide only darkens the outgoing screen toward the backdrop under
+        // the incoming one: a veil when that backdrop is one known opaque
+        // color. Otherwise (a fade to 0, a pop over the screen below, an
+        // unknown backdrop) rasterize it once instead of compositing its
+        // translucent subtree offscreen every frame.
+        let veilToken: Int?
+        if let outgoing, [2, 3, 4, 9].contains(kind) {
+            let horizontal = kind == 2 || kind == 3
+            let popping = operation == 3
+            veilToken = startVeil(
+                over: outgoing,
+                reach: CGSize(
+                    width: horizontal ? bounds.width * (popping ? 1 : 0.28) : 0,
+                    height: horizontal ? 0 : (popping ? bounds.height : 0)
+                )
+            )
+        } else {
+            veilToken = nil
+        }
+        let outgoingRasterized = (outgoing?.layer.shouldRasterize ?? true) || veilToken != nil
         if let outgoing, !outgoingRasterized {
             outgoing.layer.rasterizationScale = window?.screen.scale ?? UIScreen.main.scale
             outgoing.layer.shouldRasterize = true
@@ -393,6 +417,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             }
             animator.addCompletion { _ in
                 if !outgoingRasterized { outgoing?.layer.shouldRasterize = false }
+                if let veilToken { self.endVeil(veilToken) }
                 self.finish(incoming: incoming, outgoing: outgoing, generation: generation)
             }
             animator.startAnimation()
@@ -406,6 +431,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
         } completion: { _ in
             if !outgoingRasterized { outgoing?.layer.shouldRasterize = false }
+            if let veilToken { self.endVeil(veilToken) }
             self.finish(incoming: incoming, outgoing: outgoing, generation: generation)
         }
     }
@@ -445,14 +471,14 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                     translationX: -direction * width * 0.28 * progress, y: 0
                 )
             }
-            outgoing?.alpha = 1 - progress * 0.18
+            dim(outgoing, by: progress * 0.18)
         case 4:
             if popping {
                 outgoing?.transform = CGAffineTransform(translationX: 0, y: height * progress)
             } else {
                 incoming.transform = CGAffineTransform(translationX: 0, y: height * (1 - progress))
             }
-            outgoing?.alpha = 1 - progress * 0.12
+            dim(outgoing, by: progress * 0.12)
         case 5:
             if [5, 6].contains(screenPresentation) {
                 // A transparent modal fades alone over the screen below,
@@ -481,7 +507,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             } else {
                 incoming.transform = CGAffineTransform(translationX: 0, y: -height * (1 - progress))
             }
-            outgoing?.alpha = 1 - progress * 0.12
+            dim(outgoing, by: progress * 0.12)
         case 10:
             let sign = popping ? -semanticSign : semanticSign
             incoming.alpha = progress
@@ -517,6 +543,122 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
     }
 
+    /// Dims `route` by `amount` (`alpha = 1 - amount`). Under a veil the
+    /// route stays opaque and the veil, a view of the backdrop color right
+    /// above it, takes `amount` as its alpha and the route's transform: over
+    /// an opaque backdrop B both give `(1 - d)·route + d·B`, but the alpha
+    /// of a layer with sublayers is group opacity, rendered offscreen on
+    /// every frame (or rasterized once, a full-screen bitmap).
+    private func dim(_ route: UIView?, by amount: CGFloat) {
+        guard let route else { return }
+        if route === veiledRoute, let veil {
+            route.alpha = 1
+            veil.alpha = amount
+            veil.transform = route.transform
+            return
+        }
+        route.alpha = 1 - amount
+    }
+
+    /// Puts a veil over `route` when the one opaque color behind it is known
+    /// (`backdropColor(under:reach:)`); `reach` is how far the route moves
+    /// while dimmed. Returns the token that ends this veil, nil (no veil)
+    /// when the backdrop is unknown: the route then fades by its alpha.
+    private func startVeil(over route: UIView, reach: CGSize) -> Int? {
+        endVeil()
+        guard route.superview === self, let color = backdropColor(under: route, reach: reach) else { return nil }
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = color
+        view.alpha = 0
+        view.bounds = route.bounds
+        view.center = route.center
+        view.transform = route.transform
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        insertSubview(view, aboveSubview: route)
+        veil = view
+        veiledRoute = route
+        veilToken += 1
+        return veilToken
+    }
+
+    /// Removes the veil (only the one `token` started, when given).
+    private func endVeil(_ token: Int? = nil) {
+        if let token, token != veilToken { return }
+        veil?.removeFromSuperview()
+        veil = nil
+        veiledRoute = nil
+    }
+
+    /// The subview position of route `index`: past the veil when the veil
+    /// sits at or below it (the veil stays right above its route).
+    private func subviewPosition(forRoute index: Int, limit: Int) -> Int {
+        var position = min(max(index, 0), limit)
+        if let veil, let veilIndex = subviews.firstIndex(where: { $0 === veil }), veilIndex <= position {
+            position = min(position + 1, limit)
+        }
+        return position
+    }
+
+    /// The one opaque color under every point `route` covers while it moves
+    /// up to `reach` from its place, when nothing else can show there: no
+    /// visible layer (or shadow) below it or below an ancestor in that
+    /// area, no ancestor painting more than a background color (contents,
+    /// border, shadow, mask, a blur), and the first background color met on
+    /// the way up to the window opaque, square and covering the area. Nil
+    /// when any of that is not known.
+    func backdropColor(under route: UIView, reach: CGSize) -> UIColor? {
+        guard route.superview === self, route.layer.shadowOpacity == 0 else { return nil }
+        var region = route.frame.insetBy(dx: -reach.width, dy: -reach.height)
+        // Only what the window shows needs the backdrop.
+        if let window {
+            let visible = convert(region, to: window).intersection(window.bounds)
+            if visible.isNull || visible.isEmpty { return nil }
+            region = convert(visible, from: window)
+        }
+        var child: UIView = route
+        var current: UIView = self
+        while true {
+            if Self.drawsUnder(child, in: current, region: region) { return nil }
+            if current.clipsToBounds || current.superview == nil {
+                region = region.intersection(current.bounds)
+                if region.isNull || region.isEmpty { return nil }
+            }
+            let layer = current.layer
+            if layer.contents != nil || layer.borderWidth > 0 || layer.shadowOpacity > 0 ||
+                layer.mask != nil || current is UIVisualEffectView {
+                return nil
+            }
+            if let fill = layer.backgroundColor, fill.alpha > 0 {
+                guard fill.alpha >= 1, layer.cornerRadius == 0,
+                      current.bounds.contains(region) else { return nil }
+                return UIColor(cgColor: fill)
+            }
+            guard let parent = current.superview else { return nil }
+            region = current.convert(region, to: parent)
+            child = current
+            current = parent
+        }
+    }
+
+    /// Whether a layer of `parent` drawn before `child`'s may show in `region`.
+    private static func drawsUnder(_ child: UIView, in parent: UIView, region: CGRect) -> Bool {
+        guard let sublayers = parent.layer.sublayers else { return true }
+        // Another stacking order than the sublayer order: not followed here.
+        if sublayers.contains(where: { $0.zPosition != child.layer.zPosition }) { return true }
+        for layer in sublayers {
+            if layer === child.layer { return false }
+            if layer.isHidden || layer.opacity <= 0 { continue }
+            if layer.shadowOpacity > 0 || layer.frame.intersects(region) { return true }
+        }
+        return true
+    }
+
+    /// The route under a veil, the veil's color and alpha (tests).
+    var veiledRouteForTesting: UIView? { veiledRoute }
+    var veilColorForTesting: UIColor? { veil?.backgroundColor }
+    var veilAlphaForTesting: CGFloat { veil?.alpha ?? 0 }
+
     private func prepareSharedElements(incoming: UIView, outgoing: UIView?, popping: Bool = true) {
         sharedElements.clear()
         guard !PamMotionPolicy.isReduced, duration > 0, let outgoing else { return }
@@ -549,6 +691,15 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             setRouteHidden(incoming, false)
             setRouteHidden(outgoing, false)
             prepareSharedElements(incoming: incoming, outgoing: outgoing)
+            // The route revealed below dims toward the backdrop: under a veil
+            // when that is one known opaque color (no offscreen group
+            // opacity on every frame of the drag).
+            gestureVeilToken = startVeil(
+                over: incoming,
+                reach: gestureDirection == 2
+                    ? CGSize(width: 0, height: bounds.height * 0.12)
+                    : CGSize(width: bounds.width * 0.28, height: 0)
+            )
             fallthrough
         case .changed:
             incoming.isHidden = false
@@ -559,7 +710,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             incoming.transform = gestureDirection == 2
                 ? CGAffineTransform(translationX: 0, y: -bounds.height * 0.12 * (1 - progress))
                 : CGAffineTransform(translationX: -sign * bounds.width * 0.28 * (1 - progress), y: 0)
-            incoming.alpha = 0.82 + 0.18 * progress
+            dim(incoming, by: 0.18 * (1 - progress))
             applySharedElementProgress(progress)
         case .ended, .cancelled:
             let rawVelocity = gestureDirection == 2 ? gesture.velocity(in: self).y : gesture.velocity(in: self).x
@@ -579,9 +730,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                 incoming.transform = complete
                     ? .identity
                     : CGAffineTransform(translationX: -sign * self.bounds.width * 0.28, y: 0)
-                incoming.alpha = complete ? 1 : 0.82
+                self.dim(incoming, by: complete ? 0 : 0.18)
                 self.applySharedElementProgress(complete ? 1 : 0)
             } completion: { _ in
+                if let token = self.gestureVeilToken {
+                    self.gestureVeilToken = nil
+                    self.endVeil(token)
+                }
                 incoming.transform = .identity
                 outgoing.transform = .identity
                 incoming.alpha = 1
@@ -647,6 +802,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         sharedElements.finish()
         sharedFadeOnlyTop = false
+        if veiledRoute === incoming || (outgoing != nil && veiledRoute === outgoing) { endVeil() }
         trace("finish")
         incoming.alpha = 1
         incoming.transform = .identity

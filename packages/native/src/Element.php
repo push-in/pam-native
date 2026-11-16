@@ -502,7 +502,10 @@ abstract class Element implements Renderable
         PropKey $key,
         string|int|float|bool|BinaryValue $value,
     ): static {
-        return $this->withProperty($key, $value);
+        $element = $this->withProperty($key, $value);
+
+        // A native clock's label replaces the content (Text::clock()).
+        return $this->kind === NodeKind::Text ? Internal\NativeTime::labelled($element) : $element;
     }
 
     final public function on(EventKind $kind, Closure $handler): static

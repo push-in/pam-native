@@ -25,6 +25,11 @@ struct PamImageFilter: Equatable {
     /// blur.
     private static let context = CIContext(options: [.cacheIntermediates: false])
 
+    /// Filters run here, never on the main thread (Android blurs on the image
+    /// loader's workers): a blur or a Core Image render of a photo costs
+    /// several milliseconds, a dropped frame per image bound while scrolling.
+    static let queue = DispatchQueue(label: "dev.pam.image-filter", qos: .userInitiated)
+
     /// `drawScale`: view points per image point at the view's content mode
     /// (σ is authored in view points; a 96 px icon drawn at 92 pt must not be
     /// blurred as if it were 92 px).
@@ -71,6 +76,52 @@ struct PamImageFilter: Equatable {
               let rendered = context.createCGImage(output, from: source.extent)
         else { return image }
         return UIImage(cgImage: rendered, scale: image.scale, orientation: image.imageOrientation)
+    }
+}
+
+/// The last filtered copy of a decoded image, kept on that image (Android's
+/// blurred memory-cache entry): every view showing the shared decode (a
+/// recycled cell, the same photo twice) reuses it in the same pass, and it
+/// goes with the image.
+final class PamFilteredImage: @unchecked Sendable {
+    let filter: PamImageFilter
+    let drawScale: CGFloat
+    let image: UIImage
+
+    init(filter: PamImageFilter, drawScale: CGFloat, image: UIImage) {
+        self.filter = filter
+        self.drawScale = drawScale
+        self.image = image
+    }
+
+    /// Same filter; a blur also at the same drawn scale within 5 % (its σ
+    /// in pixels follows the scale; Android `PamBitmapBlur.sigmaMatches`).
+    func matches(_ filter: PamImageFilter, drawScale: CGFloat) -> Bool {
+        guard filter == self.filter else { return false }
+        return filter.blurSigma <= 0 || Self.drawScaleMatches(self.drawScale, drawScale)
+    }
+
+    static func drawScaleMatches(_ applied: CGFloat, _ wanted: CGFloat) -> Bool {
+        abs(applied - wanted) <= max(0.0005, wanted * 0.05)
+    }
+}
+
+private var pamFilteredKey: UInt8 = 0
+
+/// An image view handed to a background filter job.
+private final class PamWeakImageView: @unchecked Sendable {
+    weak var view: PamImageView?
+
+    init(_ view: PamImageView) {
+        self.view = view
+    }
+}
+
+extension UIImage {
+    /// Set off the main thread by `PamImageView`, read on it.
+    var pamFiltered: PamFilteredImage? {
+        get { objc_getAssociatedObject(self, &pamFilteredKey) as? PamFilteredImage }
+        set { objc_setAssociatedObject(self, &pamFilteredKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
     }
 }
 
@@ -156,6 +207,9 @@ enum PamBitmapBlur {
 /// Image host that keeps the original bitmap and displays it filtered and,
 /// with `tintColor`, as a template mask in that color (Android
 /// `ImageView.imageTintList`, SRC_IN): one decoded icon serves every color.
+/// Filters run on `PamImageFilter.queue`; until a filtered copy is ready the
+/// view keeps what it showed, or nothing, and never a sharp image under a
+/// blur (a chat spoiler). A cached copy shows at once.
 final class PamImageView: UIImageView, PamPointerEventsHost {
     private var original: UIImage?
     var pamPointerEvents = PamPointerEvents.auto
@@ -169,6 +223,9 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
     var pamFilter = PamImageFilter() {
         didSet {
             guard pamFilter != oldValue else { return }
+            if (pamFilter.blurSigma > 0) != (oldValue.blurSigma > 0) {
+                setAnimation(pamFilter.blurSigma > 0 ? nil : original?.pamAnimation)
+            }
             refilter()
         }
     }
@@ -184,8 +241,10 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
         get { super.image }
         set {
             original = newValue
-            super.image = newValue.map(displayed)
-            setAnimation(newValue?.pamAnimation)
+            // A blurred animated image shows its first frame, blurred once
+            // (Android parity), never a blur per frame.
+            setAnimation(pamFilter.blurSigma > 0 ? nil : newValue?.pamAnimation)
+            showFiltered(newValue)
         }
     }
 
@@ -238,28 +297,80 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
     }
 
     private func showAnimationFrame(_ frame: CGImage) {
-        // `original` stays the first frame (recycling, filters, tint).
-        super.image = displayed(UIImage(cgImage: frame))
+        // `original` stays the first frame (recycling, filters, tint). No
+        // blur here: a blurred image does not animate.
+        filterRequest &+= 1
+        let image = UIImage(cgImage: frame)
+        show(pamFilter.isIdentity ? image : pamFilter.apply(to: image, displayScale: window?.screen.scale ?? 2), blur: 0)
     }
 
     /// The unfiltered bitmap last assigned by the renderer.
     var originalImage: UIImage? { original }
 
-    private func displayed(_ image: UIImage) -> UIImage {
-        let filtered = pamFilter.isIdentity
-            ? image
-            : pamFilter.apply(to: image, displayScale: window?.screen.scale ?? 2, drawScale: blurDrawScale(for: image))
-        guard let pamTintColor else { return filtered }
+    /// Blur σ of what is shown (0: sharp or nothing).
+    private var shownBlurSigma: CGFloat = 0
+    /// Bumped on every image or filter change: an older filter result is dropped.
+    private var filterRequest = 0
+
+    private func showFiltered(_ image: UIImage?) {
+        filterRequest &+= 1
+        guard let image else {
+            show(nil, blur: 0)
+            return
+        }
+        let filter = pamFilter
+        guard !filter.isIdentity else {
+            show(image, blur: 0)
+            return
+        }
+        // Not laid out: the drawn scale (and so σ in pixels) is unknown;
+        // layoutSubviews filters it once sized.
+        if filter.blurSigma > 0, bounds.width <= 0 || bounds.height <= 0 {
+            appliedBlurDrawScale = 0
+            if shownBlurSigma <= 0 { show(nil, blur: 0) }
+            return
+        }
+        let drawScale = blurDrawScale(for: image)
+        if let cached = image.pamFiltered, cached.matches(filter, drawScale: drawScale) {
+            show(cached.image, blur: filter.blurSigma)
+            return
+        }
+        // Keep the pixels already shown unless they are sharp under a blur.
+        if filter.blurSigma > 0, shownBlurSigma <= 0 { show(nil, blur: 0) }
+        let request = filterRequest
+        let displayScale = window?.screen.scale ?? 2
+        // Weak: the job never keeps (nor releases off the main thread) the view.
+        let target = PamWeakImageView(self)
+        PamImageFilter.queue.async {
+            let output = filter.apply(to: image, displayScale: displayScale, drawScale: drawScale)
+            image.pamFiltered = PamFilteredImage(filter: filter, drawScale: drawScale, image: output)
+            DispatchQueue.main.async {
+                guard let view = target.view, view.filterRequest == request else { return }
+                view.show(output, blur: filter.blurSigma)
+            }
+        }
+    }
+
+    private func show(_ image: UIImage?, blur: CGFloat) {
+        shownBlurSigma = image == nil ? 0 : blur
+        guard let image else {
+            super.image = nil
+            return
+        }
+        guard let pamTintColor else {
+            super.image = image
+            return
+        }
         tintColor = pamTintColor
-        return filtered.withRenderingMode(.alwaysTemplate)
+        super.image = image.withRenderingMode(.alwaysTemplate)
     }
 
     private func refilter() {
         guard let original else { return }
-        super.image = displayed(original)
+        showFiltered(original)
     }
 
-    /// Draw scale the current blur was computed at (0 = no blur yet).
+    /// Draw scale the current blur was requested at (0 = no blur yet).
     private var appliedBlurDrawScale: CGFloat = 0
 
     private func blurDrawScale(for image: UIImage) -> CGFloat {
@@ -274,6 +385,6 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
         super.layoutSubviews()
         guard pamFilter.blurSigma > 0, let original, bounds.width > 0, bounds.height > 0 else { return }
         let scale = PamImageFilter.drawScale(image: original.size, bounds: bounds.size, contentMode: contentMode)
-        if abs(scale - appliedBlurDrawScale) > 0.01 { refilter() }
+        if !PamFilteredImage.drawScaleMatches(appliedBlurDrawScale, scale) { refilter() }
     }
 }

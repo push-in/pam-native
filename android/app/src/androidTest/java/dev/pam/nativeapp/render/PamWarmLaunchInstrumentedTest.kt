@@ -2,6 +2,8 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.SystemClock
 import android.view.View
 import android.widget.FrameLayout
@@ -46,6 +48,8 @@ class PamWarmLaunchInstrumentedTest {
         ) as PamTestActivity
         main {
             PamMotionPolicy.reduceMotionOverride = false
+            // An opaque window: the route below the warm push dims under a veil.
+            activity.window.setBackgroundDrawable(ColorDrawable(Color.WHITE))
             navigation = PamNavigationHost(activity).apply {
                 setGestureNavigation(
                     enabled = false,
@@ -105,6 +109,9 @@ class PamWarmLaunchInstrumentedTest {
         main {
             beforeCommit = warm.translationX
             assertTrue("the warm route is moving in: $beforeCommit", beforeCommit < WIDTH && beforeCommit > 0f)
+            assertTrue("the route below dims under a veil", navigation.veiledRoute() === current)
+            assertEquals("no layer for the route below", View.LAYER_TYPE_NONE, current.layerType)
+            assertEquals(1f, current.alpha)
             // The commit of the push: the route moves to the top, a new revision.
             navigation.reorderRoute(warm, 1)
             navigation.operation = OPERATION_PUSH
@@ -163,6 +170,7 @@ class PamWarmLaunchInstrumentedTest {
             assertEquals(0f, warm.translationX)
             assertEquals(1f, current.alpha)
             assertEquals(0f, current.translationX)
+            assertEquals(null, navigation.veiledRoute())
         }
     }
 

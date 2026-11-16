@@ -3780,6 +3780,15 @@ final class ImageLoadContext: @unchecked Sendable {
     var progressLoaded: Int64 = 0
     var progressTotal: Int64 = 0
     var progressScheduled = false
+    /// Set before `onError`: the HTTP status (nil for a transport error),
+    /// its `Retry-After`, and whether the failure is worth a retry.
+    var failureStatus: Int?
+    var failureRetryAfter: TimeInterval?
+    var failureTransient = false
+    /// The renderer scheduled a retry: `onEnd` reports nothing.
+    var retrying = false
+    /// The response said `Cache-Control: no-store`.
+    var noStore = false
 
     init(
         nodeId: Int64,
@@ -3824,11 +3833,23 @@ final class ImageLoadSessionDelegate: NSObject, URLSessionDataDelegate {
             completionHandler(.cancel)
             return
         }
-        if let response = response as? HTTPURLResponse,
-           !(200...299).contains(response.statusCode) {
-            context.onError?(context, "Image request failed with HTTP \(response.statusCode)")
-            completionHandler(.cancel)
-            return
+        if let response = response as? HTTPURLResponse {
+            let status = response.statusCode
+            guard (200...299).contains(status) else {
+                let retryAfter = PamMediaRetry.retryAfter(response.value(forHTTPHeaderField: "Retry-After"))
+                if PamMediaRetry.pauseStatus.contains(status) {
+                    PamMediaHostGate.shared.pause(response.url?.host, retryAfter: retryAfter)
+                }
+                context.failureStatus = status
+                context.failureRetryAfter = retryAfter
+                context.failureTransient = PamMediaRetry.transientStatus.contains(status)
+                context.onError?(context, "Image request failed with HTTP \(status)")
+                completionHandler(.cancel)
+                return
+            }
+            PamMediaHostGate.shared.succeeded(response.url?.host)
+            context.noStore = response.value(forHTTPHeaderField: "Cache-Control")?
+                .range(of: "no-store", options: .caseInsensitive) != nil
         }
         context.progressTotal = max(0, response.expectedContentLength)
         completionHandler(.allow)
@@ -3851,6 +3872,7 @@ final class ImageLoadSessionDelegate: NSObject, URLSessionDataDelegate {
         if let error {
             let nsError = error as NSError
             if nsError.domain != NSURLErrorDomain || nsError.code != NSURLErrorCancelled {
+                context.failureTransient = PamMediaRetry.isTransient(error)
                 context.onError?(context, error.localizedDescription)
             }
         } else {

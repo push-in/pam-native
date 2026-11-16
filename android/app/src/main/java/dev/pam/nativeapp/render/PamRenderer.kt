@@ -224,6 +224,20 @@ private val SLICED_MOUNT_BLOCKING_KEYS: java.util.EnumSet<PropKey> =
         )
     }
 
+/**
+ * One mount slice, for tests: its UI-thread work, its budget, the pass that
+ * built what scrolled into view (at any cost), the queued subtrees it built,
+ * when it started the last one and the longest one (times from its start).
+ */
+internal class MountSliceStats(
+    val workNanos: Long,
+    val budgetNanos: Long,
+    val revealNanos: Long,
+    val subtrees: Int,
+    val lastSubtreeStartNanos: Long,
+    val longestSubtreeNanos: Long,
+)
+
 private val MOUNT_CREATE_SECTIONS = NodeKind.entries.map { "PamMount.create." + it.name }.toTypedArray()
 private val MOUNT_ATTACH_SECTIONS = NodeKind.entries.map { "PamMount.attach." + it.name }.toTypedArray()
 private val MOUNT_PROPS_SECTIONS = NodeKind.entries.map { "PamMount.props." + it.name }.toTypedArray()
@@ -232,9 +246,11 @@ private val MOUNT_EVENTS_SECTIONS = NodeKind.entries.map { "PamMount.events." + 
 private val POOLED_CELL_KINDS = setOf(
     NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
 )
+// Exact classes: what newView builds for each pooled kind (Text nodes are
+// PamTextView, not TextView, so a TextView entry never matched one).
 private val POOLED_CELL_VIEW_CLASSES = setOf<Class<*>>(
     PamContainer::class.java,
-    TextView::class.java,
+    PamTextView::class.java,
     PamPressable::class.java,
     PamImageView::class.java,
 )
@@ -984,6 +1000,10 @@ class PamRenderer(
      * Views of scrolled-out list cells, reused for cells with the same node
      * kind and the same set of authored properties. With an identical key set
      * every property is re-applied on reuse, so no stale value can survive.
+     * What a node installs outside its properties (listeners and observers
+     * held by its state, time bindings, filter layers) is released when it
+     * dematerializes; [poolCellView] resets what properties only set
+     * conditionally (span press, selection colour) and transient state.
      */
     private val cellViewPool = HashMap<CellViewShape, ArrayDeque<View>>()
     private val cellViewShapes = java.util.WeakHashMap<View, CellViewShape>()
@@ -1018,6 +1038,9 @@ class PamRenderer(
     private fun poolCellView(id: Long, state: NodeState, view: View) {
         if (!recyclingCell || deferredViewportLayouts.containsKey(id)) return
         if (view.javaClass !in POOLED_CELL_VIEW_CLASSES) return
+        // A marquee made the text a single scrolling line, which the next
+        // cell's ellipsize mode does not undo: it gets a fresh view.
+        if (view is TextView && view.ellipsize == TextUtils.TruncateAt.MARQUEE) return
         val shape = cellViewShape(state) ?: return
         val pool = cellViewPool.getOrPut(shape) { ArrayDeque() }
         if (pool.size >= MAX_POOLED_CELL_VIEWS_PER_SHAPE) return
@@ -1036,10 +1059,20 @@ class PamRenderer(
             is PamImageView -> {
                 view.setImageDrawable(null)
                 view.onImageSizeChanged = null
+                view.onBlurChanged = null
                 view.retainPixels = false
             }
             // Modal trigger actions are re-installed by the commit pass.
             is PamPressable -> view.setLocalOnPress(null)
+            is PamTextView -> {
+                // The span-press listener stays when the next cell has no
+                // spans (configureSpanPress only removes what its node set).
+                view.setOnTouchListener(null)
+                // The next node takes the view's colour as its default
+                // selection colour (restored when it drops selectionColor).
+                view.highlightColor = state.defaultHighlightColor
+                if (view.scrollX != 0 || view.scrollY != 0) view.scrollTo(0, 0)
+            }
         }
         cellViewShapes[view] = shape
         pool.addLast(view)
@@ -1879,6 +1912,9 @@ class PamRenderer(
     /** Nodes whose views wait for a mount slice (tests and diagnostics). */
     internal fun pendingMountCount(): Int = pendingMounts.size
 
+    /** Test hook: each mount slice's work, reported after it (nothing is measured for it otherwise). */
+    internal var mountSliceObserver: ((MountSliceStats) -> Unit)? = null
+
     private fun countCreates(batches: List<List<Mutation>>): Int {
         var count = 0
         for (batch in batches) {
@@ -2186,20 +2222,41 @@ class PamRenderer(
             uninstallMountPreDraw()
             return
         }
+        val started = System.nanoTime()
+        // A commit that already ran in this frame used part of its budget.
+        val spent = if (lastCommitEndNanos >= frameTimeNanos) lastCommitEndNanos - lastCommitStartNanos else 0L
+        val deadline = started + (SLICED_MOUNT_SLICE_NANOS - spent).coerceAtLeast(0L)
+        var revealed = 0L
+        var built = 0
+        var lastStarted = 0L
+        var longest = 0L
         pamTraceSection("PamMount.slice") {
-            val started = System.nanoTime()
-            // A commit that already ran in this frame used part of its budget.
-            val spent = if (lastCommitEndNanos >= frameTimeNanos) lastCommitEndNanos - lastCommitStartNanos else 0L
             hostRevealedPendingMounts(ahead = true)
-            val deadline = started + (SLICED_MOUNT_SLICE_NANOS - spent).coerceAtLeast(0L)
-            var built = 0
-            while (pendingMountRoots.isNotEmpty() && (built == 0 || System.nanoTime() < deadline)) {
+            var now = System.nanoTime()
+            revealed = now - started
+            while (pendingMountRoots.isNotEmpty() && (built == 0 || now < deadline)) {
                 val root = pendingMountRoots.removeFirst()
                 if (root !in pendingMounts) continue
+                lastStarted = now
                 hostPendingSubtree(root)
                 built++
+                val finished = System.nanoTime()
+                if (finished - now > longest) longest = finished - now
+                now = finished
             }
             if (built > 0) afterMountSlice()
+        }
+        mountSliceObserver?.let { observer ->
+            observer(
+                MountSliceStats(
+                    workNanos = System.nanoTime() - started,
+                    budgetNanos = deadline - started,
+                    revealNanos = revealed,
+                    subtrees = built,
+                    lastSubtreeStartNanos = if (built > 0) lastStarted - started else 0L,
+                    longestSubtreeNanos = longest,
+                ),
+            )
         }
         scheduleMountSlice()
     }
@@ -3258,7 +3315,6 @@ class PamRenderer(
     /** The node whose initial properties are being applied (deferred image load / press configuration). */
     private var initialPropertiesState: NodeState? = null
     private var initialImageLoadPending = false
-    private var initialPressablePending = false
 
     private val cellProfile: CellProfile? =
         if (BuildConfig.DEBUG && Log.isLoggable(CELL_PROFILE_TAG, Log.DEBUG)) CellProfile() else null
@@ -3581,6 +3637,7 @@ class PamRenderer(
         state.cancelMotion()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
+        releaseNodeViewBindings(view, state)
         pamImageView(view)?.let(imageLoader::cancel)
         view.let(nativeViews::release)
         clearHitSlop(view)
@@ -3589,6 +3646,41 @@ class PamRenderer(
         else (view.parent as? ViewGroup)?.removeView(view)
         removeView(id)
         poolCellView(id, state, view)
+    }
+
+    /**
+     * Detaches what [state] installed on [view] outside its properties
+     * (listeners and observers it holds, its keyboard track, a filter
+     * layer). The node keeps existing without a view (a list cell scrolled
+     * out) and installs them again on the next view; the view may be reused
+     * by another cell, which must not report layout, resize or outside
+     * clicks under this node's id.
+     */
+    private fun releaseNodeViewBindings(view: View, state: NodeState) {
+        state.textLayoutListener?.let { listener ->
+            view.removeOnLayoutChangeListener(listener)
+            state.textLayoutListener = null
+        }
+        state.directiveLayoutListener?.let { listener ->
+            view.removeOnLayoutChangeListener(listener)
+            state.directiveLayoutListener = null
+        }
+        state.outsidePointerObserver?.let { observer ->
+            (host as? PamRootHost)?.removePointerObserver(observer)
+            state.outsidePointerObserver = null
+        }
+        if (state.spanPressInstalled) {
+            view.setOnTouchListener(null)
+            state.spanPressInstalled = false
+        }
+        state.keyboardProgressBinding?.let { binding ->
+            binding.close()
+            state.keyboardProgressBinding = null
+        }
+        if (state.filterLayer) {
+            view.setLayerType(View.LAYER_TYPE_NONE, null)
+            state.filterLayer = false
+        }
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
@@ -4401,10 +4493,8 @@ class PamRenderer(
         state.initialTextUpdates = textUpdates
         state.initialBackgroundUpdate = backgroundUpdate
         state.applyingInitialProperties = true
-        state.pressableConfiguredDuringInitialization = false
         initialPropertiesState = state
         initialImageLoadPending = false
-        initialPressablePending = false
         initialTimePending = false
         try {
             val keyProfile = cellKeyProfile
@@ -4423,12 +4513,12 @@ class PamRenderer(
             state.initialTextUpdates = null
             state.initialBackgroundUpdate = null
             state.applyingInitialProperties = false
-            state.pressableConfiguredDuringInitialization = false
             initialPropertiesState = null
         }
         // Each image and press property used to start a load or reconfigure
-        // the pressable: done once, with every property in place.
-        if (initialPressablePending) configurePressable(view, state)
+        // the pressable: done once, with every property in place (the
+        // pressable by installEvents, which every caller runs next with the
+        // callbacks in place too).
         if (initialImageLoadPending) mountTraceSection("PamMount.image") { loadImage(view, state) }
         if (text != null && textUpdates != null) mountTraceSection("PamMount.text") {
             if (textUpdates.typeface) applyTypeface(text, state)
@@ -6876,7 +6966,9 @@ class PamRenderer(
     }
 
     private fun reportTextLayout(text: TextView, state: NodeState) {
-        if (nodes[state.id] !== state || state.properties[PropKey.ON_TEXT_LAYOUT] == null) return
+        // A posted report can run after the cell scrolled out and its view
+        // went to another cell: it measures this node's view only.
+        if (nodes[state.id] !== state || views[state.id] !== text || state.properties[PropKey.ON_TEXT_LAYOUT] == null) return
         val visible = text.layout ?: return
         val width = (text.width - text.totalPaddingLeft - text.totalPaddingRight).coerceAtLeast(0)
         if (width == 0) return
@@ -6939,7 +7031,7 @@ class PamRenderer(
         state.motionProgramId = program.id
         state.motionRunner?.cancel()
         val start = start@{
-            if (nodes[state.id] !== state) return@start
+            if (nodes[state.id] !== state || views[state.id] !== view) return@start
             val timeline = PamMotionTimeline.build(
                 program,
                 current = { PamMotionTarget.read(view, it) },
@@ -7449,7 +7541,7 @@ class PamRenderer(
 
         if (state.properties[PropKey.ON_CLICK_OUTSIDE] != null) {
             val observer: (MotionEvent) -> Unit = observer@{ event ->
-                if (nodes[state.id] !== state || !view.isShown) return@observer
+                if (nodes[state.id] !== state || views[state.id] !== view || !view.isShown) return@observer
                 val location = IntArray(2)
                 val hostLocation = IntArray(2)
                 view.getLocationOnScreen(location)
@@ -7536,7 +7628,7 @@ class PamRenderer(
         state.directiveLayoutListener = listener
         view.addOnLayoutChangeListener(listener)
         view.post {
-            if (nodes[state.id] === state) {
+            if (nodes[state.id] === state && views[state.id] === view) {
                 listener.onLayoutChange(
                     view,
                     view.left,
@@ -7578,10 +7670,8 @@ class PamRenderer(
 
     private fun configurePressable(view: View, state: NodeState) {
         val pressable = view as? PamPressable ?: return
-        if (state.applyingInitialProperties && state === initialPropertiesState) {
-            initialPressablePending = true
-            return
-        }
+        // Mounting: installEvents configures it once, after every property.
+        if (state.applyingInitialProperties && state === initialPropertiesState) return
         pressable.onPressedStateChanged = if (state.properties[PropKey.NATIVE_STATE_STYLES] != null) {
             { pressed -> applyNativeStyleState(pressable, state, NativeStyleState.PRESSED, pressed) }
         } else {
@@ -8776,6 +8866,15 @@ class PamRenderer(
             android.graphics.drawable.LayerDrawable(arrayOf(shape, effects))
         } else {
             shape
+        }
+        // A plain fill (no border, corner or effect) paints its live color
+        // over its whole box: a navigation transition can take it as the
+        // backdrop of a dimmed route (PamNavigationHost.backgroundFill). The
+        // tag only counts while this shape is the view's background, not
+        // once a ripple wraps it.
+        val plainFill = background === shape && !imageHost && borderWidth <= 0 && radii.all { it == 0f }
+        if (plainFill || view.getTag(dev.pam.nativeapp.R.id.pam_plain_fill) != null) {
+            view.setTag(dev.pam.nativeapp.R.id.pam_plain_fill, shape.takeIf { plainFill })
         }
         pamImageView(view)?.setCornerRadii(radii)
         applyBoxShadow(view, state, radii)
@@ -11727,10 +11826,6 @@ class PamRenderer(
             get() = extras?.initialBackgroundUpdate
             set(value) { extras().initialBackgroundUpdate = value }
 
-        var pressableConfiguredDuringInitialization: Boolean
-            get() = extras?.pressableConfiguredDuringInitialization ?: false
-            set(value) { extras().pressableConfiguredDuringInitialization = value }
-
         var textWatcherInstalled: Boolean
             get() = extras?.textWatcherInstalled ?: false
             set(value) { extras().textWatcherInstalled = value }
@@ -12048,7 +12143,6 @@ class PamRenderer(
     private class NodeExtras {
         var initialTextUpdates: PamInitialTextUpdates? = null
         var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null
-        var pressableConfiguredDuringInitialization: Boolean = false
         var textWatcherInstalled: Boolean = false
         var pendingChange: Runnable? = null
         var nativeValue: String = ""
