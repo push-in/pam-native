@@ -116,6 +116,20 @@ public final class PamMediaDiskCache: @unchecked Sendable {
         }
     }
 
+    /// A fresh cached file for `source` (nil when absent or stale), without downloading.
+    func cachedFile(
+        source: String,
+        stableKey: String?,
+        maxAgeMs: Int64,
+        completion: @escaping @Sendable (URL?) -> Void
+    ) {
+        let identity = identity(source: source, stableKey: stableKey)
+        queue.async {
+            let target = self.file(identity)
+            completion(self.fresh(target, maxAgeMs: maxAgeMs) ? target : nil)
+        }
+    }
+
     func mediaURL(
         source: String,
         stableKey: String?,
