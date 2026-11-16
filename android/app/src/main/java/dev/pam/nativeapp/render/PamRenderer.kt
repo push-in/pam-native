@@ -232,9 +232,11 @@ private val MOUNT_EVENTS_SECTIONS = NodeKind.entries.map { "PamMount.events." + 
 private val POOLED_CELL_KINDS = setOf(
     NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
 )
+// Exact classes: what newView builds for each pooled kind (Text nodes are
+// PamTextView, not TextView, so a TextView entry never matched one).
 private val POOLED_CELL_VIEW_CLASSES = setOf<Class<*>>(
     PamContainer::class.java,
-    TextView::class.java,
+    PamTextView::class.java,
     PamPressable::class.java,
     PamImageView::class.java,
 )
@@ -984,6 +986,10 @@ class PamRenderer(
      * Views of scrolled-out list cells, reused for cells with the same node
      * kind and the same set of authored properties. With an identical key set
      * every property is re-applied on reuse, so no stale value can survive.
+     * What a node installs outside its properties (listeners and observers
+     * held by its state, time bindings, filter layers) is released when it
+     * dematerializes; [poolCellView] resets what properties only set
+     * conditionally (span press, selection colour) and transient state.
      */
     private val cellViewPool = HashMap<CellViewShape, ArrayDeque<View>>()
     private val cellViewShapes = java.util.WeakHashMap<View, CellViewShape>()
@@ -1018,6 +1024,9 @@ class PamRenderer(
     private fun poolCellView(id: Long, state: NodeState, view: View) {
         if (!recyclingCell || deferredViewportLayouts.containsKey(id)) return
         if (view.javaClass !in POOLED_CELL_VIEW_CLASSES) return
+        // A marquee made the text a single scrolling line, which the next
+        // cell's ellipsize mode does not undo: it gets a fresh view.
+        if (view is TextView && view.ellipsize == TextUtils.TruncateAt.MARQUEE) return
         val shape = cellViewShape(state) ?: return
         val pool = cellViewPool.getOrPut(shape) { ArrayDeque() }
         if (pool.size >= MAX_POOLED_CELL_VIEWS_PER_SHAPE) return
@@ -1041,6 +1050,15 @@ class PamRenderer(
             }
             // Modal trigger actions are re-installed by the commit pass.
             is PamPressable -> view.setLocalOnPress(null)
+            is PamTextView -> {
+                // The span-press listener stays when the next cell has no
+                // spans (configureSpanPress only removes what its node set).
+                view.setOnTouchListener(null)
+                // The next node takes the view's colour as its default
+                // selection colour (restored when it drops selectionColor).
+                view.highlightColor = state.defaultHighlightColor
+                if (view.scrollX != 0 || view.scrollY != 0) view.scrollTo(0, 0)
+            }
         }
         cellViewShapes[view] = shape
         pool.addLast(view)
@@ -3582,6 +3600,7 @@ class PamRenderer(
         state.cancelMotion()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
+        releaseNodeViewBindings(view, state)
         pamImageView(view)?.let(imageLoader::cancel)
         view.let(nativeViews::release)
         clearHitSlop(view)
@@ -3590,6 +3609,41 @@ class PamRenderer(
         else (view.parent as? ViewGroup)?.removeView(view)
         removeView(id)
         poolCellView(id, state, view)
+    }
+
+    /**
+     * Detaches what [state] installed on [view] outside its properties
+     * (listeners and observers it holds, its keyboard track, a filter
+     * layer). The node keeps existing without a view (a list cell scrolled
+     * out) and installs them again on the next view; the view may be reused
+     * by another cell, which must not report layout, resize or outside
+     * clicks under this node's id.
+     */
+    private fun releaseNodeViewBindings(view: View, state: NodeState) {
+        state.textLayoutListener?.let { listener ->
+            view.removeOnLayoutChangeListener(listener)
+            state.textLayoutListener = null
+        }
+        state.directiveLayoutListener?.let { listener ->
+            view.removeOnLayoutChangeListener(listener)
+            state.directiveLayoutListener = null
+        }
+        state.outsidePointerObserver?.let { observer ->
+            (host as? PamRootHost)?.removePointerObserver(observer)
+            state.outsidePointerObserver = null
+        }
+        if (state.spanPressInstalled) {
+            view.setOnTouchListener(null)
+            state.spanPressInstalled = false
+        }
+        state.keyboardProgressBinding?.let { binding ->
+            binding.close()
+            state.keyboardProgressBinding = null
+        }
+        if (state.filterLayer) {
+            view.setLayerType(View.LAYER_TYPE_NONE, null)
+            state.filterLayer = false
+        }
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
@@ -6877,7 +6931,9 @@ class PamRenderer(
     }
 
     private fun reportTextLayout(text: TextView, state: NodeState) {
-        if (nodes[state.id] !== state || state.properties[PropKey.ON_TEXT_LAYOUT] == null) return
+        // A posted report can run after the cell scrolled out and its view
+        // went to another cell: it measures this node's view only.
+        if (nodes[state.id] !== state || views[state.id] !== text || state.properties[PropKey.ON_TEXT_LAYOUT] == null) return
         val visible = text.layout ?: return
         val width = (text.width - text.totalPaddingLeft - text.totalPaddingRight).coerceAtLeast(0)
         if (width == 0) return
@@ -6940,7 +6996,7 @@ class PamRenderer(
         state.motionProgramId = program.id
         state.motionRunner?.cancel()
         val start = start@{
-            if (nodes[state.id] !== state) return@start
+            if (nodes[state.id] !== state || views[state.id] !== view) return@start
             val timeline = PamMotionTimeline.build(
                 program,
                 current = { PamMotionTarget.read(view, it) },
@@ -7450,7 +7506,7 @@ class PamRenderer(
 
         if (state.properties[PropKey.ON_CLICK_OUTSIDE] != null) {
             val observer: (MotionEvent) -> Unit = observer@{ event ->
-                if (nodes[state.id] !== state || !view.isShown) return@observer
+                if (nodes[state.id] !== state || views[state.id] !== view || !view.isShown) return@observer
                 val location = IntArray(2)
                 val hostLocation = IntArray(2)
                 view.getLocationOnScreen(location)
@@ -7537,7 +7593,7 @@ class PamRenderer(
         state.directiveLayoutListener = listener
         view.addOnLayoutChangeListener(listener)
         view.post {
-            if (nodes[state.id] === state) {
+            if (nodes[state.id] === state && views[state.id] === view) {
                 listener.onLayoutChange(
                     view,
                     view.left,
