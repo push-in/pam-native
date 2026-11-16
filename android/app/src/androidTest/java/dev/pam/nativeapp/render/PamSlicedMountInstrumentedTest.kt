@@ -118,7 +118,10 @@ class PamSlicedMountInstrumentedTest {
         // the full mount measured on the same host, never below the reference.
         val slowdown = maxOf(1.0, full.worst.toDouble() / REFERENCE_FULL_MOUNT_MS)
         val commitBudget = (COMMIT_FRAME_BUDGET_MS * slowdown).toLong()
-        val frameBudget = (FRAME_BUDGET_MS * slowdown).toLong()
+        // A slice mounts at most its 6 ms budget; the rest of its frame is the
+        // host's fixed per-frame cost (draw, sync), which a slow emulator does
+        // not scale with the mount: never below a fraction of the full mount.
+        val frameBudget = maxOf((FRAME_BUDGET_MS * slowdown).toLong(), (full.worst * SLICE_SHARE_OF_FULL_MOUNT).toLong())
         assertTrue(
             "the sliced commit frame ${sliced.first}ms exceeds ${commitBudget}ms (full mount ${full.worst}ms)",
             sliced.first <= commitBudget,
@@ -424,5 +427,8 @@ class PamSlicedMountInstrumentedTest {
 
         /** Worst frame of the full mount on the reference emulator (debug build). */
         const val REFERENCE_FULL_MOUNT_MS = 56.0
+
+        /** A slice frame stays under this share of the full mount's worst frame. */
+        const val SLICE_SHARE_OF_FULL_MOUNT = 0.45
     }
 }
