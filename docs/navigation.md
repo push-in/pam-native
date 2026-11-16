@@ -74,9 +74,18 @@ $navigator->preload(AppRoute::Product);
 `prewarm($route, $params)` mounts a route hidden under the current screen so
 the next push of the same route and params starts at once; it is released
 after 4 s unused or on any other navigation. `prewarm($route, $params,
-releaseAfterMs: null)` holds it until another navigation, `cancelPrewarm()` or
-`trimMemory()`, with no timer: keep a row warm while a list stays idle
-without renewing it every few seconds. `Route::prewarm($route, $params)` does
+releaseAfterMs: null)` holds it with no timer: keep a row warm while a list
+stays idle without renewing it every few seconds. A held screen survives tab
+switches: while the screen that warmed it (its owner) stays kept alive
+(`keepAlive()`), navigating between kept-alive screens leaves it mounted, so
+returning to the owner does not mount it again. It is released by a navigation
+to a screen that is not kept alive (a detail pushed from the owner or from
+another tab), by the owner leaving the stack (a reset), by another
+`prewarm()`, by `cancelPrewarm()` and by `trimMemory()`, which the runtime
+also runs on every navigator on memory pressure (Android `onTrimMemory` and
+`onLowMemory`, the iOS memory warning). One warm screen is kept per navigator.
+On the native host it stays hidden and, never shown, holds no retained display
+list. `Route::prewarm($route, $params)` does
 the same through the route table: params validated against the screen and
 middleware run first, as for `Route::navigate()`.
 
