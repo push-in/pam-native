@@ -3,9 +3,6 @@ package dev.pam.nativeapp.render
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.opengl.EGL14
-import android.opengl.EGLConfig
-import android.opengl.GLES20
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -128,7 +125,7 @@ class PamSlicedMountInstrumentedTest {
         } / NANOS_PER_MS
         val fullTotal = fullRuns.minOf { it.totalMs }
         val slicedTotal = slicedRuns.minOf { it.totalMs }
-        val renderer = glRenderer()
+        val renderer = PamGlRenderer.name
         Log.i(
             TAG,
             "mount work: full commit ${ms(fullWork)}ms; sliced commit ${ms(commitWork)}ms, worst slice " +
@@ -169,7 +166,7 @@ class PamSlicedMountInstrumentedTest {
         val full = fullRuns.minBy { it.frames.worst }.frames
         val sliced = slicedRuns.minBy { it.frames.worst }.frames
         Log.i(TAG, "worst UI frame: full mount ${full.worst}ms, sliced mount ${sliced.worst}ms (commit frame ${sliced.first}ms, slices ${sliced.rest}ms)")
-        if (!isHardwareRenderer(renderer)) {
+        if (!PamGlRenderer.isHardware(renderer)) {
             Log.i(TAG, "software GL renderer ($renderer): whole-frame budgets skipped, mount work checked above")
             return
         }
@@ -369,48 +366,6 @@ class PamSlicedMountInstrumentedTest {
 
     private fun ms(value: Double) = "%.1f".format(value)
 
-    /** GL_RENDERER of a throwaway EGL context: names the software rasterizers (SwiftShader, llvmpipe). */
-    private fun glRenderer(): String? = runCatching {
-        val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
-        val version = IntArray(2)
-        check(EGL14.eglInitialize(display, version, 0, version, 1))
-        val configs = arrayOfNulls<EGLConfig>(1)
-        val count = IntArray(1)
-        check(
-            EGL14.eglChooseConfig(
-                display,
-                intArrayOf(
-                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
-                    EGL14.EGL_NONE,
-                ),
-                0, configs, 0, 1, count, 0,
-            ) && count[0] > 0,
-        )
-        val config = configs[0]
-        val context = EGL14.eglCreateContext(
-            display, config, EGL14.EGL_NO_CONTEXT,
-            intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0,
-        )
-        check(context != EGL14.EGL_NO_CONTEXT)
-        val surface = EGL14.eglCreatePbufferSurface(display, config, intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0)
-        try {
-            check(surface != EGL14.EGL_NO_SURFACE && EGL14.eglMakeCurrent(display, surface, surface, context))
-            GLES20.glGetString(GLES20.GL_RENDERER)
-        } finally {
-            // The display stays initialized: the process's renderer shares it.
-            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-            if (surface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, surface)
-            EGL14.eglDestroyContext(display, context)
-        }
-    }.onFailure { Log.w(TAG, "GL renderer probe failed", it) }.getOrNull()
-
-    /** Unknown counts as software: the whole-frame budgets are only meaningful on a GPU. */
-    private fun isHardwareRenderer(renderer: String?): Boolean {
-        val name = renderer?.lowercase() ?: return false
-        return SOFTWARE_RENDERERS.none { it in name }
-    }
-
     private fun mount(sliced: Boolean): PamRenderer {
         val renderer = renderer(sliced)
         onMain { renderer.commit(listOf(tree())) }
@@ -584,9 +539,6 @@ class PamSlicedMountInstrumentedTest {
          */
         const val SLICED_TOTAL_MIN = 0.67
         const val SLICED_TOTAL_MAX = 1.5
-
-        /** GL_RENDERER names of software rasterizers. */
-        val SOFTWARE_RENDERERS = listOf("swiftshader", "llvmpipe", "softpipe", "software")
 
         /**
          * Main-thread frame (input, animation, layout, draw, sync) of each

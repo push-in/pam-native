@@ -39,7 +39,8 @@ import org.junit.runner.RunWith
  * Feed: `navigate()` with no transition) is a reorder of mounted routes and
  * a visibility swap. It removes no view, the screen shown again records only
  * its root (HWUI keeps its display lists, styled views ignore the visibility
- * flip of their drawables) and the frame fits the 60 Hz budget.
+ * flip of their drawables) and, on a hardware GL renderer, the frame fits
+ * the 60 Hz budget.
  */
 @RunWith(AndroidJUnit4::class)
 class PamTabSwitchFrameInstrumentedTest {
@@ -121,6 +122,14 @@ class PamTabSwitchFrameInstrumentedTest {
         val budgetNs = 16_666_667L
         Log.i(TAG, "tab switch frames (ui+issue ms): " + frames.joinToString { "%.2f".format(it.cpu / 1e6) })
         assertTrue("The switch drew at least one frame", frames.isNotEmpty())
+        // With GL drawn in software (SwiftShader on CI emulators) a frame's
+        // draw costs about a frame whatever the switch did: the structure
+        // checked above is what holds there.
+        val renderer = PamGlRenderer.name
+        if (!PamGlRenderer.isHardware(renderer)) {
+            Log.i(TAG, "software GL renderer ($renderer): frame budget skipped, structure checked above")
+            return
+        }
         frames.forEach { frame ->
             assertTrue(
                 "Every frame of the switch fits 60 Hz on the UI and render threads (${frame.cpu / 1e6} ms)",
