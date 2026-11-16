@@ -1031,7 +1031,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             else -> "touch"
         }
         @Suppress("DEPRECATION")
-        val refreshRate = windowManager.defaultDisplay.refreshRate.coerceAtLeast(1f)
+        val refreshRate = peakRefreshRate(windowManager.defaultDisplay)
         val memoryClass = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).memoryClass
         return StyleEnvironment(
             deviceType = deviceType,

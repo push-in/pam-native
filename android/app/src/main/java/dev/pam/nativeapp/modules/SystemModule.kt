@@ -348,8 +348,11 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     private fun dismissKeyboard(completion: ModuleCompletion) {
         val activity = context as? PamActivity ?: error("Keyboard requires an active PamActivity")
         val input = context.getSystemService(InputMethodManager::class.java)
-        input.hideSoftInputFromWindow(activity.currentFocus?.windowToken, 0)
-        activity.currentFocus?.clearFocus()
+        // A field that already lost focus can leave the keyboard up: without a
+        // focused view, hide it through the window itself.
+        val focused = activity.currentFocus
+        input.hideSoftInputFromWindow(focused?.windowToken ?: activity.window.decorView.windowToken, 0)
+        focused?.clearFocus()
         completion.success()
     }
 

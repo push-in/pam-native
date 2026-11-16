@@ -846,9 +846,30 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     @Suppress("DEPRECATION")
+    /** Its route is covered by a full-screen route or an inactive tab scene. */
+    private var routeCovered = false
+
+    /**
+     * Hides the window while its route is covered and shows it again when the
+     * route returns, keeping the sheet's state (iOS fades its lifted modal).
+     */
+    fun setRouteCovered(covered: Boolean) {
+        if (routeCovered == covered) return
+        routeCovered = covered
+        if (covered) {
+            dialog?.takeIf { it.isPresentedWindow }?.let(::hideWindow)
+        } else if (desiredVisible && isAttachedToWindow) {
+            updateDialog()
+        }
+    }
+
     private fun updateDialog() {
         if (!isAttachedToWindow || !desiredVisible) {
             dismiss(notify = true, animated = true)
+            return
+        }
+        if (routeCovered) {
+            dialog?.takeIf { it.isPresentedWindow }?.let(::hideWindow)
             return
         }
         val active = dialog

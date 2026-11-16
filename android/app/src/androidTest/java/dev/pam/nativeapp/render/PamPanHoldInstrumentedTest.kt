@@ -86,6 +86,9 @@ class PamPanHoldInstrumentedTest {
                     configureGesture(PamGestureConfig(2, true, 1, 1, 6, 3, 8f, 180L),
                         callback = { if (it.state == 1) began += 1 }, nativeTransform = true)
                 }
+                // HorizontalScrollView measures its child UNSPECIFIED: a spacer
+                // gives the strip real content to scroll (1080 > 360).
+                row.addView(View(activity), FrameLayout.LayoutParams(1_080, 100))
                 row.addView(thumbnail, FrameLayout.LayoutParams(300, 100))
                 scroll.addView(row, FrameLayout.LayoutParams(1_080, 100))
                 activity.host.addView(scroll, FrameLayout.LayoutParams(360, 100))
@@ -103,6 +106,80 @@ class PamPanHoldInstrumentedTest {
                 dispatch(MotionEvent.ACTION_UP, 80f)
             }
         } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
+    @Test
+    fun immediatePanInsideHorizontalPagerKeepsTheWholeDrag() {
+        // Gallery video seek bar: pan horizontal, minDistance 0, exclusive.
+        val result = dragInsideHorizontalScroll(direction = 6, composition = 1)
+        assertTrue("The scrubber recognizes the drag", result.began == 1)
+        assertTrue("The scrubber receives the drag past the pager's slop", result.lastX < 100f)
+        assertTrue("The pager stays on its page", result.scrollX == 0)
+    }
+
+    @Test
+    fun offAxisImmediatePanHandsTheTouchBackToThePager() {
+        // A vertical handle does not hold a horizontal swipe.
+        val result = dragInsideHorizontalScroll(direction = 7, composition = 1)
+        assertTrue("A horizontal drag is not a vertical pan", result.began == 0)
+        assertTrue("The pager scrolls", result.scrollX > 0)
+    }
+
+    @Test
+    fun simultaneousImmediatePanLeavesThePagerFree() {
+        val result = dragInsideHorizontalScroll(direction = 6, composition = 2)
+        assertTrue("The pager still scrolls", result.scrollX > 0)
+    }
+
+    private data class DragResult(val began: Int, val lastX: Float, val scrollX: Int)
+
+    private fun dragInsideHorizontalScroll(direction: Int, composition: Int): DragResult {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as PamTestActivity
+        lateinit var scroll: HorizontalScrollView
+        var began = 0
+        var lastX = Float.NaN
+        var scrollX = 0
+        val downAt = SystemClock.uptimeMillis()
+        fun dispatch(action: Int, x: Float) {
+            val event = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action, x, 40f, 0)
+            try { scroll.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        try {
+            instrumentation.runOnMainSync {
+                scroll = HorizontalScrollView(activity)
+                val row = FrameLayout(activity)
+                val scrubber = PamPressable(activity).apply {
+                    addView(View(activity), FrameLayout.LayoutParams(300, 100))
+                    configureGesture(
+                        PamGestureConfig(2, true, 1, 1, direction, composition, 0f, 0L),
+                        callback = {
+                            if (it.state == 1) began += 1
+                            lastX = it.x
+                        },
+                    )
+                }
+                row.addView(View(activity), FrameLayout.LayoutParams(1_080, 100))
+                row.addView(scrubber, FrameLayout.LayoutParams(300, 100))
+                scroll.addView(row, FrameLayout.LayoutParams(1_080, 100))
+                activity.host.addView(scroll, FrameLayout.LayoutParams(360, 100))
+                scroll.measure(View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY))
+                scroll.layout(0, 0, 360, 100)
+                dispatch(MotionEvent.ACTION_DOWN, 220f)
+                dispatch(MotionEvent.ACTION_MOVE, 216f)
+                dispatch(MotionEvent.ACTION_MOVE, 150f)
+                dispatch(MotionEvent.ACTION_MOVE, 80f)
+                dispatch(MotionEvent.ACTION_MOVE, 40f)
+                dispatch(MotionEvent.ACTION_MOVE, 10f)
+                scrollX = scroll.scrollX
+                dispatch(MotionEvent.ACTION_UP, 10f)
+            }
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+        return DragResult(began, lastX, scrollX)
     }
 
     private fun recognizer(hold: Long) = PamGestureRecognizer(

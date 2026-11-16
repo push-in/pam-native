@@ -2001,6 +2001,7 @@ class PamRenderer(
                 it.onRouteVisibilityChanged = {
                     scheduleRouteListenerSync()
                     retryHiddenAutoFocus()
+                    syncModalCoverage()
                 }
             }
             NodeKind.WEB_VIEW -> nativeViews.create("webview") { kind, payload ->
@@ -2015,7 +2016,10 @@ class PamRenderer(
             }
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
             NodeKind.TAB_HOST -> PamTabHost(context).also {
-                it.onSceneVisibilityChanged = Runnable { scheduleRouteListenerSync() }
+                it.onSceneVisibilityChanged = Runnable {
+                    scheduleRouteListenerSync()
+                    syncModalCoverage()
+                }
             }
             NodeKind.CANVAS -> PamVectorCanvas(context)
             NodeKind.CUSTOM_VIEW -> {
@@ -7579,6 +7583,18 @@ class PamRenderer(
         )
     }
 
+    /**
+     * A Modal/BottomSheet window shows only while its route is on screen: a
+     * full-screen route pushed over it or an inactive tab hides the window
+     * until the route is visible again (iOS `syncLiftedModal`).
+     */
+    private fun syncModalCoverage() {
+        for (index in 0 until views.size()) {
+            val modal = views.valueAt(index) as? PamModalHost ?: continue
+            modal.setRouteCovered(modal.isAttachedToWindow && PamRouteCoverage.isCovered(modal))
+        }
+    }
+
     private fun scheduleRouteListenerSync() {
         if (routeListeners.isEmpty() || routeListenerSyncPosted) return
         routeListenerSyncPosted = true
@@ -7618,11 +7634,17 @@ class PamRenderer(
         dispatchBytes(id, kind, bytes)
     }
 
-    /** Uptime of the last press, long press or submit the user made (ms). */
+    /**
+     * Uptime of the last press, long press, submit or gesture start the user
+     * made (ms). A gesture counts: an index rail grabbed while its list still
+     * flings asks for a jump that must win over the fling.
+     */
     private var lastUserActionAt = 0L
 
     private fun dispatchBytes(id: Long, kind: Int, payload: ByteArray) {
-        if (kind == EVENT_PRESS || kind == EVENT_LONG_PRESS || kind == EVENT_SUBMIT) {
+        if (kind == EVENT_PRESS || kind == EVENT_LONG_PRESS || kind == EVENT_SUBMIT ||
+            kind == EventKind.GESTURE_BEGIN.value
+        ) {
             lastUserActionAt = SystemClock.uptimeMillis()
         }
         if (payload.size <= MAX_EVENT_BYTES) dispatchEvent(id, kind, payload)
