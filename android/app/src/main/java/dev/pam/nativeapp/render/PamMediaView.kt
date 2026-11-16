@@ -87,7 +87,8 @@ internal class PamMediaView(
 ) : FrameLayout(context),
     MediaController.MediaPlayerControl,
     TextureView.SurfaceTextureListener,
-    PamSharedContentView {
+    PamSharedContentView,
+    PamRouteCoverage.Aware {
     private val video = TextureView(context)
     private val poster = PamImageView(context)
     private val main = Handler(Looper.getMainLooper())
@@ -109,6 +110,9 @@ internal class PamMediaView(
     private var mediaController: MediaController? = null
     private var creatingPlayer = false
     @Volatile private var playerGeneration = 0L
+
+    /** The current Media3 player's first frame reached the surface before it reported ready. */
+    private var frameBeforeReady = false
 
     /**
      * Covered-route policy: while the route holding this player is covered
@@ -724,8 +728,14 @@ internal class PamMediaView(
         }
     }
 
+    /** A route about to show (a push laid out first) is not covering: the player prepares while it lays out. */
+    override fun onRouteCoverageChanged() {
+        if (isAttachedToWindow) syncVisibility()
+    }
+
     private fun syncCoverage() {
-        val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
+        val nowCovered = isAttachedToWindow && !keepAliveWhenCovered &&
+            PamRouteCoverage.isCovered(this, revealing = true)
         if (nowCovered == covered) return
         covered = nowCovered
         if (nowCovered) releaseDecoder() else if (!suspended && !hiddenRelease && !idleSurface) restoreAfterCover() else if (!suspended && idleSurface) ensureVideoAttached()
@@ -930,6 +940,11 @@ internal class PamMediaView(
             refreshBindings(startAt, durationMs / 1_000.0)
             mediaController?.isEnabled = true
             applyVideoTransform()
+            // Ready is announced after the first frame: when that frame was
+            // latched already, the poster goes now, not on a next frame (a
+            // paused player draws none; a playing one only after play()).
+            // A resume (seek above) waits for the frame at its position.
+            if (frameBeforeReady && startAt <= 0 && poster.visibility != GONE) poster.visibility = GONE
             onReady?.invoke()
             onReadyDetails?.invoke(width, height, durationMs / 1_000.0)
         }
@@ -1051,6 +1066,7 @@ internal class PamMediaView(
             videoHeightPx = 0
         }
         creatingPlayer = false
+        frameBeforeReady = false
         playerGeneration++
         bufferedPercentage = 0
         mediaController?.isEnabled = false
@@ -1158,6 +1174,8 @@ internal class PamMediaView(
         if (videoWidthPx <= 0 || videoHeightPx <= 0) applyVideoTransform()
         if (prepared && poster.visibility != GONE) {
             poster.visibility = GONE
+        } else if (!prepared && exo != null) {
+            frameBeforeReady = true
         }
     }
 

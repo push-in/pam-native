@@ -825,7 +825,7 @@ internal class NativeImageLoader(
                 view,
                 result.bitmap,
                 pending.request.repeat,
-                if (animate) pending.request.fadeDurationMs else 0,
+                if (animate && fadesIn(pending)) pending.request.fadeDurationMs else 0,
             )
         }
         pending.callbacks.onSuccess(result)
@@ -886,6 +886,15 @@ internal class NativeImageLoader(
                 display(view, bitmap, request.request.repeat, 0)
             }
     }
+
+    /**
+     * A disk or fast network hit lands within a couple of frames of the
+     * request: it replaces the placeholder at once instead of cross-fading
+     * over a frame already on screen (Coil/Glide skip the fade for cache hits).
+     * Only a load the user actually waited for fades in.
+     */
+    private fun fadesIn(pending: ActiveRequest): Boolean =
+        imageFadesIn(android.os.SystemClock.uptimeMillis() - pending.startedAt)
 
     private fun display(
         view: PamImageView,
@@ -1694,6 +1703,7 @@ internal class NativeImageLoader(
         var released: Boolean = false,
         var animated: Boolean = false,
         var restoringCallbacks: NativeImageCallbacks? = null,
+        val startedAt: Long = android.os.SystemClock.uptimeMillis(),
     )
 
     private data class DecodedBitmap(
@@ -1788,3 +1798,8 @@ internal fun ByteArray.toHexString(): String {
 /** Trim the disk cache once a few megabytes or dozens of files were written since the last trim. */
 internal fun diskTrimDue(bytesSinceTrim: Long, writesSinceTrim: Int): Boolean =
     bytesSinceTrim >= 4L * 1024 * 1024 || writesSinceTrim >= 48
+
+/** Loads shorter than this (disk, memory-adjacent, fast network) skip the fade. */
+internal const val IMAGE_INSTANT_LOAD_MS = 120L
+
+internal fun imageFadesIn(elapsedMs: Long): Boolean = elapsedMs >= IMAGE_INSTANT_LOAD_MS
