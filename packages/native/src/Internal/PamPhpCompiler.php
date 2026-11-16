@@ -870,17 +870,33 @@ final class PamPhpCompiler
             if (!is_dir($output) && !mkdir($output, 0o755, true) && !is_dir($output)) {
                 throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
             }
-            $entries = [];
+            // Ordered by pack key up front so the sources stream to disk in
+            // the pack's order: a large app (400+ components) held every
+            // source twice in memory and ran out of the CLI's 128 MB.
+            $ordered = [];
             $sources = [];
             foreach ($components as $component) {
                 $relative = self::relativeTo($root, $component->source);
-                if ($relative === null) {
-                    continue;
+                if ($relative !== null) {
+                    $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+                    // Every component source of the bundle, packed or not: the
+                    // device boots from this listing (see bundledComponents()).
+                    $sources[] = $relative;
+                    $ordered[hash('sha256', $relative)] = [$relative, $component];
                 }
-                $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
-                // Every component source of the bundle, packed or not: the
-                // device boots from this listing (see bundledComponents()).
-                $sources[] = $relative;
+            }
+            unset($components, $component);
+            ksort($ordered, SORT_STRING);
+            $dataPath = tempnam($staging, 'pam-pack-data-');
+            $data = $dataPath === false ? false : fopen($dataPath, 'w+b');
+            if ($data === false) {
+                throw new RuntimeException("Cannot stage the PAM component pack in {$output}.");
+            }
+            $index = [];
+            $offset = 0;
+            foreach (array_keys($ordered) as $key) {
+                [$relative, $component] = $ordered[$key];
+                unset($ordered[$key]);
                 $compiledBase = substr($component->classFile, 0, -strlen('.class.php'));
                 $metadata = json_decode(
                     (string) file_get_contents($compiledBase.'.json'),
@@ -915,44 +931,53 @@ final class PamPhpCompiler
                     (string) file_get_contents($compiledBase.'.template.json'),
                     $root,
                 );
-                $entries[hash('sha256', $relative)] = [
-                    $metadata,
-                    (string) file_get_contents($component->classFile),
-                    TemplateExpressionCatalog::bundleSource($component->template, $template),
+                $class = (string) file_get_contents($component->classFile);
+                $template = TemplateExpressionCatalog::bundleSource($component->template, $template);
+                unset($component);
+                if (fwrite($data, $class) !== strlen($class) || fwrite($data, $template) !== strlen($template)) {
+                    throw new RuntimeException("Cannot stage the PAM component pack in {$output}.");
+                }
+                $index[$key] = [
+                    'metadata' => $metadata,
+                    'class' => [$offset, strlen($class)],
+                    'template' => [$offset + strlen($class), strlen($template)],
                 ];
+                $offset += strlen($class) + strlen($template);
             }
             // Every bundle file is created on device at the first launch after
             // an install: all components ship as one pack file (see PREBUILT_PACK).
-            ksort($entries, SORT_STRING);
-            $index = [];
-            $data = '';
-            foreach ($entries as $key => [$metadata, $class, $template]) {
-                $index[$key] = [
-                    'metadata' => $metadata,
-                    'class' => [strlen($data), strlen($class)],
-                    'template' => [strlen($data) + strlen($class), strlen($template)],
-                ];
-                $data .= $class.$template;
-            }
-            // The sources are in $data now: release them before encoding.
-            $count = count($entries);
-            unset($entries);
+            $count = count($index);
             $encoded = json_encode(
                 ['version' => 1, 'components' => (object) $index, 'sources' => $sources],
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
             );
-            // Written as parts: concatenating the header with a large app's
-            // pack copied it once more and ran out of the CLI's 128 MB.
-            self::writeAtomic(
-                $output.DIRECTORY_SEPARATOR.self::PREBUILT_PACK,
-                [self::PREBUILT_PACK_MAGIC.pack('V', strlen($encoded)), $encoded, $data],
-            );
+            unset($index);
+            $header = self::PREBUILT_PACK_MAGIC.pack('V', strlen($encoded)).$encoded;
+            unset($encoded);
+            $pack = $output.DIRECTORY_SEPARATOR.self::PREBUILT_PACK;
+            $temporary = tempnam($output, 'pam-component-');
+            $target = $temporary === false ? false : fopen($temporary, 'wb');
+            rewind($data);
+            $written = $target === false ? false : fwrite($target, $header);
+            $copied = $written === strlen($header) ? stream_copy_to_stream($data, $target) : false;
+            $closed = $target !== false && fclose($target);
+            fclose($data);
+            if ($copied !== $offset || !$closed || !rename((string) $temporary, $pack)) {
+                if (is_string($temporary)) {
+                    @unlink($temporary);
+                }
+                throw new RuntimeException("Cannot write PAM component cache {$pack}.");
+            }
+            @chmod($pack, 0o644);
 
             self::$prebuiltDirectories = [];
             self::$prebuiltPacks = [];
 
             return $count;
         } finally {
+            if (isset($data) && is_resource($data)) {
+                fclose($data);
+            }
             if (is_dir($staging)) {
                 self::removeTree($staging);
             }
