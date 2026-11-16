@@ -29,6 +29,20 @@
   typos) as `PAM2302`: a development warning, an error in strict/release
   builds.
 
+## 1.49.8 - 2026-11-16
+
+- Android images that arrive within 120 ms (disk cache, fast network)
+  replace the placeholder at once instead of cross-fading 300 ms over a
+  frame already on screen; only a load the user waited for fades in, as
+  Coil and Glide skip the fade for cache hits.
+- Android: a `MediaPlayer` with `preloadSeconds` and no `startBufferMs`
+  starts after 1 s of buffered media (2 s after a stall) instead of
+  ExoPlayer's 2.5 s / 5 s, like AVPlayer: feeds and viewers no longer hold
+  the poster for seconds.
+- Android: a Media3 player whose first frame reached the surface before it
+  reported ready hides its poster on ready instead of on the next frame (a
+  paused player could keep the poster over its first frame).
+
 ## 1.49.7 - 2026-11-15
 
 - Gestures inside pagers and lists keep the drag. A pan with

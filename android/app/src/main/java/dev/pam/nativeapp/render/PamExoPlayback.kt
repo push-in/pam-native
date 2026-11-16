@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Buffer targets of a `MediaPlayer` with `preloadSeconds` (the forward
  * buffer, like iOS `AVPlayerItem.preferredForwardBufferDuration`): the
  * player keeps about [maxBufferMs] of media loaded ahead of the playhead.
- * Playback (re)starts with the ExoPlayer defaults, capped by the target.
+ * Playback starts after 1 s of media (2 s after a stall), capped by the target.
  */
 internal data class PamForwardBuffer(
     val minBufferMs: Int,
@@ -46,11 +46,14 @@ internal fun pamForwardBuffer(seconds: Int, startBufferMs: Int = 0): PamForwardB
     } else {
         EXO_DEFAULT_BUFFER_MS
     }
-    val playback = if (start > 0) start else EXO_BUFFER_FOR_PLAYBACK_MS
+    // Without a declared start buffer, playback starts after 1 s of media
+    // (2 s after a stall), not ExoPlayer's 2.5 s / 5 s: feeds and viewers
+    // start like AVPlayer does instead of holding the poster for seconds.
+    val playback = if (start > 0) start else DEFAULT_START_BUFFER_MS
     val rebuffer = if (start > 0) {
         minOf(EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS, start * 2)
     } else {
-        EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+        DEFAULT_START_BUFFER_MS * 2
     }
     return PamForwardBuffer(
         minBufferMs = target,
@@ -67,8 +70,8 @@ private const val EXO_DEFAULT_BUFFER_MS = 50_000
 
 private const val MAX_FORWARD_BUFFER_SECONDS = 300
 
-/** `DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS`. */
-private const val EXO_BUFFER_FOR_PLAYBACK_MS = 2_500
+/** Start buffer when only a forward buffer is declared (ExoPlayer: 2_500). */
+private const val DEFAULT_START_BUFFER_MS = 1_000
 
 /** `DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS`. */
 private const val EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 5_000
