@@ -3478,17 +3478,16 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         if location.y <= handleBottom { return true }
         guard pan.velocity(in: self).y > 0 else { return false }
         // gorhom/react-native-bottom-sheet: a downward drag on a nested
-        // scrollable moves the sheet only once that scrollable is at its top.
-        var candidate = hitTest(location, with: nil)
-        while let view = candidate, view !== self {
-            if let scroll = view as? UIScrollView,
-               scroll.isScrollEnabled,
-               scroll.contentOffset.y > -scroll.adjustedContentInset.top + 0.5 {
-                return false
-            }
-            candidate = view.superview
-        }
-        return true
+        // scrollable moves the sheet only once that scrollable is at its top;
+        // a vertical pan or a drawing surface under the finger keeps it too
+        // (PamGestureArbiter), so the sheet never moves with them.
+        return PamGestureArbiter.ownership(
+            from: hitTest(location, with: nil),
+            upTo: self,
+            horizontal: false,
+            sign: 1,
+            navigation: false
+        ) < PamGestureArbiter.directional
     }
 
     func gestureRecognizer(

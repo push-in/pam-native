@@ -22,7 +22,7 @@ internal data class PamPressPointer(
     val pointerId: Int,
 )
 
-internal class PamPressable(context: Context) : PamContainer(context) {
+internal class PamPressable(context: Context) : PamContainer(context), PamDragOwner {
     private var pressedBackground: PamPressedBackground? = null
 
     internal fun configurePressedBackground(shape: android.graphics.drawable.GradientDrawable, base: Int, pressed: Int?) {
@@ -652,6 +652,20 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             }
             else -> true
         }
+    }
+
+    /**
+     * A zoomed native surface owns every drag over it; a pan or swipe owns
+     * the drags its direction (and its Drag's axis) admits.
+     */
+    override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int {
+        if (nativeTransformEnabled && drag.config == null) {
+            val child = nativeTransformTarget()
+            if (child != null && zoomedContentOwnsPan(child.scaleX)) return PamGestureArbiter.EXCLUSIVE
+        }
+        val axis = drag.config?.horizontal
+        if (axis != null && axis != horizontal) return PamGestureArbiter.NONE
+        return gestureRecognizer.dragOwnership(horizontal, fingerSign)
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {

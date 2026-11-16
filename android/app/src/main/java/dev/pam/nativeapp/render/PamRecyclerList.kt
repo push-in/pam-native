@@ -32,7 +32,7 @@ import kotlin.math.min
 /** Debug-only per-frame motion trace of virtual lists (see PamRecyclerList.traceMotion). */
 private const val MOTION_TRACE_TAG = "PamListTrace"
 
-internal class PamRecyclerList(context: Context) : RecyclerView(context) {
+internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDragOwner {
     /**
      * `keyboardDismissMode` "on-drag" / "interactive": a user drag that
      * scrolls the list closes the keyboard, as on a scroll view. Off unless
@@ -1207,7 +1207,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             // Run before RecyclerView dispatches DOWN to a row child. Waiting
             // for onInterceptTouchEvent is too late when the row itself owns
             // the first phase of the gesture inside a platform ScrollView.
-            parent?.requestDisallowInterceptTouchEvent(canConsumeScrollGesture())
+            // The claim names no axis: a navigator above asks the gesture
+            // arbiter whether a drag across the list is still its own.
+            PamGestureArbiter.claimForScrollAncestor(this, canConsumeScrollGesture())
         }
         if (keyboardTaps?.observe(event) == true) {
             // keyboardShouldPersistTaps="never": the tap only dismissed the
@@ -1251,6 +1253,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     internal fun hasScrollableContent(): Boolean = canConsumeScrollGesture()
+
+    override val scrollsContent: Boolean get() = true
+
+    /** The list owns drags along its axis while it can still scroll that way. */
+    override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int {
+        if (!scrollEnabled || horizontal != this.horizontal) return PamGestureArbiter.NONE
+        val scrolls = canScrollInDirection(-fingerSign) ||
+            if (horizontal) canScrollHorizontally(-fingerSign) else canScrollVertically(-fingerSign)
+        return if (scrolls) PamGestureArbiter.DIRECTIONAL else PamGestureArbiter.NONE
+    }
 
     /** An ancestor that can still scroll along this list's axis in [direction]. */
     private fun outerCanScroll(direction: Int): Boolean {
@@ -1301,9 +1313,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 // retain the gesture until it reaches its own boundary.
                 // Otherwise the page steals every vertical drag and rows
                 // beyond the list viewport become unreachable.
-                parent?.requestDisallowInterceptTouchEvent(
-                    canConsumeScrollGesture(),
-                )
+                PamGestureArbiter.claimForScrollAncestor(this, canConsumeScrollGesture())
             }
             MotionEvent.ACTION_MOVE -> {
                 val delta = if (horizontal) {
