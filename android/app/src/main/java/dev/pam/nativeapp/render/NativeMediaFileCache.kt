@@ -81,8 +81,37 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
             callbacks.error("Media is not available in the local cache.")
             return
         }
-        if (request.streaming || request.downloadWhilePlaying) {
+        val streamed = request.streaming || request.downloadWhilePlaying
+        if (streamed) {
             completion(uri)
+            // The player streams the start now: the copy for the cache waits
+            // until it buffered, or both requests split the bandwidth and the
+            // first frame took twice as long on a mobile network.
+            if (!inFlight.containsKey(identity)) {
+                main.postDelayed({
+                    if (!closed.get()) startDownload(request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
+                }, STREAMED_DOWNLOAD_DELAY_MS)
+                return
+            }
+        }
+        startDownload(request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
+    }
+
+    private fun startDownload(
+        request: MediaCacheRequest,
+        identity: String,
+        fileKey: String,
+        target: File,
+        callbacks: MediaCacheCallbacks,
+        staleAvailable: Boolean,
+        servedStale: Boolean,
+        completion: (Uri) -> Unit,
+        streamed: Boolean,
+    ) {
+        if (streamed && target.isFile && target.length() in 1..effectiveMax(request)) {
+            // Another request cached it meanwhile.
+            callbacks.ready(identity, target.length())
+            return
         }
         val future = inFlight.computeIfAbsent(identity) {
             CompletableFuture.supplyAsync(
@@ -102,7 +131,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
                     }
                 } else {
                     callbacks.ready(identity, file.length())
-                    if (!servedStale && !request.streaming && !request.downloadWhilePlaying) {
+                    if (!servedStale && !streamed) {
                         completion(Uri.fromFile(file))
                     }
                 }
@@ -199,6 +228,8 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
 
     private companion object {
         const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
+        /** How long a streaming player gets the bandwidth before the cache copy starts. */
+        const val STREAMED_DOWNLOAD_DELAY_MS = 4_000L
         // `cacheMaxBytes` also bounds one file (up to 2 GB); the directory
         // keeps at most 256 MB (the RN app's media/image disk budget).
         const val DEFAULT_DISK_BYTES = 256L * 1024 * 1024

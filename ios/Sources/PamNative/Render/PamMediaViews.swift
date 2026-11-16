@@ -398,7 +398,30 @@ final class PamMediaView: UIView {
         if remote && cachePolicy >= 3 {
             let identity = PamMediaDiskCache.shared.identity(source: value, stableKey: cacheKey)
             if streamingCache || downloadWhilePlaying {
-                installPlayer(url)
+                // A cached copy plays from disk (it streamed from the network
+                // again before). Otherwise the player streams the start alone
+                // and the copy for the cache waits until it buffered: both
+                // requests split the bandwidth and the first frame took twice
+                // as long (Android's NativeMediaFileCache does the same).
+                let source = value
+                PamMediaDiskCache.shared.cachedFile(source: source, stableKey: cacheKey, maxAgeMs: cacheMaxAgeMs) { [weak self] cached in
+                    let playable = cached.map { PamMediaDiskCache.playableURL(for: $0) }
+                    DispatchQueue.main.async {
+                        guard let self, self.sourceGeneration == generation else { return }
+                        if let playable {
+                            self.onCacheHit?(identity)
+                            self.installPlayer(playable)
+                            return
+                        }
+                        self.onCacheMiss?(identity)
+                        self.installPlayer(url)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(4)) { [weak self] in
+                            guard let self, self.sourceGeneration == generation else { return }
+                            self.cacheStreamedMedia(source: source, identity: identity, generation: generation)
+                        }
+                    }
+                }
+                return
             }
             PamMediaDiskCache.shared.mediaURL(
                 source: value,
@@ -441,6 +464,25 @@ final class PamMediaView: UIView {
             return
         }
         installPlayer(url)
+    }
+
+    /// The copy for the cache of a streamed media, started once the player buffered.
+    private func cacheStreamedMedia(source: String, identity: String, generation: UInt64) {
+        PamMediaDiskCache.shared.mediaURL(
+            source: source,
+            stableKey: cacheKey,
+            maxAgeMs: cacheMaxAgeMs,
+            maximumBytes: cacheMaxBytes,
+            checksum: cacheChecksum,
+            pinned: cachePinned
+        ) { [weak self] result in
+            guard case let .success(resolution) = result else { return }
+            let size = (try? resolution.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            DispatchQueue.main.async {
+                guard let self, self.sourceGeneration == generation else { return }
+                self.onCacheReady?(identity, Int64(size))
+            }
+        }
     }
 
     static let unsupportedContainerMessage = "WebM video is not supported on iOS"
