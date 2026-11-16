@@ -242,7 +242,7 @@ internal class PamTimeBinding private constructor(private val view: View) :
         } else {
             revealLastTick = -1
             // Only something that still moves waits for the screen.
-            if (apply(false) >= 0) watch()
+            if (apply(false) >= 0) watch() else unwatch()
         }
     }
 
