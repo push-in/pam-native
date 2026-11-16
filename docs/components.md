@@ -1324,6 +1324,83 @@ The template runtime decodes the native wire map before invoking the handler.
 A single-parameter handler remains available for applications that intentionally
 consume the raw event payload.
 
+## Native clocks, timed progress and text reveal
+
+Call timers, recording bars, countdowns and typewriter text move on the native
+side, frame by frame, while PHP keeps the state: PHP sets when something
+started, whether it runs and how long it lasts, and the renderer only
+interpolates. There is no PHP render per second, frame or character, and
+nothing runs while the element is off screen (hidden or covered route,
+inactive tab, scrolled out of the window, app in the background); clocks and
+bars read the wall clock, so they are right again the moment they are seen.
+
+```xml
+<!-- Call timer: 00:42, 75:03 past an hour -->
+<Text :clockStartedAt="$call['started_at_ms']" clockFormat="mm:ss" style="font-variant-numeric: tabular-nums">00:00</Text>
+
+<!-- Pausable stopwatch: PHP keeps the time counted before the last start -->
+<Text :clockStartedAt="$resumedAt" :clockOffsetMs="$countedMs" :clockRunning="$running">0:00</Text>
+
+<!-- Countdowns stop at 0 and round up (5, 4, ... 1, 0) -->
+<Text :clockEndsAt="$offerEndsAt" clockFormat="seconds">5</Text>
+<Text :clockStartedAt="$startedAt" clockDurationMs="30000" :clockRunning="$running" :clockOffsetMs="$countedMs">0:30</Text>
+
+<!-- Recording bar: fills its track over 30 s, pausable -->
+<View class="h-1 bg-white/30">
+    <View class="h-1 w-full bg-red-500" :progressStartedAt="$recordingStartedAt" progressDurationMs="30000"
+          :progressRunning="$recording" :progressOffsetMs="$recordedMs" />
+</View>
+
+<!-- Typewriter: one character every 55 ms, restarted by a new key -->
+<Text revealCharMs="55" :revealKey="$previewKey">{{ $layer['text'] }}</Text>
+```
+
+```php
+Text::make('00:00')->clock($startedAt, ClockFormat::PaddedMinutesSeconds);
+Text::make('0:00')->clock($resumedAt, offsetMs: $countedMs, running: $running);
+Text::make('0:30')->countdown(30_000, $startedAt, ClockFormat::MinutesSeconds);
+Text::make('5')->countdownTo($endsAt);                 // ClockFormat::Seconds
+View::make()->timeProgress($startedAt, 30_000, offsetMs: $recordedMs, running: $recording);
+Text::make($text)->reveal(55, key: $previewKey);       // or ->revealOver(1_200, $key)
+```
+
+Times are epoch milliseconds (`(int) (microtime(true) * 1000)`; floats are
+floored), the same clock the device's PHP and native code read.
+
+**Clock** (`Text`): the value is `clockOffsetMs` plus, while `clockRunning`
+(default `true`), the time since `clockStartedAt`. Without a start, or not
+running, the clock stands at `clockOffsetMs`: to pause, set `clockRunning`
+false and `clockOffsetMs` to the time counted so far; to resume, set a new
+`clockStartedAt` and running again. `clockDurationMs` turns it into a
+countdown of that duration (pausable the same way); `clockEndsAt` counts down
+to a fixed instant and ignores running/offset. Counting up shows whole seconds
+elapsed (rounded down); counting down shows the seconds left rounded up and
+stops at zero. `clockFormat`: `m:ss` (default, `0:42`, `1:01:05` past an
+hour), `mm:ss` (`00:42`, minutes keep counting: `75:03`), `h:mm:ss`
+(`0:00:42`) or `seconds` (`42`) — the `ClockFormat` enum. The text content is
+the placeholder the engine measures: give the label a stable width (tabular
+digits) so ticks never relayout. The label is the text's content, so screen
+readers read the current value. It wakes once per label change; removing all
+`clock*` values shows the content again.
+
+**Timed progress** (any view): the view scales from its leading edge (also in
+RTL) to `elapsed / progressDurationMs`, with the same
+`progressStartedAt`/`progressOffsetMs`/`progressRunning` rules. It moves every
+frame (or every half device pixel for a slow bar) and stops once full or
+paused. With reduced motion it advances in 1 s steps and still shows the real
+progress — it never jumps to full. It owns the view's horizontal scale, like
+`mediaProgress`; size the view as the full bar (`w-full`) inside its track.
+
+**Reveal** (`Text`): shows the text one grapheme every `revealCharMs`, or the
+whole text over `revealDurationMs`, keeping the layout of the full text
+(hidden characters hold their place, so nothing reflows). A new `revealKey`
+starts over; changing the text alone does not. It advances only while seen;
+with reduced motion the whole text shows at once; screen readers read the
+whole text.
+
+Hosts declaring extension properties up to 1033 receive these properties; an
+older renderer refuses them by name (see the renderer contract).
+
 ## Native drawing canvas
 
 `DrawingCanvas` layers a native freehand surface over an aspect-fit image:

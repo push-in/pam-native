@@ -702,6 +702,7 @@ public final class PamRenderer: @unchecked Sendable {
             view.pamMediaClockRef = nil
             view.pamMediaProgressRef = nil
         }
+        if let view = views[id] { PamTimeBinding.clear(view) }
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
         workletAnimators.removeValue(forKey: id)?.stop()
@@ -3475,6 +3476,20 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.mediaProgress:
             view.pamMediaProgressRef = value.textOrNil()
             mediaBoundIds.insert(nodeId)
+        case PamConstants.clockStartedAt,
+             PamConstants.clockEndsAt,
+             PamConstants.clockDurationMs,
+             PamConstants.clockOffsetMs,
+             PamConstants.clockRunning,
+             PamConstants.clockFormat,
+             PamConstants.progressStartedAt,
+             PamConstants.progressDurationMs,
+             PamConstants.progressOffsetMs,
+             PamConstants.progressRunning,
+             PamConstants.revealCharMs,
+             PamConstants.revealDurationMs,
+             PamConstants.revealKey:
+            syncTimeBinding(view: view, nodeId: nodeId)
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = value.boolOrNil() ?? false
         case PamConstants.scrollKeyboardPersistTaps:
@@ -4037,6 +4052,20 @@ public final class PamRenderer: @unchecked Sendable {
             view.pamMediaProgressRef = nil
             view.transform = .identity
             if state.properties[PamConstants.mediaClock] == nil { mediaBoundIds.remove(nodeId) }
+        case PamConstants.clockStartedAt,
+             PamConstants.clockEndsAt,
+             PamConstants.clockDurationMs,
+             PamConstants.clockOffsetMs,
+             PamConstants.clockRunning,
+             PamConstants.clockFormat,
+             PamConstants.progressStartedAt,
+             PamConstants.progressDurationMs,
+             PamConstants.progressOffsetMs,
+             PamConstants.progressRunning,
+             PamConstants.revealCharMs,
+             PamConstants.revealDurationMs,
+             PamConstants.revealKey:
+            syncTimeBinding(view: view, nodeId: nodeId)
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = false
         case PamConstants.scrollKeyboardPersistTaps:
@@ -4384,6 +4413,53 @@ public final class PamRenderer: @unchecked Sendable {
         } else if let field = view as? (any PamTextInputHost) {
             field.textAlignment = alignment
         }
+    }
+
+    /// Native time primitives (Android `syncTimeBinding`): `clock*` (Text),
+    /// `progress*` (any view) and `reveal*` (Text) follow PHP's values frame
+    /// by frame in `PamTimeBinding`, with no render per tick.
+    private func syncTimeBinding(view: UIView, nodeId: Int64) {
+        guard let properties = nodes[nodeId]?.properties else { return }
+        func millis(_ key: Int) -> Int64? {
+            guard let value = properties[key] else { return nil }
+            if let integer = value.integerOrNil() { return integer }
+            if let decimal = value.decimalOrNil(), decimal.isFinite { return Int64(max(-9e15, min(9e15, decimal))) }
+            return nil
+        }
+        func running(_ key: Int) -> Bool { properties[key]?.boolOrNil() ?? true }
+        let clockStart = millis(PamConstants.clockStartedAt)
+        let clockEnd = millis(PamConstants.clockEndsAt)
+        let clockDuration = millis(PamConstants.clockDurationMs)
+        let clockOffset = millis(PamConstants.clockOffsetMs)
+        var clock: PamClockSpec?
+        if view is UILabel, clockStart != nil || clockEnd != nil || clockDuration != nil || clockOffset != nil {
+            clock = PamClockSpec(
+                source: PamTimeSource(startedAt: clockStart, offsetMs: clockOffset ?? 0, running: running(PamConstants.clockRunning)),
+                durationMs: clockDuration,
+                endsAt: clockEnd,
+                format: Int(millis(PamConstants.clockFormat) ?? Int64(PamClockFormat.minutesSeconds))
+            )
+        }
+        let progressStart = millis(PamConstants.progressStartedAt)
+        let progressDuration = millis(PamConstants.progressDurationMs)
+        var progress: PamProgressSpec?
+        if progressStart != nil || progressDuration != nil {
+            progress = PamProgressSpec(
+                source: PamTimeSource(
+                    startedAt: progressStart,
+                    offsetMs: millis(PamConstants.progressOffsetMs) ?? 0,
+                    running: running(PamConstants.progressRunning)
+                ),
+                durationMs: progressDuration ?? 0
+            )
+        }
+        let revealChar = millis(PamConstants.revealCharMs) ?? 0
+        let revealDuration = millis(PamConstants.revealDurationMs) ?? 0
+        var reveal: PamRevealSpec?
+        if view is PamTextView, revealChar > 0 || revealDuration > 0 {
+            reveal = PamRevealSpec(charMs: revealChar, durationMs: revealDuration, key: properties[PamConstants.revealKey]?.textOrNil())
+        }
+        PamTimeBinding.sync(view, clock: clock, progress: progress, reveal: reveal)
     }
 
     /// Builds the `PamTextView` content from the node: the exact inputs the

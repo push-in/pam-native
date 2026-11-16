@@ -573,4 +573,18 @@ enum PropKey: int
     case NextFocusRight = 1018;
     case FocusGroup = 1019;
     case FocusRing = 1020;
+    // Native time primitives: clocks, timed progress and text reveal.
+    case ClockStartedAt = 1021;
+    case ClockEndsAt = 1022;
+    case ClockDurationMs = 1023;
+    case ClockOffsetMs = 1024;
+    case ClockRunning = 1025;
+    case ClockFormat = 1026;
+    case ProgressStartedAt = 1027;
+    case ProgressDurationMs = 1028;
+    case ProgressOffsetMs = 1029;
+    case ProgressRunning = 1030;
+    case RevealCharMs = 1031;
+    case RevealDurationMs = 1032;
+    case RevealKey = 1033;
 }

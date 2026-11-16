@@ -750,6 +750,19 @@ pub enum PropKey {
     NextFocusRight = 1018,
     FocusGroup = 1019,
     FocusRing = 1020,
+    ClockStartedAt = 1021,
+    ClockEndsAt = 1022,
+    ClockDurationMs = 1023,
+    ClockOffsetMs = 1024,
+    ClockRunning = 1025,
+    ClockFormat = 1026,
+    ProgressStartedAt = 1027,
+    ProgressDurationMs = 1028,
+    ProgressOffsetMs = 1029,
+    ProgressRunning = 1030,
+    RevealCharMs = 1031,
+    RevealDurationMs = 1032,
+    RevealKey = 1033,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1320,6 +1333,19 @@ impl TryFrom<u16> for PropKey {
             1018 => Ok(Self::NextFocusRight),
             1019 => Ok(Self::FocusGroup),
             1020 => Ok(Self::FocusRing),
+            1021 => Ok(Self::ClockStartedAt),
+            1022 => Ok(Self::ClockEndsAt),
+            1023 => Ok(Self::ClockDurationMs),
+            1024 => Ok(Self::ClockOffsetMs),
+            1025 => Ok(Self::ClockRunning),
+            1026 => Ok(Self::ClockFormat),
+            1027 => Ok(Self::ProgressStartedAt),
+            1028 => Ok(Self::ProgressDurationMs),
+            1029 => Ok(Self::ProgressOffsetMs),
+            1030 => Ok(Self::ProgressRunning),
+            1031 => Ok(Self::RevealCharMs),
+            1032 => Ok(Self::RevealDurationMs),
+            1033 => Ok(Self::RevealKey),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2265,13 +2291,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1020 {
+        for value in EXTENSION_BASE..=1033 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1021).is_err());
+        assert!(PropKey::try_from(1034).is_err());
     }
 
     #[test]

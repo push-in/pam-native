@@ -74,6 +74,11 @@ replays the attached program or keyframes without changing them.
 
 Reduced-motion settings jump to the final values.
 
+Time-driven motion that must show real progress (call timers, recording bars,
+countdowns, typewriter text) uses the native time primitives instead of a
+PHP timer or an animation program: see `clockStartedAt`, `progressStartedAt`
+and `revealCharMs` in [components](components.md#native-clocks-timed-progress-and-text-reveal).
+
 ## Presets
 
 `Pam\Native\Animation\AnimationPreset` reproduces the Zé Chat motions:
