@@ -3,6 +3,9 @@ package dev.pam.nativeapp.render
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.GLES20
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -40,7 +43,9 @@ import java.util.concurrent.TimeUnit
  * Sliced mount: a commit that builds a long ScrollView (60 rows of
  * Pressable + Image + Text) builds what the viewport shows inside the commit
  * and the rest over the next frames, with the same final views, geometry and
- * order as building everything at once, and no frame above the budget.
+ * order as building everything at once. Each slice's UI-thread work stays
+ * within the renderer's budget on any host; whole frames are held to the
+ * 60 Hz budget only where GL runs on a GPU.
  */
 @RunWith(AndroidJUnit4::class)
 class PamSlicedMountInstrumentedTest {
@@ -109,33 +114,103 @@ class PamSlicedMountInstrumentedTest {
         // Warm-up: class loading, JIT and the first-instance costs of each view kind, both paths.
         mount(sliced = false).also { warm -> onMain { warm.close() } }
         mount(sliced = true).also { warm -> onMain { warm.close() } }
-        // Best of three runs: the emulator's frame times are noisy.
-        val full = (1..RUNS).map { measureMount(sliced = false) }.minBy { it.worst }
-        val sliced = (1..RUNS).map { measureMount(sliced = true) }.minBy { it.worst }
-        Log.i(TAG, "worst UI frame: full mount ${full.worst}ms, sliced mount ${sliced.worst}ms (commit frame ${sliced.first}ms, slices ${sliced.rest}ms)")
-        // Absolute budgets hold on the reference emulator (and the Galaxy S10,
-        // measured on device). A slower or loaded host (shared CI runners)
-        // adds a fixed per-frame cost (draw, sync) that no mount strategy
-        // removes, so there only the relative guarantee below is checked.
-        val slowdown = full.worst.toDouble() / REFERENCE_FULL_MOUNT_MS
-        if (slowdown <= REFERENCE_HOST_TOLERANCE) {
-            assertTrue(
-                "the sliced commit frame ${sliced.first}ms exceeds ${COMMIT_FRAME_BUDGET_MS}ms (full mount ${full.worst}ms)",
-                sliced.first <= COMMIT_FRAME_BUDGET_MS,
-            )
-            assertTrue("a mount slice frame took ${sliced.rest}ms (full mount ${full.worst}ms)", sliced.rest <= FRAME_BUDGET_MS)
-        } else {
-            Log.i(TAG, "host ${"%.2f".format(slowdown)}x slower than the reference: relative check only")
+        // Best of three runs: the emulator's timings are noisy (noise only adds time).
+        val fullRuns = (1..RUNS).map { measureMount(sliced = false) }
+        val slicedRuns = (1..RUNS).map { measureMount(sliced = true) }
+        val fullWork = fullRuns.minOf { it.commitMs }
+        val commitWork = slicedRuns.minOf { it.commitMs }
+        val worstSlice = slicedRuns.minOf { run -> run.slices.maxOf { it.workNanos } } / NANOS_PER_MS
+        // A slice's work past its budget beyond what the budget allows: the
+        // pass building what scrolled into view and the one subtree it
+        // started before the deadline.
+        val sliceExcess = slicedRuns.minOf { run ->
+            run.slices.maxOf { it.workNanos - it.budgetNanos - it.revealNanos - it.longestSubtreeNanos }
+        } / NANOS_PER_MS
+        val fullTotal = fullRuns.minOf { it.totalMs }
+        val slicedTotal = slicedRuns.minOf { it.totalMs }
+        val renderer = glRenderer()
+        Log.i(
+            TAG,
+            "mount work: full commit ${ms(fullWork)}ms; sliced commit ${ms(commitWork)}ms, worst slice " +
+                "${ms(worstSlice)}ms (past budget + one subtree ${ms(sliceExcess)}ms); with layout/measure: " +
+                "full ${ms(fullTotal)}ms, sliced ${ms(slicedTotal)}ms (GL renderer: $renderer)",
+        )
+
+        // The mount work itself, on any host: what the framework bounds.
+        slicedRuns.forEach { run ->
+            assertTrue("the sliced commit built ${run.builtRows} rows, the viewport window holds $commitWindowRows", run.builtRows <= commitWindowRows)
+            assertTrue("the sliced commit built only ${run.builtRows} rows, the viewport shows ${visibleRows(0f).size}", run.builtRows >= visibleRows(0f).size)
+            run.slices.forEach { slice ->
+                assertTrue(
+                    "a slice started a subtree ${ms(slice.lastSubtreeStartNanos / NANOS_PER_MS)}ms in, past its " +
+                        "${ms(slice.budgetNanos / NANOS_PER_MS)}ms budget",
+                    slice.subtrees <= 1 || slice.lastSubtreeStartNanos < slice.budgetNanos,
+                )
+            }
         }
+        assertTrue(
+            "the sliced commit's work ${ms(commitWork)}ms is not under half the full mount's ${ms(fullWork)}ms",
+            commitWork * 2 <= fullWork,
+        )
+        assertTrue(
+            "a mount slice worked ${ms(sliceExcess)}ms past its budget and the subtree it finished",
+            sliceExcess <= SLICE_TOLERANCE_MS,
+        )
+        assertTrue(
+            "the sliced mount's work ${ms(slicedTotal)}ms is under the full mount's ${ms(fullTotal)}ms: views were skipped",
+            slicedTotal >= fullTotal * SLICED_TOTAL_MIN,
+        )
+
+        // Whole frames (input, animation, layout, draw, sync) and wall-clock
+        // work: with GL drawn in software (SwiftShader on CI emulators) every
+        // frame's draw costs ~20-25 ms whatever the mount did and takes the
+        // host CPU from the emulator, inflating the slices drawn between, so
+        // these only hold on a hardware renderer.
+        val full = fullRuns.minBy { it.frames.worst }.frames
+        val sliced = slicedRuns.minBy { it.frames.worst }.frames
+        Log.i(TAG, "worst UI frame: full mount ${full.worst}ms, sliced mount ${sliced.worst}ms (commit frame ${sliced.first}ms, slices ${sliced.rest}ms)")
+        if (!isHardwareRenderer(renderer)) {
+            Log.i(TAG, "software GL renderer ($renderer): whole-frame budgets skipped, mount work checked above")
+            return
+        }
+        assertTrue(
+            "the sliced commit frame ${sliced.first}ms exceeds ${COMMIT_FRAME_BUDGET_MS}ms (full mount ${full.worst}ms)",
+            sliced.first <= COMMIT_FRAME_BUDGET_MS,
+        )
+        assertTrue("a mount slice frame took ${sliced.rest}ms (full mount ${full.worst}ms)", sliced.rest <= FRAME_BUDGET_MS)
         assertTrue(
             "the sliced mount's worst frame ${sliced.worst}ms is not under half the full mount's ${full.worst}ms",
             sliced.worst * 2 <= full.worst,
+        )
+        assertTrue(
+            "a mount slice worked ${ms(worstSlice)}ms, over the ${ms(SLICE_BUDGET_MS)}ms budget + ${ms(SLICE_TOLERANCE_MS)}ms",
+            worstSlice <= SLICE_BUDGET_MS + SLICE_TOLERANCE_MS,
+        )
+        assertTrue(
+            "the sliced mount's work ${ms(slicedTotal)}ms is over ${SLICED_TOTAL_MAX}x the full mount's ${ms(fullTotal)}ms",
+            slicedTotal <= fullTotal * SLICED_TOTAL_MAX,
         )
     }
 
     /** Worst main-thread frame times (ms): the commit's frame, the frames after it, overall. */
     private class MountFrames(val first: Long, val rest: Long) {
         val worst = maxOf(first, rest)
+    }
+
+    /**
+     * One mount: its frames, the commit's UI-thread work, each slice's work,
+     * the frames' layout/measure (texts the full mount measures in its
+     * traversal, the slices ahead of it) and the rows the commit built.
+     */
+    private class MountRun(
+        val frames: MountFrames,
+        val commitMs: Double,
+        val slices: List<MountSliceStats>,
+        val layoutMs: Double,
+        val builtRows: Int,
+    ) {
+        /** The whole mount's UI-thread work. */
+        val totalMs = commitMs + slices.sumOf { it.workNanos } / NANOS_PER_MS + layoutMs
     }
 
     @Test
@@ -225,11 +300,16 @@ class PamSlicedMountInstrumentedTest {
         }
     }
 
-    /** Main-thread frame times from the mount's frame until every view is built. */
-    private fun measureMount(sliced: Boolean): MountFrames {
+    /** Frame times and mount work from the mount's frame until every view is built. */
+    private fun measureMount(sliced: Boolean): MountRun {
         val frames = Collections.synchronizedList(ArrayList<Long>())
+        val layouts = Collections.synchronizedList(ArrayList<Long>())
+        val slices = ArrayList<MountSliceStats>()
+        var commitMs = 0.0
+        var builtRows = 0
         val metricsThread = HandlerThread("pam-frame-metrics").apply { start() }
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
+            layouts += metrics.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION)
             frames += metrics.getMetric(FrameMetrics.INPUT_HANDLING_DURATION) +
                 metrics.getMetric(FrameMetrics.ANIMATION_DURATION) +
                 metrics.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION) +
@@ -239,8 +319,16 @@ class PamSlicedMountInstrumentedTest {
         val renderer = renderer(sliced)
         try {
             awaitFrames(instrumentation, 2)
-            onMain { activity.window.addOnFrameMetricsAvailableListener(listener, Handler(metricsThread.looper)) }
-            commitInFrame { renderer.commit(listOf(tree())) }
+            onMain {
+                renderer.mountSliceObserver = { slices += it }
+                activity.window.addOnFrameMetricsAvailableListener(listener, Handler(metricsThread.looper))
+            }
+            commitInFrame {
+                val started = System.nanoTime()
+                renderer.commit(listOf(tree()))
+                commitMs = (System.nanoTime() - started) / 1_000_000.0
+                builtRows = (0 until ROWS).count { renderer.viewForNode(rowId(it)) != null }
+            }
             awaitMounted(renderer)
             awaitFrames(instrumentation, 3)
             // Metrics arrive asynchronously after each frame is presented.
@@ -248,14 +336,79 @@ class PamSlicedMountInstrumentedTest {
         } finally {
             onMain {
                 activity.window.removeOnFrameMetricsAvailableListener(listener)
+                renderer.mountSliceObserver = null
                 renderer.close()
             }
             metricsThread.quitSafely()
         }
         val millis = synchronized(frames) { frames.map { it / 1_000_000L } }
         assertTrue("frame metrics were reported", millis.isNotEmpty())
-        Log.i(TAG, "sliced=$sliced frames(ms)=$millis")
-        return MountFrames(first = millis.first(), rest = millis.drop(1).maxOrNull() ?: 0L)
+        val sliceStats = onMain { slices.toList() }
+        val layoutMs = synchronized(layouts) { layouts.sum() } / 1_000_000.0
+        Log.i(
+            TAG,
+            "sliced=$sliced frames(ms)=$millis commit=${ms(commitMs)}ms rows=$builtRows " +
+                "slices(ms)=${sliceStats.map { ms(it.workNanos / NANOS_PER_MS) + "/" + it.subtrees }} layout=${ms(layoutMs)}ms",
+        )
+        if (sliced) assertTrue("the sliced mount ran its slices", sliceStats.isNotEmpty())
+        return MountRun(
+            frames = MountFrames(first = millis.first(), rest = millis.drop(1).maxOrNull() ?: 0L),
+            commitMs = commitMs,
+            slices = sliceStats.ifEmpty { listOf(MountSliceStats(0L, 0L, 0L, 0, 0L, 0L)) },
+            layoutMs = layoutMs,
+            builtRows = builtRows,
+        )
+    }
+
+    /** Rows the commit's window (viewport plus the renderer's 64 dp overscan) touches. */
+    private val commitWindowRows: Int
+        get() = (0 until ROWS).count { row ->
+            val top = row * ROW_HEIGHT
+            top < heightDp + COMMIT_OVERSCAN_DP && top + ROW_HEIGHT > -COMMIT_OVERSCAN_DP
+        }
+
+    private fun ms(value: Double) = "%.1f".format(value)
+
+    /** GL_RENDERER of a throwaway EGL context: names the software rasterizers (SwiftShader, llvmpipe). */
+    private fun glRenderer(): String? = runCatching {
+        val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+        val version = IntArray(2)
+        check(EGL14.eglInitialize(display, version, 0, version, 1))
+        val configs = arrayOfNulls<EGLConfig>(1)
+        val count = IntArray(1)
+        check(
+            EGL14.eglChooseConfig(
+                display,
+                intArrayOf(
+                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                    EGL14.EGL_NONE,
+                ),
+                0, configs, 0, 1, count, 0,
+            ) && count[0] > 0,
+        )
+        val config = configs[0]
+        val context = EGL14.eglCreateContext(
+            display, config, EGL14.EGL_NO_CONTEXT,
+            intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0,
+        )
+        check(context != EGL14.EGL_NO_CONTEXT)
+        val surface = EGL14.eglCreatePbufferSurface(display, config, intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE), 0)
+        try {
+            check(surface != EGL14.EGL_NO_SURFACE && EGL14.eglMakeCurrent(display, surface, surface, context))
+            GLES20.glGetString(GLES20.GL_RENDERER)
+        } finally {
+            // The display stays initialized: the process's renderer shares it.
+            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+            if (surface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, surface)
+            EGL14.eglDestroyContext(display, context)
+        }
+    }.onFailure { Log.w(TAG, "GL renderer probe failed", it) }.getOrNull()
+
+    /** Unknown counts as software: the whole-frame budgets are only meaningful on a GPU. */
+    private fun isHardwareRenderer(renderer: String?): Boolean {
+        val name = renderer?.lowercase() ?: return false
+        return SOFTWARE_RENDERERS.none { it in name }
     }
 
     private fun mount(sliced: Boolean): PamRenderer {
@@ -410,6 +563,31 @@ class PamSlicedMountInstrumentedTest {
 
         const val RUNS = 3
 
+        /** The renderer's per-slice budget (SLICED_MOUNT_SLICE_NANOS). */
+        const val SLICE_BUDGET_MS = 6.0
+
+        /**
+         * A slice checks its deadline between subtrees: past its budget it
+         * only finishes the row it started (~1 ms here) and its bookkeeping.
+         */
+        const val SLICE_TOLERANCE_MS = 4.0
+
+        const val NANOS_PER_MS = 1_000_000.0
+
+        /** The renderer's commit overscan (SLICED_MOUNT_MIN_OVERSCAN_DP). */
+        const val COMMIT_OVERSCAN_DP = 64f
+
+        /**
+         * The sliced mount's work (layout/measure included) against the full
+         * mount's: the same views, none skipped or built twice (each slice
+         * adds a layout pass).
+         */
+        const val SLICED_TOTAL_MIN = 0.67
+        const val SLICED_TOTAL_MAX = 1.5
+
+        /** GL_RENDERER names of software rasterizers. */
+        val SOFTWARE_RENDERERS = listOf("swiftshader", "llvmpipe", "softpipe", "software")
+
         /**
          * Main-thread frame (input, animation, layout, draw, sync) of each
          * mount slice: one 60 Hz frame.
@@ -424,11 +602,5 @@ class PamSlicedMountInstrumentedTest {
          * ~42 ms), so this is about one 60 Hz frame there.
          */
         const val COMMIT_FRAME_BUDGET_MS = 24L
-
-        /** Worst frame of the full mount on the reference emulator (debug build). */
-        const val REFERENCE_FULL_MOUNT_MS = 56.0
-
-        /** A host this much slower than the reference only gets the relative check. */
-        const val REFERENCE_HOST_TOLERANCE = 1.2
     }
 }

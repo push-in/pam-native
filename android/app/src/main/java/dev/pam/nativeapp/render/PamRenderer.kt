@@ -224,6 +224,20 @@ private val SLICED_MOUNT_BLOCKING_KEYS: java.util.EnumSet<PropKey> =
         )
     }
 
+/**
+ * One mount slice, for tests: its UI-thread work, its budget, the pass that
+ * built what scrolled into view (at any cost), the queued subtrees it built,
+ * when it started the last one and the longest one (times from its start).
+ */
+internal class MountSliceStats(
+    val workNanos: Long,
+    val budgetNanos: Long,
+    val revealNanos: Long,
+    val subtrees: Int,
+    val lastSubtreeStartNanos: Long,
+    val longestSubtreeNanos: Long,
+)
+
 private val MOUNT_CREATE_SECTIONS = NodeKind.entries.map { "PamMount.create." + it.name }.toTypedArray()
 private val MOUNT_ATTACH_SECTIONS = NodeKind.entries.map { "PamMount.attach." + it.name }.toTypedArray()
 private val MOUNT_PROPS_SECTIONS = NodeKind.entries.map { "PamMount.props." + it.name }.toTypedArray()
@@ -1898,6 +1912,9 @@ class PamRenderer(
     /** Nodes whose views wait for a mount slice (tests and diagnostics). */
     internal fun pendingMountCount(): Int = pendingMounts.size
 
+    /** Test hook: each mount slice's work, reported after it (nothing is measured for it otherwise). */
+    internal var mountSliceObserver: ((MountSliceStats) -> Unit)? = null
+
     private fun countCreates(batches: List<List<Mutation>>): Int {
         var count = 0
         for (batch in batches) {
@@ -2205,20 +2222,41 @@ class PamRenderer(
             uninstallMountPreDraw()
             return
         }
+        val started = System.nanoTime()
+        // A commit that already ran in this frame used part of its budget.
+        val spent = if (lastCommitEndNanos >= frameTimeNanos) lastCommitEndNanos - lastCommitStartNanos else 0L
+        val deadline = started + (SLICED_MOUNT_SLICE_NANOS - spent).coerceAtLeast(0L)
+        var revealed = 0L
+        var built = 0
+        var lastStarted = 0L
+        var longest = 0L
         pamTraceSection("PamMount.slice") {
-            val started = System.nanoTime()
-            // A commit that already ran in this frame used part of its budget.
-            val spent = if (lastCommitEndNanos >= frameTimeNanos) lastCommitEndNanos - lastCommitStartNanos else 0L
             hostRevealedPendingMounts(ahead = true)
-            val deadline = started + (SLICED_MOUNT_SLICE_NANOS - spent).coerceAtLeast(0L)
-            var built = 0
-            while (pendingMountRoots.isNotEmpty() && (built == 0 || System.nanoTime() < deadline)) {
+            var now = System.nanoTime()
+            revealed = now - started
+            while (pendingMountRoots.isNotEmpty() && (built == 0 || now < deadline)) {
                 val root = pendingMountRoots.removeFirst()
                 if (root !in pendingMounts) continue
+                lastStarted = now
                 hostPendingSubtree(root)
                 built++
+                val finished = System.nanoTime()
+                if (finished - now > longest) longest = finished - now
+                now = finished
             }
             if (built > 0) afterMountSlice()
+        }
+        mountSliceObserver?.let { observer ->
+            observer(
+                MountSliceStats(
+                    workNanos = System.nanoTime() - started,
+                    budgetNanos = deadline - started,
+                    revealNanos = revealed,
+                    subtrees = built,
+                    lastSubtreeStartNanos = if (built > 0) lastStarted - started else 0L,
+                    longestSubtreeNanos = longest,
+                ),
+            )
         }
         scheduleMountSlice()
     }
