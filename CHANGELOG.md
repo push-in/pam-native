@@ -16,6 +16,8 @@ display-list recording 7.9 → 0.5 ms, no missed deadline). No API change.
   them; detached list cells still release at once.
 - Android: `PamMount.remove.<KIND>` / `PamMount.move.<KIND>` trace sections
   name the node kind while tracing.
+- Android: an image that failed loads again when shown again even if it is
+  shown right as its failure is reported (a failed shared load was reused).
 - `Navigator::preload()` of a route already mounted in the stack no longer
   builds a second, unused instance.
 
