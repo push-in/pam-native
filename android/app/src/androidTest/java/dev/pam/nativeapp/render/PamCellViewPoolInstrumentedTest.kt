@@ -11,6 +11,7 @@ import android.view.Choreographer
 import android.view.FrameMetrics
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.Window
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -219,6 +220,38 @@ class PamCellViewPoolInstrumentedTest {
             var done = true
             forEachMountedText { i, view -> if (i % 3 == 1 && onScreen(view) && view.revealEnd != -1) done = false }
             done
+        }
+    }
+
+    @Test fun aListsFirstFrameBindsOnlyTheRowsInItsViewport() {
+        var firstFrame: List<View>? = null
+        var listHeight = 0
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            val list = renderer.viewForNode(2) as? PamRecyclerList
+            if (firstFrame == null && list != null && list.childCount > 0) {
+                firstFrame = (0 until list.childCount).map(list::getChildAt)
+                listHeight = list.height
+            }
+            true
+        }
+        main { activity.host.viewTreeObserver.addOnPreDrawListener(listener) }
+        try {
+            mount(ROWS, 64f) { i, y, out -> row(i, y, out, mapOf(PropKey.TEXT to PropValue.Text("Message $i"))) }
+        } finally {
+            main { activity.host.viewTreeObserver.removeOnPreDrawListener(listener) }
+        }
+        val rows = requireNotNull(firstFrame) { "the list drew" }
+        assertTrue("the viewport is filled", rows.any { it.bottom >= listHeight })
+        assertEquals(
+            "rows bound past the viewport in the list's first frame",
+            emptyList<Int>(),
+            rows.filter { it.top >= listHeight }.map { it.top },
+        )
+        // The rows ahead follow from the next frames, mounted.
+        await("the row past the viewport is bound and mounted") {
+            (0 until list.childCount).map(list::getChildAt).any { row ->
+                row.top >= list.height && (row as android.view.ViewGroup).childCount > 0
+            }
         }
     }
 
