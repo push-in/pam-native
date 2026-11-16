@@ -93,9 +93,13 @@ class PamGestureLocalSpaceInstrumentedTest {
     /**
      * Story editor layer: the detector itself is rotated 30° and committed at
      * 2x inside a canvas drawn at 0.69, and its native transform moves its
-     * child. The detector-space translation is mapped only between the
-     * detector and the child's parent (nothing here), never through the
-     * detector and canvas again, so the child moves exactly with the finger.
+     * child. The screen delta is mapped once into the child's parent (the
+     * detector), so the child moves exactly with the finger, while PHP still
+     * gets the detector-space translation.
+     *
+     * The 2x goes through [PamPressable.configure] (`targetScaleX`), as the
+     * renderer sets a Pressable's `scaleX`: a touch-down restores the
+     * Pressable's own scale to it, so a raw `View.scaleX` would drop to 1.
      */
     @Test
     fun nativePanUnderARotatedScaledDetectorMovesWithTheFinger() {
@@ -120,6 +124,21 @@ class PamGestureLocalSpaceInstrumentedTest {
                     ),
                     callback = { payloads += it },
                     nativeTransform = true,
+                )
+                configure(
+                    pressOpacity = 1f,
+                    pressScale = 1f,
+                    targetOpacity = 1f,
+                    targetScaleX = 2f,
+                    targetScaleY = 2f,
+                    delayLongPressMs = 500L,
+                    delayPressInMs = 0L,
+                    delayPressOutMs = 0L,
+                    retentionLeft = 0f,
+                    retentionTop = 0f,
+                    retentionRight = 0f,
+                    retentionBottom = 0f,
+                    androidDisableSound = true,
                 )
                 rotation = 30f
                 scaleX = 2f
@@ -156,6 +175,7 @@ class PamGestureLocalSpaceInstrumentedTest {
             send(MotionEvent.ACTION_MOVE, 302f, 383.6f, 32L)
             send(MotionEvent.ACTION_UP, 302f, 383.6f, 40L)
             end = pointInRoot(target, root)
+            assertEquals("The detector keeps its committed 2x", 2f, (target.parent as View).scaleX, 0f)
         }
         assertEquals("The child moves with the finger (x)", 40f, end[0] - start[0], 0.05f)
         assertEquals("The child moves with the finger (y)", 25f, end[1] - start[1], 0.05f)

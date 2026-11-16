@@ -336,19 +336,20 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             }
         }
         when (payload.type) {
-            // The translation is in this detector's space (its own and its
-            // ancestors' scale and rotation are already undone, as iOS hands
-            // the window-space one to parentSpaceVector): only the views
-            // between this detector and the target's parent remain to map.
+            // The finger moves in screen pixels and the target translates in
+            // its parent's space, which the detector's and every ancestor's
+            // scale or rotation transforms: the screen delta is mapped once,
+            // as iOS maps `translation(in: nil)`. (`payload.translationX/Y` are
+            // already in the detector's space, for PHP and drags.)
             2, 5 -> if (focalZoomTargets[translationTarget] == true) {
                 // A focal pinch owns the translation of this surface: follow it
                 // and resume panning from wherever the pinch leaves the content.
-                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.translationX, payload.translationY)
+                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.screenTranslationX, payload.screenTranslationY)
                 nativeBaseTranslationX = translationTarget.translationX - deltaX
                 nativeBaseTranslationY = translationTarget.translationY - deltaY
                 nativeGestureTransformActive = false
             } else {
-                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.translationX, payload.translationY)
+                val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.screenTranslationX, payload.screenTranslationY)
                 val translatedX = nativeBaseTranslationX + deltaX
                 translationTarget.translationX = if (nativeTranslationLimitX > 0f) {
                     translatedX.coerceIn(-nativeTranslationLimitX, nativeTranslationLimitX)
@@ -499,14 +500,13 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     /**
-     * A vector in this detector's space (the gesture translation) expressed
-     * in [target]'s parent coordinates: the inverse of the transforms between
-     * them (a nested detector the target belongs to). The target's parent is
-     * usually this view, and the vector is returned unchanged.
+     * A screen-space vector expressed in [target]'s parent coordinates: the
+     * inverse of every ancestor transform (scale, rotation) above it. With no
+     * transformed ancestor it is returned unchanged.
      */
     private fun parentSpaceVector(target: View, x: Float, y: Float): Pair<Float, Float> {
         val vector = floatArrayOf(x, y)
-        return if (mapToParentSpace(target, vector, from = this)) vector[0] to vector[1] else x to y
+        return if (mapToParentSpace(target, vector)) vector[0] to vector[1] else x to y
     }
 
     /** The child's untranslated pivot in this view's coordinates. */
@@ -1242,17 +1242,16 @@ internal fun focalZoomTranslation(
 ): Float = (focal - pivot) - (focalStart - pivot - baseTranslation) * ratio
 
 /**
- * Maps a [vector] (in place) from the space of [from], an ancestor of
- * [target] (the screen when null), into the coordinate space of [target]'s
- * parent by inverting the transforms of the views in between, from the
- * parent up to [from] (excluded). Returns false (vector untouched) when none
+ * Maps a screen-space [vector] (in place) into the coordinate space of
+ * [target]'s parent by inverting the transforms of every ancestor, from the
+ * parent up to the root. Returns false (vector untouched) when no ancestor
  * is transformed or the combined transform is not invertible.
  */
-internal fun mapToParentSpace(target: View, vector: FloatArray, from: View? = null): Boolean {
+internal fun mapToParentSpace(target: View, vector: FloatArray): Boolean {
     val combined = android.graphics.Matrix()
     var ancestor = target.parent as? View
     var transformed = false
-    while (ancestor != null && ancestor !== from) {
+    while (ancestor != null) {
         val matrix = ancestor.matrix
         if (!matrix.isIdentity) {
             combined.postConcat(matrix)

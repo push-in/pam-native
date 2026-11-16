@@ -44,6 +44,13 @@ internal data class PamGesturePayload(
     /** Centroid of the first two pointers (the pinch focus), in this view's coordinates. */
     val focalX: Float = x,
     val focalY: Float = y,
+    /**
+     * The finger's screen displacement (rawX/rawY delta). [translationX] is
+     * the detector's space (PHP, drags); a native transform maps this one
+     * once into its target's parent, as iOS maps `translation(in: nil)`.
+     */
+    val screenTranslationX: Float = translationX,
+    val screenTranslationY: Float = translationY,
 )
 
 internal class PamGestureRecognizer(private val view: View) {
@@ -342,6 +349,8 @@ internal class PamGestureRecognizer(private val view: View) {
             timestamp = event?.eventTime ?: SystemClock.uptimeMillis(),
             focalX = if (event != null && event.pointerCount >= 2) (event.getX(0) + event.getX(1)) / 2f else x,
             focalY = if (event != null && event.pointerCount >= 2) (event.getY(0) + event.getY(1)) / 2f else y,
+            screenTranslationX = pageX - startPageX,
+            screenTranslationY = pageY - startPageY,
         )
     }
 

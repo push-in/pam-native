@@ -23,9 +23,10 @@
   `parentSpaceVector` then mapped through the same transforms a second time
   (a story layer inside a 0.69 canvas moved about 1.45x the finger, a rotated
   one off its axis); it now gets `translation(in: nil)`. PHP's
-  `translationX/Y` stay in the detector's space. Android maps its (already
-  local) translation only between the detector and the target's parent, now
-  also for the pan a focal pinch owns.
+  `translationX/Y` stay in the detector's space. Android's native transform
+  likewise maps the screen delta (not the payload's detector-space
+  translation) once into the target's parent, now also for the pan a focal
+  pinch owns.
 - iOS: `PushEventHandler` gains `didLaunch(response:)` and
   `didLaunch(remoteNotification:)`, with empty default implementations. The
   host forwards UIScene `connectionOptions.notificationResponse` (the
