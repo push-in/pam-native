@@ -80,10 +80,40 @@ $assert(
         && ($focusTemplate[1016] ?? null) === 'grid' && ($focusTemplate[PropKey::AutoFocus->value] ?? null) === true,
     'Templates map focusable, focusGroup, focusRing, captureKeys, nextFocus* and autoFocus on any view.',
 );
+$assert(
+    PropKey::PressNavigationIntent->value === 1035 && PropKey::NavigationWarmIntent->value === 1036
+        && PropKey::NavigationWarmTransition->value === 1037 && PropKey::NavigationWarmDurationMs->value === 1038,
+    'Press prewarm and the native launch of a warm route use 1035-1038.',
+);
+$blocking = ExtensionView::make()->blocksNavigationGesture()->properties();
+$blockingTemplate = \Pam\Native\Internal\TemplateRenderer::render(
+    \Pam\Native\Internal\TemplateCompiler::compile(
+        '<View blocksNavigationGesture="true" />',
+        'BlocksNavigationGesture.pam',
+        \Pam\Native\LanguageVersion::Language2,
+    ),
+    null,
+    [],
+)->properties();
+$assert(
+    PropKey::BlocksNavigationGesture->value === 1021 && ($blocking[1021] ?? null) === true
+        && (ExtensionView::make()->blocksNavigationGesture(false)->properties()[1021] ?? null) === false
+        && ($blockingTemplate[1021] ?? null) === true,
+    'blocksNavigationGesture (1021) is set from PHP and templates on any view.',
+);
+try {
+    RendererContract::use(RendererContract::fromJson('{"abi":1,"events":[80,1001],"properties":[543,1020],"protocol":[1,1]}'));
+    $throws(
+        static fn () => (new TreeEncoder())->encode(ExtensionView::make()->blocksNavigationGesture()),
+        'BlocksNavigationGesture (1021)',
+    );
+} finally {
+    RendererContract::use(null);
+}
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::FocusRing->value
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::NavigationWarmDurationMs->value
         && $local->eventCeiling === max(array_filter(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()), static fn (int $v): bool => $v < 1001))
         && $local->extensionEventCeiling === EventKind::KeyDown->value,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',

@@ -103,7 +103,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
      * under the current screen until a push/navigate with the same route and
      * params turns it into the top of the stack without building it again.
      *
-     * @var array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}|null
+     * `intent` is the navigation intent a press declared for it
+     * (Pressable::prewarm()); without one it is intentKey() of the entry.
+     *
+     * @var array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>, intent?: string}|null
      */
     private ?array $warm = null;
     private int $warmGeneration = 0;
@@ -507,6 +510,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $motionOptions = $this->operation === NavigationOperation::Pop && $this->outgoing !== null
             ? $this->resolvedOptions($this->outgoing)
             : $activeOptions;
+        [$warmIntent, $warmTransition, $warmDurationMs] = $this->warmLaunch($warm, $activeOptions);
         return NavigationHost::make(
             $this->operation,
             $this->actionTransition ?? (
@@ -529,6 +533,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         )
         ->screenBehavior($activeOptions->orientation, $activeOptions->autoHideHomeIndicator)
         ->screenOptions($activeOptions)
+        ->warmRoute($warmIntent, $warmTransition, $warmDurationMs)
         // The host's transition and gesture callbacks re-render this navigator
         // only (and what its listeners changed, found by the render's change
         // detection): as plain closures they invalidated the whole tree, and
@@ -657,16 +662,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if (!$this->routeAvailable($route, $validatedParams)) return;
         $routeId = $this->resolveRouteId($route, $validatedParams);
         $previous = $this->currentEntry();
-        $target = null;
-        for ($index = count($this->stack) - 1; $index >= 0; $index--) {
-            if (
-                $this->stack[$index]['name'] === $route
-                && ($routeId === null || $this->stack[$index]['routeId'] === $routeId)
-            ) {
-                $target = $index;
-                break;
-            }
-        }
+        $target = $this->navigateTarget($route, $routeId);
         if ($target === null) {
             $this->push($route, $params, $transition, $durationMs);
             return;
@@ -814,6 +810,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 'params' => $validatedParams,
             ];
             $this->pruneRouteInstances();
+            // Only this navigator renders again (the hidden screen mounts),
+            // also when called from a #[PureHandler] or a timer.
+            DependencyTracker::markDirty($this);
         }
         if ($releaseAfterMs !== null) {
             \Pam\Native\System\Timers::after(max(0, $releaseAfterMs), function () use ($generation): void {
@@ -844,6 +843,74 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->warm = null;
         $this->warmGeneration++;
         $this->pruneRouteInstances();
+        DependencyTracker::markDirty($this);
+    }
+
+    /**
+     * The key a press declares for a destination (PropKey::PressNavigationIntent)
+     * and the host for its warm screen (PropKey::NavigationWarmIntent): equal
+     * keys let the native host start the push of the warm screen on the
+     * frame after the tap, before PHP handles the press.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public static function intentKey(string|BackedEnum $route, array $params = []): string
+    {
+        ksort($params);
+
+        return hash('xxh3', RouteName::value($route)."\0".serialize($params));
+    }
+
+    /**
+     * @internal Press-in prewarm (Pressable::prewarm()): mounts the route
+     * hidden and tags it with the press's intent. Returns the warm token
+     * when this call mounted the screen, which releasePressPrewarm() takes
+     * back if no navigation used it; null when nothing was mounted for this
+     * press (unknown or unavailable route, the current screen, a kept-alive
+     * screen reused as is, a navigate() that would go back to an entry
+     * already in the stack, or a screen that was already warm: an idle
+     * warmup keeps its own lifetime and only learns the press's intent).
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function pressPrewarm(
+        string|BackedEnum $route,
+        array $params,
+        string $intent,
+        bool $navigate = true,
+        ?int $releaseAfterMs = self::WARM_TTL_MS,
+    ): ?int {
+        $route = RouteName::value($route);
+        if (!isset($this->routes[$route])) return null;
+        $validatedParams = self::validatedParams($params);
+        if ($navigate && $this->navigateTarget($route, $this->resolveRouteId($route, $validatedParams)) !== null) {
+            return null;
+        }
+        if ($this->warm !== null && $this->isPrewarmed($route, $validatedParams)) {
+            if (($this->warm['intent'] ?? null) !== $intent) {
+                $this->warm['intent'] = $intent;
+                DependencyTracker::markDirty($this);
+            }
+
+            return null;
+        }
+        if (!$this->prewarm($route, $validatedParams, $releaseAfterMs) || $this->warm === null) return null;
+        $this->warm['intent'] = $intent;
+
+        return $this->warmGeneration;
+    }
+
+    /**
+     * @internal Releases the screen a press mounted (pressPrewarm()) when the
+     * press ended without using it: no navigation took it and nothing renewed
+     * it since.
+     */
+    public function releasePressPrewarm(int $token): bool
+    {
+        if ($this->warm === null || $this->warmGeneration !== $token) return false;
+        $this->cancelPrewarm();
+
+        return true;
     }
 
     /**
@@ -1329,8 +1396,63 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->warm = null;
         $this->warmGeneration++;
         if ($this->parkKey($entry['name'], $entry['params']) !== $this->parkKey($route, $params)) return null;
+        unset($entry['intent']);
 
         return $entry;
+    }
+
+    /**
+     * The intent and the motion of the push that would show the warm screen,
+     * for the native host to start it on a press: the transition and
+     * duration render() gives a push without an action override. Only a plain
+     * card push the host can run alone qualifies (no modal or sheet
+     * presentation, no native header, no orientation change, not secure);
+     * otherwise the intent is empty and the push waits for its commit.
+     *
+     * @param array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>, intent?: string}|null $warm
+     * @return array{0: string, 1: NavigationTransition, 2: int}
+     */
+    private function warmLaunch(?array $warm, ScreenOptions $activeOptions): array
+    {
+        if ($warm === null) {
+            return ['', $this->transition, 0];
+        }
+        $options = $this->resolvedOptions($warm);
+        $transition = $options->animation === NavigationTransition::PlatformDefault
+            ? $this->transition
+            : $options->animation;
+        if (
+            $options->presentation !== NavigationPresentation::Card
+            || $activeOptions->presentation !== NavigationPresentation::Card
+            || $options->headerShown
+            || $activeOptions->headerShown
+            || $options->secure
+            || $options->orientation !== $activeOptions->orientation
+            || $transition === NavigationTransition::None
+        ) {
+            return ['', $transition, 0];
+        }
+
+        return [
+            $warm['intent'] ?? self::intentKey($warm['name'], $warm['params']),
+            $transition,
+            $options->animationDurationMs ?? $this->transitionDurationMs,
+        ];
+    }
+
+    /** Index of the stack entry navigate() would go back to, or null when it pushes. */
+    private function navigateTarget(string $route, ?string $routeId): ?int
+    {
+        for ($index = count($this->stack) - 1; $index >= 0; $index--) {
+            if (
+                $this->stack[$index]['name'] === $route
+                && ($routeId === null || $this->stack[$index]['routeId'] === $routeId)
+            ) {
+                return $index;
+            }
+        }
+
+        return null;
     }
 
     private function decorateRoute(array $entry): Renderable

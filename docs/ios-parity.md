@@ -282,6 +282,15 @@ Mac validation:
 - `mediaClock`/`mediaProgress`: the label keeps its font/color while the time
   changes (attributes preserved), the bar fills from the leading edge (also in
   RTL), and nothing updates while paused or covered.
+- `clock*`/`progress*`/`reveal*` (native time primitives): a call timer label
+  ticks once per second with no PHP render and keeps its font; covering the
+  route (push, tab switch) or backgrounding the app stops its timer/display
+  link (Instruments → Time Profiler shows no `PamTimeBinding.tick`), and it
+  shows the right time at once when seen again. A `progressStartedAt` bar
+  fills from the leading edge (also RTL) and holds when `progressRunning`
+  turns false; with Reduce Motion it steps once per second. A `revealCharMs`
+  text types character by character without reflowing; VoiceOver reads the
+  whole text and the current clock value.
 - `#[PureHandler]` is PHP-only: no Swift change.
 
 ## Keyboard visibility events (1.38.0)

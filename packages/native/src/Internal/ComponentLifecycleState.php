@@ -43,4 +43,10 @@ final class ComponentLifecycleState
 
     /** ComponentLifecycle::$lazyJoins when $retained was collected. */
     public int $retainedJoins = 0;
+
+    /**
+     * True while the component re-renders some of its children without
+     * rendering itself (GranularRender): they are already listed.
+     */
+    public bool $patching = false;
 }

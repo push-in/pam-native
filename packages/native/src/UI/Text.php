@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use InvalidArgumentException;
+use Pam\Native\ClockFormat;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\Internal\BinaryValue;
@@ -61,6 +62,124 @@ final class Text extends Element
         return $this
             ->withProperty(PropKey::MediaClock, \Pam\Native\Animation\Drag::ref($ref))
             ->withProperty(PropKey::MediaClockFormat, $format->value);
+    }
+
+    /**
+     * A clock counting up from [startedAt] (epoch ms), drawn natively: the
+     * renderer updates the text once per second while it is on screen, with
+     * no PHP render, and does nothing while it is hidden, covered or in the
+     * background. [offsetMs] is time already counted before [startedAt] (a
+     * resumed stopwatch); with [running] false, or no [startedAt], the clock
+     * stands at [offsetMs]. PHP stays the source of truth: change any value
+     * and the clock follows. The text's own content is the placeholder the
+     * layout measures; give it a stable width (tabular digits).
+     */
+    public function clock(
+        ?int $startedAt,
+        ClockFormat $format = ClockFormat::MinutesSeconds,
+        int $offsetMs = 0,
+        bool $running = true,
+    ): self {
+        return $this
+            ->withoutProperty(PropKey::ClockEndsAt)
+            ->withoutProperty(PropKey::ClockDurationMs)
+            ->withClockSource($startedAt, $offsetMs, $running, $format);
+    }
+
+    /**
+     * A countdown of [durationMs] counted from [startedAt] (epoch ms), drawn
+     * natively like {@see clock()}: it shows the time left (rounded up) and
+     * stops at zero. [offsetMs] and [running] pause it the same way; with no
+     * [startedAt] it stands at the full duration.
+     */
+    public function countdown(
+        int $durationMs,
+        ?int $startedAt,
+        ClockFormat $format = ClockFormat::Seconds,
+        int $offsetMs = 0,
+        bool $running = true,
+    ): self {
+        return $this
+            ->withoutProperty(PropKey::ClockEndsAt)
+            ->withProperty(PropKey::ClockDurationMs, self::nonNegative($durationMs, 'durationMs'))
+            ->withClockSource($startedAt, $offsetMs, $running, $format);
+    }
+
+    /** A native countdown to the instant [endsAt] (epoch ms), stopping at zero. */
+    public function countdownTo(int $endsAt, ClockFormat $format = ClockFormat::Seconds): self
+    {
+        return $this
+            ->withoutProperty(PropKey::ClockStartedAt)
+            ->withoutProperty(PropKey::ClockDurationMs)
+            ->withoutProperty(PropKey::ClockOffsetMs)
+            ->withoutProperty(PropKey::ClockRunning)
+            ->withProperty(PropKey::ClockEndsAt, self::nonNegative($endsAt, 'endsAt'))
+            ->withProperty(PropKey::ClockFormat, $format->value);
+    }
+
+    /**
+     * Typewriter: the renderer reveals the text one character (grapheme)
+     * every [msPerChar], keeping the full text's layout (hidden characters
+     * hold their place). Changing [key] starts it over; changing the text
+     * does not. Runs only while on screen; with reduced motion the whole
+     * text shows at once. Screen readers always read the whole text.
+     */
+    public function reveal(int $msPerChar = 50, string|int|null $key = null): self
+    {
+        if ($msPerChar < 1) {
+            throw new InvalidArgumentException('msPerChar must be at least 1.');
+        }
+
+        return $this
+            ->withoutProperty(PropKey::RevealDurationMs)
+            ->withProperty(PropKey::RevealCharMs, $msPerChar)
+            ->withRevealKey($key);
+    }
+
+    /** Like {@see reveal()}, spreading the whole text over [durationMs]. */
+    public function revealOver(int $durationMs, string|int|null $key = null): self
+    {
+        if ($durationMs < 1) {
+            throw new InvalidArgumentException('durationMs must be at least 1.');
+        }
+
+        return $this
+            ->withoutProperty(PropKey::RevealCharMs)
+            ->withProperty(PropKey::RevealDurationMs, $durationMs)
+            ->withRevealKey($key);
+    }
+
+    private function withClockSource(?int $startedAt, int $offsetMs, bool $running, ClockFormat $format): self
+    {
+        $element = $startedAt === null
+            ? $this->withoutProperty(PropKey::ClockStartedAt)
+            : $this->withProperty(PropKey::ClockStartedAt, self::nonNegative($startedAt, 'startedAt'));
+        // The offset is always sent: it is also what turns a clock with no
+        // start yet (standing at zero) on.
+        $element = $element->withProperty(PropKey::ClockOffsetMs, self::nonNegative($offsetMs, 'offsetMs'));
+        $element = $running && $startedAt !== null
+            ? $element->withoutProperty(PropKey::ClockRunning)
+            : $element->withProperty(PropKey::ClockRunning, $running && $startedAt !== null);
+
+        return $element->withProperty(PropKey::ClockFormat, $format->value);
+    }
+
+    private function withRevealKey(string|int|null $key): self
+    {
+        $key = \Pam\Native\Internal\NativeTime::key($key);
+
+        return $key === null
+            ? $this->withoutProperty(PropKey::RevealKey)
+            : $this->withProperty(PropKey::RevealKey, $key);
+    }
+
+    private static function nonNegative(int $value, string $label): int
+    {
+        if ($value < 0) {
+            throw new InvalidArgumentException("{$label} cannot be negative.");
+        }
+
+        return $value;
     }
 
     /**

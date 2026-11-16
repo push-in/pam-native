@@ -365,6 +365,18 @@ abstract class Element implements Renderable
     }
 
     /**
+     * While the finger is on this element, the navigator's back gesture (the
+     * edge or full-screen swipe back, a vertical dismiss) does not start,
+     * not even from the screen edge: a map, a signature pad or a native view
+     * that pans on its own. Scrollers that can still scroll, pagers, sliders
+     * and pan gestures under the finger keep their drags without it.
+     */
+    final public function blocksNavigationGesture(bool $blocks = true): static
+    {
+        return $this->withProperty(PropKey::BlocksNavigationGesture, $blocks);
+    }
+
+    /**
      * Preserves the visual identity of this element across a native route
      * transition. Matching tags are measured and animated entirely by UIKit or
      * Android's UI thread; PHP is never involved per frame.
@@ -567,6 +579,36 @@ abstract class Element implements Renderable
     final public function mediaProgress(string $ref): static
     {
         return $this->withProperty(PropKey::MediaProgress, \Pam\Native\Animation\Drag::ref($ref));
+    }
+
+    /**
+     * A fill driven by time, natively: the view scales from its leading edge
+     * to `elapsed / durationMs`, where elapsed is [offsetMs] plus, while
+     * [running], the time since [startedAt] (epoch ms). The renderer moves it
+     * every frame while on screen (in 1 s steps with reduced motion, never
+     * jumping to full) and stops while hidden or once full; PHP only starts,
+     * pauses (running false, offset = time so far) or changes it. It owns
+     * the view's horizontal scale, like {@see mediaProgress()}.
+     */
+    final public function timeProgress(
+        ?int $startedAt,
+        int $durationMs,
+        int $offsetMs = 0,
+        bool $running = true,
+    ): static {
+        if ($durationMs < 0 || $offsetMs < 0 || ($startedAt !== null && $startedAt < 0)) {
+            throw new InvalidArgumentException('timeProgress() times cannot be negative.');
+        }
+        $element = $startedAt === null
+            ? $this->withoutProperty(PropKey::ProgressStartedAt)
+            : $this->withProperty(PropKey::ProgressStartedAt, $startedAt);
+        $element = $element
+            ->withProperty(PropKey::ProgressDurationMs, $durationMs)
+            ->withProperty(PropKey::ProgressOffsetMs, $offsetMs);
+
+        return $running && $startedAt !== null
+            ? $element->withoutProperty(PropKey::ProgressRunning)
+            : $element->withProperty(PropKey::ProgressRunning, false);
     }
 
     final public function toElement(): Element
@@ -810,6 +852,26 @@ abstract class Element implements Renderable
         }
         $copies[$slot] = $copy;
         self::$slottedCopies[$this] = $copies;
+
+        return $copy;
+    }
+
+    /**
+     * @internal Copy of this tree with the descendant at $path (child
+     * indexes from this element) replaced: only the elements on the path are
+     * copied, every other subtree keeps its identity (and encoder cache).
+     *
+     * @param list<int> $path
+     */
+    final public function __pamReplacePath(array $path, Element $replacement, int $depth = 0): Element
+    {
+        if (!isset($path[$depth])) {
+            return $replacement;
+        }
+        $index = $path[$depth];
+        $child = $this->children[$index] ?? throw new InvalidArgumentException('Element path does not exist.');
+        $copy = clone $this;
+        $copy->children[$index] = $child->__pamReplacePath($path, $replacement, $depth + 1);
 
         return $copy;
     }

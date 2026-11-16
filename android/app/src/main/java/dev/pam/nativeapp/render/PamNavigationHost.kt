@@ -52,6 +52,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var sheetInitialDetentIndex: Int = 1
     var sheetCornerRadius: Float = 0f
     var onActiveRouteChanged: (() -> Unit)? = null
+    /**
+     * The route mounted ahead by `Navigator::prewarm()` (always the first
+     * child) and the motion of its push, advertised by the navigator for a
+     * plain card push: a press declaring the same intent starts that push
+     * here, on the frame after the tap ([launchWarm]).
+     */
+    var warmIntent: String? = null
+    var warmTransition: Int = TRANSITION_PLATFORM_DEFAULT
+    var warmDurationMs: Long = 0L
     private var revision: Long = 0L
     private var activeRoute: View? = null
     private var movingRoute: View? = null
@@ -88,6 +97,19 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var gestureStartY = 0f
     private var gestureDirection = 1
     private var fullScreenGestureEnabled = false
+    /**
+     * The tracked touch went down on the leading edge: there the back
+     * gesture outranks scrollers and pans under the finger (UIKit's
+     * screen-edge pan); only exclusive owners keep it.
+     */
+    private var gestureFromEdge = false
+    /** How a child claimed the tracked touch ([requestDisallowInterceptTouchEvent]). */
+    private var childClaim = CHILD_CLAIM_NONE
+    /**
+     * The arbiter gave the back gesture a touch a list had claimed only for
+     * its ScrollView ancestor: onInterceptTouchEvent takes it on this move.
+     */
+    private var gestureTakeoverPending = false
     private var velocityTracker: VelocityTracker? = null
     private var predictiveBackActive = false
     private var predictiveBackCommitted = false
@@ -101,6 +123,21 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var predictiveBackAwaiting = false
     private var predictiveBackNavigated = false
     private val predictiveBackTimeout = Runnable { resolvePredictiveBack() }
+
+    /**
+     * A push of the warm route started natively by a press ([launchWarm]),
+     * before the runtime handled that press. The commit of the push adopts
+     * the running animation ([runTransition]); a different navigation drops
+     * it, and a press that navigated nowhere leaves it unconfirmed: it
+     * settles back after [WARM_LAUNCH_VERDICT_TIMEOUT_MS].
+     */
+    private class WarmLaunch(val incoming: View, val outgoing: View, val kind: Int, val durationMs: Long) {
+        var state = WARM_LAUNCH_PENDING
+        /** The animation reached the destination before the commit confirmed it. */
+        var held = false
+    }
+    private var warmLaunch: WarmLaunch? = null
+    private val warmLaunchTimeout = Runnable { warmLaunch?.let(::rollbackWarmLaunch) }
     private val sharedElements = PamSharedElements(this)
     private val routeCurve = DecelerateInterpolator(1.75f)
     private val routeControllers = IdentityHashMap<View, PamRouteFragment>()
@@ -216,6 +253,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
         if (child === revealing) revealing = null
+        warmLaunch?.takeIf { child === it.incoming || child === it.outgoing }?.let(::abortWarmLaunch)
         if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
         // A route leaves at rest: mounted again later (kept alive, parked) it
@@ -486,7 +524,49 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
             PamSharedElements.touched(event.rawX, event.rawY)
         }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                childClaim = CHILD_CLAIM_NONE
+                gestureTakeoverPending = false
+            }
+            MotionEvent.ACTION_MOVE -> if (
+                gestureTracking && !gesturePrepared && childClaim == CHILD_CLAIM_FOR_SCROLL_ANCESTOR
+            ) {
+                // A list claimed the touch when it went down only to keep a
+                // platform ScrollView off it, so onInterceptTouchEvent no
+                // longer runs: the arbiter decides here whether the drag is
+                // the list's (it scrolls along this axis) or the back gesture's.
+                velocityTracker?.addMovement(event)
+                if (gestureBegins(event)) {
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                    } else {
+                        childClaim = CHILD_CLAIM_NONE
+                        gestureTakeoverPending = true
+                        super.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+            }
+        }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * Tracks how a child claims a touch the back gesture is watching. A
+     * claim made on purpose (a scroller or pan that took the drag, a slider,
+     * a drawing surface) keeps onInterceptTouchEvent away as usual; a list's
+     * claim for its ScrollView ancestor is left to the arbiter.
+     */
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        if (gestureTracking && !gesturePrepared) {
+            childClaim = when {
+                !disallowIntercept -> CHILD_CLAIM_NONE
+                PamGestureArbiter.claimingForScrollAncestor && childClaim != CHILD_CLAIM_FIRM ->
+                    CHILD_CLAIM_FOR_SCROLL_ANCESTOR
+                else -> CHILD_CLAIM_FIRM
+            }
+        }
+        super.requestDisallowInterceptTouchEvent(disallowIntercept)
     }
 
     /** [pressed] (a Pressable) was clicked inside this host's active route. */
@@ -495,6 +575,195 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (running != null || gesturePrepared || predictiveBackActive || animationsDisabled()) return false
         return sharedElements.launchFromPress(route, pressed)
     }
+
+    /**
+     * [pressed] declared [intent] as its destination and this host holds
+     * that route warm (mounted hidden and laid out by `Navigator::prewarm()`):
+     * the push starts now, on the frame after the tap, instead of after the
+     * runtime handled the press and committed the navigation (~70-150 ms on
+     * a mid-range phone). Only a plain card push at rest qualifies: no
+     * transition, gesture or navigation pending, no shared element to fly,
+     * motion enabled. The route lifecycle (active route, focus, controller
+     * state) changes only when the commit confirms the push.
+     */
+    internal fun launchWarm(intent: String, pressed: View): Boolean {
+        // `key@transition`: the press declared the motion it navigates with.
+        val at = intent.lastIndexOf('@')
+        val key = if (at < 0) intent else intent.substring(0, at)
+        val declared = if (at < 0) null else intent.substring(at + 1).toIntOrNull() ?: return false
+        if (key.isEmpty() || key != warmIntent || warmLaunch != null) return false
+        if (declared != null && resolvedTransition(declared) != resolvedTransition(warmTransition)) return false
+        if (running != null || gestureSettle != null || gesturePrepared) return false
+        if (predictiveBackActive || predictiveBackAwaiting || pendingPreDraw != null) return false
+        if (!isAttachedToWindow || animationsDisabled() || warmDurationMs <= 0L) return false
+        if (screenPresentation != PRESENTATION_CARD || childCount < 2) return false
+        val incoming = getChildAt(0)
+        val outgoing = activeRoute ?: return false
+        if (incoming === outgoing || outgoing.parent !== this || incoming in awaitingFirstLayout) return false
+        if (!incoming.isLaidOut || incoming.width <= 0 || incoming.height <= 0) return false
+        if (routeContaining(pressed) !== outgoing) return false
+        val kind = resolvedTransition(warmTransition)
+        if (kind == TRANSITION_NONE || sharedElements.wouldFly(incoming, outgoing)) return false
+        val duration = warmDurationMs.coerceAtMost(2_000L)
+        val launch = WarmLaunch(incoming, outgoing, kind, duration)
+        warmLaunch = launch
+        // The warm route stays first among the children (the engine's
+        // order) but draws, and takes touches, above the others.
+        setChildrenDrawingOrderEnabled(true)
+        setRouteVisibility(incoming, View.VISIBLE)
+        transformedRoutes += incoming
+        transformedRoutes += outgoing
+        applyProgress(incoming, outgoing, kind, 0f, 0f, popping = false)
+        outgoing.takeIf { it.layerType == View.LAYER_TYPE_NONE }?.let {
+            it.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            layeredRoute = it
+        }
+        running = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val time = it.animatedValue as Float
+                applyProgress(incoming, outgoing, kind, routeCurve.getInterpolation(time), time, popping = false)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    when (launch.state) {
+                        // Held on the destination until the commit (or the timeout) decides.
+                        WARM_LAUNCH_PENDING -> launch.held = true
+                        WARM_LAUNCH_ADOPTED -> {
+                            if (running === animation) running = null
+                            finish(incoming, outgoing)
+                        }
+                        else -> Unit
+                    }
+                }
+            })
+            start()
+        }
+        postDelayed(warmLaunchTimeout, duration + WARM_LAUNCH_VERDICT_TIMEOUT_MS)
+        return true
+    }
+
+    private fun resolvedTransition(value: Int): Int =
+        if (value == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else value
+
+    /** The route (a direct child) that contains [view], or null. */
+    private fun routeContaining(view: View): View? {
+        var current: View = view
+        while (true) {
+            val parent = current.parent ?: return null
+            if (parent === this) return current
+            current = parent as? View ?: return null
+        }
+    }
+
+    /**
+     * The commit of the push a press started: the route becomes active and
+     * the animation already running continues (no second start). A commit
+     * that asks for another motion (an action transition, no animation)
+     * lands on the destination at once.
+     */
+    private fun adoptWarmLaunch(launch: WarmLaunch) {
+        removeCallbacks(warmLaunchTimeout)
+        warmLaunch = null
+        launch.state = WARM_LAUNCH_ADOPTED
+        setChildrenDrawingOrderEnabled(false)
+        takePredictiveBackVerdict()
+        abortGesture()
+        val incoming = launch.incoming
+        val outgoing = launch.outgoing
+        setActiveRoute(incoming)
+        applyRoutePresentation(incoming)
+        for (index in 0 until childCount) {
+            getChildAt(index).apply {
+                setRouteVisibility(this, if (this === incoming || this === outgoing) View.VISIBLE else View.INVISIBLE)
+                importantForAccessibility = if (this === incoming) {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                } else {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                }
+            }
+        }
+        settleReveal()
+        val kind = resolvedTransition(transition)
+        val animator = running
+        val sameMotion = kind == launch.kind && durationMs > 0L && !animationsDisabled()
+        when {
+            animator != null && animator.isRunning && sameMotion -> Unit
+            animator != null && animator.isRunning -> animator.end()
+            else -> {
+                running = null
+                finish(incoming, outgoing)
+            }
+        }
+    }
+
+    /** Drops a native launch at once (another navigation, a removed route, a detach). */
+    private fun abortWarmLaunch(launch: WarmLaunch) {
+        removeCallbacks(warmLaunchTimeout)
+        if (warmLaunch === launch) warmLaunch = null
+        launch.state = WARM_LAUNCH_ABORTED
+        val animator = running
+        running = null
+        animator?.cancel()
+        settleWarmLaunch(launch)
+    }
+
+    /** A launch the app never confirmed (its press navigated nowhere): it slides back. */
+    private fun rollbackWarmLaunch(launch: WarmLaunch) {
+        if (warmLaunch !== launch) return
+        warmLaunch = null
+        launch.state = WARM_LAUNCH_ABORTED
+        val current = running
+        val from = if (launch.held) 1f else (current?.animatedValue as? Float ?: 1f)
+        running = null
+        current?.cancel()
+        if (!isAttachedToWindow || from <= 0f || animationsDisabled()) {
+            settleWarmLaunch(launch)
+            return
+        }
+        running = ValueAnimator.ofFloat(from, 0f).apply {
+            duration = (launch.durationMs * from).toLong().coerceAtLeast(1L)
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val time = it.animatedValue as Float
+                applyProgress(launch.incoming, launch.outgoing, launch.kind, routeCurve.getInterpolation(time), time, popping = false)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (running === animation) running = null
+                    settleWarmLaunch(launch)
+                }
+            })
+            start()
+        }
+    }
+
+    /** The routes of a dropped launch back at rest: the warm route hidden again under the active one. */
+    private fun settleWarmLaunch(launch: WarmLaunch) {
+        setChildrenDrawingOrderEnabled(false)
+        layeredRoute?.setLayerType(View.LAYER_TYPE_NONE, null)
+        layeredRoute = null
+        reset(launch.incoming)
+        reset(launch.outgoing)
+        if (launch.incoming.parent === this && launch.incoming !== activeRoute) {
+            setRouteVisibility(launch.incoming, View.INVISIBLE)
+        }
+        restoreIdleRoutes()
+    }
+
+    override fun getChildDrawingOrder(childCount: Int, drawingPosition: Int): Int {
+        val lifted = warmLaunch?.incoming?.let(::indexOfChild) ?: -1
+        if (lifted < 0 || lifted >= childCount) return drawingPosition
+        return when {
+            drawingPosition == childCount - 1 -> lifted
+            drawingPosition >= lifted -> drawingPosition + 1
+            else -> drawingPosition
+        }
+    }
+
+    /** True while a press-started push waits for the commit that confirms it (tests). */
+    internal fun isLaunchingWarm(): Boolean = warmLaunch != null
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -506,9 +775,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
             val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
             val edge = dp(gestureEdgeWidth)
-            val withinEdge = fullScreenGestureEnabled || gestureDirection == 2 ||
+            val fromEdge = gestureDirection != 2 &&
                 if (rtl) event.x >= width - edge else event.x <= edge
-            if (!withinEdge) return false
+            if (!fullScreenGestureEnabled && gestureDirection != 2 && !fromEdge) return false
+            gestureFromEdge = fromEdge
             // Only remember where the touch went down: nothing changes on
             // screen (or in the route lifecycles) until it moves like a back
             // gesture. A tap, a scroll or a cancelled touch leaves no trace.
@@ -522,15 +792,55 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (!gestureTracking) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
+                if (gestureTakeoverPending) {
+                    gestureTakeoverPending = false
+                    beginBackGesture()
+                    return true
+                }
                 velocityTracker?.addMovement(event)
                 if (gestureBegins(event)) {
-                    prepareGesture()
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                        return false
+                    }
+                    beginBackGesture()
                     return true
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopTracking()
         }
         return false
+    }
+
+    /**
+     * Whether the content under the finger owns the drag the back gesture
+     * would take (UIKit `require(toFail:)`, `ViewPager.canScroll`): a pager
+     * with a previous page, a tab strip scrolled away from its start, a pan
+     * or slider that moves that way. From the edge only exclusive owners
+     * (a drawing surface, a zoomed photo, `blocksNavigationGesture`) keep
+     * it; elsewhere (full-screen or vertical gestures) any owner does.
+     */
+    private fun contentOwnsGesture(): Boolean {
+        if (childCount == 0) return false
+        val route = getChildAt(childCount - 1)
+        val horizontal = gestureDirection != 2
+        val fingerSign = if (horizontal && layoutDirection == View.LAYOUT_DIRECTION_RTL) -1 else 1
+        val ownership = PamGestureArbiter.ownershipOfChild(
+            this,
+            route,
+            gestureStartX,
+            gestureStartY,
+            horizontal,
+            fingerSign,
+            navigation = true,
+        )
+        return ownership >= if (gestureFromEdge) PamGestureArbiter.EXCLUSIVE else PamGestureArbiter.DIRECTIONAL
+    }
+
+    /** The back gesture takes the touch: its routes move and ancestors keep off it. */
+    private fun beginBackGesture() {
+        prepareGesture()
+        parent?.requestDisallowInterceptTouchEvent(true)
     }
 
     /**
@@ -573,7 +883,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 // of in onInterceptTouchEvent.
                 if (!gesturePrepared) {
                     if (!gestureBegins(event)) return gestureTracking
-                    prepareGesture()
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                        return true
+                    }
+                    beginBackGesture()
                 }
                 applyGestureProgress(progress, rtl)
             }
@@ -752,6 +1066,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     override fun onDetachedFromWindow() {
         overlay.remove(nativeToolbar)
+        warmLaunch?.let(::abortWarmLaunch)
         abortGesture()
         clearSharedElements()
         clearPendingTransition()
@@ -833,6 +1148,16 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun runTransition() {
+        // The push a press already started natively: its commit adopts the
+        // running animation; any other navigation drops it first.
+        warmLaunch?.let { launch ->
+            val top = if (childCount > 0) getChildAt(childCount - 1) else null
+            if (operation == OPERATION_PUSH && top === launch.incoming && launch.outgoing.parent === this) {
+                adoptWarmLaunch(launch)
+                return
+            }
+            abortWarmLaunch(launch)
+        }
         // A navigation interrupts whatever still moves the routes: the
         // previous transition ends on its destination and a back gesture in
         // progress (or settling) is dropped, so no route keeps its frame.
@@ -953,12 +1278,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         applyProgress(incoming, outgoing, kind, 0f, 0f)
     }
 
-    private fun applyProgress(incoming: View, outgoing: View?, kind: Int, progress: Float, time: Float) {
+    private fun applyProgress(
+        incoming: View,
+        outgoing: View?,
+        kind: Int,
+        progress: Float,
+        time: Float,
+        popping: Boolean = operation == OPERATION_POP,
+    ) {
         val width = width.coerceAtLeast(1).toFloat()
         val height = height.coerceAtLeast(1).toFloat()
         val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
         val semanticSign = if (rtl) -1f else 1f
-        val popping = operation == OPERATION_POP
         val direction = when (kind) {
             TRANSITION_SLIDE_FROM_LEFT -> -1f
             else -> semanticSign
@@ -1313,6 +1644,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 }
                 current = current.parent
             }
+            val intent = (pressed as? PamPressable)?.navigationIntent?.takeIf(String::isNotEmpty) ?: return
+            current = pressed.parent
+            while (current != null) {
+                if (current is PamNavigationHost && current.launchWarm(intent, pressed)) return
+                current = current.parent
+            }
         }
 
         const val OPERATION_IDLE = 1
@@ -1320,6 +1657,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val OPERATION_POP = 3
         const val OPERATION_REPLACE = 4
         const val PREDICTIVE_BACK_VERDICT_TIMEOUT_MS = 1_000L
+        /** How long a press-started push waits, after its animation, for the commit that confirms it. */
+        const val WARM_LAUNCH_VERDICT_TIMEOUT_MS = 1_000L
+        private const val WARM_LAUNCH_PENDING = 0
+        private const val WARM_LAUNCH_ADOPTED = 1
+        private const val WARM_LAUNCH_ABORTED = 2
 
 
         const val TRANSITION_PLATFORM_DEFAULT = 1
@@ -1339,6 +1681,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val PRESENTATION_CARD = 1
         const val PRESENTATION_CONTAINED_MODAL = 3
         const val PRESENTATION_FORM_SHEET = 7
+
+        private const val CHILD_CLAIM_NONE = 0
+        /** A list's claim for its ScrollView ancestor (axis unknown): the arbiter decides. */
+        private const val CHILD_CLAIM_FOR_SCROLL_ANCESTOR = 1
+        /** A child took the touch on purpose. */
+        private const val CHILD_CLAIM_FIRM = 2
     }
 }
 

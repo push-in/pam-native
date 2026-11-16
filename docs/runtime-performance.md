@@ -96,6 +96,46 @@ The same retained dependency graph powers the public
 tracked effects and nested batching while preserving component-level subtree
 reuse. No polling, global dirty flag or per-frame PHP callback is introduced.
 
+### Granular re-render of ancestors
+
+A component dirty only because of a descendant does not run its template
+again. When a component's own inputs are unchanged (own state snapshot, no
+tracked read or handler marked it, no global invalidation) but a descendant
+is dirty, it keeps its last element and renders again only the children on
+the path to that descendant. Each new child element is placed exactly where
+the owner's template placed the previous one: the call site's `class`, `key`
+and style attributes are applied again (with the same memoized copies) and
+only the elements on the path from the owner's root are copied, so every other
+subtree keeps its identity and its encoded frame. Moving state into a small
+child component therefore saves the parents' templates, as in React or Vue:
+typing in a composer component inside a sheet of a screen renders the
+composer alone.
+
+The result is always the tree a full render would produce. The owner falls
+back to its full render whenever a child cannot be placed again exactly:
+
+- the child was given as slot content to another component (it lives in that
+  component's tree);
+- the child is a lazy row of a `VirtualizedList`/`VirtualGrid` (built by the
+  list window), or portal content;
+- the child was built in PHP code (`render()` returning elements) or by a
+  component tag with native events, bindings or `p-ripple` (not a compiled
+  `.pam` tag);
+- the owner's tree no longer holds the child's element exactly once.
+
+`#[AlwaysRender]` children of an updated owner render with it, as on a full
+render. Lifecycle is unchanged: children that are not rendered again stay
+mounted with their subtrees; what a re-rendered child drops unmounts and what
+it adds mounts. A child that throws propagates to the owner as from its
+render: the owner's `failed()`/`fallback()` boundary applies and its recovery
+is shown, with its components kept mounted (a change in the failing child
+renders it again).
+
+The profiler records a granular update as a `component.patch` span (with
+`component` metadata) instead of `component.render`.
+`Pam\Native\Internal\GranularRender::enabled(false)` turns it off (every
+ancestor renders again), e.g. to compare.
+
 ## Incremental layout
 
 Property patches mark only their changed node IDs and ancestor paths as dirty.
@@ -125,12 +165,70 @@ generates constructor factories plus prop schemas before the first application
 frame; no template parsing or component reflection remains on the startup hot
 path.
 
+## Sliced mount (Android)
+
+Opening a screen used to build every view of the commit inside one frame: a
+`ScrollView` with ~50 rows cost ~40 ms of UI thread on a Galaxy S10. Android
+now builds, inside the commit, only what the screen shows, and the rest in
+the frames that follow:
+
+- A commit that creates 40 or more nodes resolves its new nodes under a
+  vertical `ScrollView` once their frames are known. A subtree whose frames
+  all lie outside the scroll's viewport (plus 64 dp, which covers shadows and
+  a frame of fling) waits; everything that intersects it is built before the
+  commit's frame draws, exactly as before.
+- Waiting subtrees are built by mount slices: a Choreographer callback per
+  frame, after input and before the traversal, spending 6 ms less whatever a
+  commit already took in that frame (at least one subtree per frame), in tree
+  order. Each slice first builds every waiting subtree that scrolled into, or
+  within a quarter viewport of, the visible band, regardless of the budget. A
+  pre-draw check builds and redraws if a layout pass moved an offset onto
+  waiting content, so a row is never drawn missing.
+- Nothing about layout or scrolling changes: views are placed at absolute
+  engine frames and the scroll content extent comes from engine frames, so a
+  missing view leaves no gap and moves nothing. Views keep their logical
+  order among their host's children.
+- Later commits stay ordered: properties and frames of waiting nodes are kept
+  in the node state and applied when the view is built; a waiting subtree
+  laid out into view, or under a scroll that receives `contentOffset` or a
+  `scrollRequest` in that commit, is built by that commit; a move into or
+  out of a waiting subtree builds it first; a removal drops it unbuilt.
+  `on:layout` is reported from engine frames, once, as before.
+- Only plain content waits: `View`, `Column`, `Row`, `Text`, `Image`,
+  `ImageBackground`, `Pressable` and `Spacer` nodes without transforms,
+  drags, sticky headers, animations or transitions, intersection/route/
+  resize/outside-press observers, text-layout events, focus or key handling,
+  media bindings, keyboard progress, shared-element tags, live regions or a
+  `nativeRef` (`ViewRef` measures a laid-out view),
+  under a vertical scroll that is not paged and has no `anchorToEnd`,
+  `maintainVisibleContentPosition`, `scrollTargetTestId` or pending
+  non-zero `contentOffset`. Anything else is built in the commit.
+
+The layout pass also lays each new view out once: a host whose frame changed
+no longer re-lays out the children that the same pass lays out right after.
+
+`PamSlicedMountInstrumentedTest` mounts 60 rows of `Pressable` + `Image` +
+`Text` on the CI emulator: the commit's frame must stay within 24 ms (a debug
+build there is ~1.6x slower than a release build on the S10), every slice
+frame within 16 ms, and the worst frame under half that of building
+everything at once; the final views, geometry, texts and order must equal
+the full mount's.
+
+Perfetto/systrace sections: `PamCommit.slicedMount`, `PamMount.slice`, and,
+only while a trace is recording, `PamMount.create.<KIND>`,
+`PamMount.attach.<KIND>`, `PamMount.props.<KIND>`, `PamMount.events.<KIND>`,
+`PamMount.text`, `PamMount.image`, `PamMount.background`, `PamMount.update`,
+`PamMount.remove` and `PamMount.move` inside `PamCommit.mutations`.
+
 ## Profiling
 
 `Profiler` retains a bounded 512-span timeline containing:
 
 - `php.render`;
 - `php.encode`;
+- `component.render` (a component ran its template) and `component.patch`
+  (it kept its render and updated only the paths to dirty descendants), with
+  `component` metadata;
 - `scheduler.task`;
 - duration, timestamp and integer priority metadata.
 

@@ -175,6 +175,23 @@ final class TemplateRenderer
     /** Last native element built by tag(); nodes() places it without copying. */
     private static ?Element $freshElement = null;
 
+    /**
+     * Placement of the component element componentTag() just returned and
+     * its component: nodes() completes it with the static slot and records it
+     * on the component (GranularRender).
+     */
+    private static ?ComponentPlacement $placing = null;
+    private static ?Component $placingComponent = null;
+
+    /**
+     * Owners (by object id) whose template is evaluating content for a
+     * component's slots: components placed there end up in another
+     * component's tree, so they get no placement.
+     *
+     * @var array<int, int>
+     */
+    private static array $slotScopes = [];
+
     /** @var array<string, true> style keys whose entries depend on the environment */
     private static array $dynamicKeys = [];
 
@@ -392,6 +409,19 @@ final class TemplateRenderer
         'mediaClock' => PropKey::MediaClock,
         'mediaClockFormat' => PropKey::MediaClockFormat,
         'mediaProgress' => PropKey::MediaProgress,
+        'clockStartedAt' => PropKey::ClockStartedAt,
+        'clockEndsAt' => PropKey::ClockEndsAt,
+        'clockDurationMs' => PropKey::ClockDurationMs,
+        'clockOffsetMs' => PropKey::ClockOffsetMs,
+        'clockRunning' => PropKey::ClockRunning,
+        'clockFormat' => PropKey::ClockFormat,
+        'progressStartedAt' => PropKey::ProgressStartedAt,
+        'progressDurationMs' => PropKey::ProgressDurationMs,
+        'progressOffsetMs' => PropKey::ProgressOffsetMs,
+        'progressRunning' => PropKey::ProgressRunning,
+        'revealCharMs' => PropKey::RevealCharMs,
+        'revealDurationMs' => PropKey::RevealDurationMs,
+        'revealKey' => PropKey::RevealKey,
         'draggable' => PropKey::Draggable,
         'dragData' => PropKey::DragData,
         'dropEnabled' => PropKey::DropEnabled,
@@ -527,6 +557,7 @@ final class TemplateRenderer
         'nextFocusRight' => PropKey::NextFocusRight,
         'focusGroup' => PropKey::FocusGroup,
         'focusRing' => PropKey::FocusRing,
+        'blocksNavigationGesture' => PropKey::BlocksNavigationGesture,
         'returnKeyType' => PropKey::ReturnKeyType,
         'hitSlop' => PropKey::HitSlop,
         'hitSlopLeft' => PropKey::HitSlopLeft,
@@ -827,6 +858,45 @@ final class TemplateRenderer
     public static function releaseFrame(): void
     {
         self::$freshElement = null;
+        self::$placing = null;
+        self::$placingComponent = null;
+    }
+
+    /**
+     * @internal Places a new element of $component where its owner's last
+     * render placed the previous one: the call site's class and attributes
+     * and the static slot, exactly as the owner's template would (and with
+     * the same memoized copies). Null when the placement no longer applies.
+     */
+    public static function replacePlacement(Component $component, ComponentPlacement $placement, Element $element): ?Element
+    {
+        if ($placement->styleRevision !== StyleVariables::revision()) {
+            return null;
+        }
+        $path = $placement->values['__pamNodePath'] ?? null;
+        $call = is_string($path) ? PamPhpRegistry::call($placement->owner, $path) : null;
+        if ($call !== null && $call->instance !== $component) {
+            $call = null;
+        }
+        if ($call !== null && $element === $call->element && $call->decorated !== null) {
+            $decorated = $call->decorated;
+        } else {
+            $decorated = self::decorateComponent(
+                $call,
+                $element,
+                $placement->resolvedClass,
+                self::componentRootValues($placement->tag, $placement->values, $placement->data, $placement->authored),
+                $placement->sheet,
+                $placement->data,
+            );
+        }
+        $placed = $decorated->withIdentitySlot($placement->slot);
+        $placed->__pamMarkReusable();
+        $placement->element = $element;
+        $placement->decorated = $decorated;
+        $placement->placed = $placed;
+
+        return $placed;
     }
 
     /**
@@ -951,6 +1021,8 @@ final class TemplateRenderer
                     );
                 if ($element->identitySlot === null && self::$freshElement === $element) {
                     $output[] = $element->__pamPlaceAt($slot);
+                    self::$placing = null;
+                    self::$placingComponent = null;
                 } else {
                     // A component's element: the same object while the
                     // component stays memoized, so the encoder keeps its
@@ -958,6 +1030,21 @@ final class TemplateRenderer
                     $placed = $element->withIdentitySlot($slot);
                     $placed->__pamMarkReusable();
                     $output[] = $placed;
+                    $placing = self::$placing;
+                    if ($placing !== null) {
+                        $placingComponent = self::$placingComponent;
+                        self::$placing = null;
+                        self::$placingComponent = null;
+                        if ($placing->decorated === $element && $placing->owner === $scope && $placingComponent !== null) {
+                            if (isset(self::$slotScopes[spl_object_id($scope)])) {
+                                $placingComponent->__pamPlace(null);
+                            } else {
+                                $placing->slot = $slot;
+                                $placing->placed = $placed;
+                                $placingComponent->__pamPlace($placing);
+                            }
+                        }
+                    }
                 }
             } catch (TemplateException $error) {
                 throw $error;
@@ -1913,7 +2000,12 @@ final class TemplateRenderer
             $childData['__pamListLoop'] = [$listPath, $listWindow !== null];
             $listLoop = true;
         }
-        $renderedChildren = $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
+        $slotScope = $factory !== null && $defaultNodes !== [] ? self::enterSlots($scope) : null;
+        try {
+            $renderedChildren = $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
+        } finally {
+            self::leaveSlots($slotScope);
+        }
         $lazyRows = null;
         if ($listLoop) {
             $parts = [];
@@ -1944,18 +2036,23 @@ final class TemplateRenderer
             }
         }
         $slots = ['slot' => $children];
-        foreach ($slotNodes as $slotName => $nodes) {
-            $renderedSlot = self::nodes($nodes, $scope, $childData);
-            $slotElements = array_values(array_filter(
-                $renderedSlot,
-                static fn (mixed $value): bool => $value instanceof Element,
-            ));
-            if (count($slotElements) !== count($renderedSlot)) {
-                throw new RuntimeException(
-                    "Named slot {$slotName} must contain renderable elements.",
-                );
+        $slotScope = $factory !== null && $slotNodes !== [] ? self::enterSlots($scope) : null;
+        try {
+            foreach ($slotNodes as $slotName => $nodes) {
+                $renderedSlot = self::nodes($nodes, $scope, $childData);
+                $slotElements = array_values(array_filter(
+                    $renderedSlot,
+                    static fn (mixed $value): bool => $value instanceof Element,
+                ));
+                if (count($slotElements) !== count($renderedSlot)) {
+                    throw new RuntimeException(
+                        "Named slot {$slotName} must contain renderable elements.",
+                    );
+                }
+                $slots[$slotName] = $slotElements;
             }
-            $slots[$slotName] = $slotElements;
+        } finally {
+            self::leaveSlots($slotScope);
         }
 
         if ($factory === null && $text !== '' && $tag !== 'Text' && $tag !== 'Span' && $tag !== 'Button') {
@@ -2279,6 +2376,22 @@ final class TemplateRenderer
         if ($factory === null && $tag === 'Icon') {
             unset($values['name'], $values['font'], $values['size'], $values['color']);
         }
+        if ($factory === null && $element instanceof Pressable && array_key_exists('prewarm', $values)) {
+            $element = self::pressPrewarm($element, $tag, $values);
+            unset($values['prewarm'], $values['prewarmParams'], $values['prewarmMode']);
+        }
+        if ($factory === null && $element instanceof Pressable && array_key_exists('navigatesTo', $values)) {
+            $destination = $values['navigatesTo'];
+            if ($destination !== null && $destination !== false && $destination !== '') {
+                $element = $element->navigatesTo(
+                    self::linkRoute($destination),
+                    self::linkParams($values['navigatesToParams'] ?? []),
+                    self::pressTransition($values['prewarmTransition'] ?? null),
+                );
+            }
+            unset($values['navigatesTo'], $values['navigatesToParams']);
+        }
+        unset($values['prewarmTransition']);
         if ($factory === null && $tag === 'Link') {
             unset($values['route'], $values['to'], $values['params'], $values['mode']);
         }
@@ -3461,11 +3574,12 @@ final class TemplateRenderer
                 if ($instance !== null) {
                     $element = $instance->toElement();
                     self::$freshElement = null;
-                    if ($element === $call->element && $call->decorated !== null) {
-                        return $call->decorated;
-                    }
+                    $decorated = $element === $call->element && $call->decorated !== null
+                        ? $call->decorated
+                        : self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
+                    self::placing($scope, $instance, $tag, $values, $data, $planNode->attributes, $resolvedClass, $sheet, $element, $decorated);
 
-                    return self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
+                    return $decorated;
                 }
             }
         }
@@ -3499,26 +3613,31 @@ final class TemplateRenderer
             );
             $eventContexts = $data['__pamEventContexts'] ?? [];
             $childData['__pamEventContexts'] = is_array($eventContexts) ? $eventContexts : [];
-            if ($defaultNodes !== []) {
-                foreach (self::nodes($defaultNodes, $scope, $childData) as $rendered) {
-                    if ($rendered instanceof Element) {
-                        $children[] = $rendered;
+            $slotScope = self::enterSlots($scope);
+            try {
+                if ($defaultNodes !== []) {
+                    foreach (self::nodes($defaultNodes, $scope, $childData) as $rendered) {
+                        if ($rendered instanceof Element) {
+                            $children[] = $rendered;
+                        }
                     }
                 }
-            }
-            $slots = ['slot' => $children];
-            foreach ($slotNodes as $slotName => $nodes) {
-                $renderedSlot = self::nodes($nodes, $scope, $childData);
-                $slotElements = array_values(array_filter(
-                    $renderedSlot,
-                    static fn (mixed $value): bool => $value instanceof Element,
-                ));
-                if (count($slotElements) !== count($renderedSlot)) {
-                    throw new RuntimeException(
-                        "Named slot {$slotName} must contain renderable elements.",
-                    );
+                $slots = ['slot' => $children];
+                foreach ($slotNodes as $slotName => $nodes) {
+                    $renderedSlot = self::nodes($nodes, $scope, $childData);
+                    $slotElements = array_values(array_filter(
+                        $renderedSlot,
+                        static fn (mixed $value): bool => $value instanceof Element,
+                    ));
+                    if (count($slotElements) !== count($renderedSlot)) {
+                        throw new RuntimeException(
+                            "Named slot {$slotName} must contain renderable elements.",
+                        );
+                    }
+                    $slots[$slotName] = $slotElements;
                 }
-                $slots[$slotName] = $slotElements;
+            } finally {
+                self::leaveSlots($slotScope);
             }
         }
 
@@ -3546,8 +3665,84 @@ final class TemplateRenderer
             : null;
         $element = $component->toElement();
         self::$freshElement = null;
+        $decorated = self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
+        if ($component instanceof Component) {
+            self::placing($scope, $component, $tag, $values, $data, $planNode->attributes, $resolvedClass, $sheet, $element, $decorated);
+        }
 
-        return self::decorateComponent($call, $element, $resolvedClass, self::componentRootValues($tag, $values, $data, $planNode->attributes), $sheet, $data);
+        return $decorated;
+    }
+
+    /**
+     * Remembers how componentTag() placed a component's element; nodes()
+     * records it on the component once it knows the static slot.
+     *
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $data
+     * @param array<string, string|bool> $authored
+     */
+    private static function placing(
+        ?object $scope,
+        Component $component,
+        string $tag,
+        array $values,
+        array $data,
+        array $authored,
+        ?string $resolvedClass,
+        mixed $sheet,
+        Element $element,
+        Element $decorated,
+    ): void {
+        if (!$scope instanceof Component) {
+            self::$placing = null;
+            self::$placingComponent = null;
+
+            return;
+        }
+        self::$placing = new ComponentPlacement(
+            $scope,
+            $tag,
+            $values,
+            // Only what decorating the element reads (see decorateComponent()).
+            [
+                '__pamStyles' => $data['__pamStyles'] ?? null,
+                '__pamInheritedStyles' => $data['__pamInheritedStyles'] ?? null,
+            ],
+            $authored,
+            $resolvedClass,
+            $sheet,
+            StyleVariables::revision(),
+            ComponentLifecycle::renderedPass($scope),
+            '',
+            $element,
+            $decorated,
+            $decorated,
+        );
+        self::$placingComponent = $component;
+    }
+
+    private static function enterSlots(?object $scope): ?int
+    {
+        if ($scope === null) {
+            return null;
+        }
+        $id = spl_object_id($scope);
+        self::$slotScopes[$id] = (self::$slotScopes[$id] ?? 0) + 1;
+
+        return $id;
+    }
+
+    private static function leaveSlots(?int $id): void
+    {
+        if ($id === null) {
+            return;
+        }
+        $depth = (self::$slotScopes[$id] ?? 1) - 1;
+        if ($depth <= 0) {
+            unset(self::$slotScopes[$id]);
+        } else {
+            self::$slotScopes[$id] = $depth;
+        }
     }
 
     /**
@@ -5245,6 +5440,22 @@ final class TemplateRenderer
                     'duration' => \Pam\Native\MediaClockFormat::Duration->value,
                     'countdown' => \Pam\Native\MediaClockFormat::CountdownSeconds->value,
                 ]),
+            PropKey::ClockStartedAt,
+            PropKey::ClockEndsAt,
+            PropKey::ClockDurationMs,
+            PropKey::ClockOffsetMs,
+            PropKey::ProgressStartedAt,
+            PropKey::ProgressDurationMs,
+            PropKey::ProgressOffsetMs,
+            => \Pam\Native\Internal\NativeTime::milliseconds($value, "Template {$key->name}"),
+            PropKey::RevealCharMs,
+            PropKey::RevealDurationMs,
+            => \Pam\Native\Internal\NativeTime::positiveMilliseconds($value, "Template {$key->name}"),
+            PropKey::ClockRunning,
+            PropKey::ProgressRunning,
+            => $value === null ? null : self::boolValue($value, "Template {$key->name}"),
+            PropKey::ClockFormat => $value === null ? null : \Pam\Native\Internal\NativeTime::format($value),
+            PropKey::RevealKey => \Pam\Native\Internal\NativeTime::key($value),
             PropKey::ListSection,
             PropKey::ListActiveSection,
             => $value === null || $value === false ? null : self::stringValue($value, "Template {$key->name}"),
@@ -5252,6 +5463,7 @@ final class TemplateRenderer
             PropKey::Focusable,
             PropKey::FocusGroup,
             PropKey::AutoFocus,
+            PropKey::BlocksNavigationGesture,
             => self::boolValue($value, "Template {$key->name}"),
             PropKey::FocusRing => is_bool($value)
                 ? ($value ? 1 : 0)
@@ -8168,6 +8380,61 @@ final class TemplateRenderer
         }
 
         throw new RuntimeException('Link requires a route="name" (or :route="Routes::name(...)") attribute.');
+    }
+
+    /**
+     * `<Link route="chat" :params="..." prewarm>` mounts the Link's own
+     * destination on press-in; `<Pressable prewarm="chat"
+     * :prewarmParams="{ id: $id }">` (or `:prewarm="Routes::chat(id: $id)"`)
+     * declares the destination of a press whose handler navigates. A false,
+     * null or empty value (`:prewarm="selecting ? null : 'chat'"`) disables
+     * it. Replace and reset do not warm.
+     *
+     * @param array<string, mixed> $values
+     */
+    private static function pressPrewarm(Pressable $element, string $tag, array $values): Pressable
+    {
+        $prewarm = $values['prewarm'];
+        if ($prewarm === null || $prewarm === false || $prewarm === 'false' || $prewarm === '0' || $prewarm === 0) {
+            return $element;
+        }
+        if ($tag === 'Link') {
+            $route = $values['route'] ?? $values['to'] ?? null;
+            $params = $values['params'] ?? [];
+            $mode = \Pam\Native\UI\Link::mode($values['mode'] ?? null);
+        } else {
+            if ($prewarm === '' || $prewarm === true) {
+                throw new RuntimeException('Pressable prewarm needs a route: prewarm="name" or :prewarm="Routes::name(...)".');
+            }
+            $route = $prewarm;
+            $params = $values['prewarmParams'] ?? [];
+            $mode = \Pam\Native\UI\Link::mode($values['prewarmMode'] ?? null);
+        }
+        if ($mode !== \Pam\Native\Routing\RedirectMode::Navigate && $mode !== \Pam\Native\Routing\RedirectMode::Push) {
+            return $element;
+        }
+
+        return $element->prewarm(
+            self::linkRoute($route),
+            self::linkParams($params),
+            $mode,
+            transition: self::pressTransition($values['prewarmTransition'] ?? null),
+        );
+    }
+
+    /** `prewarmTransition="none"` (a NavigationTransition case name) or `:prewarmTransition="NavigationTransition::Fade"`. */
+    private static function pressTransition(mixed $value): ?\Pam\Native\Navigation\NavigationTransition
+    {
+        if ($value === null || $value === '' || $value instanceof \Pam\Native\Navigation\NavigationTransition) {
+            return $value === '' ? null : $value;
+        }
+        if (is_string($value)) {
+            foreach (\Pam\Native\Navigation\NavigationTransition::cases() as $case) {
+                if (strcasecmp($case->name, $value) === 0) return $case;
+            }
+        }
+
+        throw new RuntimeException('prewarmTransition must be a NavigationTransition case name, e.g. prewarmTransition="none".');
     }
 
     /** @return array<string, string|int|float|bool|null> */

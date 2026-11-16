@@ -29,6 +29,15 @@ the stack when another route exists and close the activity from the root route.
 Use `handleSystemBack: false` on `Navigator`, or `->systemBack(false)` on
 `Router`, only when the application provides a custom `App::onBack()` handler.
 
+The swipe back of a stack (`gestureEnabled`, from the leading edge or, with
+`fullScreenGestureEnabled`, anywhere) yields to content under the finger that
+still moves with the drag: a pager with a previous page, a scrolled tab strip,
+a horizontal pan or slider. From the edge it only yields to views that own
+every drag (a drawing surface, a zoomed photo, `blocksNavigationGesture`).
+Each route's gesture options apply on their own: a route without
+`fullScreenGestureEnabled` pushed over one with it goes back from the edge
+only. See [Gestures](gestures.md#who-owns-a-drag).
+
 Components navigate without receiving a `Navigator` instance:
 
 ```php
@@ -67,7 +76,90 @@ the next push of the same route and params starts at once; it is released
 after 4 s unused or on any other navigation. `prewarm($route, $params,
 releaseAfterMs: null)` holds it until another navigation, `cancelPrewarm()` or
 `trimMemory()`, with no timer: keep a row warm while a list stays idle
-without renewing it every few seconds.
+without renewing it every few seconds. `Route::prewarm($route, $params)` does
+the same through the route table: params validated against the screen and
+middleware run first, as for `Route::navigate()`.
+
+### Press-in prewarm and the push on the next frame
+
+A template can declare where a press navigates, and the framework mounts that
+destination while the finger is down, with no handler in the app:
+
+```html
+<!-- A Link warms its own destination. -->
+<Link route="chat" :params="{ id: $chat['id'] }" prewarm>
+    <ChatRow :chat="$chat" />
+</Link>
+
+<!-- A Pressable whose handler navigates declares the same destination. -->
+<Pressable
+    :prewarm="$selecting ? null : 'chat'"
+    :prewarmParams="{ chatId: $chat['id'], title: $chat['title'] }"
+    on:press="openChat($chat['id'])"
+>
+    ...
+</Pressable>
+```
+
+`prewarm` takes a route name, an enum case or a `Routes::chat(...)`
+`TypedRoute`; `prewarmMode="push"` warms for a push (a `navigate()`, the
+default, warms nothing when the route is already in the stack, since it goes
+back to that entry). A false, null or empty value disables it, so a list in
+selection mode does not mount anything. In PHP the same is
+`Pressable::prewarm($route, $params, $mode, $releaseAfterMs)`; it composes
+with the element's own `onPressIn()`/`onPressOut()`.
+
+- Press-in mounts the destination hidden under the current screen
+  (`Navigator::isPrewarming()` is true during its `mount()`, focus comes with
+  the push). The handler is pure: only the navigator renders again.
+- The press that navigates to the same route and params reuses that screen:
+  same instance, same native views, its first layout already done. Different
+  params at the press (the list changed in between) mount a new screen as
+  usual and release the warm one.
+- A press-out without a press (the finger left, a scroll or a parent gesture
+  took the touch, a long press) releases the screen 300 ms later, unless a
+  navigation used it. An abandoned one is released after `$releaseAfterMs`
+  (4 s). A screen the app already holds warm (an idle warmup with
+  `prewarm(..., releaseAfterMs: null)`) keeps its own lifetime: the press only
+  tags it with its intent.
+- Middleware that refuses the destination, an unknown route, a tab and
+  replace/reset modes mount nothing.
+
+**The push starts natively.** A press with a declared destination carries its
+intent key (`Navigator::intentKey($route, $params)`, prop
+`PressNavigationIntent`), and the navigation host advertises the intent and
+push motion of its warm screen (`NavigationWarmIntent`,
+`NavigationWarmTransition`, `NavigationWarmDurationMs`). When they match, the
+Android host starts the push on the tap itself: the first animation frame is
+the next display frame, instead of waiting ~70-150 ms for PHP to handle the
+press, encode and commit. The commit of the push then adopts the running
+animation (no restart); the route becomes active, focused and resumed only at
+that commit, so every lifecycle event and all state still come from PHP.
+`navigatesTo($route, $params)` (template: `navigatesTo="chat"
+:navigatesToParams="{ ... }"`) declares the intent without a press-in
+prewarm, for a destination the app warmed itself (the first row of an idle
+inbox).
+
+The native start applies only to a plain card push at rest: the warm screen
+and the current one are cards without a native header, not `secure`, with the
+same orientation; the transition is animated (not `None`); no shared element
+flies between them; motion is not reduced; no transition, back gesture or
+navigation is pending. Anything else waits for the commit as before. The press
+must navigate synchronously to the same route and params: a press that
+navigates elsewhere drops the started push at that commit, and one that does
+not navigate slides it back ~1 s after the animation. A press that navigates
+with its own action transition declares it (`prewarm(..., transition:
+NavigationTransition::None)`, template `prewarmTransition="none"`): the host
+starts only that same motion, so a tab bar switching with `None` warms on
+press-in and still switches at its commit. An undeclared action transition
+lands on the destination at once when its commit arrives.
+iOS and older renderers keep the commit-driven push (the intent props are
+only sent to renderers that declare them).
+
+A push from a commit (no press launch) of a warm screen starts in the frame of
+that commit: the screen was laid out while it was hidden, so there is no
+staged layout frame. A screen mounted by the push itself is laid out on the
+frame after its mount, then the transition starts.
 
 An individual navigation can override the route or stack animation. This is
 useful for peer destinations such as a bottom navigation bar, without changing

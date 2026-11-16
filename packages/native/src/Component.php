@@ -54,6 +54,8 @@ abstract class Component implements Renderable
     private int $pamFailureAttempt = 0;
     private bool $pamSkipRender = false;
     private ?Element $pamLastElement = null;
+    /** Where the owner's template placed this component's element (granular re-render). */
+    private ?Internal\ComponentPlacement $pamPlacement = null;
     /** @var array<string, mixed>|null Own state captured after the last real render. */
     private ?array $pamSnapshot = null;
     private int $pamEpoch = -1;
@@ -115,6 +117,7 @@ abstract class Component implements Renderable
         'pamFailureAttempt',
         'pamSkipRender',
         'pamLastElement',
+        'pamPlacement',
         'pamSnapshot',
         'pamEpoch',
         'pamHandlers',
@@ -388,14 +391,31 @@ abstract class Component implements Renderable
 
     private function pamElement(): Element
     {
-            if (
-                $this->pamLastElement !== null
-                && ($this->pamSkipRender || $this->pamCanReuse())
-            ) {
-                $this->pamSkipRender = false;
-                ComponentLifecycle::retainSubtree($this);
+            if ($this->pamLastElement !== null) {
+                $reuse = $this->pamSkipRender ? 1 : $this->pamReuse();
+                if ($reuse === 1) {
+                    $this->pamSkipRender = false;
+                    ComponentLifecycle::retainSubtree($this);
 
-                return $this->pamLastElement;
+                    return $this->pamLastElement;
+                }
+                if ($reuse === 2) {
+                    // Only descendants changed: keep this render and redo
+                    // just the paths to them (full render when not possible).
+                    $started = Profiler::start();
+                    try {
+                        $patched = Internal\GranularRender::patch($this, $this->pamLastElement);
+                    } catch (Throwable $error) {
+                        return $this->pamPatchFailed($error);
+                    }
+                    if ($patched !== null) {
+                        Profiler::record('component.patch', $started, ['component' => $this::class]);
+                        $this->pamLastElement = $patched;
+                        $this->pamFailureAttempt = 0;
+
+                        return $patched;
+                    }
+                }
             }
             ComponentLifecycle::beginComponentRender($this);
             DependencyTracker::begin($this);
@@ -461,6 +481,45 @@ abstract class Component implements Renderable
                 DependencyTracker::end($this);
             }
         }
+
+    /**
+     * A descendant failed while only the path to it rendered again: this
+     * component's error boundary applies as if it had rendered (failed(),
+     * then fallback()). Its recovery is shown; the components it rendered
+     * stay mounted (a change in the failing one renders it again).
+     */
+    private function pamPatchFailed(Throwable $error): Element
+    {
+        $this->pamFailureAttempt++;
+        $recovery = $this->failed(
+            $error,
+            new ErrorContext($this::class, 'render', $this->pamFailureAttempt),
+        );
+        if ($recovery === null) {
+            $recovery = $this->fallback();
+        }
+        if ($recovery === null) {
+            throw $error;
+        }
+        ComponentLifecycle::retainSubtree($this);
+        $portals = Internal\PortalRegistry::active();
+        if ($portals) {
+            Internal\PortalRegistry::instance()->beginOwner($this);
+        }
+        DependencyTracker::resume($this);
+        try {
+            $element = $recovery->toElement();
+        } finally {
+            DependencyTracker::suspend($this);
+            if ($portals) {
+                Internal\PortalRegistry::instance()->endOwner($this);
+            }
+        }
+        DependencyTracker::clearPending($this);
+        $this->pamLastElement = $element;
+
+        return $element;
+    }
 
     /**
      * @internal Reconfigures an instance whose call site evaluated exactly
@@ -572,18 +631,45 @@ abstract class Component implements Renderable
         return $this->pamSnapshot !== null && $this->pamSnapshot !== $this->pamOwnState();
     }
 
-    private function pamCanReuse(): bool
+    /**
+     * 0: render again; 1: reuse the last element; 2: the component's own
+     * inputs are unchanged but descendants are dirty (granular update).
+     */
+    private function pamReuse(): int
     {
         if (
             $this->pamEpoch !== DependencyTracker::epoch()
-            || !DependencyTracker::canSkip($this)
+            || !DependencyTracker::ownClean($this)
         ) {
-            return false;
+            return 0;
         }
         $class = static::class;
         $always = self::$pamAlwaysRender[$class] ??= self::pamAlwaysRenders($class);
+        if ($always || $this->pamSnapshot !== $this->pamOwnState()) {
+            return 0;
+        }
 
-        return !$always && $this->pamSnapshot === $this->pamOwnState();
+        return DependencyTracker::hasPending($this) ? 2 : 1;
+    }
+
+    /** @internal True for #[AlwaysRender] components (they render whenever reached). */
+    final public static function __pamAlwaysRenders(Component $component): bool
+    {
+        $class = $component::class;
+
+        return self::$pamAlwaysRender[$class] ??= self::pamAlwaysRenders($class);
+    }
+
+    /** @internal Where the owner's template placed this component's element. */
+    final public function __pamPlacement(): ?Internal\ComponentPlacement
+    {
+        return $this->pamPlacement;
+    }
+
+    /** @internal */
+    final public function __pamPlace(?Internal\ComponentPlacement $placement): void
+    {
+        $this->pamPlacement = $placement;
     }
 
     /** @param class-string $class */
@@ -1019,6 +1105,7 @@ abstract class Component implements Renderable
         // mounts again (a lazy row back in the window) renders anew instead
         // of reusing an element whose handlers reach released children.
         $this->pamLastElement = null;
+        $this->pamPlacement = null;
         foreach ($owned as $resource) {
             try {
                 $resource->dispose();
@@ -1036,6 +1123,7 @@ abstract class Component implements Renderable
     {
         $this->pamHandlers = [];
         $this->pamLastElement = null;
+        $this->pamPlacement = null;
         $this->pamSnapshot = null;
         $this->pamEventListeners = [];
         $this->pamSlots = [];

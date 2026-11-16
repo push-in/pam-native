@@ -315,7 +315,7 @@ public final class PamRenderer: @unchecked Sendable {
         var needsModalSync = false
         let outerCommit = committing
         committing = true
-        if !liftedModals.isEmpty { prepareModalSharedRemovals(batches) }
+        if !liftedModals.isEmpty { prepareModalRemovals(batches) }
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -657,9 +657,10 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     /// A presented Modal unmounted by this commit (itself or an ancestor)
-    /// starts its shared elements home while its views are still laid out,
-    /// before the removals take them away (Android parity).
-    private func prepareModalSharedRemovals(_ batches: [[Mutation]]) {
+    /// starts its shared elements home, or records its content for the exit
+    /// it plays once unmounted, while its views are still laid out, before
+    /// the removals take them away (Android parity).
+    private func prepareModalRemovals(_ batches: [[Mutation]]) {
         var removed = Set<Int64>()
         for batch in batches {
             for mutation in batch {
@@ -672,7 +673,7 @@ public final class PamRenderer: @unchecked Sendable {
             var depth = 0
             while current != 0, depth < 512 {
                 if removed.contains(current) {
-                    modal.prepareSharedRemoval()
+                    modal.prepareRemoval()
                     break
                 }
                 current = nodes[current]?.parent ?? 0
@@ -702,6 +703,7 @@ public final class PamRenderer: @unchecked Sendable {
             view.pamMediaClockRef = nil
             view.pamMediaProgressRef = nil
         }
+        if let view = views[id] { PamTimeBinding.clear(view) }
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
         workletAnimators.removeValue(forKey: id)?.stop()
@@ -2999,6 +3001,8 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
              PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
             refreshTVFocus(view: view, nodeId: nodeId)
+        case PamConstants.blocksNavigationGesture:
+            view.pamBlocksNavigationGesture = value.boolOrNil() ?? false
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
@@ -3386,9 +3390,14 @@ public final class PamRenderer: @unchecked Sendable {
             configureTabHost(nodeId: nodeId, view: view)
         case PamConstants.canvasCommands:
             (view as? PamVectorCanvas)?.setCommands(value.textOrNil() ?? "[]")
+        // Every gesture option re-applies them all: a push that changes only
+        // the direction or the full-screen flag must not keep the previous
+        // route's gesture.
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
-             PamConstants.navigationGestureThreshold:
+             PamConstants.navigationGestureThreshold,
+             PamConstants.navigationGestureDirection,
+             PamConstants.navigationFullScreenGestureEnabled:
             configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.switchTrackColorFalse:
             if let switchView = view as? PamVuetifySwitch {
@@ -3475,6 +3484,20 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.mediaProgress:
             view.pamMediaProgressRef = value.textOrNil()
             mediaBoundIds.insert(nodeId)
+        case PamConstants.clockStartedAt,
+             PamConstants.clockEndsAt,
+             PamConstants.clockDurationMs,
+             PamConstants.clockOffsetMs,
+             PamConstants.clockRunning,
+             PamConstants.clockFormat,
+             PamConstants.progressStartedAt,
+             PamConstants.progressDurationMs,
+             PamConstants.progressOffsetMs,
+             PamConstants.progressRunning,
+             PamConstants.revealCharMs,
+             PamConstants.revealDurationMs,
+             PamConstants.revealKey:
+            syncTimeBinding(view: view, nodeId: nodeId)
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = value.boolOrNil() ?? false
         case PamConstants.scrollKeyboardPersistTaps:
@@ -3834,6 +3857,8 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
              PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
             refreshTVFocus(view: view, nodeId: nodeId)
+        case PamConstants.blocksNavigationGesture:
+            view.pamBlocksNavigationGesture = false
         case PamConstants.height:
             (view as? PamMultilineInputField)?.growsWithContent = true
         case PamConstants.secure:
@@ -3973,9 +3998,14 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamNavigationHost)?.autoHideHomeIndicator = false
         case PamConstants.navigationRevision:
             break
+        // Every gesture option re-applies them all: a push that changes only
+        // the direction or the full-screen flag must not keep the previous
+        // route's gesture.
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
-             PamConstants.navigationGestureThreshold:
+             PamConstants.navigationGestureThreshold,
+             PamConstants.navigationGestureDirection,
+             PamConstants.navigationFullScreenGestureEnabled:
             configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(2)
@@ -4037,6 +4067,20 @@ public final class PamRenderer: @unchecked Sendable {
             view.pamMediaProgressRef = nil
             view.transform = .identity
             if state.properties[PamConstants.mediaClock] == nil { mediaBoundIds.remove(nodeId) }
+        case PamConstants.clockStartedAt,
+             PamConstants.clockEndsAt,
+             PamConstants.clockDurationMs,
+             PamConstants.clockOffsetMs,
+             PamConstants.clockRunning,
+             PamConstants.clockFormat,
+             PamConstants.progressStartedAt,
+             PamConstants.progressDurationMs,
+             PamConstants.progressOffsetMs,
+             PamConstants.progressRunning,
+             PamConstants.revealCharMs,
+             PamConstants.revealDurationMs,
+             PamConstants.revealKey:
+            syncTimeBinding(view: view, nodeId: nodeId)
         case PamConstants.scrollAnimated:
             (view as? PamAnchoredScrollView)?.scrollAnimated = false
         case PamConstants.scrollKeyboardPersistTaps:
@@ -4384,6 +4428,53 @@ public final class PamRenderer: @unchecked Sendable {
         } else if let field = view as? (any PamTextInputHost) {
             field.textAlignment = alignment
         }
+    }
+
+    /// Native time primitives (Android `syncTimeBinding`): `clock*` (Text),
+    /// `progress*` (any view) and `reveal*` (Text) follow PHP's values frame
+    /// by frame in `PamTimeBinding`, with no render per tick.
+    private func syncTimeBinding(view: UIView, nodeId: Int64) {
+        guard let properties = nodes[nodeId]?.properties else { return }
+        func millis(_ key: Int) -> Int64? {
+            guard let value = properties[key] else { return nil }
+            if let integer = value.integerOrNil() { return integer }
+            if let decimal = value.decimalOrNil(), decimal.isFinite { return Int64(max(-9e15, min(9e15, decimal))) }
+            return nil
+        }
+        func running(_ key: Int) -> Bool { properties[key]?.boolOrNil() ?? true }
+        let clockStart = millis(PamConstants.clockStartedAt)
+        let clockEnd = millis(PamConstants.clockEndsAt)
+        let clockDuration = millis(PamConstants.clockDurationMs)
+        let clockOffset = millis(PamConstants.clockOffsetMs)
+        var clock: PamClockSpec?
+        if view is UILabel, clockStart != nil || clockEnd != nil || clockDuration != nil || clockOffset != nil {
+            clock = PamClockSpec(
+                source: PamTimeSource(startedAt: clockStart, offsetMs: clockOffset ?? 0, running: running(PamConstants.clockRunning)),
+                durationMs: clockDuration,
+                endsAt: clockEnd,
+                format: Int(millis(PamConstants.clockFormat) ?? Int64(PamClockFormat.minutesSeconds))
+            )
+        }
+        let progressStart = millis(PamConstants.progressStartedAt)
+        let progressDuration = millis(PamConstants.progressDurationMs)
+        var progress: PamProgressSpec?
+        if progressStart != nil || progressDuration != nil {
+            progress = PamProgressSpec(
+                source: PamTimeSource(
+                    startedAt: progressStart,
+                    offsetMs: millis(PamConstants.progressOffsetMs) ?? 0,
+                    running: running(PamConstants.progressRunning)
+                ),
+                durationMs: progressDuration ?? 0
+            )
+        }
+        let revealChar = millis(PamConstants.revealCharMs) ?? 0
+        let revealDuration = millis(PamConstants.revealDurationMs) ?? 0
+        var reveal: PamRevealSpec?
+        if view is PamTextView, revealChar > 0 || revealDuration > 0 {
+            reveal = PamRevealSpec(charMs: revealChar, durationMs: revealDuration, key: properties[PamConstants.revealKey]?.textOrNil())
+        }
+        PamTimeBinding.sync(view, clock: clock, progress: progress, reveal: reveal)
     }
 
     /// Builds the `PamTextView` content from the node: the exact inputs the
@@ -6317,7 +6408,7 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
-    private final class EventBridge: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private final class EventBridge: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate, PamDragOwning {
         private let nodeId: Int64
         private let kind: Int
         private let dispatchEvent: (Int64, Int, Data) -> Void
@@ -7428,14 +7519,65 @@ public final class PamRenderer: @unchecked Sendable {
             guard gestureRecognizer === semanticGesture,
                   let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
             let velocity = pan.velocity(in: pan.view)
+            let onAxis: Bool
             if let config = drag?.config {
-                return config.horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+                onAxis = config.horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+            } else {
+                switch semanticGestureDirection {
+                case 2, 3, 6: onAxis = abs(velocity.x) > abs(velocity.y)
+                case 4, 5, 7: onAxis = abs(velocity.y) > abs(velocity.x)
+                default: onAxis = true
+                }
             }
+            return onAxis && !contentTakesDrag(pan)
+        }
+
+        /// A pan that shares the touch with its content (simultaneous, or a
+        /// race) lets a scroll view under the finger inside it keep a drag it
+        /// can still move with: a dismiss drag around a list scrolled down
+        /// scrolls the list, and the two never move together (Android
+        /// parity). Nested detectors compose as configured. An exclusive pan
+        /// cancels its content's touches.
+        private func contentTakesDrag(_ pan: UIPanGestureRecognizer) -> Bool {
+            guard semanticGestureType == 2, semanticGestureComposition != 1, let view = pan.view else { return false }
+            let translation = pan.translation(in: view)
+            let velocity = pan.velocity(in: view)
+            let motion = (abs(velocity.x) + abs(velocity.y)) > 1 ? velocity : translation
+            let horizontal = abs(motion.x) >= abs(motion.y)
+            let along = horizontal ? motion.x : motion.y
+            let location = pan.location(in: view)
+            let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            guard let hit = view.hitTest(start, with: nil), hit !== view else { return false }
+            return PamGestureArbiter.scrollOwnership(
+                from: hit,
+                upTo: view,
+                horizontal: horizontal,
+                sign: along >= 0 ? 1 : -1
+            ) >= PamGestureArbiter.directional
+        }
+
+        /// How this node's pan or swipe owns a drag ([PamGestureArbiter]):
+        /// a zoomed surface owns every drag, a pan the ones its direction
+        /// (and its Drag's axis) admits, and a pan from the first point (a
+        /// scrubber) owns them like a slider.
+        func dragOwnership(of recognizer: UIGestureRecognizer, horizontal: Bool, sign: CGFloat) -> Int {
+            guard recognizer === semanticGesture, recognizer.isEnabled,
+                  recognizer is UIPanGestureRecognizer else { return PamGestureArbiter.noOwner }
+            if zoomedPanOwnsTouch { return PamGestureArbiter.exclusive }
+            guard semanticGestureType == 2 || semanticGestureType == 5 else { return PamGestureArbiter.noOwner }
+            if let config = drag?.config, config.horizontal != horizontal { return PamGestureArbiter.noOwner }
+            let admits: Bool
             switch semanticGestureDirection {
-            case 2, 3, 6: return abs(velocity.x) > abs(velocity.y)
-            case 4, 5, 7: return abs(velocity.y) > abs(velocity.x)
-            default: return true
+            case 2: admits = horizontal && sign < 0
+            case 3: admits = horizontal && sign > 0
+            case 4: admits = !horizontal && sign < 0
+            case 5: admits = !horizontal && sign > 0
+            case 6: admits = horizontal
+            case 7: admits = !horizontal
+            default: admits = true
             }
+            guard admits else { return PamGestureArbiter.noOwner }
+            return immediatePanOwnsTouch ? PamGestureArbiter.exclusive : PamGestureArbiter.directional
         }
 
         /// While a native transform shows its content zoomed in, a drag

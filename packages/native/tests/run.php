@@ -6716,8 +6716,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.49.13',
-    'The runtime SDK contract must match the 1.49.13 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.50.0',
+    'The runtime SDK contract must match the 1.50.0 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7656,6 +7656,7 @@ require __DIR__.'/list_window_template.php';
 require __DIR__.'/list_native_scroll.php';
 require __DIR__.'/launch_url.php';
 require __DIR__.'/handler_purity.php';
+require __DIR__.'/granular_render.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
 // Heap measurements need an isolated process, without prior tests' retained fixtures.
@@ -7663,6 +7664,7 @@ passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg(__DIR__.'/navigation_memo
 $assert($navigationMemoryStatus === 0, 'Navigation memory regression harness must pass.');
 require __DIR__.'/media_idle_surface.php';
 require __DIR__.'/media_autoplay_visible.php';
+require __DIR__.'/native_time.php';
 require __DIR__.'/arch_v2_signals.php';
 require __DIR__.'/arch_v2_signal_fanout.php';
 require __DIR__.'/arch_v2_signal_rendering.php';
@@ -7682,5 +7684,6 @@ require __DIR__.'/arch_v2_locale.php';
 require __DIR__.'/arch_v2_testing.php';
 require __DIR__.'/arch_v2_navigation_modes.php';
 require __DIR__.'/arch_v2_focus_order.php';
+require __DIR__.'/navigation_press_prewarm.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

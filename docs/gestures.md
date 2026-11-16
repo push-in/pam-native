@@ -416,6 +416,46 @@ public function captionMeasured(TextLayoutEvent $event): void
 `ellipsizeMode="marquee"` turns a single-line text into a native ticker (audio
 names in Reels).
 
+## Who owns a drag
+
+No gesture steals another's drag, like UIKit's `require(toFail:)` and
+react-native-gesture-handler. A gesture that wraps content asks, when the
+finger has moved past the touch slop, whether the content under the finger
+consumes that drag itself, and yields to it for the rest of the touch:
+
+| Container gesture | Yields to |
+| --- | --- |
+| The navigator's back gesture (full screen, or vertical) | A scroller that can still scroll that way (a pager with a previous page, a tab strip scrolled away from its start, a list scrolled down for a vertical dismiss), a pan or swipe whose direction admits the drag (a horizontal `Drag`, swipe to reply), a slider, a drawing surface, a zoomed photo, `blocksNavigationGesture`. |
+| The navigator's back gesture from the edge (`gestureEdgeWidth`, 24 dp) | Only exclusive owners: a drawing surface, a zoomed photo, a pan that tracks from the first pixel (`gestureMinDistance="0"`, not simultaneous), `blocksNavigationGesture`. The edge outranks scrollers and pans, as UIKit's screen-edge pan does. |
+| A pan that shares the touch (`gestureComposition="simultaneous"` or `race`), e.g. a vertical dismiss | A scroller inside it, under the finger, that can still scroll that way: a dismiss drag around a list scrolled down scrolls the list, and they never move together. Nested detectors compose as configured; an exclusive pan keeps the whole touch. |
+| Pull to refresh, a sheet's drag to close, swipeable top tabs | The same owners nested anywhere under the finger, not only the direct child. |
+
+So on a route with `fullScreenGestureEnabled`, dragging right over a horizontal
+pager on its second page turns the page; on its first page (nothing to its
+left) the same drag goes back. A drag that starts on the leading edge always
+goes back.
+
+A view that pans on its own without telling the platform (a map, a signature
+pad, a native view from a plugin) can keep the back gesture away while the
+finger is on it, even from the edge:
+
+```xml
+<View blocksNavigationGesture="true">
+    <SignaturePad />
+</View>
+```
+
+```php
+View::make($pad)->blocksNavigationGesture();
+```
+
+Regression sources: Android `PamGestureArbiterInstrumentedTest` (a pager
+inside a stacked route from 4 to 200 dp of the edge, first page, edge,
+`blocksNavigationGesture`, a list's claim, pans, the dismiss pan around a
+list, pull to refresh, and the renderer applying a lone
+`fullScreenGestureEnabled` change); iOS `PamGestureArbiterTests` (macOS
+UIKit test target).
+
 ## Platform status
 
 Android and iOS (1.8.0) implement every primitive on this page. On iOS,

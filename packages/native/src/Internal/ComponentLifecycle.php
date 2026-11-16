@@ -399,6 +399,12 @@ final class ComponentLifecycle
         }
     }
 
+    /** Render pass of the component's last real render (-1 before the first). */
+    public static function renderedPass(Component $component): int
+    {
+        return (self::$states[$component] ?? null)?->rendered ?? -1;
+    }
+
     /**
      * True when the component is part of this pass without having rendered
      * (it, or an ancestor, was reused): what it rendered last stays.
@@ -416,11 +422,72 @@ final class ComponentLifecycle
         $holder = $children[$parent] ?? null;
         if ($holder === null) {
             $children[$parent] = $holder = new ComponentLifecycleState();
+        } elseif ($holder->patching) {
+            return;
         }
         $holder->children[] = $component;
         // A child joined after the subtree was walked (a lazy list row).
         $holder->retained = null;
         $holder->walked = -1;
+    }
+
+    /**
+     * Child components of the component's last real render.
+     *
+     * @return list<Component>
+     */
+    public static function children(Component $component): array
+    {
+        return self::$children[$component]->children ?? [];
+    }
+
+    /**
+     * Starts a granular update of $component (GranularRender): some of its
+     * children render again while it keeps its last render, so they are not
+     * listed twice. Returns false when it has no child list.
+     */
+    public static function beginPatch(Component $component): bool
+    {
+        $holder = self::$children[$component] ?? null;
+        if ($holder === null) {
+            return false;
+        }
+        $holder->patching = true;
+
+        return true;
+    }
+
+    /**
+     * Ends a granular update: the children it did not render again stay
+     * mounted with their subtrees (as under a reused component); the ones it
+     * rendered retained what they rendered themselves.
+     *
+     * @param list<Component> $rendered
+     */
+    public static function endPatch(Component $component, array $rendered, bool $retain): void
+    {
+        $holder = self::$children[$component] ?? null;
+        if ($holder === null) {
+            return;
+        }
+        $holder->patching = false;
+        // Descendants changed: the flattened list is stale.
+        $holder->retained = null;
+        $holder->walked = -1;
+        if (!$retain) {
+            return;
+        }
+        $skip = [];
+        foreach ($rendered as $child) {
+            $skip[spl_object_id($child)] = true;
+        }
+        foreach ($holder->children as $child) {
+            if (isset($skip[spl_object_id($child)])) {
+                continue;
+            }
+            self::retain($child);
+            self::retainSubtree($child);
+        }
     }
 
     /**
@@ -696,5 +763,6 @@ final class ComponentLifecycle
         self::$pass = 0;
         self::$appState = AppState::Active;
         DependencyTracker::reset();
+        GranularRender::reset();
     }
 }
