@@ -96,6 +96,46 @@ The same retained dependency graph powers the public
 tracked effects and nested batching while preserving component-level subtree
 reuse. No polling, global dirty flag or per-frame PHP callback is introduced.
 
+### Granular re-render of ancestors
+
+A component dirty only because of a descendant does not run its template
+again. When a component's own inputs are unchanged (own state snapshot, no
+tracked read or handler marked it, no global invalidation) but a descendant
+is dirty, it keeps its last element and renders again only the children on
+the path to that descendant. Each new child element is placed exactly where
+the owner's template placed the previous one: the call site's `class`, `key`
+and style attributes are applied again (with the same memoized copies) and
+only the elements on the path from the owner's root are copied, so every other
+subtree keeps its identity and its encoded frame. Moving state into a small
+child component therefore saves the parents' templates, as in React or Vue:
+typing in a composer component inside a sheet of a screen renders the
+composer alone.
+
+The result is always the tree a full render would produce. The owner falls
+back to its full render whenever a child cannot be placed again exactly:
+
+- the child was given as slot content to another component (it lives in that
+  component's tree);
+- the child is a lazy row of a `VirtualizedList`/`VirtualGrid` (built by the
+  list window), or portal content;
+- the child was built in PHP code (`render()` returning elements) or by a
+  component tag with native events, bindings or `p-ripple` (not a compiled
+  `.pam` tag);
+- the owner's tree no longer holds the child's element exactly once.
+
+`#[AlwaysRender]` children of an updated owner render with it, as on a full
+render. Lifecycle is unchanged: children that are not rendered again stay
+mounted with their subtrees; what a re-rendered child drops unmounts and what
+it adds mounts. A child that throws propagates to the owner as from its
+render: the owner's `failed()`/`fallback()` boundary applies and its recovery
+is shown, with its components kept mounted (a change in the failing child
+renders it again).
+
+The profiler records a granular update as a `component.patch` span (with
+`component` metadata) instead of `component.render`.
+`Pam\Native\Internal\GranularRender::enabled(false)` turns it off (every
+ancestor renders again), e.g. to compare.
+
 ## Incremental layout
 
 Property patches mark only their changed node IDs and ancestor paths as dirty.
@@ -131,6 +171,9 @@ path.
 
 - `php.render`;
 - `php.encode`;
+- `component.render` (a component ran its template) and `component.patch`
+  (it kept its render and updated only the paths to dirty descendants), with
+  `component` metadata;
 - `scheduler.task`;
 - duration, timestamp and integer priority metadata.
 
