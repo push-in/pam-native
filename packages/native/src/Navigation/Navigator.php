@@ -8,6 +8,7 @@ use BackedEnum;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Component;
+use Pam\Native\Internal\DependencyTracker;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 use Pam\Native\Routing\RouteName;
@@ -266,7 +267,21 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
     public function dispatchSystemBack(): bool
     {
-        return $this->consumeSystemBack() || $this->goBack();
+        if ($this->consumeSystemBack()) {
+            // An app interceptor (a sheet closing, a "leave?" prompt) may
+            // change any state: re-render everything, as for any app closure.
+            DependencyTracker::invalidateAll();
+
+            return true;
+        }
+        if (!$this->goBack()) {
+            return false;
+        }
+        // The stacks it popped re-render (child navigators by the render's
+        // change detection); the screens kept alive under them are reused.
+        DependencyTracker::markDirty($this);
+
+        return true;
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
@@ -514,21 +529,31 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         )
         ->screenBehavior($activeOptions->orientation, $activeOptions->autoHideHomeIndicator)
         ->screenOptions($activeOptions)
-        ->onTransitionEnd(function (): void {
+        // The host's transition and gesture callbacks re-render this navigator
+        // only (and what its listeners changed, found by the render's change
+        // detection): as plain closures they invalidated the whole tree, and
+        // every kept-alive screen (tabs, the stack below) rendered again after
+        // each push or pop, ~120 ms of PHP on a large app.
+        ->onTransitionEnd(#[\Pam\Native\Attributes\PureHandler] function (): void {
             $this->finalizeOutgoingRoute();
             $this->emitNavigation(NavigationEventType::TransitionEnd, ['route' => $this->current()]);
+            DependencyTracker::markDirty($this);
         })
-        ->onGestureStart(function (): void {
+        ->onGestureStart(#[\Pam\Native\Attributes\PureHandler] function (): void {
             $this->emitNavigation(NavigationEventType::GestureStart, ['route' => $this->current()]);
+            DependencyTracker::markDirty($this);
         })
-        ->onGestureEnd(function (): void {
+        ->onGestureEnd(#[\Pam\Native\Attributes\PureHandler] function (): void {
             $this->emitNavigation(NavigationEventType::GestureEnd, ['route' => $this->current()]);
+            DependencyTracker::markDirty($this);
         })
-        ->onGestureCancel(function (): void {
+        ->onGestureCancel(#[\Pam\Native\Attributes\PureHandler] function (): void {
             $this->emitNavigation(NavigationEventType::GestureCancel, ['route' => $this->current()]);
+            DependencyTracker::markDirty($this);
         })
-        ->onGesturePop(function (): void {
+        ->onGesturePop(#[\Pam\Native\Attributes\PureHandler] function (): void {
             $this->pop();
+            DependencyTracker::markDirty($this);
         });
     }
 

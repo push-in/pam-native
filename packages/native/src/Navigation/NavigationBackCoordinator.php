@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
-use Pam\Native\App;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\NativeOperation;
 use WeakReference;
@@ -21,7 +20,8 @@ final class NavigationBackCoordinator
         if (self::$explicitRoot && !$explicitRoot) return;
         self::$root = WeakReference::create($navigator);
         self::$explicitRoot = $explicitRoot;
-        App::onBack(static function (): void {
+        // Tracked: dispatchSystemBack() marks what a Back changed.
+        Runtime::onBack(static function (): void {
             $root = self::$root?->get();
             if ($root instanceof Navigator && $root->dispatchSystemBack()) return;
             Runtime::callNative(
@@ -30,6 +30,6 @@ final class NavigationBackCoordinator
                 static function (): void {
                 },
             );
-        });
+        }, tracked: true);
     }
 }
