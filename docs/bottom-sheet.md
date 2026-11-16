@@ -99,3 +99,35 @@ row of recent photos, a new option): a fixed detent that is too short clips
 the last rows, and `pam-native safe-area-lint` reports them. Content taller
 than the available height must scroll (`ScrollView` / `VirtualizedList` with
 `flexGrow` inside the sheet).
+
+## Closing by unmounting (`p-if`)
+
+A presented `BottomSheet` (or `Modal`) that leaves the tree, the idiomatic
+
+```html
+<BottomSheet p-if="$open" on:sheetDismiss="onSheetDismiss"> ... </BottomSheet>
+```
+
+with `$open` set to `false`, plays the same exit as `visible = false`: the
+sheet and its handle slide down by their height while the backdrop fades, on
+the same curve and duration (a `Modal` plays its `animationType` exit). The
+native side keeps its window (Android) or a snapshot over the host (iOS) only
+for that exit and then removes it:
+
+- The PHP state is the source of truth and already closed it: no
+  `on:sheetDismiss`, `on:dismiss` or `on:requestClose` is sent for it, and a
+  `visible = false` exit that was running is taken over without notifying.
+- What leaves is a picture of the content as it was (Android records its draw
+  commands, sharing the decoded bitmaps; iOS takes a render-server snapshot):
+  nothing in it updates or takes input. Touches and Back reach the screen
+  below at once.
+- Opening the sheet again during the exit (`$open` back to `true`) presents a
+  new sheet above the one leaving, with its own entrance; the old one finishes
+  underneath without flicker.
+- The exit is skipped (the sheet goes at once, as before) with reduce motion
+  or animations off, `animationType="none"`, a covered route, or an activity
+  that is finishing or in the background. On Android the window also goes at
+  once if the app goes to the background or the activity is destroyed during
+  the exit, and at the latest after one second.
+- A `Modal` with `shared` tags keeps its own unmount transition (its tags fly
+  home, see `docs/navigation.md`).

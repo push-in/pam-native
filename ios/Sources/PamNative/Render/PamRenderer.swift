@@ -315,7 +315,7 @@ public final class PamRenderer: @unchecked Sendable {
         var needsModalSync = false
         let outerCommit = committing
         committing = true
-        if !liftedModals.isEmpty { prepareModalSharedRemovals(batches) }
+        if !liftedModals.isEmpty { prepareModalRemovals(batches) }
         func markList(of id: Int64) {
             if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
         }
@@ -657,9 +657,10 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     /// A presented Modal unmounted by this commit (itself or an ancestor)
-    /// starts its shared elements home while its views are still laid out,
-    /// before the removals take them away (Android parity).
-    private func prepareModalSharedRemovals(_ batches: [[Mutation]]) {
+    /// starts its shared elements home, or records its content for the exit
+    /// it plays once unmounted, while its views are still laid out, before
+    /// the removals take them away (Android parity).
+    private func prepareModalRemovals(_ batches: [[Mutation]]) {
         var removed = Set<Int64>()
         for batch in batches {
             for mutation in batch {
@@ -672,7 +673,7 @@ public final class PamRenderer: @unchecked Sendable {
             var depth = 0
             while current != 0, depth < 512 {
                 if removed.contains(current) {
-                    modal.prepareSharedRemoval()
+                    modal.prepareRemoval()
                     break
                 }
                 current = nodes[current]?.parent ?? 0

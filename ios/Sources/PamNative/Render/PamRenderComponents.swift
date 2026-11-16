@@ -2681,6 +2681,33 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private var lastOrientation: Int?
     private weak var previousFocus: UIView?
 
+    /// `visible = false` exit timings, shared with an unmounted Modal's exit.
+    private enum Exit {
+        static let sheet: TimeInterval = 0.2
+        static let dialog: TimeInterval = 0.125
+        static let slideDistance: CGFloat = 0.12
+    }
+
+    /// What an unmounted Modal leaves on screen for its exit: a copy of its
+    /// backdrop and a snapshot of its content (`prepareRemoval`), in a
+    /// container that takes no touches.
+    private struct RemovalExit {
+        let container: UIView
+        let backdrop: UIView
+        let picture: UIView?
+        /// How far the picture travels (sheet: what is left to the bottom).
+        let travel: CGFloat
+        let presentation: Int
+        let animation: Int
+    }
+
+    /// Recorded by `prepareRemoval` while the content is still laid out;
+    /// played once the renderer takes the Modal off its host.
+    private var removalExit: RemovalExit?
+
+    /// Accessibility identifier of an unmounted Modal's exit (tests, diagnostics).
+    static let removalExitIdentifier = "pam.modal.removalExit"
+
     override var canBecomeFirstResponder: Bool {
         true
     }
@@ -3200,7 +3227,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             isHidden = true
             return
         }
-        let animationDuration: TimeInterval = 0.125
+        let animationDuration = Exit.dialog
         let generation = visibilityGeneration
         // An input focused inside the sheet kept the keyboard up after the
         // sheet closed (a hidden view stays first responder). Android's
@@ -3250,10 +3277,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         let animated = !PamMotionPolicy.isReduced && animationType != Animation.none
         if presentation == Presentation.sheet && animated {
             let distance = sheetTravel
-            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveLinear]) {
+            UIView.animate(withDuration: Exit.sheet, delay: 0, options: [.curveLinear]) {
                 self.backdropView.alpha = 0
             }
-            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn], animations: {
+            UIView.animate(withDuration: Exit.sheet, delay: 0, options: [.curveEaseIn], animations: {
                 self.contentHost.transform = CGAffineTransform(translationX: 0, y: distance)
                 self.sheetHandle.transform = self.contentHost.transform
             }, completion: { _ in
@@ -3282,7 +3309,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
                 self.contentClip.alpha = 0
                 self.contentClip.transform = self.presentation == Presentation.sheet
                     ? CGAffineTransform(translationX: 0, y: self.bounds.height * 0.35)
-                    : CGAffineTransform(translationX: 0, y: self.bounds.height * 0.12)
+                    : CGAffineTransform(translationX: 0, y: self.bounds.height * Exit.slideDistance)
             }, completion: { _ in
                 completion()
             })
@@ -3400,13 +3427,140 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     /// The Modal (or an ancestor) is unmounted by the commit about to run:
     /// while its views are still laid out, its tags start flying home over a
-    /// cover of its background, and the flights outlive the Modal.
-    func prepareSharedRemoval() {
+    /// cover of its background, and the flights outlive the Modal. Without
+    /// tags, a snapshot of its content plays the regular exit once it is
+    /// removed (`willMove(toSuperview:)`, Android parity).
+    func prepareRemoval() {
         guard isPresentedOnScreen else { return }
         if shared.running { shared.cancel() }
         if startSharedExit(shade: true, onEnd: { _ in }) {
             shared.detach()
+            return
         }
+        guard removalExit == nil, alpha > 0.01, !PamMotionPolicy.isReduced,
+              animationType != Animation.none else { return }
+        removalExit = recordRemovalExit()
+        // Still mounted after all: the snapshot goes with this run-loop turn.
+        DispatchQueue.main.async { [weak self] in
+            self?.removalExit = nil
+        }
+    }
+
+    /// Snapshot of the content as it is on screen now (render server copy,
+    /// no redraw) over a copy of the backdrop, where the Modal is.
+    private func recordRemovalExit() -> RemovalExit {
+        let container = UIView()
+        container.bounds = bounds
+        container.center = center
+        container.transform = transform
+        container.alpha = alpha
+        container.isUserInteractionEnabled = false
+        container.accessibilityElementsHidden = true
+        container.accessibilityIdentifier = Self.removalExitIdentifier
+        let backdrop = UIView(frame: container.bounds)
+        backdrop.backgroundColor = backdropView.backgroundColor
+        backdrop.alpha = CGFloat(backdropView.layer.presentation()?.opacity ?? Float(backdropView.alpha))
+        backdrop.isUserInteractionEnabled = false
+        container.addSubview(backdrop)
+        let picture = contentClip.snapshotView(afterScreenUpdates: false)
+        if let picture {
+            picture.bounds = contentClip.bounds
+            picture.center = contentClip.center
+            picture.transform = contentClip.layer.presentation()?.affineTransform() ?? contentClip.transform
+            picture.alpha = CGFloat(contentClip.layer.presentation()?.opacity ?? Float(contentClip.alpha))
+            picture.isUserInteractionEnabled = false
+            container.addSubview(picture)
+        }
+        let travel: CGFloat
+        if presentation == Presentation.sheet {
+            // The sheet (and its handle) slides by its own height from rest;
+            // a drag or a running exit already moved it part of the way.
+            let moved = contentHost.layer.presentation()?.affineTransform().ty ?? contentHost.transform.ty
+            travel = max(sheetTravel - moved, 0)
+        } else if animationType == Animation.slideFade {
+            travel = max(bounds.height, 1)
+        } else {
+            travel = bounds.height * Exit.slideDistance
+        }
+        return RemovalExit(
+            container: container,
+            backdrop: backdrop,
+            picture: picture,
+            travel: travel,
+            presentation: presentation,
+            animation: animationType
+        )
+    }
+
+    override func willMove(toSuperview newSuperview: UIView?) {
+        super.willMove(toSuperview: newSuperview)
+        guard newSuperview == nil, let exit = removalExit, let host = superview else { return }
+        removalExit = nil
+        // The exit takes over a dismissal still running: that one neither
+        // completes nor notifies (the app already closed the Modal).
+        visibilityGeneration += 1
+        slideFadeAnimator?.stopAnimation(true)
+        slideFadeAnimator = nil
+        host.insertSubview(exit.container, aboveSubview: self)
+        Self.playRemovalExit(exit)
+    }
+
+    /// The same exit as `visible = false` (`dismiss(notify:)`), played by the
+    /// snapshot; the container goes when it ends (or at the latest after a
+    /// second, should an animation never complete). Touches reach what is
+    /// below meanwhile; a Modal opened meanwhile is added above it.
+    private static func playRemovalExit(_ exit: RemovalExit) {
+        let container = exit.container
+        let backdrop = exit.backdrop
+        let finish: (Bool) -> Void = { _ in container.removeFromSuperview() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak container] in
+            container?.removeFromSuperview()
+        }
+        guard let picture = exit.picture else {
+            UIView.animate(
+                withDuration: exit.presentation == Presentation.sheet ? Exit.sheet : Exit.dialog,
+                delay: 0,
+                options: [.curveLinear],
+                animations: { backdrop.alpha = 0 },
+                completion: finish
+            )
+            return
+        }
+        if exit.presentation == Presentation.sheet {
+            let from = picture.transform
+            UIView.animate(withDuration: Exit.sheet, delay: 0, options: [.curveLinear]) {
+                backdrop.alpha = 0
+            }
+            UIView.animate(withDuration: Exit.sheet, delay: 0, options: [.curveEaseIn], animations: {
+                picture.transform = from.concatenating(CGAffineTransform(translationX: 0, y: exit.travel))
+            }, completion: finish)
+            return
+        }
+        switch exit.animation {
+        case Animation.slideFade:
+            UIView.animate(withDuration: SlideFade.exit * SlideFade.backdropShare, delay: 0, options: [.curveLinear]) {
+                backdrop.alpha = 0
+            }
+            UIView.animate(withDuration: SlideFade.exit, delay: 0, options: [.curveEaseIn], animations: {
+                picture.transform = CGAffineTransform(translationX: 0, y: exit.travel)
+            }, completion: finish)
+        case Animation.slide:
+            UIView.animate(withDuration: Exit.dialog, animations: {
+                backdrop.alpha = 0
+                picture.alpha = 0
+                picture.transform = CGAffineTransform(translationX: 0, y: exit.travel)
+            }, completion: finish)
+        default:
+            UIView.animate(withDuration: Exit.dialog, animations: {
+                backdrop.alpha = 0
+                picture.alpha = 0
+            }, completion: finish)
+        }
+    }
+
+    /// Unmounted, its snapshot still plays the exit (tests, diagnostics).
+    static func removalExitView(in host: UIView) -> UIView? {
+        host.subviews.first { $0.accessibilityIdentifier == removalExitIdentifier }
     }
 
     /// Flights in progress (tests, diagnostics).

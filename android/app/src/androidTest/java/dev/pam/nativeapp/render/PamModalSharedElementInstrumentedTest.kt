@@ -75,7 +75,7 @@ class PamModalSharedElementInstrumentedTest {
 
             val closing = sample(instrumentation, scene.modal) {
                 // What the renderer does when the Modal leaves the tree.
-                scene.modal.prepareSharedRemoval()
+                scene.modal.prepareRemoval()
                 scene.modal.close()
                 (scene.modal.parent as ViewGroup).removeView(scene.modal)
             }
