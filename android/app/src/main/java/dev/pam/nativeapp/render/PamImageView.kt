@@ -139,9 +139,22 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
         super.requestLayout()
     }
 
+    /** Inside onVisibilityAggregated: drawable visibility invalidations are filtered ([drawsSameWhenHidden]). */
+    private var aggregatingVisibility = false
+
     override fun onVisibilityAggregated(isVisible: Boolean) {
-        super.onVisibilityAggregated(isVisible)
+        aggregatingVisibility = true
+        try {
+            super.onVisibilityAggregated(isVisible)
+        } finally {
+            aggregatingVisibility = false
+        }
         if (windowVisibility == VISIBLE && (isVisible || !retainPixels)) onShownChanged?.invoke(isVisible)
+    }
+
+    override fun invalidateDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (aggregatingVisibility && drawsSameWhenHidden(drawable)) return
+        super.invalidateDrawable(drawable)
     }
 
     override fun draw(canvas: Canvas) {

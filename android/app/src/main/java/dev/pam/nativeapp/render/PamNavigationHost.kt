@@ -12,6 +12,7 @@ import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RenderNode
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -23,6 +24,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
+import android.view.SurfaceView
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
@@ -31,6 +33,8 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.SearchView
 import android.widget.Toolbar
+import android.webkit.WebView
+import androidx.annotation.RequiresApi
 import android.graphics.Color
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
@@ -86,6 +90,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private val backdropRegion = RectF()
     private val siblingBounds = Rect()
     private val awaitingFirstLayout: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
+    /**
+     * Routes in the order they were last shown (most recent last), and the
+     * hidden ones that cannot be kept drawn at zero alpha (a SurfaceView or
+     * a WebView inside: their surface or functor follows the render tree).
+     * See [retainHiddenRoutes].
+     */
+    private val shownOrder = ArrayList<View>()
+    private val unretainable: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
+    private var hiddenRoutesNode: RenderNode? = null
     private var layoutGeneration = 0L
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
@@ -215,6 +228,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             if (isAttachedToWindow) ensureRouteController(view)
         }
         if (isInitialRoute) setActiveRoute(view)
+        if (isVisibleRoute && !shownOrder.contains(view)) shownOrder.add(view)
     }
 
     /**
@@ -276,6 +290,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         warmLaunch?.takeIf { child === it.incoming || child === it.outgoing }?.let(::abortWarmLaunch)
         if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
+        shownOrder.remove(child)
+        unretainable.remove(child)
         if (child === veilRoute) clearVeil()
         // A route leaves at rest: mounted again later (kept alive, parked) it
         // must not come back faded or moved.
@@ -313,6 +329,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     private fun setRouteVisibility(route: View, value: Int) {
         if (route.visibility == value) return
+        if (value == View.VISIBLE) {
+            shownOrder.remove(route)
+            shownOrder.add(route)
+        } else if (route.visibility == View.VISIBLE && shownOrder.contains(route)) {
+            // Checked once per hide: the route's tree is walked here, never per frame.
+            if (hostsOwnSurface(route)) unretainable.add(route) else unretainable.remove(route)
+        }
         route.visibility = value
         if (!routeVisibilityNotifyPosted && onRouteVisibilityChanged != null) {
             routeVisibilityNotifyPosted = true
@@ -1489,6 +1512,77 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (drawn) invalidate()
     }
 
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canvas.isHardwareAccelerated) {
+            retainHiddenRoutes(canvas)
+        }
+    }
+
+    /**
+     * A route hidden by this host (INVISIBLE) is skipped by the parent's
+     * draw, so HWUI drops it from the render tree and frees the display list
+     * of every view in it: showing it again (a kept-alive tab, the screen
+     * under a popped route) re-recorded the whole screen in that frame
+     * (~8 ms for a feed on a Galaxy S10). The [MAX_RETAINED_ROUTES] most
+     * recently shown hidden routes stay referenced from a zero-alpha node
+     * instead: nothing of them is drawn, their display lists survive, and
+     * showing one records only its root. Only views that change while hidden
+     * record again, as they would on screen.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun retainHiddenRoutes(canvas: Canvas) {
+        var retained: ArrayList<View>? = null
+        for (index in shownOrder.indices.reversed()) {
+            val route = shownOrder[index]
+            if (route.visibility == View.VISIBLE) continue
+            if (route.parent !== this || route.visibility == View.GONE || route in unretainable ||
+                route in awaitingFirstLayout || route.width <= 0 || route.height <= 0
+            ) {
+                continue
+            }
+            val list = retained ?: ArrayList<View>(MAX_RETAINED_ROUTES).also { retained = it }
+            list += route
+            if (list.size == MAX_RETAINED_ROUTES) break
+        }
+        val routes = retained
+        if (routes == null) {
+            hiddenRoutesNode?.discardDisplayList()
+            return
+        }
+        val node = hiddenRoutesNode ?: RenderNode("pam-hidden-routes").also {
+            it.setAlpha(0f)
+            hiddenRoutesNode = it
+        }
+        node.setPosition(0, 0, width, height)
+        val recording = node.beginRecording(width, height)
+        try {
+            val time = drawingTime
+            for (route in routes) super.drawChild(recording, route, time)
+        } finally {
+            node.endRecording()
+        }
+        canvas.drawRenderNode(node)
+    }
+
+    /** Whether [route] holds a view whose own surface or functor would follow it while kept drawn. */
+    private fun hostsOwnSurface(route: View): Boolean {
+        if (route is SurfaceView || route is WebView) return true
+        if (route !is ViewGroup) return false
+        for (index in 0 until route.childCount) {
+            if (hostsOwnSurface(route.getChildAt(index))) return true
+        }
+        return false
+    }
+
+    /** The hidden routes whose display lists this host keeps (tests, diagnostics). */
+    internal fun retainedHiddenRoutes(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
+        return shownOrder.count {
+            it.parent === this && it.visibility == View.INVISIBLE && it !in unretainable && it !in awaitingFirstLayout
+        }.coerceAtMost(MAX_RETAINED_ROUTES)
+    }
+
     override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
         val more = super.drawChild(canvas, child, drawingTime)
         if (child === veilRoute && veilAmount > 0f && child.visibility == View.VISIBLE) drawVeil(canvas, child)
@@ -1931,6 +2025,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
         }
 
+        /**
+         * Hidden routes whose display lists stay referenced: the last two
+         * shown (the tab or screen just left, and the one before), so
+         * switching between them never records their screens again. Each
+         * one costs its display list memory and a RenderThread walk of its
+         * nodes per frame, nothing on the GPU.
+         */
+        const val MAX_RETAINED_ROUTES = 2
         const val OPERATION_IDLE = 1
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3

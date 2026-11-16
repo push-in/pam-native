@@ -242,6 +242,8 @@ private val MOUNT_CREATE_SECTIONS = NodeKind.entries.map { "PamMount.create." + 
 private val MOUNT_ATTACH_SECTIONS = NodeKind.entries.map { "PamMount.attach." + it.name }.toTypedArray()
 private val MOUNT_PROPS_SECTIONS = NodeKind.entries.map { "PamMount.props." + it.name }.toTypedArray()
 private val MOUNT_EVENTS_SECTIONS = NodeKind.entries.map { "PamMount.events." + it.name }.toTypedArray()
+private val MOUNT_REMOVE_SECTIONS = NodeKind.entries.map { "PamMount.remove." + it.name }.toTypedArray()
+private val MOUNT_MOVE_SECTIONS = NodeKind.entries.map { "PamMount.move." + it.name }.toTypedArray()
 
 private val POOLED_CELL_KINDS = setOf(
     NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
@@ -1283,7 +1285,9 @@ class PamRenderer(
                         }
                         is Mutation.Remove -> {
                             markListOf(mutation.id)
-                            mountTraceSection("PamMount.remove") { remove(mutation.id) }
+                            mountTraceSection("PamMount.remove") {
+                                mountKindTraceSection(MOUNT_REMOVE_SECTIONS, nodes[mutation.id]?.kind) { remove(mutation.id) }
+                            }
                             needsModalSync = true
                             needsVirtualListSync = true
                         }
@@ -1310,7 +1314,11 @@ class PamRenderer(
                         }
                         is Mutation.Move -> {
                             markListOf(mutation.id)
-                            mountTraceSection("PamMount.move") { move(mutation.id, mutation.parent, mutation.index) }
+                            mountTraceSection("PamMount.move") {
+                                mountKindTraceSection(MOUNT_MOVE_SECTIONS, nodes[mutation.id]?.kind) {
+                                    move(mutation.id, mutation.parent, mutation.index)
+                                }
+                            }
                             markListOf(mutation.id)
                             needsVirtualListSync = true
                         }
@@ -1868,6 +1876,10 @@ class PamRenderer(
             android.os.Trace.endSection()
         }
     }
+
+    /** Removes and moves name the node kind: a trace tells a player's release from a text's. */
+    private inline fun <T> mountKindTraceSection(names: Array<String>, kind: NodeKind?, block: () -> T): T =
+        if (kind == null) block() else mountTraceSection(names, kind, block)
 
     private inline fun <T> mountTraceSection(name: String, block: () -> T): T {
         if (!mountTraceDetail) return block()
@@ -8792,7 +8804,7 @@ class PamRenderer(
             shape, color, state.properties[PropKey.PRESS_BACKGROUND_COLOR]?.integer()?.toInt(),
         )
         val background = if (!imageHost && hasDirectionalBorder && borderGradient == null) {
-            val borders = object : android.graphics.drawable.Drawable() {
+            val borders = object : android.graphics.drawable.Drawable(), PamStaticDrawable {
                 private var drawableAlpha = 255
                 private val paint = android.graphics.Paint(
                     android.graphics.Paint.ANTI_ALIAS_FLAG,

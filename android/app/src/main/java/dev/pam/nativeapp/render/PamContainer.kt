@@ -26,6 +26,22 @@ internal open class PamContainer(context: Context) :
     private val boxShadowBounds = RectF()
     private var backdrop: PamBackdrop? = null
     private var shimmer: PamShimmer? = null
+    /** Inside onVisibilityAggregated: drawable visibility invalidations are filtered ([drawsSameWhenHidden]). */
+    private var aggregatingVisibility = false
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        aggregatingVisibility = true
+        try {
+            super.onVisibilityAggregated(isVisible)
+        } finally {
+            aggregatingVisibility = false
+        }
+    }
+
+    override fun invalidateDrawable(drawable: android.graphics.drawable.Drawable) {
+        if (aggregatingVisibility && drawsSameWhenHidden(drawable)) return
+        super.invalidateDrawable(drawable)
+    }
 
     init {
         clipChildren = false
