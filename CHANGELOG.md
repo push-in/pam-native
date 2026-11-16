@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.10 - 2026-11-16
 
 - `Route::openInitial($uri)` opens a link without a transition, settled
   before the next frame (React Navigation's initial state from a deep link),
