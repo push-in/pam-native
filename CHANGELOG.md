@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.49.8 - 2026-11-16
 
 - Android images that arrive within 120 ms (disk cache, fast network)
   replace the placeholder at once instead of cross-fading 300 ms over a
