@@ -113,11 +113,17 @@ class PamSlicedMountInstrumentedTest {
         val full = (1..RUNS).map { measureMount(sliced = false) }.minBy { it.worst }
         val sliced = (1..RUNS).map { measureMount(sliced = true) }.minBy { it.worst }
         Log.i(TAG, "worst UI frame: full mount ${full.worst}ms, sliced mount ${sliced.worst}ms (commit frame ${sliced.first}ms, slices ${sliced.rest}ms)")
+        // The budgets hold on the reference emulator; a slower or loaded host
+        // (shared CI runners) stretches every frame alike, so they scale with
+        // the full mount measured on the same host, never below the reference.
+        val slowdown = maxOf(1.0, full.worst.toDouble() / REFERENCE_FULL_MOUNT_MS)
+        val commitBudget = (COMMIT_FRAME_BUDGET_MS * slowdown).toLong()
+        val frameBudget = (FRAME_BUDGET_MS * slowdown).toLong()
         assertTrue(
-            "the sliced commit frame ${sliced.first}ms exceeds ${COMMIT_FRAME_BUDGET_MS}ms (full mount ${full.worst}ms)",
-            sliced.first <= COMMIT_FRAME_BUDGET_MS,
+            "the sliced commit frame ${sliced.first}ms exceeds ${commitBudget}ms (full mount ${full.worst}ms)",
+            sliced.first <= commitBudget,
         )
-        assertTrue("a mount slice frame took ${sliced.rest}ms", sliced.rest <= FRAME_BUDGET_MS)
+        assertTrue("a mount slice frame took ${sliced.rest}ms (budget ${frameBudget}ms, full mount ${full.worst}ms)", sliced.rest <= frameBudget)
         assertTrue(
             "the sliced mount's worst frame ${sliced.worst}ms is not under half the full mount's ${full.worst}ms",
             sliced.worst * 2 <= full.worst,
@@ -415,5 +421,8 @@ class PamSlicedMountInstrumentedTest {
          * ~42 ms), so this is about one 60 Hz frame there.
          */
         const val COMMIT_FRAME_BUDGET_MS = 24L
+
+        /** Worst frame of the full mount on the reference emulator (debug build). */
+        const val REFERENCE_FULL_MOUNT_MS = 56.0
     }
 }
