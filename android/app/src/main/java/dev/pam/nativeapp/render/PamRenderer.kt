@@ -10731,11 +10731,13 @@ class PamRenderer(
         val hint = state.textOrNull(PropKey.ACCESSIBILITY_HINT)
             ?.takeIf(String::isNotEmpty)
         val selectedOverride = state.properties[PropKey.ACCESSIBILITY_SELECTED]?.flag()
+        val hasActionHandler = state.properties[PropKey.ON_ACCESSIBILITY_ACTION] != null
+        val adjusts = adjustsWithAccessibilityActions(role, hasActionHandler)
         if (role == 1 && actions.isEmpty() && hint == null && selectedOverride == null) {
             androidx.core.view.ViewCompat.setAccessibilityDelegate(view, nativeListDelegate)
             return
         }
-        if (actions.isNotEmpty()) {
+        if (actions.isNotEmpty() || adjusts) {
             view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
         view.accessibilityDelegate = object : View.AccessibilityDelegate() {
@@ -10756,6 +10758,10 @@ class PamRenderer(
                 }
                 applyAccessibilityRoleInfo(info, role, state)
                 if (selectedOverride != null) info.isSelected = selectedOverride
+                if (adjusts) {
+                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD)
+                }
                 actions.forEachIndexed { index, action ->
                     info.addAction(
                         AccessibilityNodeInfo.AccessibilityAction(
@@ -10778,6 +10784,10 @@ class PamRenderer(
                         EventKind.ACCESSIBILITY_ACTION.value,
                         actions[index].name,
                     )
+                    return true
+                }
+                adjustableAccessibilityActionName(role, hasActionHandler, actionId)?.let { name ->
+                    dispatch(state.id, EventKind.ACCESSIBILITY_ACTION.value, name)
                     return true
                 }
                 return nativeListDelegate?.performAccessibilityAction(host, actionId, arguments)
@@ -10814,10 +10824,10 @@ class PamRenderer(
             2, 11, 12 -> info.isClickable = true
             5, 8, 19, 29 -> {
                 info.isCheckable = true
-                val checkedState = state.integer(
-                    PropKey.ACCESSIBILITY_CHECKED_STATE,
-                    if (state.flag(PropKey.CHECKED, false)) 2L else 1L,
-                ).toInt()
+                val checkedState = announcedCheckedState(
+                    (state.properties[PropKey.ACCESSIBILITY_CHECKED_STATE] as? PropValue.Integer)?.value,
+                    state.flag(PropKey.CHECKED, false),
+                )
                 setAccessibilityChecked(info, checkedState)
             }
             10 -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

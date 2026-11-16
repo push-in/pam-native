@@ -278,7 +278,9 @@ Branches are unique and validated by the compiler.
 ### 10. Accessibility as a compiler contract
 
 Language 2 rejects meaningful images without `accessibilityLabel`; decorative
-images must say `decorative="true"`. The engine exposes native audits for
+images must say `decorative="true"`. Every template reports an accessibility
+attribute that no renderer applies on a native tag (`PAM2302`: a warning in
+development, an error in strict builds). The engine exposes native audits for
 labels and minimum 44-point interactive targets. Platform renderers continue
 to enforce Dynamic Type, focus, custom actions and reduced motion.
 

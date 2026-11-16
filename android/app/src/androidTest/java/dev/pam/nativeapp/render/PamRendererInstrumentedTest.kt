@@ -1699,6 +1699,59 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun adjustableNodeTakesTalkBackSliderActionsAsIncrementAndDecrement() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val events = mutableListOf<Triple<Long, Int, ByteArray>>()
+                val renderer = PamRenderer(activity, activity.host) { id, kind, payload ->
+                    events += Triple(id, kind, payload)
+                }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.PRESSABLE,
+                                    mapOf(
+                                        PropKey.ACCESSIBILITY_LABEL to PropValue.Text("Video position"),
+                                        PropKey.ACCESSIBILITY_ROLE to PropValue.Integer(6),
+                                        PropKey.ON_ACCESSIBILITY_ACTION to PropValue.Flag(true),
+                                        PropKey.TEST_ID to PropValue.Text("adjustable"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(16f, 16f, 200f, 48f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                val view = requireNotNull(activity.host.findByTransitionName("adjustable"))
+                val info = view.createAccessibilityNodeInfo()
+                assertEquals("android.widget.SeekBar", info.className.toString())
+                assertTrue(info.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD })
+                assertTrue(info.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD })
+                assertTrue(view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, null))
+                assertTrue(view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD, null))
+                assertEquals(listOf(2L, 2L), events.map { it.first })
+                assertEquals(
+                    listOf("increment", "decrement"),
+                    events.map { it.third.toString(Charsets.UTF_8) },
+                )
+                assertTrue(events.all { it.second == EventKind.ACCESSIBILITY_ACTION.value })
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun autoFocusInputWaitsUntilItsReactiveScreenIsAttached() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

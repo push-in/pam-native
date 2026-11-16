@@ -713,6 +713,31 @@ final class TemplateRenderer
         'contentOffset' => true,
     ];
 
+    /**
+     * Tags built by element() itself (no registered component). Attributes
+     * such a tag does not know are dropped there, so compile time reports the
+     * accessibility ones (unknownAccessibilityAttributes()).
+     */
+    private const NATIVE_TAGS = [
+        'Screen' => true, 'Column' => true, 'Row' => true, 'Grid' => true,
+        'View' => true, 'LinearGradient' => true, 'Shimmer' => true,
+        'Text' => true, 'Span' => true, 'Button' => true, 'Input' => true,
+        'TextInput' => true, 'Icon' => true, 'Image' => true,
+        'DrawingCanvas' => true, 'ImageBackground' => true, 'Scroll' => true,
+        'ScrollView' => true, 'FlatList' => true, 'NativeList' => true,
+        'VirtualizedList' => true, 'VirtualGrid' => true, 'SectionList' => true,
+        'Spacer' => true, 'Link' => true, 'Swipeable' => true,
+        'GestureDetector' => true, 'Pressable' => true,
+        'TouchableNativeFeedback' => true, 'TouchableOpacity' => true,
+        'TouchableHighlight' => true, 'TouchableWithoutFeedback' => true,
+        'ActivityIndicator' => true, 'Switch' => true, 'Modal' => true,
+        'BottomSheet' => true, 'WebView' => true, 'Video' => true,
+        'Audio' => true, 'MediaPlayer' => true, 'InteractionRegion' => true,
+        'Animated' => true, 'KeyboardAvoidingView' => true,
+        'RefreshControl' => true, 'StatusBar' => true, 'SafeAreaView' => true,
+        'InputAccessoryView' => true, 'Native' => true, 'CustomView' => true,
+    ];
+
     /** @var array<string, EventKind> */
     private const EVENTS = [
         'on:press' => EventKind::Press,
@@ -3848,6 +3873,45 @@ final class TemplateRenderer
         return [$attributes, $checkedBinding];
     }
 
+    /**
+     * Accessibility attributes (`accessibility*`, `*Accessibility*`,
+     * `aria-*`) of a native tag that no renderer applies: React Native props
+     * without a PAM equivalent (accessibilityElementsHidden,
+     * accessibilityState, aria-hidden...) and typos. Component tags are left
+     * to their own contracts.
+     *
+     * @internal
+     * @param list<string> $attributes template attribute names as written
+     * @return list<string>
+     */
+    public static function unknownAccessibilityAttributes(string $tag, array $attributes): array
+    {
+        if (!isset(self::NATIVE_TAGS[$tag]) || TemplateRegistry::factory($tag) !== null) {
+            return [];
+        }
+        $unknown = [];
+        foreach ($attributes as $attribute) {
+            $name = ltrim($attribute, ':');
+            if (str_starts_with($name, '@')) {
+                $name = 'on:'.substr($name, 1);
+            } elseif (($tag === 'Image' || $tag === 'MediaPlayer') && !str_starts_with($name, 'aria-')) {
+                $name = self::camelAttribute($name);
+            }
+            if (
+                str_starts_with($name, 'data-')
+                || (!str_starts_with($name, 'aria-') && stripos($name, 'accessib') === false)
+                || isset(self::PROPERTIES[$name])
+                || isset(self::SPECIAL_ATTRIBUTES[$name])
+                || isset(self::EVENTS[$name])
+            ) {
+                continue;
+            }
+            $unknown[] = $attribute;
+        }
+
+        return $unknown;
+    }
+
     private static function camelAttribute(string $name): string
     {
         if (!str_contains($name, '-')) {
@@ -4959,6 +5023,7 @@ final class TemplateRenderer
                         : AccessibilityCheckedState::Unchecked->value
                 )
                 : self::named($value, [
+                    'none' => AccessibilityCheckedState::None->value,
                     'false' => AccessibilityCheckedState::Unchecked->value,
                     'unchecked' => AccessibilityCheckedState::Unchecked->value,
                     'true' => AccessibilityCheckedState::Checked->value,

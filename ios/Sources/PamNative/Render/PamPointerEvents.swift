@@ -40,8 +40,27 @@ protocol PamPointerEventsHost: AnyObject {
 }
 
 /// Plain layout container (View/Row/Column/Screen/Spacer).
-final class PamContainerView: UIView, PamPointerEventsHost {
+final class PamContainerView: UIView, PamPointerEventsHost, PamAccessibilityAdjustable {
     var pamPointerEvents = PamPointerEvents.auto
+    var pamAccessibilityAdjust: ((Bool) -> Void)?
+
+    override func accessibilityIncrement() {
+        if let adjust = pamAccessibilityAdjust { adjust(true) } else { super.accessibilityIncrement() }
+    }
+
+    override func accessibilityDecrement() {
+        if let adjust = pamAccessibilityAdjust { adjust(false) } else { super.accessibilityDecrement() }
+    }
+
+    /// An element without its own label (a View with an interactive role)
+    /// reads its content, like RN's `RCTRecursiveAccessibilityLabel`.
+    override var accessibilityLabel: String? {
+        get {
+            if let own = super.accessibilityLabel, !own.isEmpty { return own }
+            return isAccessibilityElement ? PamPressButton.contentAccessibilityLabel(of: self) : nil
+        }
+        set { super.accessibilityLabel = newValue }
+    }
     /// Row/Column/View/Spacer content containers; screens and keyboard hosts
     /// keep claiming touches so empty screen areas behave as before.
     var pamTouchTransparentWhenIdle = false
