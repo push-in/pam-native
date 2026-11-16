@@ -29,6 +29,12 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var horizontalGesture = false
+    /**
+     * Views under the finger that may own a downward drag (a list nested
+     * below a pager or a wrapper, a vertical pan), resolved when it went
+     * down and asked per move as their offsets change.
+     */
+    private var touchOwners: List<View> = emptyList()
     private val syncControlled = Runnable {
         if (userTriggered) {
             userTriggered = false
@@ -38,7 +44,14 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
 
     init {
         updateEnabled()
-        setOnChildScrollUpCallback { _, child -> canContentScrollUp(child) }
+        setOnChildScrollUpCallback { _, child ->
+            canContentScrollUp(child) || PamGestureArbiter.ownership(
+                touchOwners,
+                horizontal = false,
+                fingerSign = 1,
+                navigation = false,
+            ) >= PamGestureArbiter.DIRECTIONAL
+        }
         setOnRefreshListener {
             val listener = refresh
             if (listener == null) {
@@ -89,6 +102,11 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 horizontalGesture = false
+                // Only the target is asked by SwipeRefreshLayout, and it
+                // ignores a nested scroller's disallow request when the
+                // target does not nest-scroll: a list deeper inside that can
+                // still scroll up would move together with the pull.
+                touchOwners = PamGestureArbiter.candidatesAt(this, event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (horizontalGesture || abs(event.x - downX) > touchSlop) {
@@ -100,6 +118,14 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
         if (!super.onInterceptTouchEvent(event)) return false
         parent?.requestDisallowInterceptTouchEvent(true)
         return true
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            touchOwners = emptyList()
+        }
+        return handled
     }
 
     /** RN `enabled`: a disabled control never starts a pull. */
@@ -160,6 +186,7 @@ internal class PamRefreshContainer(context: Context) : SwipeRefreshLayout(contex
     }
 
     override fun onDetachedFromWindow() {
+        touchOwners = emptyList()
         removeCallbacks(syncControlled)
         super.onDetachedFromWindow()
     }

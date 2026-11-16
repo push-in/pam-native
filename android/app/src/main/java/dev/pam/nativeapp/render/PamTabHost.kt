@@ -11,7 +11,7 @@ import android.widget.TextView
 import org.json.JSONArray
 
 /** Platform tab strip with all scenes retained and no PHP work during swipes. */
-internal class PamTabHost(context: Context) : FrameLayout(context) {
+internal class PamTabHost(context: Context) : FrameLayout(context), PamDragOwner {
     private data class Item(val label: String, val badge: String?)
 
     private val content = FrameLayout(context)
@@ -25,6 +25,8 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
     private var indicatorColor = Color.BLACK
     private var swipeEnabled = false
     private var touchStartX = 0f
+    private var touchStartY = 0f
+    private var swipeYielded = false
     var onSelect: ((Int) -> Unit)? = null
 
     /** Posted after a scene became visible or inactive (covered-route policy). */
@@ -77,10 +79,44 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
         requestLayout()
     }
 
+    /** Swiping tabs owns a horizontal drag toward a tab that exists. */
+    override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int {
+        if (!swipesTabs() || !horizontal) return PamGestureArbiter.NONE
+        val next = selectedIndex - fingerSign
+        return if (next in 1..items.size) PamGestureArbiter.DIRECTIONAL else PamGestureArbiter.NONE
+    }
+
+    private fun swipesTabs(): Boolean = swipeEnabled && position == POSITION_TOP && content.childCount >= 2
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-        if (!swipeEnabled || position != POSITION_TOP || content.childCount < 2) return false
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) touchStartX = event.x
-        if (event.actionMasked == MotionEvent.ACTION_MOVE && kotlin.math.abs(event.x - touchStartX) > dp(12f)) return true
+        if (!swipesTabs()) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchStartX = event.x
+                touchStartY = event.y
+                swipeYielded = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - touchStartX
+                if (swipeYielded || kotlin.math.abs(dx) <= dp(12f)) return false
+                // A carousel, tab strip or pan inside the page that still
+                // moves that way keeps the drag (ViewPager.canScroll).
+                val owner = PamGestureArbiter.ownership(
+                    this,
+                    touchStartX,
+                    touchStartY,
+                    horizontal = true,
+                    fingerSign = if (dx > 0f) 1 else -1,
+                    navigation = false,
+                    includeSelf = false,
+                )
+                if (owner >= PamGestureArbiter.DIRECTIONAL) {
+                    swipeYielded = true
+                    return false
+                }
+                return true
+            }
+        }
         return false
     }
 

@@ -573,4 +573,6 @@ enum PropKey: int
     case NextFocusRight = 1018;
     case FocusGroup = 1019;
     case FocusRing = 1020;
+    // Gesture arbitration.
+    case BlocksNavigationGesture = 1021;
 }

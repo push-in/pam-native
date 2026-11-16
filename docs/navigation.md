@@ -29,6 +29,15 @@ the stack when another route exists and close the activity from the root route.
 Use `handleSystemBack: false` on `Navigator`, or `->systemBack(false)` on
 `Router`, only when the application provides a custom `App::onBack()` handler.
 
+The swipe back of a stack (`gestureEnabled`, from the leading edge or, with
+`fullScreenGestureEnabled`, anywhere) yields to content under the finger that
+still moves with the drag: a pager with a previous page, a scrolled tab strip,
+a horizontal pan or slider. From the edge it only yields to views that own
+every drag (a drawing surface, a zoomed photo, `blocksNavigationGesture`).
+Each route's gesture options apply on their own: a route without
+`fullScreenGestureEnabled` pushed over one with it goes back from the edge
+only. See [Gestures](gestures.md#who-owns-a-drag).
+
 Components navigate without receiving a `Navigator` instance:
 
 ```php

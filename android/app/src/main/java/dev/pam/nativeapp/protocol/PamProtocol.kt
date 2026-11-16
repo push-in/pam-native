@@ -731,7 +731,9 @@ enum class PropKey(val value: Int) {
     NEXT_FOCUS_LEFT(1017),
     NEXT_FOCUS_RIGHT(1018),
     FOCUS_GROUP(1019),
-    FOCUS_RING(1020);
+    FOCUS_RING(1020),
+    // Gesture arbitration.
+    BLOCKS_NAVIGATION_GESTURE(1021);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

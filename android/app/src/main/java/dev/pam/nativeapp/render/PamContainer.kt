@@ -12,6 +12,9 @@ internal open class PamContainer(context: Context) :
     FrameLayout(context),
     PamPointerEventsHost {
     private var pointerEvents = POINTER_EVENTS_AUTO
+
+    /** RN `pointerEvents` of this view ([POINTER_EVENTS_AUTO] and siblings). */
+    internal val pointerEventsMode: Int get() = pointerEvents
     private var overflowClipEnabled = false
     private val overflowClipPath = Path()
     private val overflowClipBounds = RectF()

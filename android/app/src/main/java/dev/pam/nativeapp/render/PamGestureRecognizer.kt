@@ -70,6 +70,12 @@ internal class PamGestureRecognizer(private val view: View) {
     private var updateScheduled = false
     private var panOwnsParent = false
     private var tentativeParentClaim = false
+    /**
+     * Content inside this detector took the drag (a list that can still
+     * scroll that way): this pan stays out of the touch, so the two never
+     * move together.
+     */
+    private var yieldedToContent = false
     /** Screen-to-detector map of the event being handled ([PamGestureSpace]). */
     private val localSpace = FloatArray(4)
     private var localSpaceTransformed = false
@@ -115,6 +121,21 @@ internal class PamGestureRecognizer(private val view: View) {
     }
 
     fun isEnabled(): Boolean = config?.enabled == true && emit != null
+
+    /**
+     * How this detector owns a drag along [horizontal] (else vertical) with
+     * the finger moving toward [fingerSign] ([PamGestureArbiter]): a pan or
+     * swipe whose direction admits it. An immediate pan (a scrubber, a
+     * slider) owns it from the first pixel, like a platform SeekBar.
+     */
+    fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int {
+        val current = config ?: return PamGestureArbiter.NONE
+        if (!isEnabled() || (current.type != TYPE_PAN && current.type != TYPE_SWIPE)) {
+            return PamGestureArbiter.NONE
+        }
+        if (!admitsDirection(current.direction, horizontal, fingerSign)) return PamGestureArbiter.NONE
+        return if (ownsImmediatePan(current)) PamGestureArbiter.EXCLUSIVE else PamGestureArbiter.DIRECTIONAL
+    }
 
     fun hasRecognized(): Boolean = recognized
 
@@ -175,6 +196,7 @@ internal class PamGestureRecognizer(private val view: View) {
         updateScheduled = false
         active = false
         recognized = false
+        yieldedToContent = false
     }
 
     private fun begin(event: MotionEvent, current: PamGestureConfig) {
@@ -212,9 +234,14 @@ internal class PamGestureRecognizer(private val view: View) {
         val distance = hypot(dx, dy)
         when (current.type) {
             TYPE_PAN -> {
-                if (!recognized && event.eventTime - beganAt >= current.minDurationMs &&
+                val ready = !recognized && !yieldedToContent &&
+                    event.eventTime - beganAt >= current.minDurationMs &&
                     distance >= current.minDistance && matchesDirection(current, dx, dy)
-                ) {
+                if (ready && contentTakesDrag(current, dx, dy)) {
+                    yieldedToContent = true
+                    tentativeParentClaim = false
+                    releaseParent()
+                } else if (ready) {
                     recognized = true
                     // A recognized exclusive/race pan owns the rest of the
                     // touch, as on iOS: the ancestor scroll can no longer
@@ -295,6 +322,30 @@ internal class PamGestureRecognizer(private val view: View) {
             emitNow(payload(current, if (cancelled) STATE_CANCELLED else STATE_ENDED, event))
         }
         cancel()
+    }
+
+    /**
+     * A pan that shares the touch with its content (simultaneous, or a race
+     * not yet won) lets a scroller under the finger inside it keep a drag it
+     * can still move with: a dismiss drag around a list scrolled down
+     * scrolls the list, like a sheet over a scrolled list. Nested detectors
+     * compose as configured (a pan sharing a zoomed photo's surface). An
+     * exclusive pan holds the whole touch stream, so its content never gets
+     * the drag.
+     */
+    private fun contentTakesDrag(current: PamGestureConfig, dx: Float, dy: Float): Boolean {
+        if (current.composition == COMPOSITION_EXCLUSIVE) return false
+        val group = view as? android.view.ViewGroup ?: return false
+        if (group.childCount == 0) return false
+        val horizontal = abs(dx) >= abs(dy)
+        val along = if (horizontal) dx else dy
+        return PamGestureArbiter.scrollOwnership(
+            group,
+            startX,
+            startY,
+            horizontal,
+            fingerSign = if (along >= 0f) 1 else -1,
+        ) >= PamGestureArbiter.DIRECTIONAL
     }
 
     private fun schedule(payload: PamGesturePayload) {
@@ -399,6 +450,17 @@ internal class PamGestureRecognizer(private val view: View) {
         panOwnsParent = false
         view.parent?.requestDisallowInterceptTouchEvent(false)
     }
+
+    private fun admitsDirection(direction: Int, horizontal: Boolean, fingerSign: Int): Boolean =
+        when (direction) {
+            DIRECTION_LEFT -> horizontal && fingerSign < 0
+            DIRECTION_RIGHT -> horizontal && fingerSign > 0
+            DIRECTION_UP -> !horizontal && fingerSign < 0
+            DIRECTION_DOWN -> !horizontal && fingerSign > 0
+            DIRECTION_HORIZONTAL -> horizontal
+            DIRECTION_VERTICAL -> !horizontal
+            else -> true
+        }
 
     private fun matchesDirection(current: PamGestureConfig, dx: Float, dy: Float): Boolean =
         when (current.direction) {

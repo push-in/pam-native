@@ -88,6 +88,19 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var gestureStartY = 0f
     private var gestureDirection = 1
     private var fullScreenGestureEnabled = false
+    /**
+     * The tracked touch went down on the leading edge: there the back
+     * gesture outranks scrollers and pans under the finger (UIKit's
+     * screen-edge pan); only exclusive owners keep it.
+     */
+    private var gestureFromEdge = false
+    /** How a child claimed the tracked touch ([requestDisallowInterceptTouchEvent]). */
+    private var childClaim = CHILD_CLAIM_NONE
+    /**
+     * The arbiter gave the back gesture a touch a list had claimed only for
+     * its ScrollView ancestor: onInterceptTouchEvent takes it on this move.
+     */
+    private var gestureTakeoverPending = false
     private var velocityTracker: VelocityTracker? = null
     private var predictiveBackActive = false
     private var predictiveBackCommitted = false
@@ -486,7 +499,49 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
             PamSharedElements.touched(event.rawX, event.rawY)
         }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                childClaim = CHILD_CLAIM_NONE
+                gestureTakeoverPending = false
+            }
+            MotionEvent.ACTION_MOVE -> if (
+                gestureTracking && !gesturePrepared && childClaim == CHILD_CLAIM_FOR_SCROLL_ANCESTOR
+            ) {
+                // A list claimed the touch when it went down only to keep a
+                // platform ScrollView off it, so onInterceptTouchEvent no
+                // longer runs: the arbiter decides here whether the drag is
+                // the list's (it scrolls along this axis) or the back gesture's.
+                velocityTracker?.addMovement(event)
+                if (gestureBegins(event)) {
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                    } else {
+                        childClaim = CHILD_CLAIM_NONE
+                        gestureTakeoverPending = true
+                        super.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+            }
+        }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * Tracks how a child claims a touch the back gesture is watching. A
+     * claim made on purpose (a scroller or pan that took the drag, a slider,
+     * a drawing surface) keeps onInterceptTouchEvent away as usual; a list's
+     * claim for its ScrollView ancestor is left to the arbiter.
+     */
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        if (gestureTracking && !gesturePrepared) {
+            childClaim = when {
+                !disallowIntercept -> CHILD_CLAIM_NONE
+                PamGestureArbiter.claimingForScrollAncestor && childClaim != CHILD_CLAIM_FIRM ->
+                    CHILD_CLAIM_FOR_SCROLL_ANCESTOR
+                else -> CHILD_CLAIM_FIRM
+            }
+        }
+        super.requestDisallowInterceptTouchEvent(disallowIntercept)
     }
 
     /** [pressed] (a Pressable) was clicked inside this host's active route. */
@@ -506,9 +561,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
             val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
             val edge = dp(gestureEdgeWidth)
-            val withinEdge = fullScreenGestureEnabled || gestureDirection == 2 ||
+            val fromEdge = gestureDirection != 2 &&
                 if (rtl) event.x >= width - edge else event.x <= edge
-            if (!withinEdge) return false
+            if (!fullScreenGestureEnabled && gestureDirection != 2 && !fromEdge) return false
+            gestureFromEdge = fromEdge
             // Only remember where the touch went down: nothing changes on
             // screen (or in the route lifecycles) until it moves like a back
             // gesture. A tap, a scroll or a cancelled touch leaves no trace.
@@ -522,15 +578,55 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (!gestureTracking) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
+                if (gestureTakeoverPending) {
+                    gestureTakeoverPending = false
+                    beginBackGesture()
+                    return true
+                }
                 velocityTracker?.addMovement(event)
                 if (gestureBegins(event)) {
-                    prepareGesture()
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                        return false
+                    }
+                    beginBackGesture()
                     return true
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopTracking()
         }
         return false
+    }
+
+    /**
+     * Whether the content under the finger owns the drag the back gesture
+     * would take (UIKit `require(toFail:)`, `ViewPager.canScroll`): a pager
+     * with a previous page, a tab strip scrolled away from its start, a pan
+     * or slider that moves that way. From the edge only exclusive owners
+     * (a drawing surface, a zoomed photo, `blocksNavigationGesture`) keep
+     * it; elsewhere (full-screen or vertical gestures) any owner does.
+     */
+    private fun contentOwnsGesture(): Boolean {
+        if (childCount == 0) return false
+        val route = getChildAt(childCount - 1)
+        val horizontal = gestureDirection != 2
+        val fingerSign = if (horizontal && layoutDirection == View.LAYOUT_DIRECTION_RTL) -1 else 1
+        val ownership = PamGestureArbiter.ownershipOfChild(
+            this,
+            route,
+            gestureStartX,
+            gestureStartY,
+            horizontal,
+            fingerSign,
+            navigation = true,
+        )
+        return ownership >= if (gestureFromEdge) PamGestureArbiter.EXCLUSIVE else PamGestureArbiter.DIRECTIONAL
+    }
+
+    /** The back gesture takes the touch: its routes move and ancestors keep off it. */
+    private fun beginBackGesture() {
+        prepareGesture()
+        parent?.requestDisallowInterceptTouchEvent(true)
     }
 
     /**
@@ -573,7 +669,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 // of in onInterceptTouchEvent.
                 if (!gesturePrepared) {
                     if (!gestureBegins(event)) return gestureTracking
-                    prepareGesture()
+                    if (contentOwnsGesture()) {
+                        stopTracking()
+                        return true
+                    }
+                    beginBackGesture()
                 }
                 applyGestureProgress(progress, rtl)
             }
@@ -1339,6 +1439,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val PRESENTATION_CARD = 1
         const val PRESENTATION_CONTAINED_MODAL = 3
         const val PRESENTATION_FORM_SHEET = 7
+
+        private const val CHILD_CLAIM_NONE = 0
+        /** A list's claim for its ScrollView ancestor (axis unknown): the arbiter decides. */
+        private const val CHILD_CLAIM_FOR_SCROLL_ANCESTOR = 1
+        /** A child took the touch on purpose. */
+        private const val CHILD_CLAIM_FIRM = 2
     }
 }
 

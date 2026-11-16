@@ -2999,6 +2999,8 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
              PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
             refreshTVFocus(view: view, nodeId: nodeId)
+        case PamConstants.blocksNavigationGesture:
+            view.pamBlocksNavigationGesture = value.boolOrNil() ?? false
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
@@ -3386,9 +3388,14 @@ public final class PamRenderer: @unchecked Sendable {
             configureTabHost(nodeId: nodeId, view: view)
         case PamConstants.canvasCommands:
             (view as? PamVectorCanvas)?.setCommands(value.textOrNil() ?? "[]")
+        // Every gesture option re-applies them all: a push that changes only
+        // the direction or the full-screen flag must not keep the previous
+        // route's gesture.
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
-             PamConstants.navigationGestureThreshold:
+             PamConstants.navigationGestureThreshold,
+             PamConstants.navigationGestureDirection,
+             PamConstants.navigationFullScreenGestureEnabled:
             configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.switchTrackColorFalse:
             if let switchView = view as? PamVuetifySwitch {
@@ -3834,6 +3841,8 @@ public final class PamRenderer: @unchecked Sendable {
         case PamConstants.onKeyDown, PamConstants.captureKeys, PamConstants.focusable,
              PamConstants.focusGroup, PamConstants.focusRing, PamConstants.onFocus, PamConstants.onBlur:
             refreshTVFocus(view: view, nodeId: nodeId)
+        case PamConstants.blocksNavigationGesture:
+            view.pamBlocksNavigationGesture = false
         case PamConstants.height:
             (view as? PamMultilineInputField)?.growsWithContent = true
         case PamConstants.secure:
@@ -3973,9 +3982,14 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamNavigationHost)?.autoHideHomeIndicator = false
         case PamConstants.navigationRevision:
             break
+        // Every gesture option re-applies them all: a push that changes only
+        // the direction or the full-screen flag must not keep the previous
+        // route's gesture.
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
-             PamConstants.navigationGestureThreshold:
+             PamConstants.navigationGestureThreshold,
+             PamConstants.navigationGestureDirection,
+             PamConstants.navigationFullScreenGestureEnabled:
             configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(2)
@@ -6317,7 +6331,7 @@ public final class PamRenderer: @unchecked Sendable {
         )
     }
 
-    private final class EventBridge: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private final class EventBridge: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate, PamDragOwning {
         private let nodeId: Int64
         private let kind: Int
         private let dispatchEvent: (Int64, Int, Data) -> Void
@@ -7428,14 +7442,65 @@ public final class PamRenderer: @unchecked Sendable {
             guard gestureRecognizer === semanticGesture,
                   let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
             let velocity = pan.velocity(in: pan.view)
+            let onAxis: Bool
             if let config = drag?.config {
-                return config.horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+                onAxis = config.horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+            } else {
+                switch semanticGestureDirection {
+                case 2, 3, 6: onAxis = abs(velocity.x) > abs(velocity.y)
+                case 4, 5, 7: onAxis = abs(velocity.y) > abs(velocity.x)
+                default: onAxis = true
+                }
             }
+            return onAxis && !contentTakesDrag(pan)
+        }
+
+        /// A pan that shares the touch with its content (simultaneous, or a
+        /// race) lets a scroll view under the finger inside it keep a drag it
+        /// can still move with: a dismiss drag around a list scrolled down
+        /// scrolls the list, and the two never move together (Android
+        /// parity). Nested detectors compose as configured. An exclusive pan
+        /// cancels its content's touches.
+        private func contentTakesDrag(_ pan: UIPanGestureRecognizer) -> Bool {
+            guard semanticGestureType == 2, semanticGestureComposition != 1, let view = pan.view else { return false }
+            let translation = pan.translation(in: view)
+            let velocity = pan.velocity(in: view)
+            let motion = (abs(velocity.x) + abs(velocity.y)) > 1 ? velocity : translation
+            let horizontal = abs(motion.x) >= abs(motion.y)
+            let along = horizontal ? motion.x : motion.y
+            let location = pan.location(in: view)
+            let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            guard let hit = view.hitTest(start, with: nil), hit !== view else { return false }
+            return PamGestureArbiter.scrollOwnership(
+                from: hit,
+                upTo: view,
+                horizontal: horizontal,
+                sign: along >= 0 ? 1 : -1
+            ) >= PamGestureArbiter.directional
+        }
+
+        /// How this node's pan or swipe owns a drag ([PamGestureArbiter]):
+        /// a zoomed surface owns every drag, a pan the ones its direction
+        /// (and its Drag's axis) admits, and a pan from the first point (a
+        /// scrubber) owns them like a slider.
+        func dragOwnership(of recognizer: UIGestureRecognizer, horizontal: Bool, sign: CGFloat) -> Int {
+            guard recognizer === semanticGesture, recognizer.isEnabled,
+                  recognizer is UIPanGestureRecognizer else { return PamGestureArbiter.noOwner }
+            if zoomedPanOwnsTouch { return PamGestureArbiter.exclusive }
+            guard semanticGestureType == 2 || semanticGestureType == 5 else { return PamGestureArbiter.noOwner }
+            if let config = drag?.config, config.horizontal != horizontal { return PamGestureArbiter.noOwner }
+            let admits: Bool
             switch semanticGestureDirection {
-            case 2, 3, 6: return abs(velocity.x) > abs(velocity.y)
-            case 4, 5, 7: return abs(velocity.y) > abs(velocity.x)
-            default: return true
+            case 2: admits = horizontal && sign < 0
+            case 3: admits = horizontal && sign > 0
+            case 4: admits = !horizontal && sign < 0
+            case 5: admits = !horizontal && sign > 0
+            case 6: admits = horizontal
+            case 7: admits = !horizontal
+            default: admits = true
             }
+            guard admits else { return PamGestureArbiter.noOwner }
+            return immediatePanOwnsTouch ? PamGestureArbiter.exclusive : PamGestureArbiter.directional
         }
 
         /// While a native transform shows its content zoomed in, a drag

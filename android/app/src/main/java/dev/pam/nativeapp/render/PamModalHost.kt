@@ -402,6 +402,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private var dragActive = false
     private var dragFromHandle = false
     private var dragScrollChain: List<View> = emptyList()
+    /** Views under the finger that may own a downward drag (a vertical pan, a canvas). */
+    private var dragOwners: List<View> = emptyList()
     private var modalBackdropPressed = false
     private var dragVelocity: VelocityTracker? = null
 
@@ -1433,6 +1435,7 @@ internal class PamModalHost @JvmOverloads constructor(
                 // scrollable is at its top. Resolve the chain under the finger
                 // now; the sheet's direct child is rarely the scroller.
                 dragScrollChain = verticalScrollChainAt(content, event.x, event.y)
+                dragOwners = PamGestureArbiter.candidatesAt(content, event.x, event.y)
                 dragActive = false
                 dragVelocity?.recycle()
                 dragVelocity = VelocityTracker.obtain().also { it.addMovement(event) }
@@ -1448,7 +1451,15 @@ internal class PamModalHost @JvmOverloads constructor(
                         dragFromHandle ||
                             delta > 0 &&
                             !sheet.canScrollVertically(-1) &&
-                            dragScrollChain.none { it.canScrollVertically(-1) }
+                            dragScrollChain.none { it.canScrollVertically(-1) } &&
+                            // A vertical pan or a drawing surface under the
+                            // finger keeps the drag: the sheet would move with it.
+                            PamGestureArbiter.ownership(
+                                dragOwners,
+                                horizontal = false,
+                                fingerSign = 1,
+                                navigation = false,
+                            ) < PamGestureArbiter.DIRECTIONAL
                         )
                 ) {
                     dragActive = true
@@ -1482,6 +1493,7 @@ internal class PamModalHost @JvmOverloads constructor(
                 dragVelocity = null
                 dragActive = false
                 dragScrollChain = emptyList()
+                dragOwners = emptyList()
             }
         }
     }

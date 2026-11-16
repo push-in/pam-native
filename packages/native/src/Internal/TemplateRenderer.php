@@ -544,6 +544,7 @@ final class TemplateRenderer
         'nextFocusRight' => PropKey::NextFocusRight,
         'focusGroup' => PropKey::FocusGroup,
         'focusRing' => PropKey::FocusRing,
+        'blocksNavigationGesture' => PropKey::BlocksNavigationGesture,
         'returnKeyType' => PropKey::ReturnKeyType,
         'hitSlop' => PropKey::HitSlop,
         'hitSlopLeft' => PropKey::HitSlopLeft,
@@ -5417,6 +5418,7 @@ final class TemplateRenderer
             PropKey::Focusable,
             PropKey::FocusGroup,
             PropKey::AutoFocus,
+            PropKey::BlocksNavigationGesture,
             => self::boolValue($value, "Template {$key->name}"),
             PropKey::FocusRing => is_bool($value)
                 ? ($value ? 1 : 0)

@@ -301,17 +301,43 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let atLeadingEdge = pan === screenEdgeGesture || fullScreenGestureEnabled || gestureDirection == 2 || (rtl
-            ? point.x >= bounds.width - gestureEdgeWidth
-            : point.x <= gestureEdgeWidth)
         // Direction from the motion so far: velocity when UIKit has one,
         // otherwise the translation (slow or synthesized drags report ~0).
         let velocity = pan.velocity(in: self)
         let translation = pan.translation(in: self)
+        // Where the finger went down: the edge and the content under the
+        // finger are judged there, not where the drag got to.
+        let start = CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+        let fromEdge = pan === screenEdgeGesture || gestureDirection == 1 && (rtl
+            ? start.x >= bounds.width - gestureEdgeWidth
+            : start.x <= gestureEdgeWidth)
+        let atLeadingEdge = fromEdge || fullScreenGestureEnabled || gestureDirection == 2
         let motion = (abs(velocity.x) + abs(velocity.y)) > 1 ? velocity : translation
         let towardBack = gestureDirection == 2 ? motion.y > 0 : (rtl ? motion.x < 0 : motion.x > 0)
         let dominant = gestureDirection == 2 ? abs(motion.y) >= abs(motion.x) : abs(motion.x) >= abs(motion.y)
-        return atLeadingEdge && towardBack && dominant
+        guard atLeadingEdge && towardBack && dominant else { return false }
+        return !contentOwnsGesture(at: start, fromEdge: fromEdge, rtl: rtl)
+    }
+
+    /// Whether the content under the finger owns the drag the back gesture
+    /// would take (`PamGestureArbiter`): a pager with a previous page, a tab
+    /// strip scrolled away from its start, a pan or slider that moves that
+    /// way. From the edge only exclusive owners (a drawing surface, a zoomed
+    /// photo, `blocksNavigationGesture`) keep it, as UIKit's screen-edge pan
+    /// outranks scroll views; elsewhere (full-screen or vertical gestures)
+    /// any owner does (Android parity).
+    private func contentOwnsGesture(at point: CGPoint, fromEdge: Bool, rtl: Bool) -> Bool {
+        guard let route = routeViews.last(where: { !$0.isHidden }),
+              let hit = route.hitTest(convert(point, to: route), with: nil) else { return false }
+        let horizontal = gestureDirection != 2
+        let ownership = PamGestureArbiter.ownership(
+            from: hit,
+            upTo: self,
+            horizontal: horizontal,
+            sign: horizontal && rtl ? -1 : 1,
+            navigation: true
+        )
+        return ownership >= (fromEdge ? PamGestureArbiter.exclusive : PamGestureArbiter.directional)
     }
 
     /// Scrollable content under the route waits for the pop gesture, as

@@ -4595,8 +4595,6 @@ class PamRenderer(
             PropKey.NAVIGATION_HEADER_SEARCH_PLACEHOLDER,
             -> configureNavigationChrome(view, state)
             PropKey.NAVIGATION_HEADER_LARGE_TITLE_ENABLED,
-            PropKey.NAVIGATION_GESTURE_DIRECTION,
-            PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED,
             PropKey.NAVIGATION_FREEZE_ON_BLUR,
             PropKey.NAVIGATION_SHEET_GRABBER_VISIBLE,
             PropKey.NAVIGATION_SHEET_EXPANDS_WHEN_SCROLLED_TO_EDGE,
@@ -4622,9 +4620,15 @@ class PamRenderer(
                 (view as? PamVectorCanvas)?.setCommands(value.text(PropKey.CANVAS_COMMANDS))
             PropKey.NEEDS_OFFSCREEN_ALPHA_COMPOSITING ->
                 (view as? PamContainer)?.needsOffscreenAlphaCompositing = value.flag()
+            // Every gesture option re-applies them all: a push that changes
+            // only the direction or full-screen flag (a chat route with
+            // full-screen back, then a route without it) must not keep the
+            // previous route's gesture.
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,
+            PropKey.NAVIGATION_GESTURE_DIRECTION,
+            PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED,
             -> configureGestureNavigation(view, state)
             PropKey.OPACITY -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -5209,6 +5213,8 @@ class PamRenderer(
             PropKey.FOCUS_GROUP,
             PropKey.FOCUS_RING,
             -> refreshFocusInfo(view, state)
+            PropKey.BLOCKS_NAVIGATION_GESTURE ->
+                PamGestureArbiter.setBlocksNavigationGesture(view, value.flag())
             PropKey.RETURN_KEY_TYPE -> (view as? PamEditText)?.let {
                 applyInputConfiguration(it, state)
             }
@@ -5640,6 +5646,7 @@ class PamRenderer(
             PropKey.FOCUS_GROUP,
             PropKey.FOCUS_RING,
             -> refreshFocusInfo(view, state)
+            PropKey.BLOCKS_NAVIGATION_GESTURE -> PamGestureArbiter.setBlocksNavigationGesture(view, false)
             PropKey.ENABLED -> {
                 view.isEnabled = true
                 configurePressable(view, state)
@@ -5892,9 +5899,15 @@ class PamRenderer(
             PropKey.ON_MEDIA_CACHE_PROGRESS,
             PropKey.ON_MEDIA_CACHE_READY,
             -> installEvents(view, state)
+            // Every gesture option re-applies them all: a push that changes
+            // only the direction or full-screen flag (a chat route with
+            // full-screen back, then a route without it) must not keep the
+            // previous route's gesture.
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,
+            PropKey.NAVIGATION_GESTURE_DIRECTION,
+            PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED,
             -> configureGestureNavigation(view, state)
             PropKey.DRAGGABLE,
             PropKey.DRAG_DATA,

@@ -365,6 +365,18 @@ abstract class Element implements Renderable
     }
 
     /**
+     * While the finger is on this element, the navigator's back gesture (the
+     * edge or full-screen swipe back, a vertical dismiss) does not start,
+     * not even from the screen edge: a map, a signature pad or a native view
+     * that pans on its own. Scrollers that can still scroll, pagers, sliders
+     * and pan gestures under the finger keep their drags without it.
+     */
+    final public function blocksNavigationGesture(bool $blocks = true): static
+    {
+        return $this->withProperty(PropKey::BlocksNavigationGesture, $blocks);
+    }
+
+    /**
      * Preserves the visual identity of this element across a native route
      * transition. Matching tags are measured and animated entirely by UIKit or
      * Android's UI thread; PHP is never involved per frame.

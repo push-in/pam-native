@@ -151,7 +151,7 @@ internal class PamDrawingCanvas(context: Context) : FrameLayout(context) {
         onChange?.invoke(encodedValue)
     }
 
-    private inner class DrawingOverlay(context: Context) : View(context) {
+    private inner class DrawingOverlay(context: Context) : View(context), PamDragOwner {
         private val contentRect = RectF()
         private val strokes = ArrayList<PamDrawingStroke>()
         private var activePoints: MutableList<PamDrawingPoint>? = null
@@ -193,6 +193,10 @@ internal class PamDrawingCanvas(context: Context) : FrameLayout(context) {
             }
             canvas.restoreToCount(checkpoint)
         }
+
+        /** A stroke may go any way: drawing owns every drag over the canvas. */
+        override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int =
+            if (isEnabled && this@PamDrawingCanvas.isEnabled) PamGestureArbiter.EXCLUSIVE else PamGestureArbiter.NONE
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (!isEnabled || !this@PamDrawingCanvas.isEnabled) return false

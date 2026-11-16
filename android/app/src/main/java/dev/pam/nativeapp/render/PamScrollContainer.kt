@@ -1092,7 +1092,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private class PamVerticalScrollView(
         context: Context,
         private val dismissKeyboard: () -> Unit,
-    ) : ScrollView(context), ConfigurableScroll {
+    ) : ScrollView(context), ConfigurableScroll, PamDragOwner {
         override var scrollingEnabled = true
         override var pagingEnabled = false
         override var snapIntervalPx = 0
@@ -1207,6 +1207,15 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
         override fun performClick(): Boolean = super.performClick()
 
+        override val scrollsContent: Boolean get() = true
+
+        override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int =
+            if (scrollingEnabled && !horizontal && canScrollVertically(-fingerSign)) {
+                PamGestureArbiter.DIRECTIONAL
+            } else {
+                PamGestureArbiter.NONE
+            }
+
         override fun fling(velocityY: Int) {
             flingStarted = true
             val velocity = adjustedVelocity(velocityY, decelerationRate)
@@ -1250,7 +1259,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private class PamHorizontalScrollView(
         context: Context,
         private val dismissKeyboard: () -> Unit,
-    ) : HorizontalScrollView(context), ConfigurableScroll {
+    ) : HorizontalScrollView(context), ConfigurableScroll, PamDragOwner {
         override var scrollingEnabled = true
         override var pagingEnabled = false
         override var snapIntervalPx = 0
@@ -1329,6 +1338,15 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
 
         override fun performClick(): Boolean = super.performClick()
+
+        override val scrollsContent: Boolean get() = true
+
+        override fun dragOwnership(horizontal: Boolean, fingerSign: Int): Int =
+            if (scrollingEnabled && horizontal && canScrollHorizontally(-fingerSign)) {
+                PamGestureArbiter.DIRECTIONAL
+            } else {
+                PamGestureArbiter.NONE
+            }
 
         override fun fling(velocityX: Int) {
             flingStarted = true
