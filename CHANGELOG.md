@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.49.12 - 2026-11-16
+
+- Navigation: the host's transition-end and gesture callbacks and a system
+  Back that pops a route re-render the navigator they changed (child
+  navigators and listeners' components by the render's change detection),
+  not the whole tree. As plain closures they invalidated everything: every
+  kept-alive screen (tab roots, the stack below) rendered again after each
+  push and pop, ~120 ms of PHP on a large app (Zé Chat on a Galaxy S10), and
+  before each Back the pop waited ~200 ms for it. A Back an app interceptor
+  consumes (`interceptSystemBack()`) still re-renders everything, and so does
+  a handler set with `App::onBack()`.
+- Lists: a pager (`pagingEnabled` with `estimatedRowHeight`/`rowHeight`)
+  plans its first frame by pages instead of the 900 pt fallback screen:
+  `windowSize="3"` opens with the page at `initialScrollIndex` and one on
+  each side (it built 5 and released 2 once the host reported).
+
 ## 1.49.11 - 2026-11-16
 
 - `PamPhpCompiler::prebuild()` streams the component pack to disk instead of
