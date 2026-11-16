@@ -815,6 +815,26 @@ abstract class Element implements Renderable
     }
 
     /**
+     * @internal Copy of this tree with the descendant at $path (child
+     * indexes from this element) replaced: only the elements on the path are
+     * copied, every other subtree keeps its identity (and encoder cache).
+     *
+     * @param list<int> $path
+     */
+    final public function __pamReplacePath(array $path, Element $replacement, int $depth = 0): Element
+    {
+        if (!isset($path[$depth])) {
+            return $replacement;
+        }
+        $index = $path[$depth];
+        $child = $this->children[$index] ?? throw new InvalidArgumentException('Element path does not exist.');
+        $copy = clone $this;
+        $copy->children[$index] = $child->__pamReplacePath($path, $replacement, $depth + 1);
+
+        return $copy;
+    }
+
+    /**
      * @internal Places an element the template renderer just built (and
      * nobody else references yet) at its static slot without copying it.
      */

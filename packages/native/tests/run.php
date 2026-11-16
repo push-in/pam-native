@@ -7656,6 +7656,7 @@ require __DIR__.'/list_window_template.php';
 require __DIR__.'/list_native_scroll.php';
 require __DIR__.'/launch_url.php';
 require __DIR__.'/handler_purity.php';
+require __DIR__.'/granular_render.php';
 require __DIR__.'/protocol_extension.php';
 require __DIR__.'/memory_bounds.php';
 // Heap measurements need an isolated process, without prior tests' retained fixtures.
