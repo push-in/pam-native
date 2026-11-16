@@ -47,7 +47,7 @@ use function is_string;
  * reads the same file to generate typed navigation and deep links.
  *
  * Static: screen(), modal(), tabs(), group(), middleware(), name(), prefix(),
- * navigate(), back(), current(), path(), refresh().
+ * navigate(), back(), open(), openInitial(), current(), path(), refresh().
  * Instance (chained on a registration): name(), middleware(), icon(), label(),
  * title(), gestures(), presentation(), orientation(), statusBar(),
  * transition(), sheet(), secure(), keepAlive(), initial(), deepLink().
@@ -242,6 +242,19 @@ final class Route
     public static function open(string $uri): bool
     {
         return self::navigator()->open($uri);
+    }
+
+    /**
+     * Opens an incoming link without a transition, settled before the next
+     * frame: a cold-start link (or one held until the launch screen hands
+     * over) shows its screen first, the stack under it for Back, like React
+     * Navigation's initial state from a deep link. Same matching and
+     * middleware as open(), with or without Route::linking(); false when no
+     * route matches or middleware refuses it.
+     */
+    public static function openInitial(string $uri): bool
+    {
+        return self::navigator()->openInitial($uri);
     }
 
     /** @internal Starts a fresh registry (tests, hot reload). */

@@ -91,6 +91,13 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
             },
         )
         self.runtime = runtime
+#if !os(tvOS)
+        // Plugins registered their push handler while the modules were built
+        // above; the launching push reaches it before PHP boots.
+        if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
+            PamPushNotifications.didLaunch(remoteNotification: userInfo)
+        }
+#endif
         controller.onGeometryChange = { [weak runtime, weak controller] in
             guard let runtime, let controller else { return }
             runtime.updateViewport(
@@ -450,6 +457,13 @@ final class PamSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 break
             }
         }
+#if !os(tvOS)
+        // Cold start from a notification tap: under UIScene the response only
+        // arrives here, so plugins capture it before PHP boots.
+        if let response = connectionOptions.notificationResponse {
+            PamPushNotifications.didLaunch(response: response)
+        }
+#endif
         appDelegate.startRuntimeIfNeeded()
     }
 

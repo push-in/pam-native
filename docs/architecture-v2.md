@@ -451,6 +451,21 @@ missing required parameter or a value that cannot become the declared type
 throws. `Route::current()`, `Route::path('chat', ['id' => 5])`,
 `Route::has()`, `Route::refresh()` and `Route::open($uri)` complete the API.
 
+`Route::openInitial($uri)` opens a link as React Navigation's initial state
+from a deep link: no transition, settled before the next frame, with the
+stack under it kept for Back. Use it for a cold-start link, or for one an app
+held until its launch screen hands over (the reset to the home screen and the
+link in the same cycle): the first frame after the launch screen is the
+linked screen. Matching and middleware are those of `Route::open()`, with or
+without `Route::linking(false)`; it returns `false` when no route matches or
+middleware refuses it, and builds no screen while resolving the link.
+
+```php
+// Launch hand-over: home at the root, the pending link over it, no animation.
+Route::navigate('inbox', mode: 'reset', transition: NavigationTransition::None);
+if ($pendingUri !== null) Route::openInitial($pendingUri);
+```
+
 In templates:
 
 ```html

@@ -878,6 +878,17 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         return true;
     }
 
+    /**
+     * @internal Settles the navigation just made, as openInitial() does: no
+     * transition runs, the new top is simply there on the next frame.
+     * RouteNavigator::openInitial() resolves routes.php links itself (this
+     * stack has none of them) and settles with this.
+     */
+    public function settle(): void
+    {
+        $this->finalizeOutgoingRoute();
+    }
+
     public function open(string $uri): bool
     {
         if ($uri === '' || strlen($uri) > 8_192) return false;

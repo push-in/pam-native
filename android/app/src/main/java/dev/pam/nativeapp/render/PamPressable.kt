@@ -343,8 +343,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 nativeBaseTranslationY = translationTarget.translationY - payload.translationY
                 nativeGestureTransformActive = false
             } else {
-                // The finger moves in screen pixels; the target translates in its
-                // parent's space, which a scaled or rotated ancestor transforms.
+                // The translation is in this detector's space (a scaled or rotated
+                // ancestor is already undone); the target moves in its parent's.
                 val (deltaX, deltaY) = parentSpaceVector(translationTarget, payload.translationX, payload.translationY)
                 val translatedX = nativeBaseTranslationX + deltaX
                 translationTarget.translationX = if (nativeTranslationLimitX > 0f) {
@@ -496,13 +496,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     /**
-     * A screen-space vector expressed in [target]'s parent coordinates: the
-     * inverse of every ancestor transform (scale, rotation) above it. With no
-     * transformed ancestor it is returned unchanged.
+     * A vector in this detector's space (the gesture translation) expressed
+     * in [target]'s parent coordinates: the inverse of the transforms between
+     * them (a nested detector the target belongs to). The target's parent is
+     * usually this view, and the vector is returned unchanged.
      */
     private fun parentSpaceVector(target: View, x: Float, y: Float): Pair<Float, Float> {
         val vector = floatArrayOf(x, y)
-        return if (mapToParentSpace(target, vector)) vector[0] to vector[1] else x to y
+        return if (mapToParentSpace(target, vector, from = this)) vector[0] to vector[1] else x to y
     }
 
     /** The child's untranslated pivot in this view's coordinates. */
@@ -1238,16 +1239,17 @@ internal fun focalZoomTranslation(
 ): Float = (focal - pivot) - (focalStart - pivot - baseTranslation) * ratio
 
 /**
- * Maps a screen-space [vector] (in place) into the coordinate space of
- * [target]'s parent by inverting the transforms of every ancestor, from the
- * parent up to the root. Returns false (vector untouched) when no ancestor
+ * Maps a [vector] (in place) from the space of [from], an ancestor of
+ * [target] (the screen when null), into the coordinate space of [target]'s
+ * parent by inverting the transforms of the views in between, from the
+ * parent up to [from] (excluded). Returns false (vector untouched) when none
  * is transformed or the combined transform is not invertible.
  */
-internal fun mapToParentSpace(target: View, vector: FloatArray): Boolean {
+internal fun mapToParentSpace(target: View, vector: FloatArray, from: View? = null): Boolean {
     val combined = android.graphics.Matrix()
     var ancestor = target.parent as? View
     var transformed = false
-    while (ancestor != null) {
+    while (ancestor != null && ancestor !== from) {
         val matrix = ancestor.matrix
         if (!matrix.isIdentity) {
             combined.postConcat(matrix)
