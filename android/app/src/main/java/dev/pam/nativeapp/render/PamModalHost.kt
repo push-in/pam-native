@@ -5,11 +5,13 @@ import android.app.Dialog
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.Configuration
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Outline
+import android.graphics.Picture
 import android.os.Build
 import android.util.AttributeSet
 import android.view.Gravity
@@ -30,6 +32,9 @@ import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.PamAppearance
@@ -332,6 +337,18 @@ internal class PamModalHost @JvmOverloads constructor(
 
     /** The window an unmounted Modal keeps on screen while its tags fly home. */
     private var sharedRemoval: Dialog? = null
+
+    /**
+     * Pictures of the content views, recorded by [prepareRemoval] while they
+     * are still laid out, that an unmounted Modal plays its exit with.
+     */
+    private var removalGhosts: List<View>? = null
+
+    /** The window an unmounted Modal keeps on screen while its regular exit plays. */
+    private var removalExit: Dialog? = null
+    private var removalExitObserver: LifecycleEventObserver? = null
+    private val dropRemovalGhosts = Runnable { removalGhosts = null }
+    private val finishRemovalExitNow = Runnable { removalExit?.let(::finishRemovalExit) }
     private var updateScheduled = false
     private var bottomSheetSnapPoints = listOf(0.5f, 0.9f)
     private var dynamicSheetSizing = false
@@ -781,10 +798,15 @@ internal class PamModalHost @JvmOverloads constructor(
     fun close() {
         desiredVisible = false
         mainHandler.removeCallbacks(destroyDetachedDialog)
+        mainHandler.removeCallbacks(dropRemovalGhosts)
         removeCallbacks(updateRunnable)
         updateScheduled = false
-        destroyDialog(notify = false)
-        content.removeAllViews()
+        val ghosts = removalGhosts
+        removalGhosts = null
+        if (ghosts == null || !startRemovalExit(ghosts)) {
+            destroyDialog(notify = false)
+            content.removeAllViews()
+        }
         onRequestClose = null
         onShow = null
         onDismiss = null
@@ -800,6 +822,9 @@ internal class PamModalHost @JvmOverloads constructor(
         presentation == PRESENTATION_SHEET && view.parent === content
 
     fun isPresented(): Boolean = dialog?.isPresentedWindow == true
+
+    /** Unmounted, its window still plays the exit (tests, diagnostics). */
+    internal fun isExitingAfterRemoval(): Boolean = removalExit != null
 
     /**
      * Activity-level fallback for synthetic/OEM Back dispatch that reaches
@@ -1223,6 +1248,17 @@ internal class PamModalHost @JvmOverloads constructor(
         return current as? PamActivity
     }
 
+    private fun hostActivity(): android.app.Activity? {
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is android.app.Activity) return current
+            current = current.baseContext
+        }
+        return null
+    }
+
+    private fun lifecycleOwner(): LifecycleOwner? = hostActivity() as? LifecycleOwner
+
     private fun hideVisibleKeyboard(): Boolean {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
             return false
@@ -1545,6 +1581,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun sheetChild(): View? = sheetChildren().firstOrNull()
 
     private fun updateBottomSheetChrome() {
+        // An unmounted sheet's exit keeps its handle and pictures as they were.
+        if (removalExit != null) return
         val sheet = sheetChild()
         handle.visibility = if (
             presentation == PRESENTATION_SHEET &&
@@ -1576,6 +1614,17 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
+    /**
+     * The backdrop's fade level (what `setAlpha` was given). `getAlpha` is
+     * that level times the colour's own alpha: a close starting from it
+     * dropped a 32% backdrop to 10% in its first frame.
+     */
+    private fun backdropLevel(): Int {
+        val base = Color.alpha(backdropColor)
+        if (base == 0) return 255
+        return ((backdropDrawable.alpha * 255 + base / 2) / base).coerceIn(0, 255)
+    }
+
     private fun applyBackdrop() {
         backdropDrawable.color = backdropColor
         if (content.background !== backdropDrawable) content.background = backdropDrawable
@@ -1597,7 +1646,7 @@ internal class PamModalHost @JvmOverloads constructor(
         backdropAnimator?.cancel()
         content.alpha = 1f
         content.translationY = 0f
-        val from = if (entering) 0 else backdropDrawable.alpha
+        val from = if (entering) 0 else backdropLevel()
         val to = if (entering) 255 else 0
         movers.forEach { view ->
             view.animate().cancel()
@@ -1710,7 +1759,9 @@ internal class PamModalHost @JvmOverloads constructor(
                 view.translationY = offscreen
             }
             sheetEntranceOffset = offscreen
-            content.post { animateSheet(entering = true) }
+            // Not once the window closed or was unmounted before the post ran.
+            val generation = dialogGeneration
+            content.post { if (generation == dialogGeneration && removalExit == null) animateSheet(entering = true) }
             backdropDrawable.alpha = 0
             return
         }
@@ -1722,7 +1773,14 @@ internal class PamModalHost @JvmOverloads constructor(
             return
         }
         if (animationType == ANIMATION_SLIDE_FADE) {
-            if (content.isLaidOut) animateSlideFade(entering = true) else content.post { animateSlideFade(entering = true) }
+            if (content.isLaidOut) {
+                animateSlideFade(entering = true)
+            } else {
+                val generation = dialogGeneration
+                content.post {
+                    if (generation == dialogGeneration && removalExit == null) animateSlideFade(entering = true)
+                }
+            }
             return
         }
         content.alpha = if (animationType == ANIMATION_FADE) 0f else 1f
@@ -1812,11 +1870,13 @@ internal class PamModalHost @JvmOverloads constructor(
     /**
      * The Modal (or an ancestor) is about to be unmounted in this commit:
      * while its views are still laid out, its tags start flying home and the
-     * window stays until they land (see [destroyDialog]).
+     * window stays until they land (see [destroyDialog]). Without tags, its
+     * content is recorded as pictures, and [close] plays the regular exit
+     * with them before the window goes (see [startRemovalExit]).
      */
-    internal fun prepareSharedRemoval() {
+    internal fun prepareRemoval() {
         val modal = dialog?.takeIf { it.isPresentedWindow } ?: return
-        if (sharedRemoval != null) return
+        if (sharedRemoval != null || removalGhosts != null) return
         if (shared.running) shared.cancel()
         val started = startSharedExit(modal, shade = true) { completed ->
             if (sharedRemoval === modal) sharedRemoval = null
@@ -1827,7 +1887,125 @@ internal class PamModalHost @JvmOverloads constructor(
                 completed -> dismissNow(modal, notify = true)
             }
         }
-        if (started) sharedRemoval = modal
+        if (started) {
+            sharedRemoval = modal
+            return
+        }
+        if (routeCovered || !canAnimateExit()) return
+        removalGhosts = recordContentGhosts()
+        // Still mounted after all: the pictures go with this main-thread turn.
+        mainHandler.post(dropRemovalGhosts)
+    }
+
+    /**
+     * One picture per content view (not the handle), drawn where the view
+     * is now (frame, translation, alpha, outline). Recording only stores the
+     * draw commands (no pixels): decoded bitmaps, hardware ones included,
+     * are shared with the views being removed.
+     */
+    private fun recordContentGhosts(): List<View> {
+        val ghosts = ArrayList<View>(1)
+        for (index in 0 until content.childCount) {
+            val child = content.getChildAt(index)
+            if (child === handle || child.visibility != View.VISIBLE || child.width <= 0 || child.height <= 0) continue
+            val picture = recordModalPicture(child) ?: continue
+            ghosts += PamModalExitGhost(context, picture).apply {
+                layoutParams = FrameLayout.LayoutParams(child.width, child.height, Gravity.LEFT or Gravity.TOP).apply {
+                    leftMargin = child.left - content.paddingLeft
+                    topMargin = child.top - content.paddingTop
+                }
+                layout(child.left, child.top, child.right, child.bottom)
+                translationX = child.translationX
+                translationY = child.translationY
+                alpha = child.alpha
+                scaleX = child.scaleX
+                scaleY = child.scaleY
+                rotation = child.rotation
+                pivotX = child.pivotX
+                pivotY = child.pivotY
+                elevation = child.elevation
+                translationZ = child.translationZ
+                // The child's outline as it is now (rounded sheet corners, its
+                // background's shape): the picture has no background of its own.
+                val outline = child.outlineProvider?.let { provider ->
+                    Outline().also { provider.getOutline(child, it) }
+                }
+                outlineProvider = outline?.let { captured ->
+                    object : ViewOutlineProvider() {
+                        override fun getOutline(view: View, target: Outline) = target.set(captured)
+                    }
+                }
+                clipToOutline = outline != null && child.clipToOutline
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            }
+        }
+        return ghosts
+    }
+
+    /**
+     * The Modal was unmounted (`p-if`) while presented: the PHP side already
+     * closed it, so nothing is notified, but the window stays and plays the
+     * same exit as `visible = false` (curve, duration, backdrop fade) over
+     * the pictures [prepareRemoval] recorded, then goes. It takes no touches
+     * nor focus meanwhile (they reach the screen below), and a Modal opened
+     * meanwhile shows in its own window above it. The window goes at once
+     * when the activity stops or is destroyed, and at the latest after
+     * [REMOVAL_EXIT_TIMEOUT_MS] (an animator that never ends).
+     */
+    private fun startRemovalExit(ghosts: List<View>): Boolean {
+        val modal = dialog?.takeIf { it.isPresentedWindow } ?: return false
+        if (sharedRemoval === modal || removalExit != null || routeCovered || !canAnimateExit()) return false
+        val owner = lifecycleOwner()
+        if (owner != null && !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return false
+        val activity = hostActivity()
+        if (activity == null || activity.isFinishing || activity.isDestroyed) return false
+        destroyDialog(notify = false, keepForExit = true)
+        modal.setOnKeyListener(null)
+        modal.setOnCancelListener(null)
+        modal.setCancelable(false)
+        modal.window?.peekDecorView()?.let { decor ->
+            // The IME of the window below must not move the pictures.
+            ViewCompat.setOnApplyWindowInsetsListener(decor, null)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) decor.setWindowInsetsAnimationCallback(null)
+        }
+        setHiddenWindowInput(modal, hidden = true)
+        for (index in content.childCount - 1 downTo 0) {
+            val child = content.getChildAt(index)
+            if (child !== handle) {
+                child.animate().cancel()
+                content.removeViewAt(index)
+            }
+        }
+        ghosts.forEachIndexed { index, ghost -> content.addView(ghost, index) }
+        if (handle.parent === content) handle.bringToFront()
+        removalExit = modal
+        if (owner != null) {
+            removalExitObserver = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP || event == Lifecycle.Event.ON_DESTROY) {
+                    finishRemovalExit(modal)
+                }
+            }.also(owner.lifecycle::addObserver)
+        }
+        mainHandler.postDelayed(finishRemovalExitNow, REMOVAL_EXIT_TIMEOUT_MS)
+        startExitAnimation { finishRemovalExit(modal) }
+        return true
+    }
+
+    /** The unmounted Modal's exit ended (or was cut short): its window and pictures go. */
+    private fun finishRemovalExit(modal: Dialog) {
+        if (removalExit !== modal) return
+        removalExit = null
+        mainHandler.removeCallbacks(finishRemovalExitNow)
+        removalExitObserver?.let { observer -> lifecycleOwner()?.lifecycle?.removeObserver(observer) }
+        removalExitObserver = null
+        backdropAnimator?.cancel()
+        backdropAnimator = null
+        slideFadeAnimator?.cancel()
+        slideFadeAnimator = null
+        content.animate().cancel()
+        for (index in 0 until content.childCount) content.getChildAt(index).animate().cancel()
+        runCatching { modal.dismiss() }
+        content.removeAllViews()
     }
 
     internal fun activeSharedElementCount(): Int = shared.activeCount()
@@ -1852,52 +2030,48 @@ internal class PamModalHost @JvmOverloads constructor(
                 return
             }
         }
-        if (
-            animated &&
-            animationType != ANIMATION_NONE &&
-            !PamMotionPolicy.isReduced(context)
-        ) {
+        if (animated && canAnimateExit()) {
             val generation = ++dialogGeneration
-            if (presentation == PRESENTATION_SHEET) {
-                animateSheet(entering = false) {
-                    if (dialogGeneration == generation && dialog === modal && !desiredVisible) {
-                        dismissNow(modal, notify)
-                    }
+            startExitAnimation {
+                if (dialogGeneration == generation && dialog === modal && !desiredVisible) {
+                    dismissNow(modal, notify)
                 }
-                return
             }
-            content.animate().cancel()
-            if (animationType == ANIMATION_SLIDE_FADE) {
-                animateSlideFade(entering = false) {
-                    if (dialogGeneration == generation && dialog === modal && !desiredVisible) {
-                        dismissNow(modal, notify)
-                    }
-                }
-                return
-            }
-            content.animate()
-                .alpha(if (animationType == ANIMATION_FADE) 0f else 1f)
-                .translationY(
-                    if (animationType == ANIMATION_SLIDE) {
-                        resources.displayMetrics.heightPixels * SLIDE_DISTANCE_FRACTION
-                    } else {
-                        0f
-                    },
-                )
-                .setDuration(MODAL_EXIT_DURATION_MS)
-                .withEndAction {
-                    if (
-                        dialogGeneration == generation &&
-                        dialog === modal &&
-                        !desiredVisible
-                    ) {
-                        dismissNow(modal, notify)
-                    }
-                }
-                .start()
             return
         }
         dismissNow(modal, notify)
+    }
+
+    private fun canAnimateExit(): Boolean =
+        animationType != ANIMATION_NONE && !PamMotionPolicy.isReduced(context)
+
+    /**
+     * The regular exit of this Modal (sheet slide and backdrop fade,
+     * slide-fade, slide or fade). [end] runs once it completes, never when
+     * it is cut short.
+     */
+    private fun startExitAnimation(end: () -> Unit) {
+        if (presentation == PRESENTATION_SHEET) {
+            animateSheet(entering = false, end)
+            return
+        }
+        content.animate().cancel()
+        if (animationType == ANIMATION_SLIDE_FADE) {
+            animateSlideFade(entering = false, end)
+            return
+        }
+        content.animate()
+            .alpha(if (animationType == ANIMATION_FADE) 0f else 1f)
+            .translationY(
+                if (animationType == ANIMATION_SLIDE) {
+                    resources.displayMetrics.heightPixels * SLIDE_DISTANCE_FRACTION
+                } else {
+                    0f
+                },
+            )
+            .setDuration(MODAL_EXIT_DURATION_MS)
+            .withEndAction(end)
+            .start()
     }
 
     private fun dismissNow(modal: Dialog, notify: Boolean) {
@@ -1955,16 +2129,24 @@ internal class PamModalHost @JvmOverloads constructor(
         if (hidden) window.addFlags(flags) else window.clearFlags(flags)
     }
 
-    private fun destroyDialog(notify: Boolean) {
+    /**
+     * Releases the Modal's window. It stays on screen (still released from
+     * everything else) while an unmounted Modal's tags fly home, or with
+     * [keepForExit] while it plays its exit ([startRemovalExit]).
+     */
+    private fun destroyDialog(notify: Boolean, keepForExit: Boolean = false) {
         val modal = dialog ?: return
         ++dialogGeneration
         // An unmounted Modal whose tags fly home keeps its window until they land.
-        val keepWindow = sharedRemoval === modal && shared.running && pamActivity()?.isFinishing != true
-        if (!keepWindow) shared.cancel()
-        content.animate().cancel()
-        resetSlideFade()
-        content.alpha = 1f
-        content.translationY = 0f
+        val keepWindow = keepForExit ||
+            (sharedRemoval === modal && shared.running && pamActivity()?.isFinishing != true)
+        if (keepForExit || !keepWindow) shared.cancel()
+        if (!keepForExit) {
+            content.animate().cancel()
+            resetSlideFade()
+            content.alpha = 1f
+            content.translationY = 0f
+        }
         val wasShowing = modal.isPresentedWindow
         pamActivity()?.unobservePamFocus(content)
         unregisterDialogBackCallback(modal)
@@ -2048,6 +2230,39 @@ internal class PamModalHost @JvmOverloads constructor(
         const val AUTO_FOCUS_KEYBOARD_WINDOW_MS = 4_000L
         const val SHEET_EXIT_DURATION_MS = 200L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
+
+        /** Longest exit (slide-fade) plus slack for a late first frame. */
+        const val REMOVAL_EXIT_TIMEOUT_MS = 1_000L
+    }
+}
+
+/**
+ * The draw commands of [view] (not its own transform nor alpha), or null
+ * when it cannot be recorded. Nothing is rasterised: bitmaps are referenced.
+ */
+internal fun recordModalPicture(view: View): Picture? = runCatching {
+    Picture().also { picture ->
+        val canvas = picture.beginRecording(view.width, view.height)
+        try {
+            canvas.translate(-view.scrollX.toFloat(), -view.scrollY.toFloat())
+            view.draw(canvas)
+        } finally {
+            picture.endRecording()
+        }
+    }
+}.getOrNull()
+
+/** A removed Modal view's last picture, drawn where the view was while the Modal exits. */
+private class PamModalExitGhost(context: Context, private val picture: Picture) : View(context) {
+    override fun onDraw(canvas: Canvas) {
+        if (
+            !canvas.isHardwareAccelerated &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            picture.requiresHardwareAcceleration()
+        ) {
+            return
+        }
+        canvas.drawPicture(picture)
     }
 }
 
