@@ -7026,11 +7026,16 @@ public final class PamRenderer: @unchecked Sendable {
             let viewPoint = sender.location(in: sender.view)
             let windowPoint = sender.location(in: sender.view?.window)
             var translation = CGPoint.zero
+            // The native transform maps the window-space translation into its
+            // target's superview (parentSpaceVector); the detector-space one
+            // would undo the detector's and its ancestors' transforms twice.
+            var windowTranslation = CGPoint.zero
             var velocity = CGPoint.zero
             var scale: CGFloat = 1
             var rotation: CGFloat = 0
             if let pan = sender as? UIPanGestureRecognizer {
                 translation = pan.translation(in: sender.view)
+                windowTranslation = pan.translation(in: nil)
                 velocity = pan.velocity(in: sender.view)
             }
             #if !os(tvOS)
@@ -7065,7 +7070,7 @@ public final class PamRenderer: @unchecked Sendable {
             } else {
                 applyNativeGestureTransform(
                     sender,
-                    translation: translation,
+                    translation: windowTranslation,
                     scale: scale,
                     rotation: rotation
                 )
@@ -7176,6 +7181,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
+        /// `translation`: the pan's, in window points (`translation(in: nil)`).
         private func applyNativeGestureTransform(
             _ sender: UIGestureRecognizer,
             translation: CGPoint,

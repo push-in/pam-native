@@ -17,6 +17,15 @@
   finger. Pan and swipe distance/direction use the same space; tap slop and
   the pager hand-back stay in screen pixels. Without scale or rotation the
   values are unchanged.
+- iOS: a native pan transform (`gestureNativeTransform`) on a rotated or
+  scaled detector, or inside a scaled canvas, follows the finger again. The
+  renderer handed it the detector-space translation, which
+  `parentSpaceVector` then mapped through the same transforms a second time
+  (a story layer inside a 0.69 canvas moved about 1.45x the finger, a rotated
+  one off its axis); it now gets `translation(in: nil)`. PHP's
+  `translationX/Y` stay in the detector's space. Android maps its (already
+  local) translation only between the detector and the target's parent, now
+  also for the pan a focal pinch owns.
 - iOS: `PushEventHandler` gains `didLaunch(response:)` and
   `didLaunch(remoteNotification:)`, with empty default implementations. The
   host forwards UIScene `connectionOptions.notificationResponse` (the

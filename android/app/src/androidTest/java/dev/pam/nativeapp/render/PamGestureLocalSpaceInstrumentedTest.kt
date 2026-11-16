@@ -90,6 +90,98 @@ class PamGestureLocalSpaceInstrumentedTest {
         assertEquals(180f, f.target.translationX, 0f)
     }
 
+    /**
+     * Story editor layer: the detector itself is rotated 30° and committed at
+     * 2x inside a canvas drawn at 0.69, and its native transform moves its
+     * child. The detector-space translation is mapped only between the
+     * detector and the child's parent (nothing here), never through the
+     * detector and canvas again, so the child moves exactly with the finger.
+     */
+    @Test
+    fun nativePanUnderARotatedScaledDetectorMovesWithTheFinger() {
+        lateinit var root: FrameLayout
+        lateinit var target: View
+        val payloads = mutableListOf<PamGesturePayload>()
+        main {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            target = View(context)
+            val detector = PamPressable(context).apply {
+                addView(target, FrameLayout.LayoutParams(200, 80))
+                configureGesture(
+                    PamGestureConfig(
+                        type = 2,
+                        enabled = true,
+                        minPointers = 1,
+                        maxPointers = 1,
+                        direction = 1,
+                        composition = 1,
+                        minDistance = 2f,
+                        minDurationMs = 0L,
+                    ),
+                    callback = { payloads += it },
+                    nativeTransform = true,
+                )
+                rotation = 30f
+                scaleX = 2f
+                scaleY = 2f
+            }
+            val canvas = FrameLayout(context).apply {
+                scaleX = 0.69f
+                scaleY = 0.69f
+                addView(detector, FrameLayout.LayoutParams(200, 80).apply {
+                    leftMargin = 100
+                    topMargin = 300
+                })
+            }
+            root = FrameLayout(context).apply {
+                addView(canvas, FrameLayout.LayoutParams(800, 800))
+                measure(
+                    View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                )
+                layout(0, 0, 800, 800)
+            }
+        }
+        lateinit var start: FloatArray
+        lateinit var end: FloatArray
+        main {
+            start = pointInRoot(target, root)
+            // The detector's centre (200, 340 in the canvas) is (262, 358.6) on screen.
+            fun send(action: Int, x: Float, y: Float, at: Long) {
+                val event = MotionEvent.obtain(DOWN_TIME, DOWN_TIME + at, action, x, y, 0)
+                try { root.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            send(MotionEvent.ACTION_DOWN, 262f, 358.6f, 0L)
+            send(MotionEvent.ACTION_MOVE, 272f, 363.6f, 16L)
+            send(MotionEvent.ACTION_MOVE, 302f, 383.6f, 32L)
+            send(MotionEvent.ACTION_UP, 302f, 383.6f, 40L)
+            end = pointInRoot(target, root)
+        }
+        assertEquals("The child moves with the finger (x)", 40f, end[0] - start[0], 0.05f)
+        assertEquals("The child moves with the finger (y)", 25f, end[1] - start[1], 0.05f)
+        val reported = payloads.last { it.state == STATE_ENDED }
+        assertEquals(
+            "PHP still gets the detector-space translation (screen / 1.38)",
+            47.17f / 1.38f,
+            kotlin.math.hypot(reported.translationX, reported.translationY),
+            0.05f,
+        )
+    }
+
+    /** [view]'s origin in [root]'s coordinates, through every matrix on the way. */
+    private fun pointInRoot(view: View, root: View): FloatArray {
+        val point = floatArrayOf(0f, 0f)
+        var node = view
+        while (node !== root) {
+            node.matrix.mapPoints(point)
+            val parent = node.parent as View
+            point[0] += node.left - parent.scrollX
+            point[1] += node.top - parent.scrollY
+            node = parent
+        }
+        return point
+    }
+
     private class Fixture(
         val root: FrameLayout,
         val target: View,
