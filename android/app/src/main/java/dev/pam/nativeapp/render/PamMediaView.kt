@@ -258,6 +258,11 @@ internal class PamMediaView(
 
     fun setSource(value: String) {
         if (source == value) return
+        if (value != failedSource) {
+            failedSource = null
+            playbackRecoveries = 0
+            removeCallbacks(recoverPlayback)
+        }
         source = value
         if (value != resumeSource) {
             resumeSource = ""
@@ -691,8 +696,52 @@ internal class PamMediaView(
     /** True while a released paused player waits for play or seek (tests, diagnostics). */
     internal val awaitingRestore: Boolean get() = pendingRestore
 
+    /**
+     * The source whose player failed: the failed player is released (poster
+     * shown) and the source prepares again when the view is attached or shown
+     * again, or after a backoff while it stays on screen ([recoverPlayback]).
+     * A rate-limited feed video recovers instead of staying black until rebound.
+     */
+    private var failedSource: String? = null
+    private var playbackRecoveries = 0
+    private val recoverPlayback = Runnable { recoverFailedPlayback(force = false) }
+
+    private fun playerFailed(transient: Boolean) {
+        releasePlayer()
+        failedSource = source.takeIf(String::isNotEmpty)
+        removeCallbacks(recoverPlayback)
+        if (transient && playbackRecoveries < MAX_PLAYBACK_RECOVERIES) {
+            postDelayed(recoverPlayback, mediaBackoffMs(playbackRecoveries + 2, kotlin.random.Random.nextDouble()))
+        }
+    }
+
+    private fun playbackRecovered() {
+        failedSource = null
+        playbackRecoveries = 0
+        removeCallbacks(recoverPlayback)
+    }
+
+    /** Prepares a failed source again; [force] when the view just came back (attached or shown). */
+    private fun recoverFailedPlayback(force: Boolean) {
+        val failed = failedSource ?: return
+        if (failed != source || exo != null || preparedPlayer != null || creatingPlayer) return
+        if (!isAttachedToWindow || !isShown || windowVisibility != VISIBLE) return
+        if (covered || suspended || hiddenRelease || idleSurface) return
+        if (force) {
+            playbackRecoveries = 0
+        } else {
+            if (!onScreen()) return
+            playbackRecoveries++
+        }
+        removeCallbacks(recoverPlayback)
+        val current = source
+        source = ""
+        setSource(current)
+    }
+
     private fun syncVisibility() {
         val shown = isShown && windowVisibility == VISIBLE
+        if (shown && failedSource != null) post { recoverFailedPlayback(force = true) }
         playback.visibility(isAttachedToWindow, shown)
         syncCoverage()
         syncHiddenRelease(shown)
@@ -930,6 +979,7 @@ internal class PamMediaView(
         override fun onPrepared(width: Int, height: Int, durationMs: Long) {
             val player = current() ?: return
             prepared = true
+            playbackRecovered()
             videoWidthPx = width
             videoHeightPx = height
             player.setLooping(looping)
@@ -969,12 +1019,13 @@ internal class PamMediaView(
             syncPlayback()
         }
 
-        override fun onError(message: String) {
+        override fun onError(message: String, transient: Boolean) {
             current() ?: return
             prepared = false
             showPoster()
             mediaController?.isEnabled = false
             onError?.invoke(message)
+            playerFailed(transient)
         }
     }
 
@@ -1050,6 +1101,12 @@ internal class PamMediaView(
                 showPoster()
                 mediaController?.isEnabled = false
                 onError?.invoke("Media playback failed ($what/$extra)")
+                // MediaPlayer reports no HTTP status: I/O and timeouts are worth another try.
+                playerFailed(
+                    extra == MediaPlayer.MEDIA_ERROR_IO ||
+                        extra == MediaPlayer.MEDIA_ERROR_TIMED_OUT ||
+                        what == MediaPlayer.MEDIA_ERROR_SERVER_DIED,
+                )
             }
             true
         }
@@ -1248,6 +1305,7 @@ internal class PamMediaView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        if (failedSource == source) playbackRecoveries = 0
         ensureVideoAttached()
         viewLifecycle = (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle
         viewLifecycle?.addObserver(viewLifecycleObserver)
@@ -1426,6 +1484,8 @@ private val mediaExecutor = java.util.concurrent.ThreadPoolExecutor(
 
 /** A hidden (not covered) player keeps its decoder this long before it is released. */
 private const val HIDDEN_RELEASE_MS = 5_000L
+/** Backed-off re-prepares of a transiently failed player that stays on screen (shown again resets it). */
+private const val MAX_PLAYBACK_RECOVERIES = 4
 
 internal fun mediaDataSourceUsesNetworkString(scheme: String?): Boolean =
     scheme.equals("http", ignoreCase = true) ||

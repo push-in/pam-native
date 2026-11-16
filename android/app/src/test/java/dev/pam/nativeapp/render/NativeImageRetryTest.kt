@@ -50,14 +50,33 @@ class NativeImageRetryTest {
     }
 
     @Test
-    fun transientFailureIsRetriedWhileAttached() {
-        assertTrue(shouldRetryImageRequest(attempts = 0, attached = true))
-        assertTrue(shouldRetryImageRequest(attempts = 1, attached = true))
-        assertFalse(shouldRetryImageRequest(attempts = 2, attached = true))
+    fun failedRequestIsNeverReusedEvenWithAPlaceholder() {
+        assertFalse(
+            shouldReuseImageRequest(
+                sameSignature = true,
+                finished = true,
+                hasDrawable = true,
+                failed = true,
+            ),
+        )
     }
 
     @Test
-    fun detachedImageDoesNotKeepBackgroundRetriesAlive() {
-        assertFalse(shouldRetryImageRequest(attempts = 0, attached = false))
+    fun transientFailureRetriesWithBackoffUntilTheBudgetIsSpent() {
+        assertTrue(shouldRetryImageRequest(attempts = 0, transient = true))
+        assertTrue(shouldRetryImageRequest(attempts = IMAGE_MAX_TRANSIENT_RETRIES - 1, transient = true))
+        assertFalse(shouldRetryImageRequest(attempts = IMAGE_MAX_TRANSIENT_RETRIES, transient = true))
+    }
+
+    @Test
+    fun permanentFailureIsNeverRetried() {
+        assertFalse(shouldRetryImageRequest(attempts = 0, transient = false))
+    }
+
+    @Test
+    fun readTimeoutGrowsOnRetries() {
+        assertTrue(imageReadTimeoutMs(0) < imageReadTimeoutMs(1))
+        assertTrue(imageReadTimeoutMs(1) < imageReadTimeoutMs(2))
+        assertTrue(imageReadTimeoutMs(5) <= 15_000)
     }
 }
