@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.50.1 - 2026-11-16
+
+Frame-cost fixes measured on a Galaxy S10 after 1.50.0. No API change.
+
+- Navigation: a slide dims the screen it leaves under a veil of the opaque
+  backdrop instead of a hardware layer, so the first transition frame no
+  longer paints the whole outgoing screen offscreen (drawLayer + flush layers:
+  ~30 ms on the S10). Pops, fades and unknown backdrops keep the layer. iOS
+  mirrors it.
+- Lists (Android): cells reuse their Text views (the cell pool never matched
+  `PamTextView`): in a long fling a row binds ~30% faster and creates ~6x
+  fewer text views. A recycled cell releases the layout, resize/mutate,
+  click-outside, span-press and keyboard-progress bindings its nodes
+  installed, so a reused view never reports events under the previous row's
+  id. A Pressable is configured once per mount. A list's first layout binds
+  only the rows in its viewport; a hidden list (a pushed screen's first
+  layout) mounts its on-screen rows while binding them, removing a
+  window-wide second layout pass.
+- Images: Android decodes images with `blurRadius` to the heap and blurs them
+  on the image loader's workers, never on the UI thread, and never reads a
+  GPU bitmap back (15.5 ms per image on the S10). Blurred bitmaps are cached
+  per sigma and size, so recycled rows paint them in the bind frame. A
+  blurred image (spoiler) never shows a sharp frame; changing `blurRadius` or
+  resizing re-blurs off the UI thread. iOS runs blur and color-matrix filters
+  off the main thread, cached on the shared decoded image.
+- Native clocks render and measure their current label (the template text is
+  only the fallback without a clock value) and are measured again when the
+  label gains or loses a character (9:59 → 10:00, 99:59 → 100:00), with one
+  timer per component and no per-second render. `ClockFormat::format()`.
+- Tests: the sliced mount's absolute frame budgets apply on reference-speed
+  hosts; slower CI runners check the relative guarantee.
+
 ## 1.50.0 - 2026-11-16
 
 Native-level interaction release: the UI thread never waits for PHP to
