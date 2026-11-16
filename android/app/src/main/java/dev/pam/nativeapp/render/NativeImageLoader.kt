@@ -283,9 +283,17 @@ internal class InFlightImageLoads<T> {
     private val loads = ConcurrentHashMap<String, CompletableFuture<T>>()
 
     fun share(key: String, start: () -> CompletableFuture<T>): CompletableFuture<T> {
-        loads[key]?.let { return it }
+        while (true) {
+            val existing = loads[key] ?: break
+            // A failed load is reported to its callers before it leaves the
+            // map (CompletableFuture runs the dependents registered last
+            // first), so a caller told of the failure may ask again while it
+            // is still registered: it starts a new load instead of failing.
+            if (!existing.isCompletedExceptionally) return existing
+            loads.remove(key, existing)
+        }
         val created = CompletableFuture<T>()
-        loads.putIfAbsent(key, created)?.let { return it }
+        loads.putIfAbsent(key, created)?.let { return share(key, start) }
         created.whenComplete { _, _ -> loads.remove(key, created) }
         try {
             start().whenComplete { value, error ->

@@ -38,6 +38,29 @@ class InFlightImageLoadsTest {
     }
 
     @Test
+    fun `a caller told of a failure that asks again starts a new load`() {
+        val loads = InFlightImageLoads<String>()
+        val work = CompletableFuture<String>()
+        val failed = loads.share("photo") { work }
+        var started = 0
+        var retried: CompletableFuture<String>? = null
+        // Registered after the map's own cleanup, it runs first: the failed
+        // load is still registered when the caller hears of the failure.
+        failed.whenComplete { _, _ ->
+            retried = loads.share("photo") {
+                started++
+                CompletableFuture.completedFuture("bitmap")
+            }
+        }
+
+        work.completeExceptionally(IllegalStateException("404"))
+
+        assertEquals(1, started)
+        assertEquals("bitmap", retried?.join())
+        assertEquals(0, loads.size)
+    }
+
+    @Test
     fun `a start that throws fails its future and unregisters it`() {
         val loads = InFlightImageLoads<String>()
 
