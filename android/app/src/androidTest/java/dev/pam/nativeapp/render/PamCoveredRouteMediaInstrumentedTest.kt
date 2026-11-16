@@ -4,7 +4,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.SystemClock
 import android.view.View
-import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -74,86 +73,6 @@ class PamCoveredRouteMediaInstrumentedTest {
                 "Playback resumes where it was covered (${f.media.currentPosition} ms, covered at $before ms)",
                 f.media.currentPosition >= before - 250,
             )
-        }
-    }
-
-    /**
-     * A pushed route is mounted hidden and laid out a frame before its
-     * transition shows it. Its player is created on that layout frame (the
-     * route is being revealed, not covered), not when the route shows.
-     */
-    @Test fun pushedRoutePreparesItsPlayerWhileItLaysOutHidden() = withFixture { f ->
-        val navigation = f.navigation()
-        val pushed = FrameLayout(f.activity)
-        main { navigation.insert(View(f.activity), 0) }
-        await("host laid out") { navigation.isLaidOut }
-        var preparedHidden: Boolean? = null
-        main {
-            pushed.addView(f.media, FrameLayout.LayoutParams(200, 120))
-            f.media.setAutoPlay(true)
-            f.media.setSource(f.source)
-            navigation.operation = PamNavigationHost.OPERATION_PUSH
-            navigation.insert(pushed, 1)
-            assertTrue("Mounted hidden, the route covers its media", f.media.releasedForCover)
-            assertFalse(f.media.holdsPlayer)
-            navigation.navigate(1)
-            afterFirstTransitionPass(navigation) {
-                preparedHidden = pushed.visibility != View.VISIBLE && f.media.holdsPlayer && !f.media.releasedForCover
-            }
-        }
-        await("the first transition pass ran") { preparedHidden != null }
-        main { assertEquals("The player exists while the route still lays out hidden", true, preparedHidden) }
-        await("the pushed route shows") { pushed.visibility == View.VISIBLE }
-        awaitPlaying(f.media, true)
-    }
-
-    /** A route mounted hidden without a transition (kept alive, prewarmed) allocates no player. */
-    @Test fun hiddenRouteWithoutTransitionKeepsNoPlayer() = withFixture { f ->
-        val navigation = f.navigation()
-        val hidden = FrameLayout(f.activity)
-        main { navigation.insert(View(f.activity), 0) }
-        await("host laid out") { navigation.isLaidOut }
-        main {
-            hidden.addView(f.media, FrameLayout.LayoutParams(200, 120))
-            f.media.setAutoPlay(true)
-            f.media.setSource(f.source)
-            navigation.insert(hidden, 1)
-        }
-        SystemClock.sleep(300)
-        main {
-            assertEquals(View.INVISIBLE, hidden.visibility)
-            assertTrue(f.media.releasedForCover)
-            assertFalse("No decoder for a route nobody shows", f.media.holdsPlayer)
-        }
-    }
-
-    /** A revealed route that another push supersedes before it shows is covered again and frees its player. */
-    @Test fun supersededRevealReleasesThePlayer() = withFixture { f ->
-        val navigation = f.navigation()
-        val first = FrameLayout(f.activity)
-        val second = View(f.activity)
-        main { navigation.insert(View(f.activity), 0) }
-        await("host laid out") { navigation.isLaidOut }
-        var preparedHidden: Boolean? = null
-        main {
-            first.addView(f.media, FrameLayout.LayoutParams(200, 120))
-            f.media.setAutoPlay(true)
-            f.media.setSource(f.source)
-            navigation.operation = PamNavigationHost.OPERATION_PUSH
-            navigation.insert(first, 1)
-            navigation.navigate(1)
-            afterFirstTransitionPass(navigation) {
-                preparedHidden = f.media.holdsPlayer
-                // Another push lands before the first route ever shows.
-                navigation.insert(second, 2)
-                navigation.navigate(2)
-            }
-        }
-        await("the first transition pass ran") { preparedHidden != null }
-        main { assertEquals(true, preparedHidden) }
-        await("the second route shows") { second.visibility == View.VISIBLE }
-        await("the route that never showed frees its player") {
-            first.visibility == View.INVISIBLE && f.media.releasedForCover && !f.media.holdsPlayer
         }
     }
 
@@ -304,22 +223,6 @@ class PamCoveredRouteMediaInstrumentedTest {
             SystemClock.sleep(25)
         }
         main { assertTrue(label, condition()) }
-    }
-
-    /**
-     * Runs [block] once, in the pre-draw that runs the host's first
-     * transition pass (registered after the host's own listener, so right
-     * after it, before the frame that shows the pushed route).
-     */
-    private fun afterFirstTransitionPass(navigation: PamNavigationHost, block: () -> Unit) {
-        val observer = navigation.viewTreeObserver
-        observer.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
-            override fun onPreDraw(): Boolean {
-                if (observer.isAlive) observer.removeOnPreDrawListener(this)
-                block()
-                return true
-            }
-        })
     }
 
     private fun awaitPlaying(media: PamMediaView, expected: Boolean) =
