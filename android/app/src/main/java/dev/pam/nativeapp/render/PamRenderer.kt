@@ -8777,6 +8777,15 @@ class PamRenderer(
         } else {
             shape
         }
+        // A plain fill (no border, corner or effect) paints its live color
+        // over its whole box: a navigation transition can take it as the
+        // backdrop of a dimmed route (PamNavigationHost.backgroundFill). The
+        // tag only counts while this shape is the view's background, not
+        // once a ripple wraps it.
+        val plainFill = background === shape && !imageHost && borderWidth <= 0 && radii.all { it == 0f }
+        if (plainFill || view.getTag(dev.pam.nativeapp.R.id.pam_plain_fill) != null) {
+            view.setTag(dev.pam.nativeapp.R.id.pam_plain_fill, shape.takeIf { plainFill })
+        }
         pamImageView(view)?.setCornerRadii(radii)
         applyBoxShadow(view, state, radii)
         if (imageHost) {

@@ -601,7 +601,17 @@ Available transitions are `PlatformDefault`, `SlideFromRight`,
 `SlideFromLeft`, `SlideFromBottom`, `Fade`, `FadeFromBottom`, `Scale`, and
 `None`, plus `SlideFromTop`, `SharedAxisX`, and `SharedAxisY`. They are
 integer-backed enums and are rendered natively with transform
-and opacity. Android's disabled-animation accessibility setting is respected,
+and opacity. A slide also darkens the screen it uncovers or leaves under the
+moving one (18% horizontally, 12% vertically) toward whatever is behind the
+navigator. When that backdrop is one known opaque color (a plain
+`backgroundColor` on the navigator or an ancestor, else the window
+background), the screen stays opaque under a veil of that color: the same
+pixels, without rendering the whole screen offscreen (a hardware layer whose
+first paint costs a frame on mid-range Android phones, group opacity on iOS).
+A translucent window, an image, gradient, border or rounded background behind
+the navigator keeps the offscreen fade, as does a pop, where the top screen
+fades over the one below. An opaque background on the app root keeps every
+push on the cheap path. Android's disabled-animation accessibility setting is respected,
 horizontal transitions automatically mirror in RTL layouts, and only the
 incoming screen remains reachable by TalkBack during and after a transition.
 When the native transition completes, the outgoing route is released and the

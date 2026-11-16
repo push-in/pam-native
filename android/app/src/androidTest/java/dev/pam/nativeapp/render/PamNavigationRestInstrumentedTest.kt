@@ -107,7 +107,12 @@ class PamNavigationRestInstrumentedTest {
     @Test
     fun anEdgeDragReleasedEarlyRestoresBothRoutes() {
         drag(to = 200f)
-        main { assertTrue("the gesture fades the route below", routes[0].alpha < 1f) }
+        main {
+            // A plain View composites as a group: it dims under the host's veil.
+            val dimmed = routes[0].alpha < 1f ||
+                (navigation.veiledRoute() === routes[0] && navigation.veilAmount() > 0f)
+            assertTrue("the gesture dims the route below", dimmed)
+        }
         touch(MotionEvent.ACTION_UP, 200f)
         awaitRest()
         main {
@@ -281,6 +286,7 @@ class PamNavigationRestInstrumentedTest {
     }
 
     private fun assertAtRest() {
+        assertEquals("no veil at rest", null, navigation.veiledRoute())
         routes.forEachIndexed { index, route ->
             assertEquals("route $index alpha", 1f, route.alpha, 0f)
             assertEquals("route $index translationX", 0f, route.translationX, 0f)

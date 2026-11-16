@@ -52,6 +52,9 @@ internal object PamBoxShadows {
         (view.parent as? View)?.invalidate()
     }
 
+    /** Whether [view]'s parent paints outer shadows of it (under it and around it). */
+    fun has(view: View): Boolean = values.containsKey(view)
+
     /** Parses the compiler's `boxShadows` wire list (dp) into px shadows. */
     fun parse(wire: String?, density: Float, radii: FloatArray): List<PamBoxShadow> {
         if (wire.isNullOrEmpty()) return emptyList()

@@ -7,9 +7,17 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Canvas
 import android.graphics.Outline
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.view.Choreographer
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Gravity
 import android.view.MotionEvent
@@ -65,6 +73,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var activeRoute: View? = null
     private var movingRoute: View? = null
     private var layeredRoute: View? = null
+    /**
+     * The route dimmed under a veil ([startVeil]), the view whose opaque
+     * background is its backdrop, and the veil drawn over it now.
+     */
+    private var veilRoute: View? = null
+    private var veilBackdrop: View? = null
+    private var veilLayerFallback = false
+    private var veilAmount = 0f
+    private var veilColor = 0
+    private val veilPaint = Paint()
+    private val backdropRegion = RectF()
+    private val siblingBounds = Rect()
     private val awaitingFirstLayout: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
     private var layoutGeneration = 0L
     private var running: ValueAnimator? = null
@@ -256,6 +276,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         warmLaunch?.takeIf { child === it.incoming || child === it.outgoing }?.let(::abortWarmLaunch)
         if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
+        if (child === veilRoute) clearVeil()
         // A route leaves at rest: mounted again later (kept alive, parked) it
         // must not come back faded or moved.
         if (transformedRoutes.remove(child)) reset(child)
@@ -614,10 +635,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         transformedRoutes += incoming
         transformedRoutes += outgoing
         applyProgress(incoming, outgoing, kind, 0f, 0f, popping = false)
-        outgoing.takeIf { it.layerType == View.LAYER_TYPE_NONE }?.let {
-            it.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            layeredRoute = it
-        }
+        prepareOutgoing(outgoing, kind, popping = false)
         running = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
             interpolator = LinearInterpolator()
@@ -928,6 +946,19 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         setRouteVisibility(incoming, View.VISIBLE)
         setRouteVisibility(outgoing, View.VISIBLE)
         prepareSharedElements(incoming, outgoing)
+        // The route revealed below dims toward the backdrop. One that
+        // composites as a group (its alpha would render it offscreen on every
+        // frame) takes a veil; a PAM screen applies its alpha to each draw
+        // (no offscreen pass, React Native's default) and keeps it.
+        if (incoming.hasOverlappingRendering) {
+            val vertical = gestureDirection == 2
+            startVeil(
+                incoming,
+                reachX = if (vertical) 0f else width * 0.28f,
+                reachY = if (vertical) height * 0.12f else 0f,
+                layerFallback = false,
+            )
+        }
         onGestureStart?.invoke()
     }
 
@@ -949,7 +980,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             outgoing.translationX = sign * width * progress
             incoming.translationX = -sign * width * 0.28f * (1f - progress)
         }
-        incoming.alpha = 0.82f + 0.18f * progress
+        dimRoute(incoming, 0.18f * (1f - progress))
         sharedElements.applyTracking(progress)
     }
 
@@ -1248,13 +1279,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             return
         }
 
-        // The outgoing screen only fades/slides: draw it once into a layer and
-        // composite it, instead of re-rendering it offscreen for its alpha
-        // on every frame of the transition.
-        outgoing?.takeIf { it.layerType == View.LAYER_TYPE_NONE }?.let {
-            it.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            layeredRoute = it
-        }
+        outgoing?.let { prepareOutgoing(it, actualTransition, popping = operation == OPERATION_POP) }
         running = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = actualDuration
             // Linear time: the routes take the platform deceleration, every
@@ -1315,17 +1340,17 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                     incoming.translationX = direction * width * (1f - progress)
                     outgoing?.translationX = -direction * width * 0.28f * progress
                 }
-                outgoing?.alpha = 1f - (progress * 0.18f)
+                outgoing?.let { dimRoute(it, progress * 0.18f) }
             }
             TRANSITION_SLIDE_FROM_BOTTOM -> {
                 if (popping) outgoing?.translationY = height * progress
                 else incoming.translationY = height * (1f - progress)
-                outgoing?.alpha = 1f - (progress * 0.12f)
+                outgoing?.let { dimRoute(it, progress * 0.12f) }
             }
             TRANSITION_SLIDE_FROM_TOP -> {
                 if (popping) outgoing?.translationY = -height * progress
                 else incoming.translationY = -height * (1f - progress)
-                outgoing?.alpha = 1f - (progress * 0.12f)
+                outgoing?.let { dimRoute(it, progress * 0.12f) }
             }
             TRANSITION_FADE -> if (sharedElements.isEmpty) {
                 incoming.alpha = progress
@@ -1376,6 +1401,259 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         }
         sharedElements.apply(time)
     }
+
+    /**
+     * How [outgoing] is dimmed through a transition. A slide only darkens it
+     * toward the backdrop (18% horizontal, 12% vertical) under the incoming
+     * route: a veil when that backdrop is one known opaque color
+     * ([startVeil]). Anything else (a fade to 0, a pop, where the outgoing
+     * route fades over the incoming one, an unknown backdrop) draws it once
+     * into a hardware layer and composites that, instead of re-rendering it
+     * offscreen for its alpha on every frame.
+     */
+    private fun prepareOutgoing(outgoing: View, kind: Int, popping: Boolean) {
+        val reachX = when (kind) {
+            TRANSITION_SLIDE_FROM_RIGHT, TRANSITION_SLIDE_FROM_LEFT -> width * (if (popping) 1f else 0.28f)
+            else -> 0f
+        }
+        val reachY = when (kind) {
+            TRANSITION_SLIDE_FROM_BOTTOM, TRANSITION_SLIDE_FROM_TOP -> if (popping) height.toFloat() else 0f
+            else -> 0f
+        }
+        val slides = kind == TRANSITION_SLIDE_FROM_RIGHT || kind == TRANSITION_SLIDE_FROM_LEFT ||
+            kind == TRANSITION_SLIDE_FROM_BOTTOM || kind == TRANSITION_SLIDE_FROM_TOP
+        if (slides && startVeil(outgoing, reachX, reachY, layerFallback = true)) return
+        if (outgoing.layerType == View.LAYER_TYPE_NONE) {
+            outgoing.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            layeredRoute = outgoing
+        }
+    }
+
+    /**
+     * Dims [route] by [amount]: alpha `1 - amount`, composited as one
+     * picture. Under a veil the route keeps alpha 1 and the host draws the
+     * backdrop color over it at [amount] instead: the same pixels.
+     */
+    private fun dimRoute(route: View, amount: Float) {
+        if (route === veilRoute) {
+            val color = veilBackdrop?.let(::backgroundFill)
+            if (color != null && Color.alpha(color) == 255) {
+                route.alpha = 1f
+                if (veilColor != color || veilAmount != amount) {
+                    veilColor = color
+                    veilAmount = amount
+                    invalidate()
+                }
+                return
+            }
+            // The backdrop stopped being one opaque color (a background
+            // changed mid-transition): group opacity again.
+            val layer = veilLayerFallback
+            clearVeil()
+            if (layer && layeredRoute == null && route.layerType == View.LAYER_TYPE_NONE) {
+                route.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                layeredRoute = route
+            }
+        }
+        route.alpha = 1f - amount
+    }
+
+    /**
+     * Dims [route] under a veil from now on, when the one opaque color
+     * behind it is known ([backdropOf]): the route keeps alpha 1 and the
+     * host draws that color over it at the dim amount ([drawChild]: right
+     * after the route, under every route drawn after it). Over an opaque
+     * backdrop B both give every pixel `(1 - d)·route + d·B`, but group
+     * opacity renders the route offscreen: a hardware layer whose first
+     * paint cost a 30 ms frame on a Galaxy S10 at every push (and a
+     * full-screen texture while it lives). The veil is one rect.
+     * [reachX]/[reachY]: how far the route moves from its place while it is
+     * dimmed. [layerFallback]: a backdrop that stops being opaque midway
+     * gives the route a hardware layer (a transition); otherwise it keeps a
+     * plain alpha. False when the backdrop is not known: nothing changed.
+     */
+    private fun startVeil(route: View, reachX: Float, reachY: Float, layerFallback: Boolean): Boolean {
+        clearVeil()
+        val backdrop = backdropOf(route, reachX, reachY) ?: return false
+        veilRoute = route
+        veilBackdrop = backdrop
+        veilLayerFallback = layerFallback
+        return true
+    }
+
+    private fun clearVeil() {
+        val drawn = veilRoute != null && veilAmount > 0f
+        veilRoute = null
+        veilBackdrop = null
+        veilAmount = 0f
+        if (drawn) invalidate()
+    }
+
+    override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+        val more = super.drawChild(canvas, child, drawingTime)
+        if (child === veilRoute && veilAmount > 0f && child.visibility == View.VISIBLE) drawVeil(canvas, child)
+        return more
+    }
+
+    /** The veil over [route]: its box, moved with it, in the backdrop color at the dim amount. */
+    private fun drawVeil(canvas: Canvas, route: View) {
+        val checkpoint = canvas.save()
+        canvas.translate(route.left.toFloat(), route.top.toFloat())
+        val matrix = route.matrix
+        if (!matrix.isIdentity) canvas.concat(matrix)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // A float alpha: the very blend factor a route alpha uses.
+            veilPaint.setColor(
+                Color.pack(
+                    Color.red(veilColor) / 255f,
+                    Color.green(veilColor) / 255f,
+                    Color.blue(veilColor) / 255f,
+                    veilAmount,
+                ),
+            )
+        } else {
+            veilPaint.color = (veilColor and 0x00FFFFFF) or ((veilAmount * 255f + 0.5f).toInt().coerceIn(0, 255) shl 24)
+        }
+        canvas.drawRect(0f, 0f, route.width.toFloat(), route.height.toFloat(), veilPaint)
+        canvas.restoreToCount(checkpoint)
+    }
+
+    /**
+     * The view whose background is the one opaque color under every pixel
+     * [route] covers while it moves up to [reachX]/[reachY] px from its
+     * place, when nothing else can show there: no visible route drawn
+     * before it, no sibling (or outer shadow) drawn before an ancestor in
+     * that area, no ancestor painting more than a plain fill or casting an
+     * elevation shadow, and the first fill met on the way up to the
+     * window opaque and covering the area. Null when any of that is not
+     * known (a translucent window, a picture, gradient, border or ripple
+     * background, a blur, a shimmer).
+     */
+    internal fun backdropOf(route: View, reachX: Float, reachY: Float): View? {
+        if (route.parent !== this || route.visibility != View.VISIBLE) return null
+        if (route.z != 0f || route.clipToOutline || PamBoxShadows.has(route)) return null
+        val region = backdropRegion
+        region.set(-reachX, -reachY, route.width + reachX, route.height + reachY)
+        if (!clipToWindow(route, region)) return null
+        region.offset(route.left.toFloat(), route.top.toFloat())
+        if (drawnUnder(this, route, region)) return null
+        var view: View = this
+        while (true) {
+            // [region] is in [view]'s content coordinates.
+            region.offset(-view.scrollX.toFloat(), -view.scrollY.toFloat())
+            val parent = view.parent
+            if (parent !is ViewGroup || parent.clipChildren) {
+                if (!region.intersect(0f, 0f, view.width.toFloat(), view.height.toFloat())) return null
+            }
+            val fill = backgroundFill(view) ?: return null
+            if (Color.alpha(fill) != 0) {
+                val covered = region.left >= 0f && region.top >= 0f &&
+                    region.right <= view.width && region.bottom <= view.height
+                return view.takeIf { covered && Color.alpha(fill) == 255 }
+            }
+            if (parent !is ViewGroup) return null
+            if (!view.willNotDraw() || (view as? PamContainer)?.paintsUnderChildren() == true) return null
+            if (view.z != 0f || PamBoxShadows.has(view)) return null
+            val matrix = view.matrix
+            if (!matrix.isIdentity) matrix.mapRect(region)
+            region.offset(view.left.toFloat(), view.top.toFloat())
+            if (drawnUnder(parent, view, region)) return null
+            view = parent
+        }
+    }
+
+    /**
+     * Limits [region] (in [route]'s coordinates) to the part the window
+     * shows. Left whole under a scaled or rotated ancestor. False when
+     * nothing of it is on screen.
+     */
+    private fun clipToWindow(route: View, region: RectF): Boolean {
+        var x = route.left.toFloat()
+        var y = route.top.toFloat()
+        var view: View = this
+        while (true) {
+            if (view.scaleX != 1f || view.scaleY != 1f || view.rotation != 0f ||
+                view.rotationX != 0f || view.rotationY != 0f
+            ) {
+                return true
+            }
+            x += view.left + view.translationX - view.scrollX
+            y += view.top + view.translationY - view.scrollY
+            view = view.parent as? View ?: break
+        }
+        return region.intersect(-x, -y, view.width - x, view.height - y)
+    }
+
+    /** Whether a sibling of [view] drawn before it, or its outer shadow, may show in [region] ([parent]'s coordinates). */
+    private fun drawnUnder(parent: ViewGroup, view: View, region: RectF): Boolean {
+        val host = parent as? PamNavigationHost
+        val position = parent.indexOfChild(view).let { host?.drawPosition(it) ?: it }
+        for (index in 0 until parent.childCount) {
+            val sibling = parent.getChildAt(index)
+            if (sibling === view || sibling.visibility != View.VISIBLE || sibling.alpha <= 0f) continue
+            val order = host?.drawPosition(index) ?: index
+            if (sibling.z > view.z || (sibling.z == view.z && order > position)) continue
+            if (PamBoxShadows.has(sibling)) return true
+            sibling.getHitRect(siblingBounds)
+            if (region.intersects(
+                    siblingBounds.left.toFloat(),
+                    siblingBounds.top.toFloat(),
+                    siblingBounds.right.toFloat(),
+                    siblingBounds.bottom.toFloat(),
+                )
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** Where the child at [index] draws among the children ([getChildDrawingOrder]'s inverse). */
+    private fun drawPosition(index: Int): Int {
+        val lifted = warmLaunch?.incoming?.let(::indexOfChild) ?: -1
+        return when {
+            lifted < 0 || index < lifted -> index
+            index == lifted -> childCount - 1
+            else -> index - 1
+        }
+    }
+
+    /**
+     * The color [view]'s background paints over its whole box (alpha 0 when
+     * it paints nothing), or null when it is not one known color: a
+     * picture, a gradient, a border, rounded corners, a ripple, a tint.
+     */
+    private fun backgroundFill(view: View): Int? {
+        val background = view.background ?: return Color.TRANSPARENT
+        if (view.backgroundTintList != null || background.colorFilter != null) return null
+        return when {
+            background is ColorDrawable -> background.color
+            background is GradientDrawable && view.getTag(dev.pam.nativeapp.R.id.pam_plain_fill) === background -> {
+                val colors = background.color ?: return null
+                val color = colors.getColorForState(background.state, colors.defaultColor)
+                Color.argb(
+                    Color.alpha(color) * background.alpha / 255,
+                    Color.red(color),
+                    Color.green(color),
+                    Color.blue(color),
+                )
+            }
+            else -> null
+        }
+    }
+
+    /** The route dimmed under a veil, the veil's color and its amount (tests). */
+    internal fun veiledRoute(): View? = veilRoute
+
+    internal fun veilColor(): Int = veilColor
+
+    internal fun veilAmount(): Float = veilAmount
+
+    /** The route drawn into a hardware layer for the running transition (tests). */
+    internal fun layeredRoute(): View? = layeredRoute
+
+    /** The animator of the running transition (tests pause and seek it). */
+    internal fun transitionAnimator(): ValueAnimator? = running
 
     private fun prepareSharedElements(incoming: View, outgoing: View?, popping: Boolean = true) {
         sharedElements.clear()
@@ -1550,6 +1828,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         (0 until childCount).map(::getChildAt)
 
     private fun reset(view: View) {
+        if (view === veilRoute) clearVeil()
         view.alpha = 1f
         view.translationX = 0f
         view.translationY = 0f
