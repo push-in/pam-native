@@ -86,6 +86,9 @@ class PamPanHoldInstrumentedTest {
                     configureGesture(PamGestureConfig(2, true, 1, 1, 6, 3, 8f, 180L),
                         callback = { if (it.state == 1) began += 1 }, nativeTransform = true)
                 }
+                // HorizontalScrollView measures its child UNSPECIFIED: a spacer
+                // gives the strip real content to scroll (1080 > 360).
+                row.addView(View(activity), FrameLayout.LayoutParams(1_080, 100))
                 row.addView(thumbnail, FrameLayout.LayoutParams(300, 100))
                 scroll.addView(row, FrameLayout.LayoutParams(1_080, 100))
                 activity.host.addView(scroll, FrameLayout.LayoutParams(360, 100))
@@ -159,6 +162,7 @@ class PamPanHoldInstrumentedTest {
                         },
                     )
                 }
+                row.addView(View(activity), FrameLayout.LayoutParams(1_080, 100))
                 row.addView(scrubber, FrameLayout.LayoutParams(300, 100))
                 scroll.addView(row, FrameLayout.LayoutParams(1_080, 100))
                 activity.host.addView(scroll, FrameLayout.LayoutParams(360, 100))
