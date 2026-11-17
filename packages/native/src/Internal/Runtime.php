@@ -693,6 +693,8 @@ final class Runtime
             }
             if ($eventKind === EventKind::MemoryPressure->value) {
                 DependencyTracker::invalidateAll();
+                // Screens mounted ahead of navigation (a held prewarm too) go first.
+                \Pam\Native\Navigation\Navigator::trimAllMemory();
                 self::$memoryPressureHandler?->__invoke(MemoryPressure::from((int) $payload));
                 self::afterDispatch();
                 // Hidden or low on memory: what the handlers and the frame

@@ -6536,6 +6536,136 @@ $assert(
     !$prewarmNavigator->isPrewarmed('detail', ['id' => 11]),
     'trimMemory() must release a screen held warm without a timer.',
 );
+// A held prewarm (releaseAfterMs: null) survives a tab switch between
+// kept-alive screens and is released by a navigation inside the owner's
+// stack, by a new prewarm and by memory pressure.
+$tabWarmBuilds = 0;
+$tabWarmRemoved = 0;
+$tabWarmNavigator = Router::stack('inbox')
+    ->route('inbox', static fn () => Screen::make(Text::make('Inbox')))
+    ->route('feed', static fn () => Screen::make(Text::make('Feed')))
+    ->route('chat', static function () use (&$tabWarmBuilds, &$tabWarmRemoved) {
+        $tabWarmBuilds++;
+        return new class($tabWarmRemoved) extends Component implements NavigationLifecycleAware {
+            use InteractsWithNavigationLifecycle;
+
+            public function __construct(private int &$removed) {}
+
+            public function navigationRemoved(RouteContext $route): void
+            {
+                $this->removed++;
+            }
+
+            public function render(): \Pam\Native\Renderable
+            {
+                return Screen::make(Text::make('Chat'));
+            }
+        };
+    })
+    ->route('post', static fn () => Screen::make(Text::make('Post')))
+    ->keepAlive('inbox')
+    ->keepAlive('feed')
+    ->build();
+$tabWarmKeys = static fn (Navigator $navigator): array => array_map(
+    static fn ($screen): ?string => $screen->toElement()->elementKey(),
+    $navigator->render()->toElement()->children(),
+);
+$tabWarmNavigator->render();
+$tabWarmNavigator->prewarm('chat', ['id' => 1], null);
+$heldKey = $tabWarmKeys($tabWarmNavigator)[0];
+$tabWarmNavigator->navigate('feed', transition: NavigationTransition::None, durationMs: 0);
+$onFeedKeys = $tabWarmKeys($tabWarmNavigator);
+$tabWarmNavigator->navigate('inbox', transition: NavigationTransition::None, durationMs: 0);
+$backKeys = $tabWarmKeys($tabWarmNavigator);
+$tabWarmNavigator->navigate('feed');
+$tabWarmNavigator->render();
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->render();
+$assert(
+    $tabWarmNavigator->isPrewarmed('chat', ['id' => 1]) && $tabWarmBuilds === 1 && $tabWarmRemoved === 0
+        && $onFeedKeys[0] === $heldKey && $backKeys[0] === $heldKey,
+    'A held prewarm must survive switching between kept-alive screens (tabs): same element, no new build, not removed. '
+        .json_encode([$heldKey, $onFeedKeys, $backKeys, $tabWarmBuilds, $tabWarmRemoved]),
+);
+$tabWarmNavigator->push('chat', ['id' => 1]);
+$tabWarmPushed = $tabWarmKeys($tabWarmNavigator);
+$assert(
+    $tabWarmBuilds === 1 && end($tabWarmPushed) === $heldKey && !$tabWarmNavigator->isPrewarmed('chat', ['id' => 1]),
+    'A push after the tab round trip must reuse the held screen.',
+);
+$tabWarmNavigator->pop();
+$tabWarmNavigator->render();
+$tabWarmNavigator->prewarm('chat', ['id' => 2], null);
+$tabWarmNavigator->render();
+$removedBefore = $tabWarmRemoved;
+$tabWarmNavigator->push('post');
+$tabWarmNavigator->render();
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 2]) && $tabWarmRemoved > $removedBefore,
+    'A navigation inside the owner\'s stack (a screen that is not kept alive) must release a held prewarm.',
+);
+$tabWarmNavigator->pop();
+$tabWarmNavigator->render();
+$tabWarmNavigator->prewarm('chat', ['id' => 3], null);
+$tabWarmNavigator->navigate('feed');
+$tabWarmNavigator->push('post');
+$tabWarmNavigator->render();
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 3]),
+    'A navigation from another tab to a screen that is not kept alive must release a held prewarm.',
+);
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->render();
+$tabWarmNavigator->prewarm('chat', ['id' => 4]);
+$tabWarmNavigator->navigate('feed');
+$tabWarmNavigator->render();
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 4]),
+    'A timed prewarm must still be released by a tab switch.',
+);
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->prewarm('chat', ['id' => 5], null);
+$tabWarmNavigator->prewarm('chat', ['id' => 5]);
+$tabWarmNavigator->navigate('feed');
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 5]),
+    'A timed prewarm of the held screen must end the hold (the last call decides).',
+);
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->prewarm('chat', ['id' => 6], null);
+$tabWarmNavigator->navigate('feed');
+$tabWarmNavigator->prewarm('post');
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 6]) && $tabWarmNavigator->isPrewarmed('post'),
+    'A new prewarm must replace a held one (one warm screen per navigator).',
+);
+$tabWarmNavigator->cancelPrewarm();
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->prewarm('chat', ['id' => 7], null);
+$tabWarmNavigator->navigate('feed');
+$tabWarmNavigator->render();
+$removedBefore = $tabWarmRemoved;
+Navigator::trimAllMemory();
+$tabWarmNavigator->render();
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 7]) && $tabWarmRemoved > $removedBefore,
+    'Memory pressure (Navigator::trimAllMemory()) must release a held prewarm kept across tabs.',
+);
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->prewarm('chat', ['id' => 8], null);
+$tabWarmNavigator->reset('feed');
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 8]),
+    'A reset that drops the owner must release a held prewarm.',
+);
+$tabWarmNavigator->navigate('inbox');
+$tabWarmNavigator->prewarm('chat', ['id' => 9], null);
+$tabWarmNavigator->navigate('feed');
+Runtime::dispatchEvent(0, EventKind::MemoryPressure->value, (string) MemoryPressure::Moderate->value);
+$assert(
+    !$tabWarmNavigator->isPrewarmed('chat', ['id' => 9]),
+    'A memory-pressure event must release warm screens (onTrimMemory/onLowMemory, iOS memory warning).',
+);
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
 
@@ -6734,8 +6864,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.50.2',
-    'The runtime SDK contract must match the 1.50.2 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.50.3',
+    'The runtime SDK contract must match the 1.50.3 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

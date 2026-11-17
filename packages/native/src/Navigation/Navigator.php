@@ -105,13 +105,17 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
      *
      * `intent` is the navigation intent a press declared for it
      * (Pressable::prewarm()); without one it is intentKey() of the entry.
+     * `owner` is the entry key of the screen that warmed it and `held` is
+     * true for a prewarm without a release timer (warmSurvives()).
      *
-     * @var array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>, intent?: string}|null
+     * @var array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>, intent?: string, owner?: string, held?: bool}|null
      */
     private ?array $warm = null;
     private int $warmGeneration = 0;
     private const WARM_TTL_MS = 4_000;
     private static int $prewarmDepth = 0;
+    /** @var \WeakMap<self, true>|null live navigators, released together on memory pressure */
+    private static ?\WeakMap $live = null;
 
     /**
      * @param array<array-key, mixed> $routes
@@ -140,6 +144,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     )
     {
         $initialRoute = RouteName::value($initialRoute);
+        self::$live ??= new \WeakMap();
+        self::$live[$this] = true;
         $validated = [];
 
         foreach ($routes as $name => $route) {
@@ -786,6 +792,19 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /**
+     * @internal trimMemory() on every live navigator: the runtime calls it on
+     * memory pressure (Android onTrimMemory/onLowMemory, iOS memory warning)
+     * before the app's App::onMemoryPressure() handler.
+     */
+    public static function trimAllMemory(): void
+    {
+        if (self::$live === null) return;
+        foreach (self::$live as $navigator => $_) {
+            $navigator->trimMemory();
+        }
+    }
+
+    /**
      * Mounts a route ahead of navigation, hidden under the current screen, so
      * a following push()/navigate() with the same route and params starts
      * its transition at once: the screen, its native views and its first
@@ -795,11 +814,15 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
      * kept at a time and it is released when unused for a few seconds or on
      * any other navigation.
      *
-     * `$releaseAfterMs` is that unused lifetime (4 s by default). `null` keeps
-     * the screen warm until another navigation, cancelPrewarm() or
-     * trimMemory(): a screen that keeps a route warm while it stays idle no
+     * `$releaseAfterMs` is that unused lifetime (4 s by default). `null` holds
+     * the screen warm, with no timer, until a navigation leaves its owner (the
+     * screen that warmed it) for a screen that is not kept alive,
+     * cancelPrewarm(), another prewarm() or trimMemory() (also run on memory
+     * pressure): a screen that keeps a route warm while it stays idle no
      * longer renews it with a timer every few seconds (each renewal woke PHP
-     * and ran a render pass twice).
+     * and ran a render pass twice). Switching between kept-alive screens
+     * (tabs) keeps a held screen mounted while its owner stays kept alive, so
+     * returning to the owner does not mount it again.
      *
      * @param array<string, string|int|float|bool|null> $params
      */
@@ -826,6 +849,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             // also when called from a #[PureHandler] or a timer.
             DependencyTracker::markDirty($this);
         }
+        // Not render state: the last call decides the lifetime and the owner.
+        $this->warm['owner'] = $this->entryKey($current);
+        $this->warm['held'] = $releaseAfterMs === null;
         if ($releaseAfterMs !== null) {
             \Pam\Native\System\Timers::after(max(0, $releaseAfterMs), function () use ($generation): void {
                 if ($generation === $this->warmGeneration) $this->cancelPrewarm();
@@ -1404,13 +1430,40 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function takeWarm(string $route, array $params): ?array
     {
         $entry = $this->warm;
-        if ($entry === null) return null;
+        // Another warm screen is left to didNavigate() (warmSurvives()).
+        if ($entry === null || $this->parkKey($entry['name'], $entry['params']) !== $this->parkKey($route, $params)) {
+            return null;
+        }
         $this->warm = null;
         $this->warmGeneration++;
-        if ($this->parkKey($entry['name'], $entry['params']) !== $this->parkKey($route, $params)) return null;
-        unset($entry['intent']);
+        unset($entry['intent'], $entry['owner'], $entry['held']);
 
         return $entry;
+    }
+
+    /**
+     * Whether the warm screen stays mounted across the navigation that just
+     * happened. Only a held prewarm (releaseAfterMs: null) does, and
+     * only while its owner stays kept alive and the navigation lands on the
+     * owner or on another kept-alive screen (a tab switch): returning to the
+     * owner then finds it mounted instead of mounting it again. A navigation
+     * to a screen that is not kept alive (a detail pushed from the owner or
+     * from another tab), a reset or the owner leaving releases it.
+     */
+    private function warmSurvives(): bool
+    {
+        $warm = $this->warm;
+        if ($warm === null || ($warm['held'] ?? false) !== true || !isset($warm['owner'])) return false;
+        $current = $this->currentEntry();
+        $currentKey = $this->entryKey($current);
+        if ($currentKey !== $warm['owner'] && !$this->keepsAlive($current)) return false;
+        foreach ([...$this->stack, ...array_values($this->parked)] as $entry) {
+            if ($this->entryKey($entry) === $warm['owner']) {
+                return $this->keepsAlive($entry) && isset($this->routeInstances[$warm['owner']]);
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1574,8 +1627,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
     private function didNavigate(array $previous, NavigationAction $action): void
     {
-        if ($this->warm !== null) {
-            // Any other navigation releases the screen mounted ahead of time.
+        if ($this->warm !== null && !$this->warmSurvives()) {
+            // Any other navigation releases the screen mounted ahead of time,
+            // except a tab switch for a held one (warmSurvives()).
             $this->warm = null;
             $this->warmGeneration++;
         }

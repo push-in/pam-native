@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.50.3 - 2026-11-16
+
+- Navigation: a held prewarm (`releaseAfterMs: null`) now survives switches
+  between kept-alive screens (tabs) while the screen that warmed it stays kept
+  alive; returning to it no longer remounts the warm screen (Galaxy S10: a
+  17-20 ms commit ~1 s after returning to the inbox is gone). Navigating to a
+  screen that is not kept alive, a reset, another prewarm, `cancelPrewarm()`
+  and `trimMemory()` still release it.
+- Runtime: every memory-pressure event (Android onTrimMemory/onLowMemory, iOS
+  memory warning) now runs `trimMemory()` on every live navigator, releasing
+  preloaded and warm screens before `App::onMemoryPressure()`.
+
 ## 1.50.2 - 2026-11-16
 
 Tab switches in one cheap frame (Galaxy S10: Chats → Feed worst frame 16 → 8.7 ms,
