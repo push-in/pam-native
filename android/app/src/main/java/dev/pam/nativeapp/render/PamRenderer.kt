@@ -1010,7 +1010,23 @@ class PamRenderer(
         val visible = Rect()
         for (index in 0 until nodes.size()) {
             val state = nodes.valueAt(index)
-            val view = views[state.id] ?: continue
+            val view = views[state.id]
+            if (view == null) {
+                // Layout-only nodes flattened away: no pixels, but their
+                // frames keep the tree whole for spacing checks.
+                val frame = frames[state.id] ?: continue
+                nodesJson.put(
+                    JSONObject()
+                        .put("id", state.id)
+                        .put("parent", state.parent)
+                        .put("kind", state.kind.name)
+                        .put("virtual", true)
+                        .put("x", 0).put("y", 0).put("w", 0).put("h", 0)
+                        .put("visible", JSONArray())
+                        .put("frame", JSONArray().put(frame.x.toDouble()).put(frame.y.toDouble()).put(frame.width.toDouble()).put(frame.height.toDouble())),
+                )
+                continue
+            }
             if (!view.isShown || view.width == 0 && view.height == 0) continue
             view.getLocationOnScreen(onScreen)
             view.getLocationInWindow(inWindow)
