@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.52.0 - 2026-11-17
+
+HTTP that survives broken IPv6, input that never loses its last keystrokes,
+pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
+
+- Changed: Android HTTP runs on OkHttp 5 (the HTTP module, remote images and
+  `Files::download`), sharing one connection pool. Happy Eyeballs (RFC 8305)
+  races IPv6 and IPv4 250 ms apart: on a network whose IPv6 is broken a
+  request to a dual-stack host took 15-21 s (the connect timeout per AAAA
+  address) and now takes the normal round trip. HTTP/2 is used when the
+  server offers it.
+- Changed: HTTP requests run at most 6 per host and 32 in total on threads
+  that end when idle. The previous fixed pool of 4 let a few slow requests
+  block every other host.
+- Fixed: a debounced text change still coalescing is delivered before
+  `submit`, `blur` and any press (Android and iOS): the submit handler and a
+  button tapped right after typing see the text on screen, not the value from
+  before the last keystrokes.
+- Fixed: after a hot reload that changed several files, "Only one deep-link
+  listener can wait at a time" (Module callback error). A new deep-link wait
+  now supersedes a stale one from the replaced request on Android and iOS.
+- Fixed: a `VirtualizedList` mounted inside deferred content (a long list in
+  a `BottomSheet`) is built through its adapter instead of receiving its rows
+  as children (#262).
+- Fixed: a child centred in its parent keeps equal pixel gaps at fractional
+  densities (a 20dp icon in a 44dp button sat 1px low at 2.625x).
+- Fixed: opening a sheet no longer requests a layout during layout
+  ("requestLayout() improperly called"), which Android deferred to the next
+  frame.
+- Fixed: `pam dev` hot-reloads Composer path packages linked into `vendor/`
+  (a component library or plugin developed next to the app).
+- Added: debug layout snapshots for UI geometry tests: Android
+  `am broadcast -a dev.pam.nativeapp.action.CAPTURE_LAYOUT` and the iOS UI
+  driver's `{"layout": "name"}` step write every view's frame, visible part,
+  real touch target and text metrics. The iOS driver also gains
+  `{"expectText": id, "contains": [...]}`.
+- CI: instrumentation runs on the AOSP emulator image, resolves dependencies
+  before the emulator boots and retries only transient repository errors; the
+  iOS plugin aggregate no longer imports the private media editor.
+
 ## 1.51.0 - 2026-11-17
 
 Two-way binding for components, plugin component libraries and the fixes
