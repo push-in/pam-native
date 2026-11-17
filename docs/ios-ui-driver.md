@@ -49,6 +49,7 @@ Steps:
 | `{"wait": 1.5}` / `{"waitFor": "label", "timeout": 10}` | Delay / wait for an element. |
 | `{"expectText": "php-state", "contains": ["\"text\":\"hi\""], "timeout": 5}` | The element with that identifier (`testID`) shows every string in its label or value; polls until the timeout, so it asserts PHP state round-trips. |
 | `{"shot": "name"}` | Screenshot `name.png`. |
+| `{"layout": "name"}` | Debug builds: the app's layout snapshot (every view's frame, visible part, touch target, text metrics) as `name.json`, for geometry checks. Needs a `launch` step first (it passes the shot directory to the app). |
 | `{"dump": "name"}` | Accessibility tree as `name.txt`. |
 | `{"probe": "label", "name": "x"}` | `x.txt` lists the frame and `isHittable` of every element whose label matches, without tapping (diagnoses a "not hittable" tap). |
 

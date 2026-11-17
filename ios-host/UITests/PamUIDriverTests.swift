@@ -26,6 +26,8 @@ import XCTest
 ///     {"wait": 1.5}                    seconds
 ///     {"waitFor": "label", "timeout": 10}
 ///     {"shot": "marketplace"}          PNG in PAM_UI_SHOT_DIR + attachment
+///     {"layout": "catalog"}            debug layout snapshot (geometry checks)
+///                                      as catalog.json in PAM_UI_SHOT_DIR
 ///     {"dump": "tree"}                accessibility tree (.txt) + attachment
 ///     {"probe": "label", "name": "x"} frame and hittability of every match
 ///                                      (.txt) without tapping
@@ -85,7 +87,33 @@ final class PamUIDriverTests: XCTestCase {
     private func run(step: [String: Any], index: Int) throws {
         let timeout = step["timeout"] as? Double ?? 10
         if step["launch"] as? Bool == true {
+            if let directory = shotDirectory {
+                app.launchEnvironment["PAM_LAYOUT_DIR"] = directory.path
+            }
             app.launch()
+            return
+        }
+        if let name = step["layout"] as? String {
+            // Debug apps publish their layout on this Darwin notification
+            // (PamLayoutSnapshot); it lands in the shot directory.
+            guard let directory = shotDirectory else {
+                XCTFail("step \(index): layout needs TEST_RUNNER_PAM_UI_SHOT_DIR and a launch step")
+                return
+            }
+            let published = directory.appendingPathComponent("pam-layout.json")
+            try? FileManager.default.removeItem(at: published)
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName("dev.pam.native.layout" as CFString),
+                nil, nil, true
+            )
+            let deadline = Date().addingTimeInterval(5)
+            while !FileManager.default.fileExists(atPath: published.path), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            let target = directory.appendingPathComponent("\(name).json")
+            try? FileManager.default.removeItem(at: target)
+            XCTAssertNoThrow(try FileManager.default.moveItem(at: published, to: target), "step \(index): the app did not publish its layout")
             return
         }
 #if os(iOS)
