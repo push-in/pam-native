@@ -191,3 +191,28 @@ $assert(
     'A body the host spilled to a private file must be read once and removed.',
 );
 echo "ARCH_V2_HTTP_LIMIT_OK client request bounds spill\n";
+
+// --- PendingResponse::cancel() aborts the native request (its cancel key) and drops the callback.
+$cancelCalls = [];
+\Pam\Native\Internal\Runtime::setModuleTransport(new class ($cancelCalls) implements \Pam\Native\Modules\NativeModuleTransport {
+    public function __construct(private array &$calls) {}
+    public function invoke(int $requestId, string $module, string $method, string $payload, Closure $complete): void
+    {
+        $this->calls[] = [$method, \Pam\Native\Internal\Wire::decodeMap($payload), $complete];
+    }
+});
+$settled = false;
+$pending = Http::create()->get('https://a.example.test/slow');
+$pending->then(static function () use (&$settled): void { $settled = true; });
+$requested = $cancelCalls[0] ?? null;
+$pending->cancel();
+$cancel = $cancelCalls[1] ?? null;
+$assert(
+    $requested !== null && $requested[0] === 'request' && $cancel !== null && $cancel[0] === 'cancel'
+        && ($cancel[1]['cancelKey'] ?? null) === ($requested[1]['cancelKey'] ?? 'missing'),
+    'Cancelling a pending request must cancel its native call by cancel key.',
+);
+($requested[2])(\Pam\Native\ModuleResultStatus::Success, \Pam\Native\Internal\Wire::map(['statusCode' => 200, 'body' => 'late', 'headers' => '{}']));
+$assert(!$settled, 'A cancelled request must never settle, even when its result arrives late.');
+\Pam\Native\Internal\Runtime::setModuleTransport(null);
+echo "ARCH_V2_HTTP_CANCEL_OK\n";

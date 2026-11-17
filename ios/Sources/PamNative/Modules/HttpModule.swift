@@ -13,6 +13,8 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
     private let filesRoot: URL
     private let uploadCache: URL
     private let transfers = HttpTransferRegistry()
+    /// In-flight requests by the cancel key PHP sent (`Http::cancelRequest`).
+    private let cancellable = HttpCancellableRequests()
 
     public convenience init() {
         self.init(configuration: .default)
@@ -32,6 +34,13 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
 
         if method == "transferStart" || method == "transferNext" || method == "transferCancel" {
             transfer(method: method, payload: payload, completion: completion)
+            return
+        }
+        if method == "cancel" {
+            if case let .integer(key)? = (try? WireMap.decode(payload))?["cancelKey"] {
+                cancellable.take(key)?.cancel()
+            }
+            completion(.success, Data())
             return
         }
         if method != "get" && method != "request" && method != "upload" {
@@ -154,8 +163,14 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                     snapshot = try HttpUploadSnapshot.create(root: self.filesRoot, cache: self.uploadCache, path: path) { self.closed }
                 } else { snapshot = nil }
                 let deadline = HttpUploadDeadline()
+                let cancelKey: Int64? = {
+                    if case let .integer(key)? = values["cancelKey"] { return key }
+                    return nil
+                }()
+                let cancellable = self.cancellable
                 let receive: @Sendable (Data?, URLResponse?, Error?) -> Void = { data, response, error in
                     deadline.cancel()
+                    if let cancelKey { _ = cancellable.take(cancelKey) }
                     do { try snapshot?.close() } catch {
                         completion(.failure, Data("Cannot remove HTTP upload snapshot".utf8))
                         return
@@ -219,6 +234,7 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                 } else {
                     task = self.session.dataTask(with: request, completionHandler: receive)
                 }
+                if let cancelKey { self.cancellable.put(cancelKey, task) }
                 task.resume()
                 self.stateLock.unlock()
             } catch {
@@ -474,5 +490,24 @@ private final class HttpUploadDeadline: @unchecked Sendable {
         work?.cancel()
         work = nil
         lock.unlock()
+    }
+}
+
+
+/// Requests PHP may cancel (`Http::cancelRequest`), by cancel key.
+final class HttpCancellableRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [Int64: URLSessionTask] = [:]
+
+    func put(_ key: Int64, _ task: URLSessionTask) {
+        lock.lock()
+        tasks[key] = task
+        lock.unlock()
+    }
+
+    func take(_ key: Int64) -> URLSessionTask? {
+        lock.lock()
+        defer { lock.unlock() }
+        return tasks.removeValue(forKey: key)
     }
 }

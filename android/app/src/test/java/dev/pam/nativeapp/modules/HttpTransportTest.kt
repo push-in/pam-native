@@ -84,4 +84,35 @@ class HttpTransportTest {
             server.stop(0)
         }
     }
+
+    @Test
+    fun cancelAbortsTheNativeRequestByItsKey() {
+        val server = server(mapOf("slow.test" to 5_000L))
+        val dns = Dns { listOf(InetAddress.getByName("127.0.0.1")) }
+        val module = HttpModule(baseClient = PamHttpClient.shared.newBuilder().dns(dns).build())
+        try {
+            val done = CountDownLatch(1)
+            var status: ModuleResultStatus? = null
+            val started = System.nanoTime()
+            module.invoke(
+                "request",
+                WireMap.encode(
+                    mapOf(
+                        "url" to WireValue.Text("http://slow.test:${server.address.port}/"),
+                        "method" to WireValue.Text("GET"),
+                        "headers" to WireValue.Text("{}"),
+                        "cancelKey" to WireValue.Integer(7),
+                    ),
+                ),
+            ) { s, _ -> status = s; done.countDown() }
+            Thread.sleep(200)
+            module.invoke("cancel", WireMap.encode(mapOf("cancelKey" to WireValue.Integer(7)))) { _, _ -> }
+            assertTrue(done.await(3, TimeUnit.SECONDS))
+            assertEquals(ModuleResultStatus.FAILURE, status)
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000)
+        } finally {
+            module.close()
+            server.stop(0)
+        }
+    }
 }

@@ -52,6 +52,8 @@ internal class HttpModule(
         Thread(runnable, "pam-http-transfer").apply { isDaemon = true }
     }
     private val transfers = ConcurrentHashMap<Int, HttpTransfer>()
+    /** In-flight requests by the cancel key PHP sent (Http::cancelRequest). */
+    private val calls = ConcurrentHashMap<Long, Call>()
     private val nextTransfer = java.util.concurrent.atomic.AtomicInteger(1)
 
     override fun invoke(
@@ -66,6 +68,12 @@ internal class HttpModule(
                     (it.message ?: "HTTP transfer failed").toByteArray(),
                 )
             }
+            return
+        }
+        if (method == "cancel") {
+            val key = (WireMap.decode(payload)["cancelKey"] as? WireValue.Integer)?.value
+            key?.let(calls::remove)?.cancel()
+            completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
             return
         }
         if (method !in setOf("get", "request", "upload")) {
@@ -100,6 +108,7 @@ internal class HttpModule(
             require(maxResponseBytes in 1L..MAX_RESPONSE_LIMIT.toLong()) {
                 "maxResponseBytes must be between 1 and 16 MiB"
             }
+            val cancelKey = (values["cancelKey"] as? WireValue.Integer)?.value
             val uploadPath = if (method == "upload") {
                 require(body == null) { "File upload cannot include a text body" }
                 (values["path"] as? WireValue.Text)?.value ?: error("Upload source path is required")
@@ -113,6 +122,7 @@ internal class HttpModule(
                     uploading = snapshot != null,
                     maxResponseBytes = maxResponseBytes.toInt(),
                     completion = completion,
+                    cancelKey = cancelKey,
                     finished = { snapshot?.close() },
                 )
             }
@@ -426,6 +436,7 @@ internal class HttpModule(
         uploading: Boolean,
         maxResponseBytes: Int,
         completion: ModuleCompletion,
+        cancelKey: Long?,
         finished: () -> Unit,
     ) {
         val builder = client.newBuilder()
@@ -436,9 +447,12 @@ internal class HttpModule(
             builder.connectTimeout(minOf(10_000, timeoutMs).toLong(), TimeUnit.MILLISECONDS)
                 .callTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
         }
-        builder.build().newCall(request).enqueue(
+        val call = builder.build().newCall(request)
+        cancelKey?.let { calls[it] = call }
+        call.enqueue(
             object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    cancelKey?.let { calls.remove(it, call) }
                     finished()
                     val message = when {
                         closed.get() -> "HTTP module is closed"
@@ -450,6 +464,7 @@ internal class HttpModule(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
+                    cancelKey?.let { calls.remove(it, call) }
                     runCatching {
                         response.use { encodeResponse(it, maxResponseBytes) }
                     }.also { finished() }.fold(

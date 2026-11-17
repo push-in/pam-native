@@ -14,6 +14,9 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
 - Changed: HTTP requests run at most 6 per host and 32 in total on threads
   that end when idle. The previous fixed pool of 4 let a few slow requests
   block every other host.
+- Added: `PendingResponse::cancel()` (and `Http::cancelRequest($id)` for the
+  callback API) aborts the native request, so a screen that unmounts can
+  stop its downloads: `$this->onUnmounted(fn () => $pending->cancel())`.
 - Fixed: a debounced text change still coalescing is delivered before
   `submit`, `blur` and any press (Android and iOS): the submit handler and a
   button tapped right after typing see the text on screen, not the value from
