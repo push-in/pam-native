@@ -47,6 +47,7 @@ Steps:
 | `{"alert": "Open"}` | Tap a SpringBoard alert button (e.g. the custom-scheme prompt). |
 | `{"openurl": "scheme://path"}` | `XCUIApplication.open` (iOS 16.4+). |
 | `{"wait": 1.5}` / `{"waitFor": "label", "timeout": 10}` | Delay / wait for an element. |
+| `{"expectText": "php-state", "contains": ["\"text\":\"hi\""], "timeout": 5}` | The element with that identifier (`testID`) shows every string in its label or value; polls until the timeout, so it asserts PHP state round-trips. |
 | `{"shot": "name"}` | Screenshot `name.png`. |
 | `{"dump": "name"}` | Accessibility tree as `name.txt`. |
 | `{"probe": "label", "name": "x"}` | `x.txt` lists the frame and `isHittable` of every element whose label matches, without tapping (diagnoses a "not hittable" tap). |

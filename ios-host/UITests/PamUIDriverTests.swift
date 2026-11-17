@@ -30,6 +30,9 @@ import XCTest
 ///     {"probe": "label", "name": "x"} frame and hittability of every match
 ///                                      (.txt) without tapping
 ///     {"wait": "label"} / {"expect": "label"} / {"expectNot": "label"}
+///     {"expectText": "php-state", "contains": ["\"ok\":true"]}
+///                                      label or value of the element with
+///                                      that identifier contains every string
 ///     {"key": "ArrowRight", "times": 2}  Siri Remote button (tvOS)
 ///     {"expectFocus": "label"}         text of the focused element (tvOS)
 final class PamUIDriverTests: XCTestCase {
@@ -212,6 +215,21 @@ final class PamUIDriverTests: XCTestCase {
         }
         if let label = step["expect"] as? String {
             _ = try element(labelled: label, timeout: step["timeout"] as? Double ?? 5, step: index)
+            return
+        }
+        if let identifier = step["expectText"] as? String {
+            let wanted = (step["contains"] as? [String]) ?? [(step["contains"] as? String) ?? ""]
+            let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+            let deadline = Date().addingTimeInterval(step["timeout"] as? Double ?? 5)
+            var text = ""
+            repeat {
+                if element.exists {
+                    text = element.label + ((element.value as? String).map { " " + $0 } ?? "")
+                    if wanted.allSatisfy({ text.contains($0) }) { return }
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            } while Date() < deadline
+            XCTFail("step \(index): \(identifier) shows \(text.isEmpty ? "nothing" : text), expected \(wanted)")
             return
         }
         if let label = step["expectNot"] as? String {
