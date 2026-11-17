@@ -162,3 +162,32 @@ $decoded = Wire::decodeMap($payload);
 $assert($method === 'transferStart' && $decoded['kind'] === 2 && $decoded['method'] === 'PUT', 'upload() with progress uses the native transfer.');
 
 echo "Architecture v2 HTTP tests passed.\n";
+
+// maxResponseBytes: 1 MiB by default, per client and per request, at most 16 MiB.
+$limited = [];
+$limitTransport = static function (Request $r, Closure $done) use (&$limited): ?Closure {
+    $limited[] = $r->maxResponseBytes;
+
+    return null;
+};
+$big = Http::create('https://store.example.test', maxResponseBytes: 2 * 1024 * 1024)->withTransport($limitTransport);
+$big->get('/page');
+$big->withMaxResponseBytes(4 * 1024 * 1024)->get('/bigger');
+Http::create()->withTransport($limitTransport)->send((new Request('GET', 'https://a.example.test'))->withMaxResponseBytes(3_000_000));
+Http::create()->withTransport($limitTransport)->get('https://a.example.test/default');
+$assert($limited === [2_097_152, 4_194_304, 3_000_000, 1_048_576], 'maxResponseBytes must follow the client, its copies and the request.');
+$limitRefused = false;
+try {
+    Http::create(maxResponseBytes: 32 * 1024 * 1024);
+} catch (InvalidArgumentException) {
+    $limitRefused = true;
+}
+$assert($limitRefused, 'maxResponseBytes above 16 MiB must be refused.');
+$spilled = sys_get_temp_dir().'/pam-http-'.bin2hex(random_bytes(6)).'.pamhttp';
+file_put_contents($spilled, str_repeat('a', 1_200_000));
+$spilledResponse = \Pam\Native\Http\HttpResponse::fromNative(['statusCode' => 200, 'body' => '', 'bodyFile' => $spilled, 'headers' => '{}']);
+$assert(
+    strlen($spilledResponse->body) === 1_200_000 && !is_file($spilled),
+    'A body the host spilled to a private file must be read once and removed.',
+);
+echo "ARCH_V2_HTTP_LIMIT_OK client request bounds spill\n";

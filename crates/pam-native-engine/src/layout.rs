@@ -2932,7 +2932,28 @@ fn wrapped_intrinsic_cross(
             }
             _ => None,
         };
-        let main = match basis {
+        // A percentage main size resolves against the line's available main
+        // size, as the final line layout does: measured intrinsically it was
+        // 0, every key of a 33% keypad fit on one line and the wrapped lines
+        // overlapped.
+        let percent_main = match flow_axis {
+            Axis::Horizontal if number(child, PropKey::Width).is_none() => {
+                dimension(child, PropKey::Width, PropKey::WidthPercent, available_main)
+            }
+            Axis::Vertical if number(child, PropKey::Height).is_none() => dimension(
+                child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                available_main,
+            ),
+            _ => None,
+        }
+        .map(|main| {
+            flex_main_bounds(child, flow_axis, available_main)
+                .map(|(minimum, maximum)| main.min(maximum).max(minimum))
+        })
+        .transpose()?;
+        let main = match basis.or(percent_main) {
             Some(basis) => basis,
             None => constrained_intrinsic_extent(
                 children_index,
@@ -2949,7 +2970,7 @@ fn wrapped_intrinsic_cross(
         // final line layout does: a fixed-width cell measured against the
         // whole row kept its labels on one line, so a scroller holding the
         // wrap ended one label short of its last line.
-        let resolved_main = basis.unwrap_or(main);
+        let resolved_main = basis.or(percent_main).unwrap_or(main);
         let (measure_width, measure_height) = match flow_axis {
             Axis::Horizontal => (resolved_main, available_height),
             Axis::Vertical => (available_width, resolved_main),
@@ -5802,6 +5823,79 @@ mod tests {
             "wrapped text: {:?}",
             layouts[&6]
         );
+    }
+
+    #[test]
+    fn flex_wrap_with_percent_widths_stacks_every_line() {
+        // A 3x4 keypad: twelve 33.333% keys wrap into four lines; the
+        // container must be as tall as the four lines, not one.
+        let mut nodes = BTreeMap::from([
+            (
+                1,
+                node(
+                    1,
+                    0,
+                    0,
+                    NodeKind::Column,
+                    [(PropKey::AlignItems, PropValue::Integer(1))],
+                ),
+            ),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Row,
+                    [
+                        (PropKey::Width, PropValue::Float(300.0)),
+                        (PropKey::FlexWrap, PropValue::Integer(2)),
+                    ],
+                ),
+            ),
+            (
+                15,
+                node(
+                    15,
+                    1,
+                    1,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(10.0))],
+                ),
+            ),
+        ]);
+        for key in 0..12_u64 {
+            nodes.insert(
+                3 + key,
+                node(
+                    3 + key,
+                    2,
+                    key as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::WidthPercent, PropValue::Float(33.333)),
+                        (PropKey::Height, PropValue::Float(50.0)),
+                    ],
+                ),
+            );
+        }
+        let tree = Tree { root: 1, nodes };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
+
+        assert_eq!(layouts[&2].height, 200.0);
+        assert_eq!(layouts[&3].y, 0.0);
+        assert_eq!(layouts[&6].y, 50.0);
+        assert_eq!(layouts[&14].y, 150.0);
+        assert!((layouts[&5].x - 199.999).abs() < 0.01);
+        // The sibling below the keypad starts after its last line.
+        assert_eq!(layouts[&15].y, 200.0);
     }
 
     #[test]

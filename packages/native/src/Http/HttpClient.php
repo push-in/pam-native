@@ -53,7 +53,9 @@ final class HttpClient
         private int $timeoutMs = 30_000,
         private int $retries = 0,
         private int $retryDelayMs = 300,
+        private int $maxResponseBytes = Http::DEFAULT_RESPONSE_BYTES,
     ) {
+        Http::assertResponseLimit($maxResponseBytes);
         if ($baseUrl !== '' && preg_match('#^https?://[^/\s]+#i', $baseUrl) !== 1) {
             throw new InvalidArgumentException('HTTP client base URLs must be absolute http(s) URLs.');
         }
@@ -111,6 +113,12 @@ final class HttpClient
     public function withTimeout(int $milliseconds): self
     {
         return $this->reconfigured(timeoutMs: $milliseconds);
+    }
+
+    /** Accepts response bodies up to $bytes (1 MiB by default, at most 16 MiB). */
+    public function withMaxResponseBytes(int $bytes): self
+    {
+        return $this->reconfigured(maxResponseBytes: $bytes);
     }
 
     /**
@@ -186,6 +194,7 @@ final class HttpClient
             headers: [...$this->headers, ...$headers],
             query: $query,
             timeoutMs: $this->timeoutMs,
+            maxResponseBytes: $this->maxResponseBytes,
         );
         if (is_string($data)) {
             $request = $request->withBody($data);
@@ -390,7 +399,7 @@ final class HttpClient
 
             return static fn () => Http::cancelTransfer($transfer);
         }
-        Http::request($request->method, $request->fullUrl(), $done, $headers, $request->body, $request->timeoutMs);
+        Http::request($request->method, $request->fullUrl(), $done, $headers, $request->body, $request->timeoutMs, maxResponseBytes: $request->maxResponseBytes);
 
         return null;
     }
@@ -422,6 +431,7 @@ final class HttpClient
         ?int $timeoutMs = null,
         ?int $retries = null,
         ?int $retryDelayMs = null,
+        ?int $maxResponseBytes = null,
     ): self {
         $copy = new self(
             $baseUrl ?? $this->baseUrl,
@@ -429,6 +439,7 @@ final class HttpClient
             $timeoutMs ?? $this->timeoutMs,
             $retries ?? $this->retries,
             $retryDelayMs ?? $this->retryDelayMs,
+            $maxResponseBytes ?? $this->maxResponseBytes,
         );
         $copy->requestInterceptors = $this->requestInterceptors;
         $copy->responseInterceptors = $this->responseInterceptors;

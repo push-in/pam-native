@@ -1577,10 +1577,17 @@ final class TemplateRenderer
         $variant = $factory === null ? 'n' : 'f';
         if ($planNode !== null) {
             $plan = $planNode->pamTagPlans[$variant]
-                ??= self::tagPlan($tag, $attributes, $factory !== null, $childNodes);
+                ??= self::tagPlan(
+                    $tag,
+                    $factory !== null ? self::componentEventAliases($tag, $attributes) : $attributes,
+                    $factory !== null,
+                    $childNodes,
+                );
             $attributes = $plan['attributes'];
         } elseif ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
+        } else {
+            $attributes = self::componentEventAliases($tag, $attributes);
         }
         $declaredAttributes = $attributes;
         // $knownClass: already evaluated by fastNode() (never twice).
@@ -1699,8 +1706,18 @@ final class TemplateRenderer
             $attributes = $entry['attributes'];
             $unresolvedStyleAttributes = $entry['unresolved'];
         }
+        $componentModel = null;
         if ($plan === null || $plan['bindings']) {
-            [$attributes, $checkedBinding] = self::modelBindings($tag, $attributes);
+            [$attributes, $checkedBinding, $componentModel] = self::modelBindings(
+                $tag,
+                $attributes,
+                $factory !== null,
+            );
+            if ($componentModel !== null) {
+                // Validates the target before `:modelValue` reads it, so a
+                // typo names the binding instead of a generic value error.
+                self::componentModelHandler($tag, $componentModel, $scope, null);
+            }
             $entry = null;
         } else {
             $checkedBinding = null;
@@ -1842,6 +1859,10 @@ final class TemplateRenderer
                     $declaredNames[ltrim($name, ':')] = true;
                 }
             }
+            if ($componentModel !== null) {
+                // p-model authored `modelValue` (see modelBindings()).
+                $declaredNames['modelValue'] = true;
+            }
             $componentValues = array_filter(
                 $values,
                 static fn (string $name): bool =>
@@ -1891,6 +1912,14 @@ final class TemplateRenderer
                     $raw,
                     $scope,
                     $data,
+                );
+            }
+            if ($componentModel !== null) {
+                $componentEvents['model'] = self::componentModelHandler(
+                    $tag,
+                    $componentModel,
+                    $scope,
+                    $componentEvents['model'] ?? null,
                 );
             }
         }
@@ -2112,12 +2141,14 @@ final class TemplateRenderer
         }
         $contract = $factory !== null ? TemplateRegistry::tagContract($tag) : null;
         if ($contract !== null) {
+            $componentValues = self::staticStringProps($contract, $declaredAttributes, $componentValues);
             ContractValidator::validate(
                 $contract,
                 array_filter(
                     $componentValues,
                     static fn (string $name): bool =>
-                        !str_starts_with($name, '__pam') && $name !== 'className',
+                        // `key` is the element identity, never a prop.
+                        !str_starts_with($name, '__pam') && $name !== 'className' && $name !== 'key',
                     ARRAY_FILTER_USE_KEY,
                 ),
                 $slots,
@@ -2193,8 +2224,12 @@ final class TemplateRenderer
             ),
             'VirtualizedList' => $lazyRows !== null
                 ? VirtualizedList::__pamRows($lazyRows)
-                : ($children === []
-                    ? FlatList::make(self::stringItems($values['items'] ?? []))
+                // An empty loop (data not loaded yet) is still a rich list:
+                // only the legacy `items` attribute means a string FlatList.
+                // Switching the node kind when rows arrive left the list
+                // without a native view (rows had nowhere to mount).
+                : ($children === [] && array_key_exists('items', $values)
+                    ? FlatList::make(self::stringItems($values['items']))
                     : VirtualizedList::make(...$children)),
             'VirtualGrid' => $lazyRows !== null
                 ? VirtualizedList::__pamRows($lazyRows)->columns(max(1, self::intValue(
@@ -3647,12 +3682,14 @@ final class TemplateRenderer
 
         $contract = TemplateRegistry::tagContract($tag);
         if ($contract !== null) {
+            $componentValues = self::staticStringProps($contract, $attributes, $componentValues);
             ContractValidator::validate(
                 $contract,
                 array_filter(
                     $componentValues,
                     static fn (string $name): bool =>
-                        !str_starts_with($name, '__pam') && $name !== 'className',
+                        // `key` is the element identity, never a prop.
+                        !str_starts_with($name, '__pam') && $name !== 'className' && $name !== 'key',
                     ARRAY_FILTER_USE_KEY,
                 ),
                 $slots,
@@ -4028,10 +4065,31 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $attributes
-     * @return array{0: array<string, mixed>, 1: ?string}
+     * @return array{0: array<string, mixed>, 1: ?string, 2: ?string}
      */
-    private static function modelBindings(string $tag, array $attributes): array
+    private static function modelBindings(string $tag, array $attributes, bool $component = false): array
     {
+        if ($component) {
+            // A component tag (a registered or compiled component) takes
+            // `p-model` like Vue's v-model: the bound value arrives as the
+            // `modelValue` prop and the component writes it back by emitting
+            // `model` (see Component::emit()).
+            $model = $attributes['p-model'] ?? $attributes['p-model:checked'] ?? null;
+            if ($model === null) {
+                return [$attributes, null, null];
+            }
+            if (isset($attributes['p-model'], $attributes['p-model:checked'])) {
+                throw new RuntimeException("p-model and p-model:checked cannot be combined on {$tag}.");
+            }
+            if (array_key_exists(':modelValue', $attributes) || array_key_exists('modelValue', $attributes)) {
+                throw new RuntimeException("p-model cannot be combined with modelValue on {$tag}.");
+            }
+            $model = self::stringValue($model, 'p-model target');
+            $attributes[':modelValue'] = $model;
+            unset($attributes['p-model'], $attributes['p-model:checked']);
+
+            return [$attributes, null, $model];
+        }
         if (isset($attributes['p-model'])) {
             $binding = in_array($tag, ['Switch', 'Toggle'], true)
                 ? 'bind:checked'
@@ -4074,7 +4132,7 @@ final class TemplateRenderer
             unset($attributes['bind:checked']);
         }
 
-        return [$attributes, $checkedBinding];
+        return [$attributes, $checkedBinding, null];
     }
 
     /**
@@ -7338,6 +7396,38 @@ final class TemplateRenderer
     }
 
     /**
+     * `on:change` on a component that declares a `change` event
+     * (`#[Event('change', …)]`) is its component event, exactly like
+     * `@change`: native elements accept both spellings, so typed components
+     * do too. Undeclared `on:` names keep their native meaning (attached to
+     * the component's root element).
+     *
+     * @param array<string, string|int|bool> $attributes
+     * @return array<string, string|int|bool>
+     */
+    public static function componentEventAliases(string $tag, array $attributes): array
+    {
+        $contract = TemplateRegistry::tagContract($tag);
+        if ($contract === null || $contract->events === []) {
+            return $attributes;
+        }
+        foreach ($contract->events as $event) {
+            $native = 'on:'.$event->name;
+            if (!array_key_exists($native, $attributes)) {
+                continue;
+            }
+            $alias = '@'.$event->name;
+            if (array_key_exists($alias, $attributes) && $attributes[$alias] !== $attributes[$native]) {
+                throw new RuntimeException("{$native} and {$alias} cannot disagree on {$tag}.");
+            }
+            $attributes[$alias] = $attributes[$native];
+            unset($attributes[$native]);
+        }
+
+        return $attributes;
+    }
+
+    /**
      * @param list<CompiledTemplateNode> $nodes
      * @return array{
      *     list<CompiledTemplateNode>,
@@ -7894,6 +7984,126 @@ final class TemplateRenderer
         };
     }
 
+    /**
+     * The `model` listener `p-model` gives a component tag: it writes the
+     * emitted value to the bound property of the parent component (any
+     * type: a text field emits a string, a checkbox a bool, a multi-select
+     * an array) and then runs an explicit `@model` listener, if any.
+     */
+    private static function componentModelHandler(
+        string $tag,
+        string $model,
+        ?object $scope,
+        ?Closure $explicit,
+    ): Closure {
+        // `$field` or one level into an object property: `$form->email`.
+        if (
+            $scope === null
+            || preg_match('/^\$?([A-Za-z_][A-Za-z0-9_]*)(?:->([A-Za-z_][A-Za-z0-9_]*))?$/D', trim($model), $match) !== 1
+            || !property_exists($scope, $match[1])
+        ) {
+            throw new RuntimeException(
+                "p-model {$model} on {$tag} does not resolve to a property of the parent component.",
+            );
+        }
+        $property = $match[1];
+        $field = $match[2] ?? '';
+        $reflection = self::reflectionProperty($scope, $property);
+        if ($field === '') {
+            if ($reflection->isReadOnly()) {
+                throw new RuntimeException("p-model {$model} on {$tag} cannot write a readonly property.");
+            }
+            $type = $reflection->getType();
+
+            return static function (mixed $value = null) use ($reflection, $property, $scope, $explicit, $type): void {
+                $value = self::coerceModel($type, $value);
+                $previous = $reflection->getValue($scope);
+                if ($previous !== $value) {
+                    if ($scope instanceof Component) {
+                        $scope->__pamNotifyUpdating($property, $value, $previous);
+                    }
+                    $reflection->setValue($scope, $value);
+                    if ($scope instanceof Component) {
+                        $scope->__pamNotifyUpdated($property);
+                        $scope->__pamFlushChanges();
+                    }
+                }
+                if ($explicit !== null) {
+                    $explicit($value);
+                }
+            };
+        }
+
+        return static function (mixed $value = null) use ($reflection, $property, $field, $scope, $explicit, $model, $tag): void {
+            $target = $reflection->getValue($scope);
+            if (!is_object($target) || !property_exists($target, $field)) {
+                throw new RuntimeException("p-model {$model} on {$tag} does not resolve to an object property.");
+            }
+            $fieldReflection = new \ReflectionProperty($target, $field);
+            $value = self::coerceModel($fieldReflection->getType(), $value);
+            if ($fieldReflection->getValue($target) !== $value) {
+                if ($scope instanceof Component) {
+                    $scope->__pamNotifyUpdating($property, $target, $target);
+                }
+                if ($target instanceof \Pam\Native\Forms\NativeForm) {
+                    // Marks the field dirty and touched and clears its error.
+                    $target->set($field, $value);
+                } else {
+                    $fieldReflection->setValue($target, $value);
+                }
+                if ($scope instanceof Component) {
+                    $scope->__pamNotifyUpdated($property);
+                    $scope->__pamFlushChanges();
+                }
+            }
+            if ($explicit !== null) {
+                $explicit($value);
+            }
+        };
+    }
+
+    /**
+     * A static attribute is parsed as a literal (`label="2.0"` is the float
+     * 2.0, `code="007"` the int 7). For a string prop of a typed component the
+     * author meant the text as written: pass the attribute verbatim.
+     *
+     * @param array<string, mixed> $attributes
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function staticStringProps(\Pam\Native\UI\Contract\TagContract $contract, array $attributes, array $values): array
+    {
+        foreach ($contract->props as $prop) {
+            $raw = $attributes[$prop->name] ?? null;
+            if (
+                $prop->kind === \Pam\Native\UI\Contract\ValueKind::String
+                && is_string($raw)
+                && array_key_exists($prop->name, $values)
+                && (is_int($values[$prop->name]) || is_float($values[$prop->name]) || is_bool($values[$prop->name]))
+            ) {
+                $values[$prop->name] = $raw;
+            }
+        }
+
+        return $values;
+    }
+
+    /** Casts a component's model value to the bound property's scalar type. */
+    private static function coerceModel(?\ReflectionType $type, mixed $value): mixed
+    {
+        if (!$type instanceof \ReflectionNamedType || !$type->isBuiltin() || $value === null) {
+            return $value;
+        }
+
+        return match ($type->getName()) {
+            'int' => is_numeric($value) ? (int) $value : $value,
+            'float' => is_numeric($value) ? (float) $value : $value,
+            'string' => is_scalar($value) ? (string) $value : $value,
+            'bool' => is_scalar($value) ? ($value === true || $value === 1 || $value === '1' || $value === 'true') : $value,
+            default => $value,
+        };
+    }
+
     private static function checkedModelHandler(
         string $model,
         ?object $scope,
@@ -8177,12 +8387,8 @@ final class TemplateRenderer
         array $children,
         bool $horizontal,
     ): Element {
-        if ($children === []) {
-            throw new RuntimeException(
-                'ScrollView requires at least one child.',
-            );
-        }
-
+        // An empty ScrollView (content not loaded yet) scrolls an empty
+        // container instead of failing; content mounts into it later.
         return $horizontal
             ? Row::make(...$children)
             : Column::make(...$children);

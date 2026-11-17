@@ -867,6 +867,11 @@ final class PamPhpCompiler
         }
         try {
             $components = self::compileDirectory($sourcePath, $staging);
+            // Component libraries of installed plugins ship inside vendor/:
+            // pack them too, so the device compiles none of them either.
+            foreach (\Pam\Native\Plugin\PluginManager::componentDirectories($root) as $directory) {
+                array_push($components, ...self::compileDirectory($directory, $staging));
+            }
             if (!is_dir($output) && !mkdir($output, 0o755, true) && !is_dir($output)) {
                 throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
             }

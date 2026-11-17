@@ -132,10 +132,10 @@ final class Language2StyleCompiler
                         : StyleQueryKind::Container->value,
                     'condition' => trim($match[2]),
                     'ast' => $queryAst,
-                    'styles' => ScopedStyleCompiler::compile(
+                    'styles' => self::queryStyles(ScopedStyleCompiler::compile(
                         self::rootSource($variables).$body,
                         $name.' '.$header,
-                    ),
+                    )),
                 ];
                 continue;
             }
@@ -426,4 +426,26 @@ final class Language2StyleCompiler
         StyleSelectorCompiler::compile($selector, $name);
     }
 
+
+    /**
+     * A query's rules without the sheet-level IR artifacts (IR, bytecode,
+     * source map, the 20 KB compatibility table): the renderer reads only the
+     * rules of a query, and the parent sheet's IR already describes it. Each
+     * `@media` block carried a full copy, ~75 KB per block, so a themed
+     * component with light/dark/platform blocks compiled to over 1 MB.
+     *
+     * @param array<string, mixed> $styles
+     * @return array<string, mixed>
+     */
+    private static function queryStyles(array $styles): array
+    {
+        unset(
+            $styles['styleIr'],
+            $styles['styleBytecode'],
+            $styles['styleSourceMap'],
+            $styles['styleCompatibility'],
+        );
+
+        return $styles;
+    }
 }

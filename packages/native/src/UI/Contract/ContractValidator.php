@@ -89,8 +89,10 @@ final class ContractValidator
         }
 
         return match ($prop->kind) {
-            ValueKind::String => is_string($value),
-            ValueKind::Integer => is_int($value),
+            // A static template attribute (`label="2.0"`, `code="42"`) is
+            // parsed as a number; the registry casts it back for string props.
+            ValueKind::String => is_string($value) || is_int($value) || is_float($value),
+            ValueKind::Integer => is_int($value) || (is_float($value) && floor($value) === $value),
             ValueKind::Float => is_float($value) || is_int($value),
             ValueKind::Boolean => is_bool($value),
             ValueKind::Array => is_array($value),

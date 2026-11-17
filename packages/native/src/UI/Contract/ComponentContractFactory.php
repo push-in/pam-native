@@ -19,6 +19,9 @@ use function count;
 
 final class ComponentContractFactory
 {
+    /** Scalar and untyped event payloads (`#[Event('change', 'string')]`). */
+    private const array BUILTIN_PAYLOADS = ['mixed', 'null', 'string', 'int', 'float', 'bool', 'array'];
+
     private function __construct()
     {
     }
@@ -46,7 +49,11 @@ final class ComponentContractFactory
         $events = [];
         foreach ($reflection->getAttributes(Event::class) as $attribute) {
             $definition = $attribute->newInstance();
-            if (!class_exists($definition->payload) && !interface_exists($definition->payload)) {
+            if (
+                !in_array($definition->payload, self::BUILTIN_PAYLOADS, true)
+                && !class_exists($definition->payload)
+                && !interface_exists($definition->payload)
+            ) {
                 throw new RuntimeException(
                     "Component event {$component}.{$definition->name} has unknown payload {$definition->payload}.",
                 );

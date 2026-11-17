@@ -54,6 +54,11 @@
                 "provider": {
                     "type": "string",
                     "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\\\[A-Za-z_][A-Za-z0-9_]*)+$"
+                },
+                "components": {
+                    "type": "string",
+                    "description": "Package-relative directory of .pam.php single-file components registered as template tags.",
+                    "minLength": 1
                 }
             }
         },

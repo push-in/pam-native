@@ -27,7 +27,7 @@ internal object PamPreloadedImages {
     fun preload(context: Context, source: String): Long {
         if (bitmaps.containsKey(source)) return 0
         val path = requireNotNull(normalizedPamAssetPath(source)) { "Only packaged asset:// images preload." }
-        val bytes = context.assets.open(path).use { it.readBytes() }
+        val bytes = PamDevAssets.open(context.assets, path).use { it.readBytes() }
         val bitmap = decode(bytes)
         val size = bitmap.allocationByteCount.toLong()
         synchronized(this) {

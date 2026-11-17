@@ -77,6 +77,11 @@ internal class HttpModule(
                     val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
                         .coerceIn(1_000L, 120_000L)
                         .toInt()
+                    val maxResponseBytes = ((values["maxResponseBytes"] as? WireValue.Integer)?.value
+                        ?: DEFAULT_RESPONSE_BYTES.toLong())
+                    require(maxResponseBytes in 1L..MAX_RESPONSE_LIMIT.toLong()) {
+                        "maxResponseBytes must be between 1 and 16 MiB"
+                    }
                     val snapshot = if (method == "upload") {
                         require(body == null) { "File upload cannot include a text body" }
                         val path = (values["path"] as? WireValue.Text)?.value
@@ -88,7 +93,17 @@ internal class HttpModule(
                         ) { closed.get() || Thread.currentThread().isInterrupted }
                     } else null
                     try {
-                        fetch(url, requestMethod, headersJson, body, timeoutMs, traceparent, traceOrigin, snapshot?.file)
+                        fetch(
+                            url,
+                            requestMethod,
+                            headersJson,
+                            body,
+                            timeoutMs,
+                            traceparent,
+                            traceOrigin,
+                            snapshot?.file,
+                            maxResponseBytes.toInt(),
+                        )
                     } finally {
                         snapshot?.close()
                     }
@@ -280,16 +295,35 @@ internal class HttpModule(
     private fun readResponse(connection: HttpURLConnection, status: Int): String {
         val input = if (status >= 400) connection.errorStream else connection.inputStream
         return input?.use { stream ->
-            val output = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(8_192)
-            while (true) {
-                val read = stream.read(buffer)
-                if (read < 0) break
-                require(output.size() + read <= MAX_RESPONSE_BYTES) { "HTTP response exceeds one MiB" }
-                output.write(buffer, 0, read)
-            }
-            output.toString(Charsets.UTF_8.name())
+            String(readBounded(stream, INLINE_RESPONSE_BYTES), Charsets.UTF_8)
         }.orEmpty()
+    }
+
+    /** Reads at most [limit] bytes; a longer body fails with the limit in the message. */
+    private fun readBounded(stream: java.io.InputStream, limit: Int): ByteArray {
+        val output = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
+        val buffer = ByteArray(8_192)
+        while (true) {
+            val read = stream.read(buffer)
+            if (read < 0) break
+            require(output.size() + read <= limit) {
+                "HTTP response exceeds $limit bytes; raise maxResponseBytes (up to 16 MiB)"
+            }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    private fun spill(bytes: ByteArray): File {
+        val cache = requireNotNull(uploadCache) { "Private HTTP cache is unavailable" }
+        val directory = File(cache.parentFile ?: cache, "pam-http-responses").apply { mkdirs() }
+        // Stale files from a request whose PHP side never read them.
+        directory.listFiles()?.forEach { file ->
+            if (System.currentTimeMillis() - file.lastModified() > 10 * 60_000L) file.delete()
+        }
+        val file = File(directory, "${java.util.UUID.randomUUID()}.pamhttp")
+        file.writeBytes(bytes)
+        return file
     }
 
     private fun transferFor(payload: ByteArray): HttpTransfer =
@@ -325,6 +359,7 @@ internal class HttpModule(
         traceparent: String?,
         traceOrigin: String?,
         bodyFile: File?,
+        maxResponseBytes: Int = DEFAULT_RESPONSE_BYTES,
     ): ByteArray {
         val uri = URI(source)
         require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
@@ -394,26 +429,20 @@ internal class HttpModule(
             check(!timedOut.get()) { "HTTP upload timed out" }
             val status = connection.responseCode
             val input = if (status >= 400) connection.errorStream else connection.inputStream
-            val body = input?.use { stream ->
-                val output = java.io.ByteArrayOutputStream()
-                val buffer = ByteArray(8_192)
-                while (true) {
-                    val read = stream.read(buffer)
-                    if (read < 0) break
-                    require(output.size() + read <= MAX_RESPONSE_BYTES) {
-                        "HTTP response exceeds one MiB"
-                    }
-                    output.write(buffer, 0, read)
-                }
-                output.toString(Charsets.UTF_8.name())
-            }.orEmpty()
-            return WireMap.encode(
-                mapOf(
-                    "statusCode" to WireValue.Integer(status.toLong()),
-                    "body" to WireValue.Text(body),
-                    "headers" to WireValue.Text(responseHeaders(connection)),
-                ),
+            val bytes = input?.use { stream -> readBounded(stream, maxResponseBytes) } ?: ByteArray(0)
+            val result = linkedMapOf<String, WireValue>(
+                "statusCode" to WireValue.Integer(status.toLong()),
+                "headers" to WireValue.Text(responseHeaders(connection)),
             )
+            if (bytes.size <= INLINE_RESPONSE_BYTES) {
+                result["body"] = WireValue.Text(String(bytes, Charsets.UTF_8))
+            } else {
+                // The module bridge carries at most 1 MiB: a larger body goes
+                // through a private cache file that PHP reads once and deletes.
+                result["body"] = WireValue.Text("")
+                result["bodyFile"] = WireValue.Text(spill(bytes).absolutePath)
+            }
+            return WireMap.encode(result)
         } finally {
             deadline?.cancel(false)
             connections -= connection
@@ -438,7 +467,10 @@ internal class HttpModule(
         val TRACEPARENT = Regex("^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$")
         val SAFE_HEADER_NAME = Regex("^[A-Za-z0-9-]{1,64}$")
         const val MAX_REQUEST_BYTES = 1_048_576
-        const val MAX_RESPONSE_BYTES = 900 * 1024
+        /** Largest body sent inline over the module bridge (1 MiB frames). */
+        const val INLINE_RESPONSE_BYTES = 900 * 1024
+        const val DEFAULT_RESPONSE_BYTES = 1_048_576
+        const val MAX_RESPONSE_LIMIT = 16 * 1024 * 1024
     }
 }
 

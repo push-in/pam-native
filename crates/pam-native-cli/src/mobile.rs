@@ -710,9 +710,14 @@ struct PluginCompatibility {
 struct PluginPhp {
     #[serde(default)]
     provider: Option<String>,
+    /// Package-relative directory of `.pam.php` components (read by the PHP
+    /// runtime and the component prebuild; the CLI only accepts the key).
+    #[serde(default)]
+    #[allow(dead_code)]
+    components: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PluginAndroid {
     #[serde(default)]
@@ -918,6 +923,28 @@ struct PluginLockEntry<'a> {
 
 fn default_min_sdk() -> u32 {
     26
+}
+
+/// A PHP-only plugin has no `android` section: it must default to the
+/// lowest supported minSdk (26), like an `android` section without
+/// `minSdk`, instead of 0.
+impl Default for PluginAndroid {
+    fn default() -> Self {
+        Self {
+            namespace: None,
+            min_sdk: default_min_sdk(),
+            permissions: Vec::new(),
+            repositories: Vec::new(),
+            dependencies: Vec::new(),
+            local_aars: Vec::new(),
+            source_dirs: Vec::new(),
+            resource_dirs: Vec::new(),
+            asset_dirs: Vec::new(),
+            jni_lib_dirs: Vec::new(),
+            manifest: None,
+            consumer_rules: None,
+        }
+    }
 }
 
 fn default_ios_minimum_version() -> String {

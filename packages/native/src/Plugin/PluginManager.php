@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\Plugin;
 
 use JsonException;
+use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Protocol;
 use ReflectionClass;
 
@@ -21,6 +22,14 @@ final class PluginManager
     private static array $providers = [];
 
     private static bool $booted = false;
+
+    /**
+     * Component libraries declared by plugins (`php.components` in the
+     * descriptor): package name => absolute directory of `.pam.php` files.
+     *
+     * @var array<string, string>
+     */
+    private static array $componentDirectories = [];
 
     private function __construct()
     {
@@ -44,6 +53,12 @@ final class PluginManager
 
         $providerClasses = self::discover($root);
         $providers = [];
+
+        // Package component libraries register their tags before providers
+        // run, so a provider can still override or decorate one of them.
+        foreach (self::$componentDirectories as $directory) {
+            PamPhpRegistry::discover($directory, $root.'/.pam-native/components');
+        }
 
         foreach ($providerClasses as $providerClass) {
             if (!class_exists($providerClass)) {
@@ -143,6 +158,7 @@ final class PluginManager
             : $decoded;
         $providers = [];
         $providerNames = [];
+        self::$componentDirectories = [];
 
         foreach ($packages as $package) {
             if (!is_array($package)) {
@@ -239,6 +255,21 @@ final class PluginManager
             }
 
             $php = $manifest['php'] ?? null;
+            $components = is_array($php) ? ($php['components'] ?? null) : null;
+            if ($components !== null) {
+                if (!is_string($components) || !self::isSafeRelativePath($components)) {
+                    throw new PluginException("Pam Native plugin {$name} has an unsafe components path.");
+                }
+                $componentDirectory = realpath($packageRoot.'/'.$components);
+                if (
+                    $componentDirectory === false
+                    || !is_dir($componentDirectory)
+                    || !self::isWithin($componentDirectory, $packageRoot)
+                ) {
+                    throw new PluginException("Pam Native plugin {$name} components directory escapes its package.");
+                }
+                self::$componentDirectories[$name] = $componentDirectory;
+            }
             $provider = is_array($php) ? ($php['provider'] ?? null) : null;
 
             if ($provider === null) {
@@ -258,6 +289,7 @@ final class PluginManager
         }
 
         ksort($providers, SORT_STRING);
+        ksort(self::$componentDirectories, SORT_STRING);
 
         /** @var list<class-string<PluginProvider>> $classes */
         $classes = array_values($providers);
@@ -274,7 +306,23 @@ final class PluginManager
     public static function reset(): void
     {
         self::$providers = [];
+        self::$componentDirectories = [];
         self::$booted = false;
+    }
+
+    /**
+     * Component library directories of the installed plugins, in package
+     * order: discovered at boot and packed by the build's component prebuild.
+     *
+     * @return array<string, string> package name => absolute directory
+     */
+    public static function componentDirectories(?string $projectRoot = null): array
+    {
+        if ($projectRoot !== null) {
+            self::discover($projectRoot);
+        }
+
+        return self::$componentDirectories;
     }
 
     /** @internal The application root: the nearest directory with vendor/composer/installed.json. */

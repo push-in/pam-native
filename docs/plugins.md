@@ -254,6 +254,26 @@ A `plugins` key that no installed plugin declares, two plugins sharing a
 fails prepare. Keep validating received content in PHP: share sheets are an
 untrusted input.
 
+## Component libraries
+
+A package can ship single-file `.pam` components. Declare their directory
+(package-relative) in the descriptor:
+
+```json
+{
+    "php": {
+        "provider": "Vendor\\Ui\\UiPluginProvider",
+        "components": "components"
+    }
+}
+```
+
+Every component in it is registered at boot under its `#[Tag('…')]`, before
+the providers run, and the build's component prebuild packs them with the
+application's own, so a release build compiles none on the device. The
+package's `src/app.css` is prepended to each of its components, the same way
+an application's `src/app.css` is. `pushinbr/pam-native-ui` is built this way.
+
 ## PHP provider
 
 Providers are registered in package-name order before the first render.

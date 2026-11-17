@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.51.0 - 2026-11-17
+
+Two-way binding for components, plugin component libraries and the fixes
+found while rebuilding PAM Native UI 2.0 and porting PushinPay.
+
+- Added: `p-model` on component tags. `<my-field p-model="$email" />` passes
+  the bound value as the `modelValue` prop and writes back what the component
+  emits as `model` (`$this->emit('model', $value)`), cast to the bound
+  property's scalar type. `p-model="$form->email"` writes one level into an
+  object; a `NativeForm` field is set through `set()` (dirty, touched, error
+  cleared). Before, `p-model` on any component threw "The model attribute is
+  only valid on Input".
+- Added: plugins can ship `.pam` components. `"php": {"components": "dir"}` in
+  `pam-native.plugin.json` registers every component of that package
+  directory at boot, and the component prebuild packs them, so release builds
+  compile none on the device.
+- Added: `#[Event('change', 'string')]`: component events accept scalar
+  payload types (`mixed`, `string`, `int`, `float`, `bool`, `array`, `null`).
+- Changed: `on:change` on a component that declares a `change` event is that
+  component event, like `@change` (native elements already accepted both).
+  It no longer fails with "PAM2401 unknown prop".
+- Fixed: a static attribute reaches a typed string prop as written
+  (`label="2.0"` stayed `2`), numeric props accept integral values, and `key`
+  is no longer reported as an unknown prop of a typed component.
+- Fixed: a `VirtualizedList` whose `p-for` is empty on the first render
+  (data still loading) stays a virtualized list; it used to become a legacy
+  string list, and the rows that arrived later never appeared ("Node … cannot
+  contain children"). An empty `ScrollView` renders instead of throwing.
+- Fixed: `flex-wrap: wrap` with percentage widths (a 3x4 keypad of
+  `width: 33.333%` keys) measures every wrapped line; the container was one
+  line tall and the lines overlapped what followed.
+- Fixed: `->statusBar('light')` on a route rendered an empty screen; the
+  status bar wrapper now fills the scene.
+- Fixed: `Icon` finds `assets/fonts/<Font>.ttf` and its glyph map from the
+  project root, not the working directory, so icon fonts work during Android
+  hot reload.
+- Fixed: an image or font added while `pam dev` runs loads on the next
+  Android reload (packaged `asset://` paths resolve from the synced tree
+  first) instead of after restarting `pam dev`.
+- Fixed: a PHP-only plugin (no `android` section) defaults to `minSdk` 26
+  instead of 0, which the CLI rejected.
+- Added: `maxResponseBytes` for HTTP: per client
+  (`Http::create(maxResponseBytes: 2 * 1024 * 1024)`, `withMaxResponseBytes()`)
+  and per request (`Request::withMaxResponseBytes()`, `Http::request(...,
+  maxResponseBytes:)`). The default stays 1 MiB; the hard limit is 16 MiB.
+  Responses were capped at 900 KiB by the native module bridge ("HTTP response
+  exceeds one MiB"); bodies over 900 KiB now reach PHP through a private cache
+  file on Android and iOS (a 1.17 MB store page loads with a 2 MiB limit).
+- Fixed: the mobile PHP extension audit skips Composer `require-dev`
+  packages: a fresh `pam init --template native-ui` printed 34 warnings for
+  PHPUnit files that never run on the device.
+- Performance: each `@media`/`@container` block of a component stylesheet
+  carried a full copy of the sheet-level IR, bytecode, source map and the
+  20 KB compatibility table (~75 KB per block). Query blocks keep only their
+  rules now: a themed component with light, dark and platform blocks compiles
+  ~4x smaller and loads with less memory.
+
 ## 1.50.5 - 2026-11-16
 
 - Fixed: Android reads `pam-native.properties` and `pam-plugins.properties` as

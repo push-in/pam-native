@@ -316,7 +316,13 @@ final class ComponentStatePreserver
                 && is_string($entry[0] ?? null)
                 && is_array($entry[1] ?? null)
             ) {
-                $components[$key] = [$entry[0], $entry[1]];
+                $state = [];
+                foreach ($entry[1] as $name => $value) {
+                    if (is_string($name)) {
+                        $state[$name] = $value;
+                    }
+                }
+                $components[$key] = [$entry[0], $state];
             }
         }
 

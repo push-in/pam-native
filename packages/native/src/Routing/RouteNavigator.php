@@ -491,7 +491,10 @@ final class RouteNavigator implements NavigationLinkHandler
         }
         if ($style === null) return $result;
 
-        return Screen::make(StatusBar::make(null, $style, $route->statusBarHidden()), $result);
+        // The wrapper must fill the scene like the screen it wraps: without a
+        // flex size it measures zero and the route renders empty.
+        return Screen::make(StatusBar::make(null, $style, $route->statusBarHidden()), $result)
+            ->style(new \Pam\Native\Style(flexGrow: 1));
     }
 
     private function tabNavigator(Route $host): TabNavigator
