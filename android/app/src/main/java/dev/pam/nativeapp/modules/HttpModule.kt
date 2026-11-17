@@ -410,7 +410,8 @@ internal class HttpModule(
                     bodyFile.inputStream().use { input ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
-                            check(!closed.get()) { "HTTP upload cancelled" }
+                            // IOException: OkHttp rethrows anything else on its dispatcher thread and crashes the app.
+                            if (closed.get()) throw IOException("HTTP upload cancelled")
                             val count = input.read(buffer)
                             if (count < 0) break
                             sink.write(buffer, 0, count)

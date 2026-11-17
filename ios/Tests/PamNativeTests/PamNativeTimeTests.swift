@@ -56,12 +56,15 @@ final class PamNativeTimeTests: XCTestCase {
         XCTAssertEqual(PamNativeTime.graphemeEnds("a👍🏽b"), [1, 5, 6])
     }
 
-    func testClockLabelTicksNativelyAndStopsWhenHidden() {
+    func testClockLabelTicksNativelyAndStopsWhenHidden() throws {
         let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         defer { window.isHidden = true }
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        // A busy CI simulator can leave the host app's only scene in the
+        // background; the binding then (correctly) never ticks.
+        try XCTSkipIf(window.windowScene?.activationState == .background, "host scene is in the background")
         let route = UIView(frame: window.bounds)
         controller.view.addSubview(route)
         let label = PamTextView(frame: CGRect(x: 0, y: 100, width: 200, height: 40))

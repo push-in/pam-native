@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.52.1 - 2026-11-18
+
+- Fixed (Android): closing the HTTP module (hot reload, activity finished)
+  while `Http::upload` streamed a file threw an `IllegalStateException` from
+  the request body, which OkHttp rethrows on its dispatcher thread: the app
+  crashed. The upload now fails with an `IOException` and its call reports
+  the failure to PHP. A JVM test closes the module mid-upload and asserts
+  that no thread dies.
+- Fixed (release): the community gate prebuilds components with the
+  runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
+- Tests: the iOS clock-label test skips when the CI host scene is in the
+  background, where the binding correctly does not tick.
+
 ## 1.52.0 - 2026-11-17
 
 HTTP that survives broken IPv6, input that never loses its last keystrokes,
