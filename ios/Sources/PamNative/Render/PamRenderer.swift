@@ -2079,7 +2079,9 @@ public final class PamRenderer: @unchecked Sendable {
     /// observe exactly the text the editor shows, so its pending value is
     /// sent before the press.
     func routeEvent(_ id: Int64, _ kind: Int, _ payload: Data) {
-        if kind == EventKind.press.rawValue {
+        // A press, submit or blur first delivers any change still coalescing
+        // (native or debounced sync), so the handler sees the visible text.
+        if kind == EventKind.press.rawValue || kind == EventKind.submit.rawValue || kind == EventKind.blur.rawValue {
             flushPendingNativeInputs()
         }
         if kind == EventKind.press.rawValue || kind == EventKind.longPress.rawValue
@@ -8182,9 +8184,10 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
-        /// A press elsewhere drains a native-synced value still on the device.
+        /// A press elsewhere drains a native-synced or debounced value still
+        /// on the device, so the pressed action sees what the editor shows.
         func flushPendingNativeChange() {
-            guard inputSyncMode == 1, pendingChangeValue != nil else { return }
+            guard pendingChangeValue != nil else { return }
             onInputSyncFlush()
         }
 

@@ -1028,6 +1028,11 @@ class PamRenderer(
             view.transitionName?.let { node.put("testId", it) }
             if (view.isClickable) node.put("clickable", true)
             if (!view.isEnabled) node.put("disabled", true)
+            if (view.rotation != 0f || view.translationX != 0f || view.translationY != 0f ||
+                view.scaleX != 1f || view.scaleY != 1f
+            ) {
+                node.put("transformed", true)
+            }
             if (view is TextView) {
                 node.put("text", view.text.toString()).put("textSize", (view.textSize / density).toDouble())
                 view.layout?.let { layout ->
@@ -8033,7 +8038,11 @@ class PamRenderer(
                 state.deferredInputValue?.let { next ->
                     applyInputValue(input, state, next)
                 }
-                if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_BLUR) {
+                if (
+                    state.inputSyncMode() == INPUT_SYNC_NATIVE ||
+                    state.inputSyncMode() == INPUT_SYNC_BLUR ||
+                    state.pendingChange != null
+                ) {
                     dispatchInput(state)
                 }
                 if (state.properties[PropKey.ON_BLUR] != null) dispatch(state.id, EVENT_BLUR)
@@ -8059,8 +8068,11 @@ class PamRenderer(
             }
             if (
                 state.inputSyncMode() == INPUT_SYNC_NATIVE ||
-                state.inputSyncMode() == INPUT_SYNC_SUBMIT
+                state.inputSyncMode() == INPUT_SYNC_SUBMIT ||
+                state.pendingChange != null
             ) {
+                // A debounced change still waiting is delivered first, so the
+                // submit handler sees the submitted text in its model.
                 dispatchInput(state)
             }
             if (state.properties[PropKey.ON_SUBMIT] != null) {
@@ -8377,18 +8389,22 @@ class PamRenderer(
     }
 
     /**
-     * Native-synced inputs intentionally avoid a PHP round trip per keystroke.
-     * Drain their current value before another control fires so the following
-     * action observes exactly what is visible in the focused editor.
+     * Native-synced inputs intentionally avoid a PHP round trip per keystroke,
+     * and debounced ones may still hold the last keystrokes. Drain them before
+     * another control fires so the following action observes exactly what is
+     * visible in the editor.
      */
     private fun flushFocusedNativeInputs() {
         val pending = buildList {
             for (index in 0 until nodes.size()) {
                 val state = nodes.valueAt(index)
                 if (
-                state.inputSyncMode() == INPUT_SYNC_NATIVE &&
                     state.properties[PropKey.ON_CHANGE] != null &&
-                    (views[state.id] as? EditText)?.hasFocus() == true
+                    (
+                        state.pendingChange != null ||
+                            state.inputSyncMode() == INPUT_SYNC_NATIVE &&
+                            (views[state.id] as? EditText)?.hasFocus() == true
+                        )
                 ) {
                     add(state)
                 }
