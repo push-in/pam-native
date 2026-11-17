@@ -8752,6 +8752,9 @@ extension PamRenderer {
             if let label = view.accessibilityLabel, !label.isEmpty { node["label"] = label }
             if let identifier = view.accessibilityIdentifier, !identifier.isEmpty { node["testId"] = identifier }
             if view.transform != .identity || view.layer.transform.m34 != 0 { node["transformed"] = true }
+            // Layout keys the geometry checks read (protocol codes, as on Android).
+            if let position = state.properties[112]?.integer() { node["position"] = position }
+            if let justify = state.properties[PamConstants.justifyContent]?.integer() { node["justify"] = justify }
             if let button = view as? PamPressButton {
                 node["clickable"] = true
                 if !button.isEnabled { node["disabled"] = true }
