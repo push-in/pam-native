@@ -1404,23 +1404,56 @@ internal class PamModalHost @JvmOverloads constructor(
             // it shrank with its keyboard-padded content and slid down by
             // half the IME.
             if (presentation == PRESENTATION_DIALOG && child in windowSpanningChildren) {
-                child.layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+                setModalChildLayoutParams(
+                    child,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
                 )
                 return@repeat
             }
-            child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
+            setModalChildLayoutParams(child, modalChildLayoutParams(presentation, sheetHeight))
             if (entrancePending) child.translationY = sheetEntranceOffset!!
             else if (!sheetAnimating) child.translationY = keyboardTranslation
         }
         if (entrancePending) handle.translationY = sheetEntranceOffset!!
         else if (!sheetAnimating) handle.translationY = keyboardTranslation
-        modal.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        )
+        modal.window?.let { window ->
+            // Re-applying identical window attributes requests a layout; done
+            // from the layout listener that is a second pass and a late frame.
+            val attributes = window.attributes
+            if (
+                attributes.width != ViewGroup.LayoutParams.MATCH_PARENT ||
+                attributes.height != ViewGroup.LayoutParams.MATCH_PARENT
+            ) {
+                window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+        }
         updateBottomSheetChrome()
+    }
+
+    /**
+     * Assigns [params] only when they change: this runs from the content's
+     * layout listener, and a redundant assignment requests a layout during
+     * layout ("requestLayout() improperly called"), which Android defers to
+     * the next frame - a visible size jump while a sheet opens.
+     */
+    private fun setModalChildLayoutParams(child: View, params: FrameLayout.LayoutParams) {
+        val current = child.layoutParams as? FrameLayout.LayoutParams
+        if (
+            current != null &&
+            current.width == params.width &&
+            current.height == params.height &&
+            current.gravity == params.gravity &&
+            current.leftMargin == params.leftMargin &&
+            current.topMargin == params.topMargin &&
+            current.rightMargin == params.rightMargin &&
+            current.bottomMargin == params.bottomMargin
+        ) {
+            return
+        }
+        child.layoutParams = params
     }
 
     /**

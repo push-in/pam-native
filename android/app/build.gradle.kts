@@ -267,6 +267,9 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    // HTTP module transport: Happy Eyeballs (IPv6/IPv4 fast fallback), HTTP/2
+    // and per-host request limits.
+    implementation("com.squareup.okhttp3:okhttp:5.3.0")
     // Forward-buffered video (MediaPlayer preloadSeconds > 0); MediaPlayer stays the default engine.
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     // HLS (.m3u8) for those players: MediaPlayer plays HLS, so ExoPlayer must too.

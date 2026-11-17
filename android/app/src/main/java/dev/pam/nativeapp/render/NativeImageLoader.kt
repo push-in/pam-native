@@ -15,9 +15,7 @@ import android.widget.ImageView
 import dev.pam.nativeapp.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.security.MessageDigest
@@ -356,8 +354,7 @@ internal class NativeImageLoader(
     private val thumbnailSignals = ConcurrentHashMap<String, android.os.CancellationSignal>()
     private val generation = AtomicLong()
     private val closed = AtomicBoolean()
-    private val connections =
-        ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    private val calls = ConcurrentHashMap.newKeySet<okhttp3.Call>()
     private val diskDirectory = File(context.cacheDir, DISK_DIRECTORY)
     private val diskLock = DISK_LOCK
     private var diskBytesSinceTrim = 0L
@@ -483,8 +480,8 @@ internal class NativeImageLoader(
             view.onBlurChanged = null
         }
         active.clear()
-        connections.toList().forEach(HttpURLConnection::disconnect)
-        connections.clear()
+        calls.toList().forEach(okhttp3.Call::cancel)
+        calls.clear()
         inFlight.cancelAll()
         networkLane.close()
         decodeLane.close()
@@ -1663,6 +1660,12 @@ internal class NativeImageLoader(
      * URL), never under a redirect target, so a signed CDN URL behind an API
      * redirect is fetched once. A 429/503 pauses the host for every loader.
      */
+    private fun imageClient(attempt: Int): okhttp3.OkHttpClient =
+        dev.pam.nativeapp.net.PamHttpClient.shared.newBuilder()
+            .connectTimeout(CONNECT_TIMEOUT_MS.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(imageReadTimeoutMs(attempt).toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+
     private fun downloadRemote(
         source: String,
         request: NativeImageRequest,
@@ -1685,39 +1688,42 @@ internal class NativeImageLoader(
             PamMediaHostGate.remainingMs(uri.host).takeIf { it > 0 }?.let { paused ->
                 throw MediaHostPausedException(uri.host, paused)
             }
-            val connection = URL(current).openConnection() as HttpURLConnection
-            connections += connection
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = imageReadTimeoutMs(attempt)
-            connection.instanceFollowRedirects = false
-            connection.useCaches = request.cachePolicy != IMAGE_CACHE_NONE
+            val builder = okhttp3.Request.Builder().url(current)
             if (request.cachePolicy == IMAGE_CACHE_NONE) {
-                connection.setRequestProperty("Cache-Control", "no-cache, no-store")
-                connection.setRequestProperty("Pragma", "no-cache")
+                builder.header("Cache-Control", "no-cache, no-store")
+                builder.header("Pragma", "no-cache")
             }
-            connection.setRequestProperty("Accept", "image/*")
+            builder.header("Accept", "image/*")
             if (sameOrigin(origin, uri)) {
-                headers.forEach(connection::setRequestProperty)
+                headers.forEach { (name, value) -> builder.header(name, value) }
+            }
+            val call = imageClient(attempt).newCall(builder.build())
+            calls += call
+            val response = try {
+                call.execute()
+            } catch (error: Throwable) {
+                calls -= call
+                throw error
             }
             try {
-                val status = connection.responseCode
+                val status = response.code
                 if (status in REDIRECT_STATUS) {
                     require(redirect < MAX_REDIRECTS) {
                         "Image request has too many redirects."
                     }
-                    val location = connection.getHeaderField("Location")
+                    val location = response.header("Location")
                         ?: error("Image redirect has no location.")
                     previous = uri
                     current = uri.resolve(location).toString()
                     return@repeat
                 }
                 if (status !in 200..299) {
-                    val retryAfter = parseRetryAfterMs(connection.getHeaderField("Retry-After"))
+                    val retryAfter = parseRetryAfterMs(response.header("Retry-After"))
                     if (status in MEDIA_HOST_PAUSE_STATUS) PamMediaHostGate.pause(uri.host, retryAfter)
                     throw MediaHttpException(status, retryAfter, "Image")
                 }
                 PamMediaHostGate.succeeded(uri.host)
-                val contentType = connection.contentType.orEmpty()
+                val contentType = response.header("Content-Type").orEmpty()
                     .substringBefore(';')
                     .trim()
                     .lowercase()
@@ -1728,11 +1734,11 @@ internal class NativeImageLoader(
                 ) {
                     "Image response has an unsupported content type."
                 }
-                val length = connection.contentLengthLong
+                val length = response.body.contentLength()
                 require(length in -1..MAX_IMAGE_BYTES.toLong()) {
                     "Image is too large."
                 }
-                val bytes = connection.inputStream.use { input ->
+                val bytes = response.body.byteStream().use { input ->
                     readBounded(
                         input,
                         length,
@@ -1755,7 +1761,7 @@ internal class NativeImageLoader(
                 // `Cache-Control: no-store` keeps the bytes off disk, unless
                 // the app named the cache key itself (it owns that policy).
                 val noStore = request.mediaCacheKey == null &&
-                    connection.getHeaderField("Cache-Control")?.contains("no-store", ignoreCase = true) == true
+                    response.header("Cache-Control")?.contains("no-store", ignoreCase = true) == true
                 if (diskEnabled && !noStore) {
                     writeDisk(
                         cacheFile,
@@ -1768,8 +1774,8 @@ internal class NativeImageLoader(
                 }
                     return bytes
                 } finally {
-                    connections -= connection
-                    connection.disconnect()
+                    calls -= call
+                    response.close()
                 }
             }
             error("Image request could not be completed.")

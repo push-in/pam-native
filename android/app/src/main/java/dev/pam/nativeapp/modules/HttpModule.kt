@@ -4,30 +4,50 @@ import dev.pam.nativeapp.BuildConfig
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
-import java.net.HttpURLConnection
+import java.io.IOException
 import java.net.URI
-import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Dispatcher
+import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okio.BufferedSink
 import org.json.JSONObject
 
 internal class HttpModule(
     private val filesRoot: File? = null,
     private val uploadCache: File? = null,
+    baseClient: OkHttpClient = dev.pam.nativeapp.net.PamHttpClient.shared,
 ) : NativeModule, AutoCloseable {
-    private val executor: ExecutorService = Executors.newFixedThreadPool(4) { runnable ->
-        Thread(runnable, "pam-http").apply { isDaemon = true }
+    // OkHttp: Happy Eyeballs (RFC 8305 fast fallback: IPv6 and IPv4 attempts
+    // interleaved 250 ms apart, so a network with broken IPv6 costs a quarter
+    // second, not a 10-15 s connect timeout) and per-host fairness. Requests
+    // run on demand-created threads that end when idle: nothing works while
+    // the app makes no requests.
+    private val dispatcher = Dispatcher(
+        ThreadPoolExecutor(0, Int.MAX_VALUE, 30, TimeUnit.SECONDS, SynchronousQueue()) { runnable ->
+            Thread(runnable, "pam-http").apply { isDaemon = true }
+        },
+    ).apply {
+        maxRequests = MAX_CONCURRENT_REQUESTS
+        maxRequestsPerHost = MAX_REQUESTS_PER_HOST
     }
-    private val uploadDeadlines = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "pam-http-upload-timeout").apply { isDaemon = true }
-    }
+    private val client: OkHttpClient = baseClient.newBuilder()
+        .dispatcher(dispatcher)
+        .build()
     private val closed = AtomicBoolean()
-    private val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
     private val transferExecutor: ExecutorService = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "pam-http-transfer").apply { isDaemon = true }
     }
@@ -56,70 +76,70 @@ internal class HttpModule(
             completion.complete(ModuleResultStatus.FAILURE, "HTTP module is closed".toByteArray())
             return
         }
-        try {
-            executor.execute {
-                runCatching {
-                    val values = WireMap.decode(payload)
-                    val url = (values["url"] as? WireValue.Text)?.value
-                        ?: error("HTTP URL is required")
-                    val requestMethod = if (method == "get") {
-                        "GET"
-                    } else if (method == "upload") {
-                        "PUT"
-                    } else {
-                        (values["method"] as? WireValue.Text)?.value
-                            ?: error("HTTP method is required")
-                    }
-                    val headersJson = (values["headers"] as? WireValue.Text)?.value ?: "{}"
-                    val body = (values["body"] as? WireValue.Text)?.value
-                    val traceparent = (values["traceparent"] as? WireValue.Text)?.value
-                    val traceOrigin = (values["traceOrigin"] as? WireValue.Text)?.value
-                    val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
-                        .coerceIn(1_000L, 120_000L)
-                        .toInt()
-                    val maxResponseBytes = ((values["maxResponseBytes"] as? WireValue.Integer)?.value
-                        ?: DEFAULT_RESPONSE_BYTES.toLong())
-                    require(maxResponseBytes in 1L..MAX_RESPONSE_LIMIT.toLong()) {
-                        "maxResponseBytes must be between 1 and 16 MiB"
-                    }
-                    val snapshot = if (method == "upload") {
-                        require(body == null) { "File upload cannot include a text body" }
-                        val path = (values["path"] as? WireValue.Text)?.value
-                            ?: error("Upload source path is required")
+        runCatching {
+            val values = WireMap.decode(payload)
+            val url = (values["url"] as? WireValue.Text)?.value
+                ?: error("HTTP URL is required")
+            val requestMethod = if (method == "get") {
+                "GET"
+            } else if (method == "upload") {
+                "PUT"
+            } else {
+                (values["method"] as? WireValue.Text)?.value
+                    ?: error("HTTP method is required")
+            }
+            val headersJson = (values["headers"] as? WireValue.Text)?.value ?: "{}"
+            val body = (values["body"] as? WireValue.Text)?.value
+            val traceparent = (values["traceparent"] as? WireValue.Text)?.value
+            val traceOrigin = (values["traceOrigin"] as? WireValue.Text)?.value
+            val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
+                .coerceIn(1_000L, 120_000L)
+                .toInt()
+            val maxResponseBytes = ((values["maxResponseBytes"] as? WireValue.Integer)?.value
+                ?: DEFAULT_RESPONSE_BYTES.toLong())
+            require(maxResponseBytes in 1L..MAX_RESPONSE_LIMIT.toLong()) {
+                "maxResponseBytes must be between 1 and 16 MiB"
+            }
+            val uploadPath = if (method == "upload") {
+                require(body == null) { "File upload cannot include a text body" }
+                (values["path"] as? WireValue.Text)?.value ?: error("Upload source path is required")
+            } else {
+                null
+            }
+            val prepared = { snapshot: HttpUploadSnapshot? ->
+                enqueue(
+                    request(url, requestMethod, headersJson, body, traceparent, traceOrigin, snapshot?.file),
+                    timeoutMs,
+                    uploading = snapshot != null,
+                    maxResponseBytes = maxResponseBytes.toInt(),
+                    completion = completion,
+                    finished = { snapshot?.close() },
+                )
+            }
+            if (uploadPath == null) {
+                prepared(null)
+            } else {
+                // Copying the source into a private snapshot is file I/O: off
+                // the calling thread, then the request joins the dispatcher.
+                transferExecutor.execute {
+                    runCatching {
                         HttpUploadSnapshot.create(
                             requireNotNull(filesRoot) { "Private files directory is unavailable" },
                             requireNotNull(uploadCache) { "Private upload cache is unavailable" },
-                            path,
+                            uploadPath,
                         ) { closed.get() || Thread.currentThread().isInterrupted }
-                    } else null
-                    try {
-                        fetch(
-                            url,
-                            requestMethod,
-                            headersJson,
-                            body,
-                            timeoutMs,
-                            traceparent,
-                            traceOrigin,
-                            snapshot?.file,
-                            maxResponseBytes.toInt(),
-                        )
-                    } finally {
-                        snapshot?.close()
-                    }
-                }.fold(
-                    onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
-                    onFailure = {
-                        completion.complete(
-                            ModuleResultStatus.FAILURE,
-                            (it.message ?: "HTTP request failed").toByteArray(),
-                        )
-                    },
-                )
+                    }.fold(
+                        onSuccess = { snapshot -> runCatching { prepared(snapshot) }.onFailure { snapshot.close(); fail(completion, it) } },
+                        onFailure = { fail(completion, it) },
+                    )
+                }
             }
-        } catch (_: RejectedExecutionException) {
-            completion.complete(ModuleResultStatus.FAILURE, "HTTP module is closed".toByteArray())
-        }
+        }.onFailure { fail(completion, it) }
+    }
+
+    private fun fail(completion: ModuleCompletion, error: Throwable) {
+        val message = if (closed.get()) "HTTP module is closed" else error.message ?: "HTTP request failed"
+        completion.complete(ModuleResultStatus.FAILURE, message.toByteArray())
     }
 
     private fun transfer(method: String, payload: ByteArray, completion: ModuleCompletion) {
@@ -218,53 +238,59 @@ internal class HttpModule(
             "HTTP requests require HTTPS"
         }
         require(uri.userInfo == null && uri.host != null) { "Invalid HTTP URL" }
-        val connection = URL(source).openConnection() as HttpURLConnection
-        connections += connection
-        transfer.connection = connection
-        try {
-            check(!transfer.cancelled.get()) { "HTTP transfer cancelled" }
-            connection.requestMethod = requestMethod
-            connection.connectTimeout = minOf(15_000, timeoutMs)
-            connection.readTimeout = timeoutMs
-            connection.instanceFollowRedirects = false
-            connection.setRequestProperty("Accept", "application/json, text/plain, */*")
-            applyHeaders(connection, headersJson, fileTransport = true, multipart = body.contentType != null)
-            applyTrace(connection, uri, traceparent, traceOrigin)
-            body.contentType?.let { connection.setRequestProperty("Content-Type", it) }
-            if (body.contentType == null && connection.getRequestProperty("Content-Type") == null) {
-                connection.setRequestProperty("Content-Type", "application/octet-stream")
-            }
-            connection.doOutput = true
-            connection.setFixedLengthStreamingMode(body.length)
-            val throttle = TransferProgressThrottle(body.length)
-            transfer.channel.offer(HttpTransferEvents.progress(0, body.length))
-            connection.outputStream.use { output ->
+        val headers = Headers.Builder()
+        headers.add("Accept", "application/json, text/plain, */*")
+        applyHeaders(headers, headersJson, fileTransport = true, multipart = body.contentType != null)
+        applyTrace(headers, uri, traceparent, traceOrigin)
+        val contentType = body.contentType ?: headers["Content-Type"] ?: "application/octet-stream"
+        headers.removeAll("Content-Type")
+        val throttle = TransferProgressThrottle(body.length)
+        val requestBody = object : RequestBody() {
+            override fun contentType() = contentType.toMediaTypeOrNull()
+            override fun contentLength() = body.length
+            override fun isOneShot() = true
+            override fun writeTo(sink: BufferedSink) {
+                val output = sink.outputStream()
                 body.write(output) { sent ->
                     if (throttle.shouldReport(sent)) {
                         transfer.channel.offer(HttpTransferEvents.progress(sent, body.length))
                     }
                 }
+                output.flush()
             }
-            check(!transfer.cancelled.get()) { "HTTP transfer cancelled" }
-            val status = connection.responseCode
-            return HttpTransferEvents.complete(status, readResponse(connection, status), responseHeaders(connection))
+        }
+        check(!transfer.cancelled.get()) { "HTTP transfer cancelled" }
+        val call = client.newBuilder()
+            .connectTimeout(minOf(15_000, timeoutMs).toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .build()
+            .newCall(Request.Builder().url(source).headers(headers.build()).method(requestMethod, requestBody).build())
+        transfer.call = call
+        try {
+            transfer.channel.offer(HttpTransferEvents.progress(0, body.length))
+            call.execute().use { response ->
+                check(!transfer.cancelled.get()) { "HTTP transfer cancelled" }
+                val text = response.body.byteStream().use { stream ->
+                    String(readBounded(stream, INLINE_RESPONSE_BYTES), Charsets.UTF_8)
+                }
+                return HttpTransferEvents.complete(response.code, text, responseHeaders(response.headers))
+            }
         } finally {
-            transfer.connection = null
-            connections -= connection
-            connection.disconnect()
+            transfer.call = null
         }
     }
 
     private fun applyHeaders(
-        connection: HttpURLConnection,
+        headers: Headers.Builder,
         headersJson: String,
         fileTransport: Boolean,
         multipart: Boolean = false,
     ) {
-        val headers = JSONObject(headersJson)
-        require(headers.length() <= 32) { "HTTP requests support at most 32 headers" }
-        headers.keys().forEach { name ->
-            val value = headers.getString(name)
+        val values = JSONObject(headersJson)
+        require(values.length() <= 32) { "HTTP requests support at most 32 headers" }
+        values.keys().forEach { name ->
+            val value = values.getString(name)
             require(SAFE_HEADER_NAME.matches(name) && !value.contains('\r') && !value.contains('\n')) {
                 "Invalid HTTP header"
             }
@@ -278,25 +304,20 @@ internal class HttpModule(
             require(!multipart || name.lowercase() != "content-type") {
                 "Multipart requests own the Content-Type boundary"
             }
-            connection.setRequestProperty(name, value)
+            // Like HttpURLConnection.setRequestProperty: one value per name.
+            headers.removeAll(name)
+            headers.addUnsafeNonAscii(name, value)
         }
     }
 
-    private fun applyTrace(connection: HttpURLConnection, uri: URI, traceparent: String?, traceOrigin: String?) {
+    private fun applyTrace(headers: Headers.Builder, uri: URI, traceparent: String?, traceOrigin: String?) {
         if (traceparent == null && traceOrigin == null) return
         require(traceparent != null && traceOrigin != null) { "Incomplete HTTP trace context" }
         require(TRACEPARENT.matches(traceparent)) { "Invalid W3C version 00 traceparent" }
         require(origin(uri) == traceOrigin && traceOrigin.startsWith("https://")) {
             "Trace context origin does not match the HTTP request origin"
         }
-        connection.setRequestProperty("traceparent", traceparent)
-    }
-
-    private fun readResponse(connection: HttpURLConnection, status: Int): String {
-        val input = if (status >= 400) connection.errorStream else connection.inputStream
-        return input?.use { stream ->
-            String(readBounded(stream, INLINE_RESPONSE_BYTES), Charsets.UTF_8)
-        }.orEmpty()
+        headers.set("traceparent", traceparent)
     }
 
     /** Reads at most [limit] bytes; a longer body fails with the limit in the message. */
@@ -344,110 +365,117 @@ internal class HttpModule(
         transfers.values.forEach(HttpTransfer::cancel)
         transfers.clear()
         transferExecutor.shutdownNow()
-        connections.toList().forEach(HttpURLConnection::disconnect)
-        connections.clear()
-        uploadDeadlines.shutdownNow()
-        executor.shutdownNow()
+        dispatcher.cancelAll()
+        dispatcher.executorService.shutdown()
     }
 
-    private fun fetch(
+    private fun request(
         source: String,
         requestMethod: String,
         headersJson: String,
         body: String?,
-        timeoutMs: Int,
         traceparent: String?,
         traceOrigin: String?,
         bodyFile: File?,
-        maxResponseBytes: Int = DEFAULT_RESPONSE_BYTES,
-    ): ByteArray {
+    ): Request {
         val uri = URI(source)
         require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
             "HTTP requests require HTTPS"
         }
         require(uri.userInfo == null && uri.host != null) { "Invalid HTTP URL" }
-        val connection = URL(source).openConnection() as HttpURLConnection
-        connections += connection
-        var deadline: ScheduledFuture<*>? = null
-        val timedOut = AtomicBoolean()
-        try {
-            if (bodyFile != null) {
-                deadline = uploadDeadlines.schedule({ timedOut.set(true); connection.disconnect() }, timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            }
-            check(!closed.get()) { "HTTP module is closed" }
-            require(requestMethod in ALLOWED_METHODS) { "Unsupported HTTP method $requestMethod" }
-            require(body == null || body.toByteArray(Charsets.UTF_8).size <= MAX_REQUEST_BYTES) {
-                "HTTP request body exceeds one MiB"
-            }
-            connection.requestMethod = requestMethod
-            connection.connectTimeout = if (bodyFile != null) minOf(10_000, timeoutMs) else 10_000
-            connection.readTimeout = timeoutMs
-            connection.instanceFollowRedirects = false
-            connection.setRequestProperty("Accept", "application/json, text/plain, */*")
-            val headers = JSONObject(headersJson)
-            require(headers.length() <= 32) { "HTTP requests support at most 32 headers" }
-            headers.keys().forEach { name ->
-                val value = headers.getString(name)
-                require(SAFE_HEADER_NAME.matches(name) && !value.contains('\r') && !value.contains('\n')) {
-                    "Invalid HTTP header"
-                }
-                require(value.toByteArray(Charsets.UTF_8).size <= 8_192) { "HTTP header value is too large" }
-                require(name.lowercase() !in RESERVED_TRACE_HEADERS) {
-                    "Trace headers require an origin-scoped context"
-                }
-                require(bodyFile == null || name.lowercase() !in FILE_TRANSPORT_HEADERS) {
-                    "File upload headers cannot override HTTP transport fields"
-                }
-                connection.setRequestProperty(name, value)
-            }
-            if (traceparent != null || traceOrigin != null) {
-                require(traceparent != null && traceOrigin != null) { "Incomplete HTTP trace context" }
-                require(TRACEPARENT.matches(traceparent)) { "Invalid W3C version 00 traceparent" }
-                require(origin(uri) == traceOrigin && traceOrigin.startsWith("https://")) {
-                    "Trace context origin does not match the HTTP request origin"
-                }
-                connection.setRequestProperty("traceparent", traceparent)
-            }
-            if (bodyFile != null) {
-                connection.doOutput = true
-                connection.setFixedLengthStreamingMode(bodyFile.length())
-                bodyFile.inputStream().use { input ->
-                    connection.outputStream.use { output ->
+        check(!closed.get()) { "HTTP module is closed" }
+        require(requestMethod in ALLOWED_METHODS) { "Unsupported HTTP method $requestMethod" }
+        val bytes = body?.toByteArray(Charsets.UTF_8)
+        require(bytes == null || bytes.size <= MAX_REQUEST_BYTES) { "HTTP request body exceeds one MiB" }
+        val headers = Headers.Builder()
+        headers.add("Accept", "application/json, text/plain, */*")
+        applyHeaders(headers, headersJson, fileTransport = bodyFile != null)
+        applyTrace(headers, uri, traceparent, traceOrigin)
+        val type = headers["Content-Type"]?.toMediaTypeOrNull()
+        val requestBody = when {
+            bodyFile != null -> object : RequestBody() {
+                override fun contentType() = type
+                override fun contentLength() = bodyFile.length()
+                override fun writeTo(sink: BufferedSink) {
+                    bodyFile.inputStream().use { input ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
-                            check(!closed.get() && !timedOut.get() && !Thread.currentThread().isInterrupted) { "HTTP upload cancelled" }
+                            check(!closed.get()) { "HTTP upload cancelled" }
                             val count = input.read(buffer)
                             if (count < 0) break
-                            output.write(buffer, 0, count)
+                            sink.write(buffer, 0, count)
                         }
                     }
                 }
-            } else if (body != null) {
-                connection.doOutput = true
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
-            check(!timedOut.get()) { "HTTP upload timed out" }
-            val status = connection.responseCode
-            val input = if (status >= 400) connection.errorStream else connection.inputStream
-            val bytes = input?.use { stream -> readBounded(stream, maxResponseBytes) } ?: ByteArray(0)
-            val result = linkedMapOf<String, WireValue>(
-                "statusCode" to WireValue.Integer(status.toLong()),
-                "headers" to WireValue.Text(responseHeaders(connection)),
-            )
-            if (bytes.size <= INLINE_RESPONSE_BYTES) {
-                result["body"] = WireValue.Text(String(bytes, Charsets.UTF_8))
-            } else {
-                // The module bridge carries at most 1 MiB: a larger body goes
-                // through a private cache file that PHP reads once and deletes.
-                result["body"] = WireValue.Text("")
-                result["bodyFile"] = WireValue.Text(spill(bytes).absolutePath)
-            }
-            return WireMap.encode(result)
-        } finally {
-            deadline?.cancel(false)
-            connections -= connection
-            connection.disconnect()
+            bytes != null -> bytes.toRequestBody(type)
+            // OkHttp requires a body for these methods; HttpURLConnection sent an empty one.
+            requestMethod in setOf("POST", "PUT", "PATCH") -> ByteArray(0).toRequestBody(type)
+            else -> null
         }
+        return Request.Builder()
+            .url(source)
+            .headers(headers.build())
+            .method(requestMethod, requestBody)
+            .build()
+    }
+
+    private fun enqueue(
+        request: Request,
+        timeoutMs: Int,
+        uploading: Boolean,
+        maxResponseBytes: Int,
+        completion: ModuleCompletion,
+        finished: () -> Unit,
+    ) {
+        val builder = client.newBuilder()
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+        if (uploading) {
+            // The whole upload, connect included, has the request's deadline.
+            builder.connectTimeout(minOf(10_000, timeoutMs).toLong(), TimeUnit.MILLISECONDS)
+                .callTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+        }
+        builder.build().newCall(request).enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    finished()
+                    val message = when {
+                        closed.get() -> "HTTP module is closed"
+                        uploading && call.isCanceled() -> "HTTP upload cancelled"
+                        uploading && e is java.io.InterruptedIOException && e.message == "timeout" -> "HTTP upload timed out"
+                        else -> e.message ?: "HTTP request failed"
+                    }
+                    completion.complete(ModuleResultStatus.FAILURE, message.toByteArray())
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    runCatching {
+                        response.use { encodeResponse(it, maxResponseBytes) }
+                    }.also { finished() }.fold(
+                        onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
+                        onFailure = { fail(completion, it) },
+                    )
+                }
+            },
+        )
+    }
+
+    private fun encodeResponse(response: Response, maxResponseBytes: Int): ByteArray {
+        val bytes = response.body.byteStream().use { stream -> readBounded(stream, maxResponseBytes) }
+        val result = linkedMapOf<String, WireValue>(
+            "statusCode" to WireValue.Integer(response.code.toLong()),
+            "headers" to WireValue.Text(responseHeaders(response.headers)),
+        )
+        if (bytes.size <= INLINE_RESPONSE_BYTES) {
+            result["body"] = WireValue.Text(String(bytes, Charsets.UTF_8))
+        } else {
+            // The module bridge carries at most 1 MiB: a larger body goes
+            // through a private cache file that PHP reads once and deletes.
+            result["body"] = WireValue.Text("")
+            result["bodyFile"] = WireValue.Text(spill(bytes).absolutePath)
+        }
+        return WireMap.encode(result)
     }
 
     private companion object {
@@ -471,6 +499,9 @@ internal class HttpModule(
         const val INLINE_RESPONSE_BYTES = 900 * 1024
         const val DEFAULT_RESPONSE_BYTES = 1_048_576
         const val MAX_RESPONSE_LIMIT = 16 * 1024 * 1024
+        /** Concurrent requests per host (browsers use 6) and overall. */
+        const val MAX_REQUESTS_PER_HOST = 6
+        const val MAX_CONCURRENT_REQUESTS = 32
     }
 }
 
@@ -489,14 +520,13 @@ internal fun resolvePrivateFile(root: File, path: String): File {
 }
 
 /** Response headers as a JSON object with lower-case names, bounded to 32 KiB. */
-internal fun responseHeaders(connection: HttpURLConnection): String {
-    val headers = JSONObject()
+internal fun responseHeaders(headers: Headers): String {
+    val json = JSONObject()
     var bytes = 0
-    connection.headerFields.orEmpty().forEach { (name, values) ->
-        if (name == null || values.isNullOrEmpty()) return@forEach
-        val value = values.joinToString(", ")
+    headers.names().forEach { name ->
+        val value = headers.values(name).joinToString(", ")
         bytes += name.length + value.length
-        if (bytes <= 32 * 1024 && headers.length() < 64) headers.put(name.lowercase(), value)
+        if (bytes <= 32 * 1024 && json.length() < 64) json.put(name.lowercase(), value)
     }
-    return headers.toString()
+    return json.toString()
 }

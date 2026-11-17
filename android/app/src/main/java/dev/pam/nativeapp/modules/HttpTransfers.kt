@@ -175,11 +175,11 @@ internal class TransferProgressThrottle(private val total: Long) {
 internal class HttpTransfer(val channel: WatchChannel = WatchChannel()) {
     val cancelled = AtomicBoolean()
     @Volatile var future: Future<*>? = null
-    @Volatile var connection: java.net.HttpURLConnection? = null
+    @Volatile var call: okhttp3.Call? = null
 
     fun cancel() {
         cancelled.set(true)
-        connection?.disconnect()
+        call?.cancel()
         future?.cancel(true)
         channel.close()
     }

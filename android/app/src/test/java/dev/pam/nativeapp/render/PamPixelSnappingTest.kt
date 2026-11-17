@@ -13,6 +13,30 @@ class PamPixelSnappingTest {
     }
 
     @Test
+    fun aCentredIconKeepsEqualPixelGapsAtFractionalDensities() {
+        // A 20dp icon centred in a 44dp button: 12dp gaps are 31.5px at 2.625x.
+        for (density in floatArrayOf(1f, 1.5f, 2f, 2.625f, 2.75f, 3f, 3.5f)) {
+            for (parentStart in floatArrayOf(0f, 13.3f, 101.7f)) {
+                val parentExtent = 44f
+                val span = snappedPixelSpan(
+                    start = parentStart + 12f,
+                    extent = 20f,
+                    parentStart = parentStart,
+                    density = density,
+                    parentExtent = parentExtent,
+                )
+                val parentPixels = yogaPixelGrid((parentStart + parentExtent).toDouble(), density, false, false) -
+                    yogaPixelGrid(parentStart.toDouble(), density, false, false)
+                assertEquals(
+                    "gaps at ${density}x from $parentStart",
+                    span.offset,
+                    parentPixels - span.offset - span.extent,
+                )
+            }
+        }
+    }
+
+    @Test
     fun centered_children_share_the_same_physical_center() {
         val density = 2.625f
         val parentExtent = 54f
