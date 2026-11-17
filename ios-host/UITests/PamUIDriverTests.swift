@@ -12,6 +12,8 @@ import XCTest
 ///     {"launch": true}                 cold start (default: activate)
 ///     {"tap": "Local marketplace"}     first element whose label matches
 ///     {"tapIfExists": "Back"}         tap when present, otherwise continue
+///     {"tapField": "Email"}            the editable field with that label,
+///                                      then wait for keyboard focus
 ///     {"tapId": "composer.send"}       accessibility identifier
 ///     {"tapXY": [0.5, 0.9]}            normalized window coordinates
 ///     {"longPress": "label", "seconds": 1.0}
@@ -120,6 +122,19 @@ final class PamUIDriverTests: XCTestCase {
         if let label = step["tap"] as? String {
             let element = try element(labelled: label, timeout: timeout, step: index)
             element.tap()
+            return
+        }
+        if let label = step["tapField"] as? String {
+            // The editable field itself (text field, secure field or text
+            // view), not a caption that shares its label; waits for focus.
+            let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@ OR placeholderValue == %@", label, label, label)
+            let field = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "elementType IN %@", [XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.secureTextField.rawValue, XCUIElement.ElementType.textView.rawValue]))
+                .matching(predicate).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: timeout), "step \(index): no editable field labelled \(label)")
+            field.tap()
+            let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+            _ = XCTWaiter().wait(for: [focused], timeout: 3)
             return
         }
         if let label = step["tapIfExists"] as? String {
