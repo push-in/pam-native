@@ -723,7 +723,10 @@ internal fun snappedPixelSpan(
     // [parentStart].
     val text = textRounding
     val fractionalExtent = !pixelGridWhole(safeExtent.toDouble() * safeDensity)
-    val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
+    // Text starts on the same rounded pixel as any box (Yoga floors it,
+    // which put a section label a pixel left of the card under it); its
+    // trailing edge still ceils, and its measured width is preserved below.
+    val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
     val offset = absoluteStart - yogaPixelGrid(parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
     val absoluteEnd = yogaPixelGrid(
         start.toDouble() + safeExtent.toDouble(),
@@ -1013,8 +1016,17 @@ class PamRenderer(
             val view = views[state.id]
             if (view == null) {
                 // Layout-only nodes flattened away: no pixels, but their
-                // frames keep the tree whole for spacing checks.
+                // frames keep the tree whole for spacing checks. Only those
+                // whose native host is on screen (not a covered route).
                 val frame = frames[state.id] ?: continue
+                var host = state.parent
+                var hostView: View? = null
+                var depth = 0
+                while (host != 0L && hostView == null && depth++ < 64) {
+                    hostView = views[host]
+                    if (hostView == null) host = nodes[host]?.parent ?: 0L
+                }
+                if (hostView?.isShown != true) continue
                 nodesJson.put(
                     JSONObject()
                         .put("id", state.id)
