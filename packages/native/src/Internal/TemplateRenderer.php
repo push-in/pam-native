@@ -1699,8 +1699,13 @@ final class TemplateRenderer
             $attributes = $entry['attributes'];
             $unresolvedStyleAttributes = $entry['unresolved'];
         }
+        $componentModel = null;
         if ($plan === null || $plan['bindings']) {
-            [$attributes, $checkedBinding] = self::modelBindings($tag, $attributes);
+            [$attributes, $checkedBinding, $componentModel] = self::modelBindings(
+                $tag,
+                $attributes,
+                $factory !== null,
+            );
             $entry = null;
         } else {
             $checkedBinding = null;
@@ -1842,6 +1847,10 @@ final class TemplateRenderer
                     $declaredNames[ltrim($name, ':')] = true;
                 }
             }
+            if ($componentModel !== null) {
+                // p-model authored `modelValue` (see modelBindings()).
+                $declaredNames['modelValue'] = true;
+            }
             $componentValues = array_filter(
                 $values,
                 static fn (string $name): bool =>
@@ -1891,6 +1900,14 @@ final class TemplateRenderer
                     $raw,
                     $scope,
                     $data,
+                );
+            }
+            if ($componentModel !== null) {
+                $componentEvents['model'] = self::componentModelHandler(
+                    $tag,
+                    $componentModel,
+                    $scope,
+                    $componentEvents['model'] ?? null,
                 );
             }
         }
@@ -4028,10 +4045,31 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $attributes
-     * @return array{0: array<string, mixed>, 1: ?string}
+     * @return array{0: array<string, mixed>, 1: ?string, 2: ?string}
      */
-    private static function modelBindings(string $tag, array $attributes): array
+    private static function modelBindings(string $tag, array $attributes, bool $component = false): array
     {
+        if ($component) {
+            // A component tag (a registered or compiled component) takes
+            // `p-model` like Vue's v-model: the bound value arrives as the
+            // `modelValue` prop and the component writes it back by emitting
+            // `model` (see Component::emit()).
+            $model = $attributes['p-model'] ?? $attributes['p-model:checked'] ?? null;
+            if ($model === null) {
+                return [$attributes, null, null];
+            }
+            if (isset($attributes['p-model'], $attributes['p-model:checked'])) {
+                throw new RuntimeException("p-model and p-model:checked cannot be combined on {$tag}.");
+            }
+            if (array_key_exists(':modelValue', $attributes) || array_key_exists('modelValue', $attributes)) {
+                throw new RuntimeException("p-model cannot be combined with modelValue on {$tag}.");
+            }
+            $model = self::stringValue($model, 'p-model target');
+            $attributes[':modelValue'] = $model;
+            unset($attributes['p-model'], $attributes['p-model:checked']);
+
+            return [$attributes, null, $model];
+        }
         if (isset($attributes['p-model'])) {
             $binding = in_array($tag, ['Switch', 'Toggle'], true)
                 ? 'bind:checked'
@@ -4074,7 +4112,7 @@ final class TemplateRenderer
             unset($attributes['bind:checked']);
         }
 
-        return [$attributes, $checkedBinding];
+        return [$attributes, $checkedBinding, null];
     }
 
     /**
@@ -7890,6 +7928,61 @@ final class TemplateRenderer
             if ($scope instanceof Component) {
                 $scope->__pamNotifyUpdated($property);
                 $scope->__pamFlushChanges();
+            }
+        };
+    }
+
+    /**
+     * The `model` listener `p-model` gives a component tag: it writes the
+     * emitted value to the bound property of the parent component (any
+     * type: a text field emits a string, a checkbox a bool, a multi-select
+     * an array) and then runs an explicit `@model` listener, if any.
+     */
+    private static function componentModelHandler(
+        string $tag,
+        string $model,
+        ?object $scope,
+        ?Closure $explicit,
+    ): Closure {
+        $property = ltrim($model, '$');
+        if (
+            $scope === null
+            || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $property) !== 1
+            || !property_exists($scope, $property)
+        ) {
+            throw new RuntimeException(
+                "p-model {$model} on {$tag} does not resolve to a property of the parent component.",
+            );
+        }
+        $reflection = self::reflectionProperty($scope, $property);
+        if ($reflection->isReadOnly()) {
+            throw new RuntimeException("p-model {$model} on {$tag} cannot write a readonly property.");
+        }
+        $type = $reflection->getType();
+
+        return static function (mixed $value = null) use ($reflection, $property, $scope, $explicit, $type): void {
+            if ($type instanceof \ReflectionNamedType && $type->isBuiltin() && $value !== null) {
+                $value = match ($type->getName()) {
+                    'int' => is_numeric($value) ? (int) $value : $value,
+                    'float' => is_numeric($value) ? (float) $value : $value,
+                    'string' => is_scalar($value) ? (string) $value : $value,
+                    'bool' => is_scalar($value) ? ($value === true || $value === 1 || $value === '1' || $value === 'true') : $value,
+                    default => $value,
+                };
+            }
+            $previous = $reflection->getValue($scope);
+            if ($previous !== $value) {
+                if ($scope instanceof Component) {
+                    $scope->__pamNotifyUpdating($property, $value, $previous);
+                }
+                $reflection->setValue($scope, $value);
+                if ($scope instanceof Component) {
+                    $scope->__pamNotifyUpdated($property);
+                    $scope->__pamFlushChanges();
+                }
+            }
+            if ($explicit !== null) {
+                $explicit($value);
             }
         };
     }

@@ -710,6 +710,11 @@ struct PluginCompatibility {
 struct PluginPhp {
     #[serde(default)]
     provider: Option<String>,
+    /// Package-relative directory of `.pam.php` components (read by the PHP
+    /// runtime and the component prebuild; the CLI only accepts the key).
+    #[serde(default)]
+    #[allow(dead_code)]
+    components: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -10,7 +10,7 @@ use Attribute;
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final readonly class Event
 {
-    /** @param class-string $payload */
+    /** @param class-string|'mixed'|'null'|'string'|'int'|'float'|'bool'|'array' $payload */
     public function __construct(
         public string $name,
         public string $payload,
