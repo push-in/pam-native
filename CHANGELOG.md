@@ -36,14 +36,6 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   share an edge in dp share it in pixels (a card's button started 1px right
   of its title at 2.625x, and a centred icon could sit 2px off). React
   Native's Yoga rounds positions relative to the parent instead.
-- Fixed: an `Input` with a CSS box (background, border, radius) and
-  `underlineColorAndroid="transparent"` lost its whole box on Android: the
-  underline tint was applied to PAM's own background drawable. The tint now
-  colours only the platform underline.
-- Changed: a node inside flattened layout-only wrappers is placed by its
-  whole offset from its native host, rounded once, so it shares the pixel of
-  a sibling at the same dp offset (a card's button started 1px right of its
-  title at 2.625x). React Native adds each wrapper's rounded origin.
 - Fixed: a bottom sheet's drag handle follows the sheet when it changes
   height without the window changing (a snap point, the keyboard); after a
   list scroll collapsed a full-height sheet, the handle stayed at the top of
