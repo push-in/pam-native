@@ -1072,7 +1072,8 @@ class PamRenderer(
                     var widest = 0f
                     for (line in 0 until layout.lineCount) {
                         if (layout.getEllipsisCount(line) > 0) ellipsized = true
-                        widest = maxOf(widest, layout.getLineWidth(line))
+                        // getLineMax excludes the trailing space a wrapped line ends with.
+                        widest = maxOf(widest, layout.getLineMax(line))
                     }
                     node.put("baseline", onScreen[1] + view.baseline)
                         .put("textHeight", layout.height)
