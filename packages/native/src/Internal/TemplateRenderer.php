@@ -733,6 +733,8 @@ final class TemplateRenderer
         'accessibilityActions' => true,
         'alt' => true,
         'testId' => true,
+        // React Native's spelling: the same test identifier.
+        'testID' => true,
         'disabled' => true,
         'enabled' => true,
         'placeholder' => true,
@@ -2679,6 +2681,7 @@ final class TemplateRenderer
         'key' => true,
         'accessibilityLabel' => true,
         'testId' => true,
+        'testID' => true,
         'disabled' => true,
         'enabled' => true,
     ];
@@ -3061,8 +3064,8 @@ final class TemplateRenderer
                     'Accessibility label',
                 );
             }
-            if (isset($values['testId'])) {
-                $properties[PropKey::TestId->value] = self::boundedString($values['testId'], 'Test ID');
+            if (isset($values['testId']) || isset($values['testID'])) {
+                $properties[PropKey::TestId->value] = self::boundedString($values['testId'] ?? $values['testID'], 'Test ID');
             }
             if (isset($values['disabled'])) {
                 $properties[PropKey::Enabled->value] = !self::boolValue($values['disabled'], 'Disabled');
@@ -4601,8 +4604,8 @@ final class TemplateRenderer
                 ->accessible();
         }
 
-        if (isset($attributes['testId'])) {
-            $element = $element->testId(self::stringValue($attributes['testId'], 'Test ID'));
+        if (isset($attributes['testId']) || isset($attributes['testID'])) {
+            $element = $element->testId(self::stringValue($attributes['testId'] ?? $attributes['testID'], 'Test ID'));
         }
 
         if (isset($attributes['disabled'])) {

@@ -49,6 +49,21 @@ final class LinkingModuleTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    func testANewWaitSupersedesAStaleOneFromAReplacedRequest() {
+        var stale: [String] = []
+        var delivered: String?
+        LinkingModule().invoke(method: "nextUrl", payload: Data()) { status, payload in
+            stale.append("\(status == .failure ? "failure" : "success"):\(String(decoding: payload, as: UTF8.self))")
+        }
+        LinkingModule().invoke(method: "nextUrl", payload: Data()) { status, payload in
+            XCTAssertEqual(status, .success)
+            if case let .text(url)? = ((try? WireMap.decode(payload)) ?? [:])["url"] { delivered = url }
+        }
+        XCTAssertEqual(stale, ["failure:superseded"])
+        PamLinking.open(URL(string: "app://orders/7"))
+        XCTAssertEqual(delivered, "app://orders/7")
+    }
+
     func testRuntimeCloseClearsColdAndWarmState() {
         PamLinking.captureInitial(URL(string: "zechat://chat/private"))
         PamLinking.open(URL(string: "zechat://chat/private"))

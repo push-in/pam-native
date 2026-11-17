@@ -718,12 +718,14 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                         Log.i("PamNativeDevTools", if (shown) "shown" else "hidden")
                     }
                     DIAGNOSTICS_ACTION -> publishDiagnostics(intent)
+                    LAYOUT_ACTION -> publishLayout(intent)
                 }
             }
         }
         val filter = IntentFilter().apply {
             addAction(DEVTOOLS_ACTION)
             addAction(DIAGNOSTICS_ACTION)
+            addAction(LAYOUT_ACTION)
         }
         registerReceiver(
             receiver,
@@ -736,16 +738,35 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     private fun publishDiagnostics(intent: Intent) {
+        publishSnapshot(intent, DIAGNOSTICS_FILE_PREFIX) { devTools.snapshotJson() }
+    }
+
+    /** Debug only: the layout of every renderer surface, as UI geometry tests read it. */
+    private fun publishLayout(intent: Intent) {
+        publishSnapshot(intent, LAYOUT_FILE_PREFIX) {
+            val decor = window.decorView
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(decor)
+                ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+            val root = org.json.JSONObject(activeRenderer?.layoutSnapshotJson() ?: "{}")
+            root.put("screen", org.json.JSONArray().put(decor.width).put(decor.height))
+            root.put("insets", org.json.JSONArray().put(insets?.left ?: 0).put(insets?.top ?: 0).put(insets?.right ?: 0).put(insets?.bottom ?: 0))
+            root.put("fontScale", resources.configuration.fontScale.toDouble())
+            root.put("rtl", decor.layoutDirection == View.LAYOUT_DIRECTION_RTL)
+            root.toString()
+        }
+    }
+
+    private fun publishSnapshot(intent: Intent, prefix: String, capture: () -> String) {
         val requestId = intent.getStringExtra(DIAGNOSTICS_REQUEST_EXTRA).orEmpty()
         if (!requestId.matches(DIAGNOSTICS_REQUEST_PATTERN)) return
-        val snapshot = devTools.snapshotJson()
+        val snapshot = capture()
         val directory = cacheDir
         diagnosticsExecutor.execute {
             directory.listFiles { file ->
-                file.name.startsWith(DIAGNOSTICS_FILE_PREFIX)
+                file.name.startsWith(prefix)
             }?.forEach(File::delete)
-            val temporary = File(directory, "$DIAGNOSTICS_FILE_PREFIX$requestId.tmp")
-            val destination = File(directory, "$DIAGNOSTICS_FILE_PREFIX$requestId.json")
+            val temporary = File(directory, "$prefix$requestId.tmp")
+            val destination = File(directory, "$prefix$requestId.json")
             runCatching {
                 temporary.writeText(snapshot, Charsets.UTF_8)
                 check(temporary.renameTo(destination)) { "cannot publish Native diagnostics" }
@@ -1206,8 +1227,10 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         const val HIDDEN_TRIM_DELAY_MS = 5_000L
         const val DEVTOOLS_ACTION = "dev.pam.nativeapp.action.TOGGLE_DEVTOOLS"
         const val DIAGNOSTICS_ACTION = "dev.pam.nativeapp.action.CAPTURE_DIAGNOSTICS"
+        const val LAYOUT_ACTION = "dev.pam.nativeapp.action.CAPTURE_LAYOUT"
         const val DIAGNOSTICS_REQUEST_EXTRA = "requestId"
         const val DIAGNOSTICS_FILE_PREFIX = "pam-diagnostics-"
+        const val LAYOUT_FILE_PREFIX = "pam-layout-"
         val DIAGNOSTICS_REQUEST_PATTERN = Regex("[a-f0-9]{32}")
         const val MEMORY_PRESSURE_CRITICAL = 2
 

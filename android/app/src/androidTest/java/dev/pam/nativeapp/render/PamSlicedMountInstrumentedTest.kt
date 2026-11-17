@@ -277,6 +277,42 @@ class PamSlicedMountInstrumentedTest {
         }
     }
 
+    /**
+     * A virtualized list inside deferred content (a sheet opened from a
+     * scrolling screen, a list below the fold) keeps its rows in its adapter:
+     * finishing the sliced mount used to build each row as a plain child of
+     * the list view and failed with "Node … cannot contain children".
+     */
+    @Test
+    fun deferredContentBuildsItsVirtualListThroughTheAdapter() {
+        val renderer = renderer()
+        try {
+            onMain {
+                val mutations = tree().toMutableList()
+                val setRoot = mutations.removeAt(mutations.lastIndex)
+                mutations += Mutation.Create(NodeSpec(LIST, CONTENT, ROWS, NodeKind.VIRTUAL_LIST, emptyMap()))
+                mutations += Mutation.Layout(LIST, Frame(0f, ROWS * ROW_HEIGHT, widthDp, 400f))
+                repeat(LIST_ROWS) { row ->
+                    val id = LIST + 1 + row
+                    mutations += Mutation.Create(
+                        NodeSpec(id, LIST, row, NodeKind.TEXT, mapOf(PropKey.TEXT to PropValue.Text("Option $row"))),
+                    )
+                    mutations += Mutation.Layout(id, Frame(0f, row * 40f, widthDp, 40f))
+                }
+                mutations += setRoot
+                renderer.commit(listOf(mutations))
+                assertTrue("the list below the fold is deferred", renderer.pendingMountCount() > 0)
+            }
+            awaitMounted(renderer)
+            onMain {
+                assertTrue(renderer.viewForNode(LIST) is PamRecyclerList)
+                assertEquals(0, renderer.pendingMountCount())
+            }
+        } finally {
+            onMain { renderer.close() }
+        }
+    }
+
     @Test
     fun smallCommitsAndHorizontalScrollsBuildEverythingAtOnce() {
         val renderer = renderer()
@@ -512,6 +548,8 @@ class PamSlicedMountInstrumentedTest {
         const val EXTRA = 3L
         const val UPDATED_ROW = 50
         const val REMOVED_ROW = 55
+        const val LIST = 10_000L
+        const val LIST_ROWS = 12
         const val GROWN_ROW = 52
         const val MOVED_ROW = 40
         const val SCROLLED_TO_ROW = 30

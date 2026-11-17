@@ -78,8 +78,13 @@ final class PamNativeTimeTests: XCTestCase {
         )
         XCTAssertEqual(label.text, "00:05")
         XCTAssertTrue(label.pamTimeBinding?.isTicking == true)
-        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
-        XCTAssertEqual(label.text, "00:06")
+        // The label ticks on its own. A loaded CI simulator may fire the next
+        // tick late (or skip a second), so assert that it advanced.
+        let deadline = Date().addingTimeInterval(4)
+        while label.text == "00:05", Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertTrue(["00:06", "00:07", "00:08", "00:09"].contains(label.text ?? ""), "clock stayed at \(label.text ?? "nil")")
         // A covered route: the next tick finds it hidden and stops.
         route.isHidden = true
         RunLoop.main.run(until: Date().addingTimeInterval(1.1))

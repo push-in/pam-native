@@ -33,6 +33,9 @@ Steps:
 | `{"launch": true}` | Cold start (default: `activate()` keeps the running state). |
 | `{"tap": "label"}` | First element whose accessibility label equals or starts with `label`. |
 | `{"tapIfExists": "label", "timeout": 2}` | Same, but continues when absent. |
+| `{"tapIn": "label", "at": [0.9, 0.5]}` | Taps a point inside the element, normalized to its frame (the + of an adjustable stepper, whose parts are not elements). |
+| `{"dismissKeyboard": true}` | Closes the keyboard the way a user does (a drag on the content, else a tap near the top) and asserts it closed. |
+| `{"tapField": "label"}` | The editable field (text field, secure field, text view) with that label or placeholder, not a caption sharing it; waits up to 3 s for keyboard focus. |
 | `{"tapId": "identifier"}` | Accessibility identifier (`testId`). |
 | `{"tapXY": [0.5, 0.9]}` | Normalized window coordinates. |
 | `{"longPress": "label", "seconds": 1}` | Long press. |
@@ -47,7 +50,9 @@ Steps:
 | `{"alert": "Open"}` | Tap a SpringBoard alert button (e.g. the custom-scheme prompt). |
 | `{"openurl": "scheme://path"}` | `XCUIApplication.open` (iOS 16.4+). |
 | `{"wait": 1.5}` / `{"waitFor": "label", "timeout": 10}` | Delay / wait for an element. |
+| `{"expectText": "php-state", "contains": ["\"text\":\"hi\""], "timeout": 5}` | The element with that identifier (`testID`) shows every string in its label or value; polls until the timeout, so it asserts PHP state round-trips. |
 | `{"shot": "name"}` | Screenshot `name.png`. |
+| `{"layout": "name"}` | Debug builds: the app's layout snapshot (every view's frame, visible part, touch target, text metrics) as `name.json`, for geometry checks. Needs a `launch` step first (it passes the shot directory to the app). |
 | `{"dump": "name"}` | Accessibility tree as `name.txt`. |
 | `{"probe": "label", "name": "x"}` | `x.txt` lists the frame and `isHittable` of every element whose label matches, without tapping (diagnoses a "not hittable" tap). |
 

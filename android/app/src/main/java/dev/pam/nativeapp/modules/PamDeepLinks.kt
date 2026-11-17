@@ -48,9 +48,16 @@ internal object PamDeepLinks {
         )
     }
 
+    /**
+     * One listener waits at a time. A new wait supersedes a stale one (a PHP
+     * request that a hot reload replaced while its wait was still armed or
+     * in flight): the stale waiter ends with [SUPERSEDED], which PHP ignores.
+     */
     fun next(completion: ModuleCompletion) {
+        var superseded: ModuleCompletion? = null
         val event = synchronized(lock) {
-            require(waiter == null) { "Only one deep-link listener can wait at a time" }
+            superseded = waiter
+            waiter = null
             if (events.isEmpty()) {
                 waiter = completion
                 null
@@ -58,6 +65,7 @@ internal object PamDeepLinks {
                 events.removeFirst()
             }
         }
+        superseded?.complete(ModuleResultStatus.FAILURE, SUPERSEDED.toByteArray())
         if (event != null) completion.complete(ModuleResultStatus.SUCCESS, event)
     }
 
@@ -82,6 +90,7 @@ internal object PamDeepLinks {
     private fun validated(url: String?): String? =
         url?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_URL_BYTES }
 
+    const val SUPERSEDED = "superseded"
     private const val MAX_QUEUED_EVENTS = 32
     private const val MAX_URL_BYTES = 8_192
 }

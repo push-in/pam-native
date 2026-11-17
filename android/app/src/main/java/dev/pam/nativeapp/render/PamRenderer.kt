@@ -89,6 +89,7 @@ import dev.pam.nativeapp.views.NativePropertyView
 import dev.pam.nativeapp.views.NativeViewRegistry
 import dev.pam.nativeapp.views.NativeChildVisibilityHost
 import org.json.JSONArray
+import org.json.JSONObject
 import java.nio.ByteOrder
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -710,19 +711,23 @@ internal fun snappedPixelSpan(
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
     val safeExtent = extent.coerceAtLeast(0f)
-    // Yoga's roundLayoutResultsToPixelGrid (what React Native mounts): the
-    // position is rounded RELATIVE to the parent (text floors it), and the
-    // size comes from the rounded absolute edges (a text's trailing edge
-    // ceils a fractional size and floors a whole one). Rounding absolute
-    // edges for the position moved children by a pixel against RN and
-    // grids drifted per row.
+    // Every edge snaps on the ABSOLUTE pixel grid: a node's position is its
+    // rounded absolute start minus its native host's rounded absolute start,
+    // and its size comes from its rounded absolute edges (a text's trailing
+    // edge ceils a fractional size and floors a whole one). Siblings that
+    // share an edge in dp therefore share it in pixels, wherever their
+    // parents sit. Yoga's roundLayoutResultsToPixelGrid (React Native) rounds
+    // the position relative to the parent instead, which put a card's button
+    // a pixel right of its title at 2.625x. Layout-only ancestors flattened
+    // away ([flattenedOffset]) need no special case: the host's start is
+    // [parentStart].
     val text = textRounding
     val fractionalExtent = !pixelGridWhole(safeExtent.toDouble() * safeDensity)
-    // Layout-only ancestors between the node and its native host: React
-    // Native's view flattening adds their rounded origins ([flattenedOffset]).
-    val offset = flattenedOffset
-        ?: yogaPixelGrid(start.toDouble() - parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
-    val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
+    // Text starts on the same rounded pixel as any box (Yoga floors it,
+    // which put a section label a pixel left of the card under it); its
+    // trailing edge still ceils, and its measured width is preserved below.
+    val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
+    val offset = absoluteStart - yogaPixelGrid(parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
     val absoluteEnd = yogaPixelGrid(
         start.toDouble() + safeExtent.toDouble(),
         safeDensity,
@@ -770,13 +775,15 @@ internal fun headerRunPixelSteps(starts: DoubleArray, density: Float): IntArray 
     return IntArray((starts.size - 1).coerceAtLeast(0)) { rounded[it + 1] - rounded[it] }
 }
 
-internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Float, text: Boolean): Int {
-    var sum = 0
-    relativesFromNodeUp.forEachIndexed { index, relative ->
-        sum += yogaPixelGrid(relative, density, forceCeil = false, forceFloor = text && index == 0)
-    }
-    return sum
-}
+/**
+ * A node whose layout-only ancestors were flattened away is placed by its
+ * whole offset from the native host, rounded once: exactly the pixel a
+ * sibling at the same dp offset gets. React Native adds each ancestor's
+ * rounded origin instead, so a button inside a flattened wrapper started a
+ * pixel right of the title above it at 2.625x.
+ */
+internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Float, text: Boolean): Int =
+    yogaPixelGrid(relativesFromNodeUp.sum(), density, forceCeil = false, forceFloor = text)
 
 // Yoga compares the scaled fraction with 0.0001; frames here are absolute
 // float sums, so a whole pixel can arrive a few 1e-4 px short of it.
@@ -985,6 +992,144 @@ class PamRenderer(
 
     /** True while [id] is part of the committed tree (events for removed nodes are stale). */
     fun hasNode(id: Long): Boolean = nodes.indexOfKey(id) >= 0
+
+    /**
+     * Debug layout evidence (`pam-native layout` / UI geometry checks): every
+     * shown view of the committed tree with its engine frame in dp, its
+     * on-screen pixel rectangle, the part of it actually visible, and for
+     * text the baseline, line count and whether it was ellipsized.
+     */
+    private val LAYOUT_SNAPSHOT_STYLE_KEYS = listOf(
+        PropKey.POSITION_TYPE to "position",
+        PropKey.JUSTIFY_CONTENT to "justify",
+        PropKey.ALIGN_ITEMS to "align",
+    )
+
+    internal fun layoutSnapshotJson(): String {
+        val density = resourcesDensity()
+        val nodesJson = JSONArray()
+        val onScreen = IntArray(2)
+        val inWindow = IntArray(2)
+        val visible = Rect()
+        for (index in 0 until nodes.size()) {
+            val state = nodes.valueAt(index)
+            val view = views[state.id]
+            if (view == null) {
+                // Layout-only nodes flattened away: no pixels, but their
+                // frames keep the tree whole for spacing checks. Only those
+                // whose native host is on screen (not a covered route).
+                val frame = frames[state.id] ?: continue
+                var host = state.parent
+                var hostView: View? = null
+                var depth = 0
+                while (host != 0L && hostView == null && depth++ < 64) {
+                    hostView = views[host]
+                    if (hostView == null) host = nodes[host]?.parent ?: 0L
+                }
+                if (hostView?.isShown != true) continue
+                nodesJson.put(
+                    JSONObject()
+                        .put("id", state.id)
+                        .put("parent", state.parent)
+                        .put("kind", state.kind.name)
+                        .put("virtual", true)
+                        .put("x", 0).put("y", 0).put("w", 0).put("h", 0)
+                        .put("visible", JSONArray())
+                        .put("frame", JSONArray().put(frame.x.toDouble()).put(frame.y.toDouble()).put(frame.width.toDouble()).put(frame.height.toDouble())),
+                )
+                continue
+            }
+            if (!view.isShown || view.width == 0 && view.height == 0) continue
+            view.getLocationOnScreen(onScreen)
+            view.getLocationInWindow(inWindow)
+            val node = JSONObject()
+                .put("id", state.id)
+                .put("parent", state.parent)
+                .put("kind", state.kind.name)
+                .put("x", onScreen[0])
+                .put("y", onScreen[1])
+                .put("w", view.width)
+                .put("h", view.height)
+                .put("alpha", view.alpha.toDouble())
+            frames[state.id]?.let {
+                node.put("frame", JSONArray().put(it.x.toDouble()).put(it.y.toDouble()).put(it.width.toDouble()).put(it.height.toDouble()))
+            }
+            var shown = view.getGlobalVisibleRect(visible)
+            // A scroll container always clips its rows when it draws, even
+            // with clipChildren off: rows scrolled out of its viewport (kept
+            // attached by a RecyclerView) are not on screen.
+            var scroller = view.parent as? View
+            val clip = Rect()
+            while (shown && scroller != null) {
+                if (scroller is androidx.recyclerview.widget.RecyclerView || scroller is android.widget.ScrollView ||
+                    scroller is android.widget.HorizontalScrollView || scroller is PamScrollContainer
+                ) {
+                    shown = scroller.getGlobalVisibleRect(clip) && visible.intersect(clip)
+                }
+                scroller = scroller.parent as? View
+            }
+            if (shown) {
+                val dx = onScreen[0] - inWindow[0]
+                val dy = onScreen[1] - inWindow[1]
+                node.put("visible", JSONArray().put(visible.left + dx).put(visible.top + dy).put(visible.right + dx).put(visible.bottom + dy))
+            } else {
+                node.put("visible", JSONArray())
+            }
+            view.contentDescription?.let { node.put("label", it.toString()) }
+            view.transitionName?.let { node.put("testId", it) }
+            if (view.isClickable) node.put("clickable", true)
+            if (!view.isEnabled) node.put("disabled", true)
+            // Content of a scroll container may pass under a system bar on
+            // its way; geometry checks treat it apart from fixed content.
+            var ancestor = view.parent as? View
+            while (ancestor != null) {
+                if (ancestor is android.widget.ScrollView || ancestor is android.widget.HorizontalScrollView ||
+                    ancestor is androidx.recyclerview.widget.RecyclerView || ancestor is PamScrollContainer
+                ) {
+                    node.put("scrolls", true)
+                    break
+                }
+                ancestor = ancestor.parent as? View
+            }
+            // The touch target hit testing really uses (hitSlop, 48dp minimum).
+            ((view.parent as? ViewGroup)?.touchDelegate as? PamTouchDelegateGroup)?.boundsOf(view)?.let { hit ->
+                node.put("hit", JSONArray().put(hit.width()).put(hit.height()))
+            }
+            for ((key, name) in LAYOUT_SNAPSHOT_STYLE_KEYS) {
+                when (val value = state.properties[key]) {
+                    is PropValue.Text -> node.put(name, value.value)
+                    is PropValue.Integer -> node.put(name, value.value)
+                    else -> Unit
+                }
+            }
+            if (view.rotation != 0f || view.translationX != 0f || view.translationY != 0f ||
+                view.scaleX != 1f || view.scaleY != 1f
+            ) {
+                node.put("transformed", true)
+            }
+            if (view is TextView) {
+                node.put("text", view.text.toString()).put("textSize", (view.textSize / density).toDouble())
+                view.layout?.let { layout ->
+                    var ellipsized = false
+                    var widest = 0f
+                    for (line in 0 until layout.lineCount) {
+                        if (layout.getEllipsisCount(line) > 0) ellipsized = true
+                        // getLineMax excludes the trailing space a wrapped line ends with.
+                        widest = maxOf(widest, layout.getLineMax(line))
+                    }
+                    node.put("baseline", onScreen[1] + view.baseline)
+                        .put("textHeight", layout.height)
+                        .put("contentHeight", view.height - view.totalPaddingTop - view.totalPaddingBottom)
+                        .put("contentWidth", view.width - view.totalPaddingLeft - view.totalPaddingRight)
+                        .put("lines", layout.lineCount)
+                        .put("ellipsized", ellipsized)
+                        .put("textWidth", widest.toDouble())
+                }
+            }
+            nodesJson.put(node)
+        }
+        return JSONObject().put("schemaVersion", 1).put("density", density.toDouble()).put("nodes", nodesJson).toString()
+    }
     private val frames = PamLongMap<Frame>(256)
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
@@ -1839,10 +1984,23 @@ class PamRenderer(
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
         if (state.kind == NodeKind.STATUS_BAR) statusBarIds.add(spec.id)
         addChild(state.parent, state.id, fresh = true)
+        // Rows of a virtualized list are built by its adapter: they never
+        // join a deferred (sliced) mount, which would build them as ordinary
+        // children of the list view ("Node … cannot contain children").
+        if (virtualListAncestor(state.parent) != null) return
         if (deferMount(state)) return
-        if (!state.virtual && virtualListAncestor(state.parent) == null) {
+        if (!state.virtual) {
             buildHostedView(state)
         }
+    }
+
+    /** Builds the view of a node whose mount was deferred, then lets a list adapt its rows. */
+    private fun buildDeferredView(state: NodeState): Boolean {
+        if (state.virtual || views[state.id] != null) return false
+        if (virtualListAncestor(state.parent) != null) return false
+        buildHostedView(state)
+        if (state.kind == NodeKind.VIRTUAL_LIST) syncVirtualList(state.id)
+        return true
     }
 
     /** Creates, attaches and configures the view of hosted node [state]. */
@@ -2085,10 +2243,8 @@ class PamRenderer(
             return
         }
         pendingMounts.remove(id)
-        if (!state.virtual && views[id] == null) {
-            buildHostedView(state)
-            if (frames[id] != null) commitDirtyLayouts?.add(id)
-        }
+        if (buildDeferredView(state) && frames[id] != null) commitDirtyLayouts?.add(id)
+        if (state.kind == NodeKind.VIRTUAL_LIST) return
         // Content of a nested ScrollView is placed against that scroll's viewport.
         val childWindow = if (state.kind == NodeKind.SCROLL) {
             if (scrollAllowsSlicedMount(state)) {
@@ -2124,14 +2280,15 @@ class PamRenderer(
     private fun hostPendingNode(id: Long, laidOut: MutableCollection<Long>) {
         if (!pendingMounts.remove(id)) return
         val state = nodes[id] ?: return
-        if (!state.virtual && views[id] == null) {
+        if (!state.virtual && views[id] == null && virtualListAncestor(state.parent) == null) {
             // The commit that created the node already reported its on:layout;
             // applying the property now must not report the same frame again.
             val reportedLayout = lastLayoutEvents[id]
-            buildHostedView(state)
+            buildDeferredView(state)
             if (reportedLayout != null && lastLayoutEvents[id] == null) lastLayoutEvents[id] = reportedLayout
             if (frames[id] != null) laidOut += id
         }
+        if (state.kind == NodeKind.VIRTUAL_LIST) return
         children[id]?.toList()?.forEach { child -> hostPendingNode(child, laidOut) }
     }
 
@@ -7956,7 +8113,11 @@ class PamRenderer(
                 state.deferredInputValue?.let { next ->
                     applyInputValue(input, state, next)
                 }
-                if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_BLUR) {
+                if (
+                    state.inputSyncMode() == INPUT_SYNC_NATIVE ||
+                    state.inputSyncMode() == INPUT_SYNC_BLUR ||
+                    state.pendingChange != null
+                ) {
                     dispatchInput(state)
                 }
                 if (state.properties[PropKey.ON_BLUR] != null) dispatch(state.id, EVENT_BLUR)
@@ -7982,8 +8143,11 @@ class PamRenderer(
             }
             if (
                 state.inputSyncMode() == INPUT_SYNC_NATIVE ||
-                state.inputSyncMode() == INPUT_SYNC_SUBMIT
+                state.inputSyncMode() == INPUT_SYNC_SUBMIT ||
+                state.pendingChange != null
             ) {
+                // A debounced change still waiting is delivered first, so the
+                // submit handler sees the submitted text in its model.
                 dispatchInput(state)
             }
             if (state.properties[PropKey.ON_SUBMIT] != null) {
@@ -8300,18 +8464,22 @@ class PamRenderer(
     }
 
     /**
-     * Native-synced inputs intentionally avoid a PHP round trip per keystroke.
-     * Drain their current value before another control fires so the following
-     * action observes exactly what is visible in the focused editor.
+     * Native-synced inputs intentionally avoid a PHP round trip per keystroke,
+     * and debounced ones may still hold the last keystrokes. Drain them before
+     * another control fires so the following action observes exactly what is
+     * visible in the editor.
      */
     private fun flushFocusedNativeInputs() {
         val pending = buildList {
             for (index in 0 until nodes.size()) {
                 val state = nodes.valueAt(index)
                 if (
-                state.inputSyncMode() == INPUT_SYNC_NATIVE &&
                     state.properties[PropKey.ON_CHANGE] != null &&
-                    (views[state.id] as? EditText)?.hasFocus() == true
+                    (
+                        state.pendingChange != null ||
+                            state.inputSyncMode() == INPUT_SYNC_NATIVE &&
+                            (views[state.id] as? EditText)?.hasFocus() == true
+                        )
                 ) {
                     add(state)
                 }

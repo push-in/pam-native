@@ -304,8 +304,11 @@ enum PamPixelGrid {
         }
         let size = max(0, extent)
         let fractional = !isWhole(size * scale)
-        let offset = pixels(start - parentStart, scale: scale, forceFloor: text)
-        let absoluteStart = pixels(start, scale: scale, forceFloor: text)
+        // Every edge on the absolute pixel grid (Android parity): siblings
+        // that share an edge in points share it in pixels wherever their
+        // parents sit; text starts on the same rounded pixel as any box.
+        let absoluteStart = pixels(start, scale: scale)
+        let offset = absoluteStart - pixels(parentStart, scale: scale)
         let absoluteEnd = pixels(
             start + size,
             scale: scale,

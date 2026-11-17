@@ -9,7 +9,6 @@ import PamPlugin6PushinbrPamNativeIntents
 import PamPlugin7PushinbrPamNativeLiveActivities
 import PamPlugin8PushinbrPamNativeMaps
 import PamPlugin9PushinbrPamNativeMedia
-import PamPlugin10PushinbrPamNativeMediaEditor
 import PamPlugin11PushinbrPamNativeNfc
 import PamPlugin12PushinbrPamNativePayments
 import PamPlugin13PushinbrPamNativeRealtime
@@ -35,7 +34,6 @@ public enum PamNativePluginRegistry {
             "intents": IntentsModule(),
             "live-activities": LiveActivitiesModule(),
             "media": MediaModule(),
-            "media-editor": MediaEditorModule(),
             "nfc": NfcModule(),
             "realtime": RealtimeModule(),
             "share-extension": ShareExtensionModule(),

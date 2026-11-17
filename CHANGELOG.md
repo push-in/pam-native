@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.52.0 - 2026-11-17
+
+HTTP that survives broken IPv6, input that never loses its last keystrokes,
+pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
+
+- Changed: Android HTTP runs on OkHttp 5 (the HTTP module, remote images and
+  `Files::download`), sharing one connection pool. Happy Eyeballs (RFC 8305)
+  races IPv6 and IPv4 250 ms apart: on a network whose IPv6 is broken a
+  request to a dual-stack host took 15-21 s (the connect timeout per AAAA
+  address) and now takes the normal round trip. HTTP/2 is used when the
+  server offers it.
+- Changed: HTTP requests run at most 6 per host and 32 in total on threads
+  that end when idle. The previous fixed pool of 4 let a few slow requests
+  block every other host.
+- Added: `PendingResponse::cancel()` (and `Http::cancelRequest($id)` for the
+  callback API) aborts the native request, so a screen that unmounts can
+  stop its downloads: `$this->onUnmounted(fn () => $pending->cancel())`.
+- Fixed: a debounced text change still coalescing is delivered before
+  `submit`, `blur` and any press (Android and iOS): the submit handler and a
+  button tapped right after typing see the text on screen, not the value from
+  before the last keystrokes.
+- Fixed: after a hot reload that changed several files, "Only one deep-link
+  listener can wait at a time" (Module callback error). A new deep-link wait
+  now supersedes a stale one from the replaced request on Android and iOS.
+- Fixed: a `VirtualizedList` mounted inside deferred content (a long list in
+  a `BottomSheet`) is built through its adapter instead of receiving its rows
+  as children (#262).
+- Fixed: an `Input` with a CSS box (background, border, radius) and
+  `underlineColorAndroid="transparent"` lost its whole box on Android: the
+  underline tint was applied to PAM's own background drawable. The tint now
+  colours only the platform underline.
+- Changed: Android and iOS snap every edge on the absolute pixel grid: a view's
+  position is its rounded absolute start minus its host's, so siblings that
+  share an edge in dp share it in pixels (a card's button started 1px right
+  of its title at 2.625x, and a centred icon could sit 2px off). React
+  Native's Yoga rounds positions relative to the parent instead.
+- Fixed: closing a bottom sheet with Back or a tap on the backdrop now
+  emits `sheetDismiss`, like a swipe down (Android and iOS). PHP's bound
+  state stayed open, so the next open request changed nothing and the sheet
+  never reopened.
+- Fixed (iOS): a `Modal` with `presentation="dialog"` keeps its card at the
+  size the layout gave it; the card stretched with the window (a 300pt
+  dialog drew window-sized). An explicit `backdropColor` dims behind a
+  transparent modal, as on Android.
+- Fixed: a bottom sheet's drag handle is drawn 10dp below the sheet's top
+  edge on every frame. It used to keep the position of an earlier snap point
+  (after a list in the sheet scrolled, it sat at the top of the screen over a
+  half-height sheet).
+- Fixed: opening a sheet no longer requests a layout during layout
+  ("requestLayout() improperly called"), which Android deferred to the next
+  frame.
+- Fixed: `testID` (React Native's spelling) sets the native test identifier
+  like `testId`; it was dropped silently, so test ids written that way never
+  reached Android or iOS.
+- Fixed: `pam dev` hot-reloads Composer path packages linked into `vendor/`
+  (a component library or plugin developed next to the app).
+- Added: every release publishes a prebuilt `PamNativeEngine.xcframework`
+  (iOS arm64 device, arm64 and x86_64 simulator) as
+  `pam-native-ios-engine-<version>-<protocol>-<engine>.zip` with its SHA-256.
+  `pam mobile ios:*` downloads it once, verifies it and caches it per
+  version and fingerprint (`~/Library/Caches/pam-native/engines`,
+  `PAM_NATIVE_ENGINE_CACHE` overrides), so projects on different pam-native
+  versions no longer depend on, or overwrite, the single engine slot of the
+  shared PHP runtime. A matching locally rebuilt engine in that slot is still
+  used first.
+- Added: debug layout snapshots for UI geometry tests: Android
+  `am broadcast -a dev.pam.nativeapp.action.CAPTURE_LAYOUT` and the iOS UI
+  driver's `{"layout": "name"}` step write every view's frame, visible part,
+  real touch target and text metrics. The iOS driver also gains
+  `{"expectText": id, "contains": [...]}`.
+- CI: instrumentation resolves its dependencies before the emulator boots
+  and retries only transient repository errors (Maven Central 429s); the
+  iOS plugin aggregate no longer imports the private media editor.
+
 ## 1.51.0 - 2026-11-17
 
 Two-way binding for components, plugin component libraries and the fixes

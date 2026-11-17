@@ -184,3 +184,18 @@ $emptyScroll = TemplateRenderer::render(
 $assert($emptyScroll->kind() === NodeKind::Scroll, 'An empty ScrollView must render.');
 
 echo "COMPONENT_MODEL_OK p-model scalar cast object-field on-alias static-string empty-list empty-scroll plugin-components\n";
+
+// --- testID (React Native's spelling) is the same test identifier as testId:
+// it used to be dropped silently, so components and tests lost their ids.
+$testIdTree = \Pam\Native\Internal\TemplateRenderer::render(
+    \Pam\Native\Internal\TemplateCompiler::compile('<Column><Text testID="rn-spelling">a</Text><Text testId="pam-spelling">b</Text></Column>'),
+    null,
+    [],
+);
+$testIdTexts = $testIdTree->children();
+$assert(
+    ($testIdTexts[0]->properties()[\Pam\Native\PropKey::TestId->value] ?? null) === 'rn-spelling'
+        && ($testIdTexts[1]->properties()[\Pam\Native\PropKey::TestId->value] ?? null) === 'pam-spelling',
+    'testID and testId must both set the native test identifier.',
+);
+echo "COMPONENT_TESTID_OK\n";

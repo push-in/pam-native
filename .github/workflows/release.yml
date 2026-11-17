@@ -109,6 +109,13 @@ jobs:
             cd dist
             shasum -a 256 "${artifact}" > "${artifact}.sha256"
           )
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: Build the prebuilt iOS engine
+        # pam mobile ios:* downloads it by protocol and engine fingerprint, so
+        # no project depends on a shared, locally rebuilt runtime slot.
+        run: scripts/build-ios-engine.sh "${PAM_RELEASE_TAG#v}" dist
       - name: Enforce the iOS package budget
         run: >-
           python3 benchmarks/package/gate.py

@@ -12,6 +12,10 @@ import XCTest
 ///     {"launch": true}                 cold start (default: activate)
 ///     {"tap": "Local marketplace"}     first element whose label matches
 ///     {"tapIfExists": "Back"}         tap when present, otherwise continue
+///     {"dismissKeyboard": true}        drag the content to close the keyboard
+///     {"tapIn": "Stepper", "at": [0.9, 0.5]}  a point inside an element
+///     {"tapField": "Email"}            the editable field with that label,
+///                                      then wait for keyboard focus
 ///     {"tapId": "composer.send"}       accessibility identifier
 ///     {"tapXY": [0.5, 0.9]}            normalized window coordinates
 ///     {"longPress": "label", "seconds": 1.0}
@@ -26,10 +30,15 @@ import XCTest
 ///     {"wait": 1.5}                    seconds
 ///     {"waitFor": "label", "timeout": 10}
 ///     {"shot": "marketplace"}          PNG in PAM_UI_SHOT_DIR + attachment
+///     {"layout": "catalog"}            debug layout snapshot (geometry checks)
+///                                      as catalog.json in PAM_UI_SHOT_DIR
 ///     {"dump": "tree"}                accessibility tree (.txt) + attachment
 ///     {"probe": "label", "name": "x"} frame and hittability of every match
 ///                                      (.txt) without tapping
 ///     {"wait": "label"} / {"expect": "label"} / {"expectNot": "label"}
+///     {"expectText": "php-state", "contains": ["\"ok\":true"]}
+///                                      label or value of the element with
+///                                      that identifier contains every string
 ///     {"key": "ArrowRight", "times": 2}  Siri Remote button (tvOS)
 ///     {"expectFocus": "label"}         text of the focused element (tvOS)
 final class PamUIDriverTests: XCTestCase {
@@ -82,13 +91,81 @@ final class PamUIDriverTests: XCTestCase {
     private func run(step: [String: Any], index: Int) throws {
         let timeout = step["timeout"] as? Double ?? 10
         if step["launch"] as? Bool == true {
+            if let directory = shotDirectory {
+                app.launchEnvironment["PAM_LAYOUT_DIR"] = directory.path
+            }
             app.launch()
+            return
+        }
+        if let name = step["layout"] as? String {
+            // Debug apps publish their layout on this Darwin notification
+            // (PamLayoutSnapshot); it lands in the shot directory.
+            guard let directory = shotDirectory else {
+                XCTFail("step \(index): layout needs TEST_RUNNER_PAM_UI_SHOT_DIR and a launch step")
+                return
+            }
+            let published = directory.appendingPathComponent("pam-layout.json")
+            try? FileManager.default.removeItem(at: published)
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName("dev.pam.native.layout" as CFString),
+                nil, nil, true
+            )
+            let deadline = Date().addingTimeInterval(5)
+            while !FileManager.default.fileExists(atPath: published.path), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            let target = directory.appendingPathComponent("\(name).json")
+            try? FileManager.default.removeItem(at: target)
+            XCTAssertNoThrow(try FileManager.default.moveItem(at: published, to: target), "step \(index): the app did not publish its layout")
             return
         }
 #if os(iOS)
         if let label = step["tap"] as? String {
             let element = try element(labelled: label, timeout: timeout, step: index)
             element.tap()
+            return
+        }
+        if let label = step["tapField"] as? String {
+            // The editable field itself (text field, secure field or text
+            // view), not a caption that shares its label; waits for focus.
+            let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@ OR placeholderValue == %@", label, label, label)
+            let field = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "elementType IN %@", [XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.secureTextField.rawValue, XCUIElement.ElementType.textView.rawValue]))
+                .matching(predicate).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: timeout), "step \(index): no editable field labelled \(label)")
+            field.tap()
+            let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+            _ = XCTWaiter().wait(for: [focused], timeout: 3)
+            return
+        }
+        if let label = step["tapIn"] as? String, let point = step["at"] as? [Double], point.count == 2 {
+            // A point inside an element, normalized to its frame: the parts of
+            // an adjustable control (a stepper's + and -) are not elements.
+            let element = try element(labelled: label, timeout: timeout, step: index)
+            element.coordinate(withNormalizedOffset: CGVector(dx: point[0], dy: point[1])).tap()
+            return
+        }
+        if step["dismissKeyboard"] as? Bool == true {
+            // Like a user: drag the content down (scroll views dismiss the
+            // keyboard on drag), else tap an empty spot near the top.
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                let window = app.windows.firstMatch
+                // Into the keyboard: interactive dismissal follows the finger.
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)),
+                        withVelocity: .slow,
+                        thenHoldForDuration: 0
+                    )
+                if keyboard.exists {
+                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+                }
+                let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
+                XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "step \(index): the keyboard stayed open")
+            }
             return
         }
         if let label = step["tapIfExists"] as? String {
@@ -214,6 +291,21 @@ final class PamUIDriverTests: XCTestCase {
             _ = try element(labelled: label, timeout: step["timeout"] as? Double ?? 5, step: index)
             return
         }
+        if let identifier = step["expectText"] as? String {
+            let wanted = (step["contains"] as? [String]) ?? [(step["contains"] as? String) ?? ""]
+            let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+            let deadline = Date().addingTimeInterval(step["timeout"] as? Double ?? 5)
+            var text = ""
+            repeat {
+                if element.exists {
+                    text = element.label + ((element.value as? String).map { " " + $0 } ?? "")
+                    if wanted.allSatisfy({ text.contains($0) }) { return }
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            } while Date() < deadline
+            XCTFail("step \(index): \(identifier) shows \(text.isEmpty ? "nothing" : text), expected \(wanted)")
+            return
+        }
         if let label = step["expectNot"] as? String {
             let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
             let element = app.descendants(matching: .any).matching(predicate).firstMatch
@@ -310,11 +402,19 @@ final class PamUIDriverTests: XCTestCase {
     }
 #endif
 
+    /// The element labelled exactly [label], else the first whose label
+    /// starts with it ("Delete" is the dialog's button, not "Delete project").
     private func element(labelled label: String, timeout: Double, step: Int) throws -> XCUIElement {
-        let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
-        let element = app.descendants(matching: .any).matching(predicate).firstMatch
-        XCTAssertTrue(element.waitForExistence(timeout: timeout), "step \(step): no element labelled \(label)")
-        return element
+        let exact = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        let prefix = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if exact.exists { return exact }
+            if prefix.exists, !exact.waitForExistence(timeout: 0.3) { return prefix }
+        } while Date() < deadline
+        if exact.exists { return exact }
+        XCTAssertTrue(prefix.exists, "step \(step): no element labelled \(label)")
+        return prefix
     }
 
     private func screenshot(named name: String) throws {

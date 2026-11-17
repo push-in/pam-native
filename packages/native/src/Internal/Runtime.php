@@ -831,6 +831,12 @@ final class Runtime
             : $fallback;
     }
 
+    /** Drops the callback of a module call that was cancelled: its late result is ignored. */
+    public static function forgetModuleCall(int $requestId): void
+    {
+        unset(self::$moduleCallbacks[$requestId]);
+    }
+
     public static function dispatchModuleResult(
         int $requestId,
         int $status,

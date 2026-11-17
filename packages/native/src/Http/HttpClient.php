@@ -384,9 +384,9 @@ final class HttpClient
 
                 return static fn () => Http::cancelTransfer($transfer);
             }
-            Http::upload($request->fullUrl(), $upload, $done, $headers, $request->timeoutMs);
+            $id = Http::upload($request->fullUrl(), $upload, $done, $headers, $request->timeoutMs);
 
-            return null;
+            return static fn () => Http::cancelRequest($id);
         }
         if ($build instanceof Closure) {
             $multipart = Http::multipart($request->fullUrl())->method($request->method)->timeout($request->timeoutMs);
@@ -399,9 +399,10 @@ final class HttpClient
 
             return static fn () => Http::cancelTransfer($transfer);
         }
-        Http::request($request->method, $request->fullUrl(), $done, $headers, $request->body, $request->timeoutMs, maxResponseBytes: $request->maxResponseBytes);
+        $id = Http::request($request->method, $request->fullUrl(), $done, $headers, $request->body, $request->timeoutMs, maxResponseBytes: $request->maxResponseBytes);
 
-        return null;
+        // PendingResponse::cancel() aborts the native request too.
+        return static fn () => Http::cancelRequest($id);
     }
 
     private function retryable(Request $request, ?Response $response): bool

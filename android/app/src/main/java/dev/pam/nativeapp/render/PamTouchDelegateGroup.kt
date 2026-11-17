@@ -32,6 +32,9 @@ internal class PamTouchDelegateGroup(private val parent: View) : TouchDelegate(R
         )
     }
 
+    /** The expanded hit rectangle of [target] in its parent, if it has one. */
+    fun boundsOf(target: View): Rect? = entries[target]?.bounds?.let(::Rect)
+
     fun remove(target: View) {
         val removed = entries.remove(target)?.delegate
         if (active === removed) {

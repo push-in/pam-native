@@ -830,10 +830,12 @@ internal class PamModalHost @JvmOverloads constructor(
     /**
      * Activity-level fallback for synthetic/OEM Back dispatch that reaches
      * both the dialog and its host activity. A visible modal always owns Back;
-     * the activity must never pop its navigator or finish underneath it.
+     * the activity must never pop its navigator or finish underneath it. A
+     * modal the app has asked to present owns it too, from the commit: a
+     * quick Back before its window appeared popped the screen behind it.
      */
     fun consumeActivityBack(): Boolean {
-        if (!isPresented()) return false
+        if (!isPresented() && !(desiredVisible && isAttachedToWindow && removalExit == null)) return false
         if (desiredVisible) requestCloseFromBack()
         return true
     }
@@ -1187,6 +1189,11 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun requestClose() {
         if (blocksModalDismissal(bottomSheetDismissible)) return
+        // Every user dismissal of a sheet (swipe, Back, backdrop tap) is a
+        // sheetDismiss: Back and the backdrop used to close the window
+        // without telling PHP, so its bound state stayed open and the next
+        // open request changed nothing.
+        if (presentation == PRESENTATION_SHEET && desiredVisible) onBottomSheetDismiss?.invoke()
         desiredVisible = false
         val callback = onRequestClose
         if (callback != null) {
@@ -1404,23 +1411,56 @@ internal class PamModalHost @JvmOverloads constructor(
             // it shrank with its keyboard-padded content and slid down by
             // half the IME.
             if (presentation == PRESENTATION_DIALOG && child in windowSpanningChildren) {
-                child.layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+                setModalChildLayoutParams(
+                    child,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
                 )
                 return@repeat
             }
-            child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
+            setModalChildLayoutParams(child, modalChildLayoutParams(presentation, sheetHeight))
             if (entrancePending) child.translationY = sheetEntranceOffset!!
             else if (!sheetAnimating) child.translationY = keyboardTranslation
         }
         if (entrancePending) handle.translationY = sheetEntranceOffset!!
         else if (!sheetAnimating) handle.translationY = keyboardTranslation
-        modal.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        )
+        modal.window?.let { window ->
+            // Re-applying identical window attributes requests a layout; done
+            // from the layout listener that is a second pass and a late frame.
+            val attributes = window.attributes
+            if (
+                attributes.width != ViewGroup.LayoutParams.MATCH_PARENT ||
+                attributes.height != ViewGroup.LayoutParams.MATCH_PARENT
+            ) {
+                window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+        }
         updateBottomSheetChrome()
+    }
+
+    /**
+     * Assigns [params] only when they change: this runs from the content's
+     * layout listener, and a redundant assignment requests a layout during
+     * layout ("requestLayout() improperly called"), which Android defers to
+     * the next frame - a visible size jump while a sheet opens.
+     */
+    private fun setModalChildLayoutParams(child: View, params: FrameLayout.LayoutParams) {
+        val current = child.layoutParams as? FrameLayout.LayoutParams
+        if (
+            current != null &&
+            current.width == params.width &&
+            current.height == params.height &&
+            current.gravity == params.gravity &&
+            current.leftMargin == params.leftMargin &&
+            current.topMargin == params.topMargin &&
+            current.rightMargin == params.rightMargin &&
+            current.bottomMargin == params.bottomMargin
+        ) {
+            return
+        }
+        child.layoutParams = params
     }
 
     /**
@@ -1544,7 +1584,6 @@ internal class PamModalHost @JvmOverloads constructor(
             bottomSheetIndex == 0 &&
             projected < bottomSheetSnapPoints.first() * 0.55f
         ) {
-            onBottomSheetDismiss?.invoke()
             requestClose()
             return
         }
@@ -1609,8 +1648,35 @@ internal class PamModalHost @JvmOverloads constructor(
         }
         sheet.invalidateOutline()
         handle.x = (content.width - handle.layoutParams.width) / 2f
-        handle.y = (content.height - sheet.height + dp(10f))
+        followSheetWithHandle()
         handle.bringToFront()
+    }
+
+    private var handleFollower: android.view.ViewTreeObserver.OnPreDrawListener? = null
+    private var handleFollowerObserver: android.view.ViewTreeObserver? = null
+
+    /**
+     * The handle is drawn 10dp below the sheet's top edge, wherever the sheet
+     * is: before every frame it takes the sheet's position (layout top plus
+     * drag, snap, keyboard or entrance translation). Positioning it from the
+     * sheet's height and its own translation drifted apart after a snap: the
+     * handle stayed at the top of the screen over a half-height sheet.
+     */
+    private fun followSheetWithHandle() {
+        val observer = content.viewTreeObserver
+        if (handleFollower != null && handleFollowerObserver === observer && observer.isAlive) return
+        handleFollower?.let { old -> handleFollowerObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(old) }
+        val follower = android.view.ViewTreeObserver.OnPreDrawListener {
+            val sheet = sheetChild()
+            if (sheet != null && presentation == PRESENTATION_SHEET && removalExit == null) {
+                val y = sheet.y + dp(10f)
+                if (handle.y != y) handle.y = y
+            }
+            true
+        }
+        handleFollower = follower
+        handleFollowerObserver = observer
+        observer.addOnPreDrawListener(follower)
     }
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density

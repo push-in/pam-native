@@ -27,6 +27,31 @@ final class Http
     /** Hard upper bound for maxResponseBytes, protecting app memory. */
     public const int MAX_RESPONSE_BYTES = 16_777_216;
 
+    /** @var array<int, int> runtime request id => native cancel key */
+    private static array $cancelKeys = [];
+    private static int $nextCancelKey = 1;
+
+    /**
+     * Aborts a request started with request()/get()/post()...: the native
+     * call is cancelled (its connection and bytes stop) and its callback is
+     * never invoked. Unknown or finished ids are ignored.
+     */
+    public static function cancelRequest(int $requestId): void
+    {
+        $key = self::$cancelKeys[$requestId] ?? null;
+        unset(self::$cancelKeys[$requestId]);
+        if ($key === null) {
+            return;
+        }
+        Runtime::forgetModuleCall($requestId);
+        Runtime::call(
+            module: 'http',
+            method: 'cancel',
+            payload: Wire::map(['cancelKey' => $key]),
+            callback: static function (): void {},
+        );
+    }
+
     /** @internal */
     public static function assertResponseLimit(int $bytes): void
     {
@@ -324,12 +349,22 @@ final class Http
             $payload['traceOrigin'] = $trace->origin;
         }
 
-        return Runtime::call(
+        $key = self::$nextCancelKey++;
+        $payload['cancelKey'] = $key;
+        $requestId = 0;
+        $responded = self::responseCallback($callback);
+        $requestId = Runtime::call(
             module: 'http',
             method: $source === null ? 'request' : 'upload',
             payload: Wire::map($payload),
-            callback: self::responseCallback($callback),
+            callback: static function (ModuleResultStatus $status, string $result) use (&$requestId, $responded): void {
+                unset(self::$cancelKeys[$requestId]);
+                $responded($status, $result);
+            },
         );
+        self::$cancelKeys[$requestId] = $key;
+
+        return $requestId;
     }
 
     /**

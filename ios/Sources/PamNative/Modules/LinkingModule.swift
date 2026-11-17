@@ -43,18 +43,22 @@ public enum PamLinking {
         completion(.success, encoded(value ?? ""))
     }
 
+    /// One listener waits at a time. A new wait supersedes a stale one (a PHP
+    /// request a hot reload replaced while its wait was armed or in flight):
+    /// the stale waiter ends with "superseded", which PHP ignores.
     fileprivate static func next(_ completion: @escaping ModuleCompletion) {
         lock.lock()
+        let superseded = waiter
+        waiter = nil
         if !values.isEmpty {
             let value = values.removeFirst()
             lock.unlock()
+            superseded?(.failure, Data("superseded".utf8))
             completion(.success, value)
-        } else if waiter != nil {
-            lock.unlock()
-            completion(.failure, Data("Only one deep-link listener can wait at a time".utf8))
         } else {
             waiter = completion
             lock.unlock()
+            superseded?(.failure, Data("superseded".utf8))
         }
     }
 

@@ -19,7 +19,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.net.HttpURLConnection
 import java.net.URI
 import java.util.Base64
 import java.util.UUID
@@ -247,23 +246,16 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             val file = resolve(values.requiredText("path"))
             file.parentFile?.mkdirs()
             val temporary = File(file.parentFile, "${file.name}.tmp-${UUID.randomUUID()}")
-            val connection = uri.toURL().openConnection() as HttpURLConnection
+            val connection = openDownload(uri, requestHeaders(values))
             try {
-                connection.instanceFollowRedirects = false
-                connection.connectTimeout = 15_000
-                connection.readTimeout = 30_000
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Accept-Encoding", "identity")
-                requestHeaders(values).forEach(connection::setRequestProperty)
-                connection.connect()
-                require(connection.responseCode in 200..299) {
-                    "Download failed with HTTP ${connection.responseCode}"
+                require(connection.code in 200..299) {
+                    "Download failed with HTTP ${connection.code}"
                 }
-                val declaredSize = connection.contentLengthLong
+                val declaredSize = connection.body.contentLength()
                 require(declaredSize < 0 || declaredSize <= maximumBytes) {
                     "Download exceeds configured size limit"
                 }
-                connection.inputStream.use { input ->
+                connection.body.byteStream().use { input ->
                     temporary.outputStream().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         var total = 0L
@@ -282,11 +274,11 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING,
                 )
-                val mime = connection.contentType?.substringBefore(';')?.trim()
+                val mime = connection.header("Content-Type")?.substringBefore(';')?.trim()
                     ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
                 completion.success(file, mime)
             } finally {
-                connection.disconnect()
+                connection.close()
                 temporary.delete()
             }
         }.onFailure { completion.failure(it) }
@@ -322,6 +314,18 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         )
     }
 
+    /** A GET on the shared HTTP stack (Happy Eyeballs, pooled connections). */
+    private fun openDownload(uri: URI, headers: Map<String, String>): okhttp3.Response {
+        val request = okhttp3.Request.Builder().url(uri.toString()).header("Accept-Encoding", "identity")
+        headers.forEach { (name, value) -> request.header(name, value) }
+        return dev.pam.nativeapp.net.PamHttpClient.shared.newBuilder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+            .newCall(request.build())
+            .execute()
+    }
+
     private fun performObservedDownload(
         uri: URI,
         file: File,
@@ -331,23 +335,16 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     ) {
         file.parentFile?.mkdirs()
         val temporary = File(file.parentFile, "${file.name}.tmp-${UUID.randomUUID()}")
-        val connection = uri.toURL().openConnection() as HttpURLConnection
+        val connection = openDownload(uri, headers)
         try {
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            headers.forEach(connection::setRequestProperty)
-            connection.connect()
-            require(connection.responseCode in 200..299) {
-                "Download failed with HTTP ${connection.responseCode}"
+            require(connection.code in 200..299) {
+                "Download failed with HTTP ${connection.code}"
             }
-            val declaredSize = connection.contentLengthLong
+            val declaredSize = connection.body.contentLength()
             require(declaredSize < 0 || declaredSize <= maximumBytes) {
                 "Download exceeds configured size limit"
             }
-            connection.inputStream.use { input ->
+            connection.body.byteStream().use { input ->
                 temporary.outputStream().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     var total = 0L
@@ -377,7 +374,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 StandardCopyOption.ATOMIC_MOVE,
                 StandardCopyOption.REPLACE_EXISTING,
             )
-            val mime = connection.contentType?.substringBefore(';')?.trim()
+            val mime = connection.header("Content-Type")?.substringBefore(';')?.trim()
                 ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
             channel.offer(downloadEvent(
                 state = DOWNLOAD_COMPLETE,
@@ -385,7 +382,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 mime = mime,
             ))
         } finally {
-            connection.disconnect()
+            connection.close()
             temporary.delete()
         }
     }

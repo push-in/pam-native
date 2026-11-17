@@ -207,6 +207,10 @@ final class Linking
                 if (!isset(self::$subscriptions[$subscription])) {
                     return;
                 }
+                if ($result->status === ModuleResultStatus::Failure && $result->payload === 'superseded') {
+                    // A newer wait (this request's, after a hot reload) replaced a stale one.
+                    return;
+                }
                 if ($result->status === ModuleResultStatus::Failure) {
                     unset(self::$subscriptions[$subscription]);
                     throw new RuntimeException($result->payload);

@@ -2595,6 +2595,14 @@ private final class PamModalContentViewport: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.size != previousSize else { return }
+        // A child that filled the old viewport fills the new one (a screen
+        // in a full-screen modal, a sheet's content); a child the engine
+        // placed and sized (a dialog's card) keeps its frame. Autoresizing
+        // grew a 300pt card by the whole window when the modal appeared.
+        let filled = CGRect(origin: .zero, size: previousSize)
+        for child in subviews where child.autoresizingMask.isEmpty && child.frame == filled {
+            child.frame = bounds
+        }
         previousSize = bounds.size
         onBoundsChange?()
     }
@@ -2660,6 +2668,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private var presentation = Presentation.dialog
     private var animationType = Animation.none
     private var backdropColor = UIColor.black.withAlphaComponent(0.32)
+    private var backdropColorSet = false
     private var transparent = false
     private var allowSwipeDismissal = false
     private var bottomSheetSnapPoints: [CGFloat] = [0.5, 0.9]
@@ -2905,8 +2914,13 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             contentHost.addSubview(view)
         }
         view.frame = contentHost.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         updatePresentationLayout()
+    }
+
+    /// The viewport resizes its children itself (see PamModalContentViewport):
+    /// filling children follow it, engine-placed ones keep their frames.
+    private func applyChildResizing() {
+        contentHost.subviews.forEach { $0.autoresizingMask = [] }
     }
 
     func setVisible(_ value: Bool) {
@@ -2940,6 +2954,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     func setBackdropColor(_ color: Int) {
         backdropColor = UIColor(argb: Int64(truncatingIfNeeded: UInt32(truncatingIfNeeded: color)))
+        backdropColorSet = true
         applyBackdropColor()
     }
 
@@ -3575,6 +3590,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     func requestClose() {
         guard presentation != Presentation.sheet || bottomSheetDismissible else { return }
+        // Every user dismissal of a sheet (swipe, backdrop tap, Escape) is a
+        // sheetDismiss, so PHP's bound state follows (Android parity).
+        if presentation == Presentation.sheet, desiredVisible { onBottomSheetDismiss?() }
         setVisible(false)
         if let onRequestClose {
             onRequestClose()
@@ -3658,7 +3676,6 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         if bottomSheetDismissible,
            bottomSheetIndex == 0,
            projected < bottomSheetSnapPoints[0] * 0.55 {
-            onBottomSheetDismiss?()
             requestClose()
             return
         }
@@ -3685,11 +3702,14 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    /// Like Android: an explicit `backdropColor` always dims; `transparent`
+    /// only clears the default one.
     private func applyBackdropColor() {
-        backdropView.backgroundColor = transparent ? .clear : backdropColor
+        backdropView.backgroundColor = transparent && !backdropColorSet ? .clear : backdropColor
     }
 
     private func updatePresentationLayout() {
+        applyChildResizing()
         if presentation == Presentation.sheet {
             contentHeightConstraint.isActive = false
             contentHeightConstraint = contentHost.heightAnchor.constraint(equalToConstant: sheetHeight)

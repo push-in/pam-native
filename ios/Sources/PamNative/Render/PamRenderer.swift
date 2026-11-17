@@ -222,6 +222,9 @@ public final class PamRenderer: @unchecked Sendable {
         ) { [weak self] _ in
             self?.scheduleStatusBarResolve()
         }
+        #if DEBUG
+        PamLayoutSnapshot.install(self)
+        #endif
         routeCoverageObserver = NotificationCenter.default.addObserver(
             forName: PamRouteCoverage.didChange,
             object: nil,
@@ -2079,7 +2082,9 @@ public final class PamRenderer: @unchecked Sendable {
     /// observe exactly the text the editor shows, so its pending value is
     /// sent before the press.
     func routeEvent(_ id: Int64, _ kind: Int, _ payload: Data) {
-        if kind == EventKind.press.rawValue {
+        // A press, submit or blur first delivers any change still coalescing
+        // (native or debounced sync), so the handler sees the visible text.
+        if kind == EventKind.press.rawValue || kind == EventKind.submit.rawValue || kind == EventKind.blur.rawValue {
             flushPendingNativeInputs()
         }
         if kind == EventKind.press.rawValue || kind == EventKind.longPress.rawValue
@@ -8182,9 +8187,10 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
 
-        /// A press elsewhere drains a native-synced value still on the device.
+        /// A press elsewhere drains a native-synced or debounced value still
+        /// on the device, so the pressed action sees what the editor shows.
         func flushPendingNativeChange() {
-            guard inputSyncMode == 1, pendingChangeValue != nil else { return }
+            guard pendingChangeValue != nil else { return }
             onInputSyncFlush()
         }
 
@@ -8672,3 +8678,119 @@ private extension PropValue {
         }
     }
 }
+
+
+#if DEBUG
+/// Debug layout evidence for UI geometry checks (parity with Android's
+/// `CAPTURE_LAYOUT` broadcast). `xcrun simctl spawn booted notifyutil -p
+/// dev.pam.native.layout` makes the app write `Library/Caches/pam-layout.json`
+/// in its data container: every shown view of the committed tree with its
+/// engine frame and window frame in points, the visible part, the real touch
+/// target, and for text the baseline, line count and truncation.
+enum PamLayoutSnapshot {
+    static let notification = "dev.pam.native.layout"
+    fileprivate static weak var renderer: PamRenderer?
+    private static var installed = false
+
+    static func install(_ renderer: PamRenderer) {
+        self.renderer = renderer
+        guard !installed else { return }
+        installed = true
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            { _, _, _, _, _ in DispatchQueue.main.async { PamLayoutSnapshot.publish() } },
+            notification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    static func publish() {
+        guard let renderer, let json = renderer.layoutSnapshotJSON() else { return }
+        // The UI driver passes a host directory on the Simulator; otherwise Caches.
+        let directory = ProcessInfo.processInfo.environment["PAM_LAYOUT_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        try? json.write(to: directory.appendingPathComponent("pam-layout.json"), options: .atomic)
+    }
+}
+
+extension PamRenderer {
+    fileprivate func layoutSnapshotJSON() -> Data? {
+        guard let window = views.values.lazy.compactMap(\.window).first else { return nil }
+        var list: [[String: Any]] = []
+        for (id, state) in nodes {
+            guard let view = views[id], view.window != nil, !view.isHidden, view.bounds.size != .zero else { continue }
+            var hidden = false
+            var ancestor = view.superview
+            while let current = ancestor {
+                if current.isHidden || current.alpha <= 0.01 { hidden = true; break }
+                ancestor = current.superview
+            }
+            if hidden { continue }
+            let frame = view.convert(view.bounds, to: window)
+            var visible = frame.intersection(window.bounds)
+            ancestor = view.superview
+            while let current = ancestor, !visible.isNull {
+                if current.clipsToBounds {
+                    visible = visible.intersection(current.convert(current.bounds, to: window))
+                }
+                ancestor = current.superview
+            }
+            var node: [String: Any] = [
+                "id": id,
+                "parent": state.parent,
+                "kind": String(describing: state.kind).uppercased(),
+                "x": Double(frame.minX), "y": Double(frame.minY),
+                "w": Double(frame.width), "h": Double(frame.height),
+                "alpha": Double(view.alpha),
+                "visible": visible.isNull ? [] : [Double(visible.minX), Double(visible.minY), Double(visible.maxX), Double(visible.maxY)],
+            ]
+            if let engine = frames[id] {
+                node["frame"] = [Double(engine.x), Double(engine.y), Double(engine.width), Double(engine.height)]
+            }
+            if let label = view.accessibilityLabel, !label.isEmpty { node["label"] = label }
+            if let identifier = view.accessibilityIdentifier, !identifier.isEmpty { node["testId"] = identifier }
+            if view.transform != .identity || view.layer.transform.m34 != 0 { node["transformed"] = true }
+            // Layout keys the geometry checks read (protocol codes, as on Android).
+            if let position = state.properties[112]?.integer() { node["position"] = position }
+            if let justify = state.properties[PamConstants.justifyContent]?.integer() { node["justify"] = justify }
+            if let button = view as? PamPressButton {
+                node["clickable"] = true
+                if !button.isEnabled { node["disabled"] = true }
+                let hit = button.touchBounds(retaining: false)
+                node["hit"] = [Double(hit.width), Double(hit.height)]
+            } else if let control = view as? UIControl, !(control is UITextField) {
+                node["clickable"] = true
+                if !control.isEnabled { node["disabled"] = true }
+            }
+            if let label = view as? UILabel, let text = label.text ?? label.attributedText?.string {
+                let font = label.font ?? UIFont.systemFont(ofSize: 17)
+                let fitted = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude))
+                let lineHeight = max(1, font.lineHeight)
+                node["text"] = text
+                node["textSize"] = Double(font.pointSize)
+                node["baseline"] = Double(frame.minY + (label.bounds.height - fitted.height) / 2 + font.ascender)
+                node["lines"] = Int((min(fitted.height, label.bounds.height) / lineHeight).rounded())
+                node["textHeight"] = Double(fitted.height)
+                node["contentHeight"] = Double(label.bounds.height)
+                node["ellipsized"] = label.numberOfLines > 0 && fitted.height > label.bounds.height + 0.5
+                    && label.lineBreakMode == .byTruncatingTail
+            }
+            list.append(node)
+        }
+        let insets = window.safeAreaInsets
+        let root: [String: Any] = [
+            "schemaVersion": 1,
+            "density": Double(window.screen.scale),
+            "units": "pt",
+            "screen": [Double(window.bounds.width), Double(window.bounds.height)],
+            "insets": [Double(insets.left), Double(insets.top), Double(insets.right), Double(insets.bottom)],
+            "fontScale": Double(UIFontMetrics.default.scaledValue(for: 17) / 17),
+            "rtl": window.effectiveUserInterfaceLayoutDirection == .rightToLeft,
+            "nodes": list,
+        ]
+        return try? JSONSerialization.data(withJSONObject: root)
+    }
+}
+#endif

@@ -5,18 +5,18 @@ import XCTest
 /// Yoga pixel-grid rounding of mounted frames (Android `PamPixelSnappingTest`).
 @MainActor
 final class PamPixelGridTests: XCTestCase {
-    func testPositionRoundsRelativeToTheParentAndSizeFromAbsoluteEdges() {
-        // 3x: parent at 10.2 pt (30.6 px), child at 10.2 + 5.25 pt.
+    func testEveryEdgeSnapsToTheAbsolutePixelGrid() {
+        // 3x: parent at 10.2 pt (30.6 px -> 31), child at 15.45 pt (46.35 px -> 46).
         let span = PamPixelGrid.span(start: 15.45, extent: 20.3, parentStart: 10.2, scale: 3, text: false)
-        XCTAssertEqual(span.offset * 3, 16, accuracy: 0.0001) // 15.75 px -> 16
+        XCTAssertEqual(span.offset * 3, 15, accuracy: 0.0001) // 46 - 31
         // edges 46.35 -> 46, 107.25 -> 107
         XCTAssertEqual(span.extent * 3, 61, accuracy: 0.0001)
     }
 
-    func testTextFloorsItsPositionAndCeilsAFractionalSize() {
+    func testTextStartsOnTheRoundedPixelAndCeilsAFractionalSize() {
         let span = PamPixelGrid.span(start: 0.9, extent: 10.1, parentStart: 0, scale: 3, text: true)
-        XCTAssertEqual(span.offset * 3, 2, accuracy: 0.0001) // 2.7 px floored
-        // 2.7 floored -> 2, 33.0 whole -> 33: extent 31, but the 30.3 px text ceils to 31
+        XCTAssertEqual(span.offset * 3, 3, accuracy: 0.0001) // 2.7 px rounded, like a box
+        // 3 to 33.0 is 30 px, but the 30.3 px text ceils to 31
         XCTAssertEqual(span.extent * 3, 31, accuracy: 0.0001)
     }
 
@@ -42,7 +42,7 @@ final class PamPixelGridTests: XCTestCase {
             .setRoot(1),
         ]])
         let child = try XCTUnwrap(host.viewWithTag(3))
-        XCTAssertEqual(child.frame.minY * 3, 16, accuracy: 0.0001)
+        XCTAssertEqual(child.frame.minY * 3, 15, accuracy: 0.0001) // 46 px - parent 31 px
         XCTAssertEqual(child.frame.height * 3, 61, accuracy: 0.0001)
         XCTAssertEqual(child.frame.minX * 3, 12, accuracy: 0.0001) // 12.3 px
     }

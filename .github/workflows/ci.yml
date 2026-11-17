@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running checks; main, releases
+# (workflow_call) and manual runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PAM_RUNTIME_RELEASE_TAG: v2.0.7
 
@@ -192,6 +198,8 @@ jobs:
           path: dist
       - name: Restore native prerequisites
         run: tar -xzf dist/pam-native-android-prerequisites.tar.gz
+      - name: Resolve instrumentation dependencies before the emulator boots
+        run: scripts/ci-gradle-retry.sh ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest --dry-run
       - name: Enable KVM
         run: |
           sudo usermod -aG kvm "$USER"
@@ -201,11 +209,13 @@ jobs:
         with:
           api-level: ${{ matrix.api-level }}
           arch: x86_64
+          # google_apis ships a real soft keyboard: the IME contracts need it
+          # (the AOSP default image failed every keyboard test).
           target: google_apis
           profile: pixel_6
           disable-animations: true
           script: |
-            ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest
+            scripts/ci-gradle-retry.sh ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest
             if [ "${{ matrix.api-level }}" = "36" ]; then composer install --working-dir=examples/showcase --no-interaction --prefer-dist --no-progress; fi
             if [ "${{ matrix.api-level }}" = "36" ]; then PAM_HOME="$GITHUB_WORKSPACE" PAM_NATIVE_HOME="$GITHUB_WORKSPACE" cargo run --locked --release --package pam-native-cli -- prepare examples/showcase; fi
             if [ "${{ matrix.api-level }}" = "36" ]; then ./examples/showcase/.pam-native/android/gradlew -p examples/showcase/.pam-native/android -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR :macrobenchmark:connectedBenchmarkAndroidTest; fi
