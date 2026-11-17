@@ -33,6 +33,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   colours only the platform underline.
 - Fixed: a child centred in its parent keeps equal pixel gaps at fractional
   densities (a 20dp icon in a 44dp button sat 1px low at 2.625x).
+- Fixed: a bottom sheet's drag handle follows the sheet when it changes
+  height without the window changing (a snap point, the keyboard); after a
+  list scroll collapsed a full-height sheet, the handle stayed at the top of
+  the screen.
 - Fixed: opening a sheet no longer requests a layout during layout
   ("requestLayout() improperly called"), which Android deferred to the next
   frame.

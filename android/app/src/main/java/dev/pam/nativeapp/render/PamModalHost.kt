@@ -1641,9 +1641,25 @@ internal class PamModalHost @JvmOverloads constructor(
             }
         }
         sheet.invalidateOutline()
+        placeHandle(sheet)
+        // The sheet resizes without the content changing size (a snap point
+        // or the keyboard): follow its own layout, or the handle stayed where
+        // the previous height put it (at the top of the screen after a
+        // collapse from full height).
+        if (sheet.getTag(dev.pam.nativeapp.R.id.pam_sheet_handle_follower) == null) {
+            val follower = View.OnLayoutChangeListener { view, _, top, _, bottom, _, oldTop, _, oldBottom ->
+                if (top != oldTop || bottom != oldBottom) placeHandle(view)
+            }
+            sheet.setTag(dev.pam.nativeapp.R.id.pam_sheet_handle_follower, follower)
+            sheet.addOnLayoutChangeListener(follower)
+        }
+        handle.bringToFront()
+    }
+
+    private fun placeHandle(sheet: View) {
+        if (removalExit != null || sheetChild() !== sheet) return
         handle.x = (content.width - handle.layoutParams.width) / 2f
         handle.y = (content.height - sheet.height + dp(10f))
-        handle.bringToFront()
     }
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
