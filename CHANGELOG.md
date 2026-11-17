@@ -36,10 +36,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   share an edge in dp share it in pixels (a card's button started 1px right
   of its title at 2.625x, and a centred icon could sit 2px off). React
   Native's Yoga rounds positions relative to the parent instead.
-- Fixed: a bottom sheet's drag handle follows the sheet when it changes
-  height without the window changing (a snap point, the keyboard); after a
-  list scroll collapsed a full-height sheet, the handle stayed at the top of
-  the screen.
+- Fixed: a bottom sheet's drag handle is drawn 10dp below the sheet's top
+  edge on every frame. It used to keep the position of an earlier snap point
+  (after a list in the sheet scrolled, it sat at the top of the screen over a
+  half-height sheet).
 - Fixed: opening a sheet no longer requests a layout during layout
   ("requestLayout() improperly called"), which Android deferred to the next
   frame.

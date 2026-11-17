@@ -2,7 +2,6 @@
 <resources>
     <item name="pam_shared_transition_tag" type="id" />
     <item name="pam_focus" type="id" />
-    <item name="pam_sheet_handle_follower" type="id" />
     <item name="pam_focus_ring" type="id" />
     <item name="pam_focus_radius" type="id" />
     <item name="pam_shared_transition_config" type="id" />

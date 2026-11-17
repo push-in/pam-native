@@ -1643,25 +1643,36 @@ internal class PamModalHost @JvmOverloads constructor(
             }
         }
         sheet.invalidateOutline()
-        placeHandle(sheet)
-        // The sheet resizes without the content changing size (a snap point
-        // or the keyboard): follow its own layout, or the handle stayed where
-        // the previous height put it (at the top of the screen after a
-        // collapse from full height).
-        if (sheet.getTag(dev.pam.nativeapp.R.id.pam_sheet_handle_follower) == null) {
-            val follower = View.OnLayoutChangeListener { view, _, top, _, bottom, _, oldTop, _, oldBottom ->
-                if (top != oldTop || bottom != oldBottom) placeHandle(view)
-            }
-            sheet.setTag(dev.pam.nativeapp.R.id.pam_sheet_handle_follower, follower)
-            sheet.addOnLayoutChangeListener(follower)
-        }
+        handle.x = (content.width - handle.layoutParams.width) / 2f
+        followSheetWithHandle()
         handle.bringToFront()
     }
 
-    private fun placeHandle(sheet: View) {
-        if (removalExit != null || sheetChild() !== sheet) return
-        handle.x = (content.width - handle.layoutParams.width) / 2f
-        handle.y = (content.height - sheet.height + dp(10f))
+    private var handleFollower: android.view.ViewTreeObserver.OnPreDrawListener? = null
+    private var handleFollowerObserver: android.view.ViewTreeObserver? = null
+
+    /**
+     * The handle is drawn 10dp below the sheet's top edge, wherever the sheet
+     * is: before every frame it takes the sheet's position (layout top plus
+     * drag, snap, keyboard or entrance translation). Positioning it from the
+     * sheet's height and its own translation drifted apart after a snap: the
+     * handle stayed at the top of the screen over a half-height sheet.
+     */
+    private fun followSheetWithHandle() {
+        val observer = content.viewTreeObserver
+        if (handleFollower != null && handleFollowerObserver === observer && observer.isAlive) return
+        handleFollower?.let { old -> handleFollowerObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(old) }
+        val follower = android.view.ViewTreeObserver.OnPreDrawListener {
+            val sheet = sheetChild()
+            if (sheet != null && presentation == PRESENTATION_SHEET && removalExit == null) {
+                val y = sheet.y + dp(10f)
+                if (handle.y != y) handle.y = y
+            }
+            true
+        }
+        handleFollower = follower
+        handleFollowerObserver = observer
+        observer.addOnPreDrawListener(follower)
     }
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density

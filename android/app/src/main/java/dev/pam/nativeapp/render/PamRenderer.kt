@@ -1054,7 +1054,21 @@ class PamRenderer(
             frames[state.id]?.let {
                 node.put("frame", JSONArray().put(it.x.toDouble()).put(it.y.toDouble()).put(it.width.toDouble()).put(it.height.toDouble()))
             }
-            if (view.getGlobalVisibleRect(visible)) {
+            var shown = view.getGlobalVisibleRect(visible)
+            // A scroll container always clips its rows when it draws, even
+            // with clipChildren off: rows scrolled out of its viewport (kept
+            // attached by a RecyclerView) are not on screen.
+            var scroller = view.parent as? View
+            val clip = Rect()
+            while (shown && scroller != null) {
+                if (scroller is androidx.recyclerview.widget.RecyclerView || scroller is android.widget.ScrollView ||
+                    scroller is android.widget.HorizontalScrollView || scroller is PamScrollContainer
+                ) {
+                    shown = scroller.getGlobalVisibleRect(clip) && visible.intersect(clip)
+                }
+                scroller = scroller.parent as? View
+            }
+            if (shown) {
                 val dx = onScreen[0] - inWindow[0]
                 val dy = onScreen[1] - inWindow[1]
                 node.put("visible", JSONArray().put(visible.left + dx).put(visible.top + dy).put(visible.right + dx).put(visible.bottom + dy))
