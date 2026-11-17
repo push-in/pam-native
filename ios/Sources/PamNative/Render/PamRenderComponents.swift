@@ -3575,6 +3575,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     func requestClose() {
         guard presentation != Presentation.sheet || bottomSheetDismissible else { return }
+        // Every user dismissal of a sheet (swipe, backdrop tap, Escape) is a
+        // sheetDismiss, so PHP's bound state follows (Android parity).
+        if presentation == Presentation.sheet, desiredVisible { onBottomSheetDismiss?() }
         setVisible(false)
         if let onRequestClose {
             onRequestClose()
@@ -3658,7 +3661,6 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         if bottomSheetDismissible,
            bottomSheetIndex == 0,
            projected < bottomSheetSnapPoints[0] * 0.55 {
-            onBottomSheetDismiss?()
             requestClose()
             return
         }

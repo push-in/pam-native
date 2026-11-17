@@ -1189,6 +1189,11 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun requestClose() {
         if (blocksModalDismissal(bottomSheetDismissible)) return
+        // Every user dismissal of a sheet (swipe, Back, backdrop tap) is a
+        // sheetDismiss: Back and the backdrop used to close the window
+        // without telling PHP, so its bound state stayed open and the next
+        // open request changed nothing.
+        if (presentation == PRESENTATION_SHEET && desiredVisible) onBottomSheetDismiss?.invoke()
         desiredVisible = false
         val callback = onRequestClose
         if (callback != null) {
@@ -1579,7 +1584,6 @@ internal class PamModalHost @JvmOverloads constructor(
             bottomSheetIndex == 0 &&
             projected < bottomSheetSnapPoints.first() * 0.55f
         ) {
-            onBottomSheetDismiss?.invoke()
             requestClose()
             return
         }

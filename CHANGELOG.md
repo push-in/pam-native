@@ -36,6 +36,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   share an edge in dp share it in pixels (a card's button started 1px right
   of its title at 2.625x, and a centred icon could sit 2px off). React
   Native's Yoga rounds positions relative to the parent instead.
+- Fixed: closing a bottom sheet with Back or a tap on the backdrop now
+  emits `sheetDismiss`, like a swipe down (Android and iOS). PHP's bound
+  state stayed open, so the next open request changed nothing and the sheet
+  never reopened.
 - Fixed: a bottom sheet's drag handle is drawn 10dp below the sheet's top
   edge on every frame. It used to keep the position of an earlier snap point
   (after a list in the sheet scrolled, it sat at the top of the screen over a
