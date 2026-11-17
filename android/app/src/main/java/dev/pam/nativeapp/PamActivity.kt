@@ -727,18 +727,15 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             addAction(DIAGNOSTICS_ACTION)
             addAction(LAYOUT_ACTION)
         }
-        // The flags overload is API 26; Android 7.x receivers are exported anyway.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            registerReceiver(
-                receiver,
-                filter,
-                android.Manifest.permission.DUMP,
-                null,
-                Context.RECEIVER_EXPORTED,
-            )
-        } else {
-            registerReceiver(receiver, filter, android.Manifest.permission.DUMP, null)
-        }
+        // ContextCompat: the flags overload is API 26 (Android 7.x crashed at launch).
+        androidx.core.content.ContextCompat.registerReceiver(
+            this,
+            receiver,
+            filter,
+            android.Manifest.permission.DUMP,
+            null,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+        )
         devToolsReceiver = receiver
     }
 
