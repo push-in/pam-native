@@ -2940,9 +2940,12 @@ fn wrapped_intrinsic_cross(
             Axis::Horizontal if number(child, PropKey::Width).is_none() => {
                 dimension(child, PropKey::Width, PropKey::WidthPercent, available_main)
             }
-            Axis::Vertical if number(child, PropKey::Height).is_none() => {
-                dimension(child, PropKey::Height, PropKey::HeightPercent, available_main)
-            }
+            Axis::Vertical if number(child, PropKey::Height).is_none() => dimension(
+                child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                available_main,
+            ),
             _ => None,
         }
         .map(|main| {
@@ -5829,7 +5832,13 @@ mod tests {
         let mut nodes = BTreeMap::from([
             (
                 1,
-                node(1, 0, 0, NodeKind::Column, [(PropKey::AlignItems, PropValue::Integer(1))]),
+                node(
+                    1,
+                    0,
+                    0,
+                    NodeKind::Column,
+                    [(PropKey::AlignItems, PropValue::Integer(1))],
+                ),
             ),
             (
                 2,
@@ -5846,7 +5855,13 @@ mod tests {
             ),
             (
                 15,
-                node(15, 1, 1, NodeKind::View, [(PropKey::Height, PropValue::Float(10.0))]),
+                node(
+                    15,
+                    1,
+                    1,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(10.0))],
+                ),
             ),
         ]);
         for key in 0..12_u64 {
@@ -5865,7 +5880,14 @@ mod tests {
             );
         }
         let tree = Tree { root: 1, nodes };
-        let layouts = calculate(&tree, Size { width: 360.0, height: 640.0 }).expect("layout");
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
 
         assert_eq!(layouts[&2].height, 200.0);
         assert_eq!(layouts[&3].y, 0.0);
