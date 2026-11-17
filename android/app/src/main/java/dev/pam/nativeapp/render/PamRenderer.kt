@@ -1839,10 +1839,23 @@ class PamRenderer(
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
         if (state.kind == NodeKind.STATUS_BAR) statusBarIds.add(spec.id)
         addChild(state.parent, state.id, fresh = true)
+        // Rows of a virtualized list are built by its adapter: they never
+        // join a deferred (sliced) mount, which would build them as ordinary
+        // children of the list view ("Node … cannot contain children").
+        if (virtualListAncestor(state.parent) != null) return
         if (deferMount(state)) return
-        if (!state.virtual && virtualListAncestor(state.parent) == null) {
+        if (!state.virtual) {
             buildHostedView(state)
         }
+    }
+
+    /** Builds the view of a node whose mount was deferred, then lets a list adapt its rows. */
+    private fun buildDeferredView(state: NodeState): Boolean {
+        if (state.virtual || views[state.id] != null) return false
+        if (virtualListAncestor(state.parent) != null) return false
+        buildHostedView(state)
+        if (state.kind == NodeKind.VIRTUAL_LIST) syncVirtualList(state.id)
+        return true
     }
 
     /** Creates, attaches and configures the view of hosted node [state]. */
@@ -2085,10 +2098,8 @@ class PamRenderer(
             return
         }
         pendingMounts.remove(id)
-        if (!state.virtual && views[id] == null) {
-            buildHostedView(state)
-            if (frames[id] != null) commitDirtyLayouts?.add(id)
-        }
+        if (buildDeferredView(state) && frames[id] != null) commitDirtyLayouts?.add(id)
+        if (state.kind == NodeKind.VIRTUAL_LIST) return
         // Content of a nested ScrollView is placed against that scroll's viewport.
         val childWindow = if (state.kind == NodeKind.SCROLL) {
             if (scrollAllowsSlicedMount(state)) {
@@ -2124,14 +2135,15 @@ class PamRenderer(
     private fun hostPendingNode(id: Long, laidOut: MutableCollection<Long>) {
         if (!pendingMounts.remove(id)) return
         val state = nodes[id] ?: return
-        if (!state.virtual && views[id] == null) {
+        if (!state.virtual && views[id] == null && virtualListAncestor(state.parent) == null) {
             // The commit that created the node already reported its on:layout;
             // applying the property now must not report the same frame again.
             val reportedLayout = lastLayoutEvents[id]
-            buildHostedView(state)
+            buildDeferredView(state)
             if (reportedLayout != null && lastLayoutEvents[id] == null) lastLayoutEvents[id] = reportedLayout
             if (frames[id] != null) laidOut += id
         }
+        if (state.kind == NodeKind.VIRTUAL_LIST) return
         children[id]?.toList()?.forEach { child -> hostPendingNode(child, laidOut) }
     }
 
