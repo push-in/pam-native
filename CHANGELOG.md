@@ -40,6 +40,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   emits `sheetDismiss`, like a swipe down (Android and iOS). PHP's bound
   state stayed open, so the next open request changed nothing and the sheet
   never reopened.
+- Fixed (iOS): a `Modal` with `presentation="dialog"` keeps its card at the
+  size the layout gave it; the card stretched with the window (a 300pt
+  dialog drew window-sized). An explicit `backdropColor` dims behind a
+  transparent modal, as on Android.
 - Fixed: a bottom sheet's drag handle is drawn 10dp below the sheet's top
   edge on every frame. It used to keep the position of an earlier snap point
   (after a list in the sheet scrolled, it sat at the top of the screen over a

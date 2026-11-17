@@ -2660,6 +2660,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private var presentation = Presentation.dialog
     private var animationType = Animation.none
     private var backdropColor = UIColor.black.withAlphaComponent(0.32)
+    private var backdropColorSet = false
     private var transparent = false
     private var allowSwipeDismissal = false
     private var bottomSheetSnapPoints: [CGFloat] = [0.5, 0.9]
@@ -2905,8 +2906,16 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             contentHost.addSubview(view)
         }
         view.frame = contentHost.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         updatePresentationLayout()
+    }
+
+    /// A dialog's child is a card the engine places and sizes (centred):
+    /// stretching it with the modal (flexible autoresizing) grew a 300pt
+    /// card to the window size plus its own. Full-screen modals and sheets
+    /// still fill their host.
+    private func applyChildResizing() {
+        let mask: UIView.AutoresizingMask = presentation == Presentation.dialog ? [] : [.flexibleWidth, .flexibleHeight]
+        contentHost.subviews.forEach { if $0 !== sheetHandle { $0.autoresizingMask = mask } }
     }
 
     func setVisible(_ value: Bool) {
@@ -2940,6 +2949,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     func setBackdropColor(_ color: Int) {
         backdropColor = UIColor(argb: Int64(truncatingIfNeeded: UInt32(truncatingIfNeeded: color)))
+        backdropColorSet = true
         applyBackdropColor()
     }
 
@@ -3687,11 +3697,14 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    /// Like Android: an explicit `backdropColor` always dims; `transparent`
+    /// only clears the default one.
     private func applyBackdropColor() {
-        backdropView.backgroundColor = transparent ? .clear : backdropColor
+        backdropView.backgroundColor = transparent && !backdropColorSet ? .clear : backdropColor
     }
 
     private func updatePresentationLayout() {
+        applyChildResizing()
         if presentation == Presentation.sheet {
             contentHeightConstraint.isActive = false
             contentHeightConstraint = contentHost.heightAnchor.constraint(equalToConstant: sheetHeight)
