@@ -13,6 +13,7 @@ import XCTest
 ///     {"tap": "Local marketplace"}     first element whose label matches
 ///     {"tapIfExists": "Back"}         tap when present, otherwise continue
 ///     {"dismissKeyboard": true}        drag the content to close the keyboard
+///     {"tapIn": "Stepper", "at": [0.9, 0.5]}  a point inside an element
 ///     {"tapField": "Email"}            the editable field with that label,
 ///                                      then wait for keyboard focus
 ///     {"tapId": "composer.send"}       accessibility identifier
@@ -136,6 +137,13 @@ final class PamUIDriverTests: XCTestCase {
             field.tap()
             let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
             _ = XCTWaiter().wait(for: [focused], timeout: 3)
+            return
+        }
+        if let label = step["tapIn"] as? String, let point = step["at"] as? [Double], point.count == 2 {
+            // A point inside an element, normalized to its frame: the parts of
+            // an adjustable control (a stepper's + and -) are not elements.
+            let element = try element(labelled: label, timeout: timeout, step: index)
+            element.coordinate(withNormalizedOffset: CGVector(dx: point[0], dy: point[1])).tap()
             return
         }
         if step["dismissKeyboard"] as? Bool == true {
