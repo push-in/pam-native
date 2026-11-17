@@ -993,6 +993,12 @@ class PamRenderer(
      * on-screen pixel rectangle, the part of it actually visible, and for
      * text the baseline, line count and whether it was ellipsized.
      */
+    private val LAYOUT_SNAPSHOT_STYLE_KEYS = listOf(
+        PropKey.POSITION_TYPE to "position",
+        PropKey.JUSTIFY_CONTENT to "justify",
+        PropKey.ALIGN_ITEMS to "align",
+    )
+
     internal fun layoutSnapshotJson(): String {
         val density = resourcesDensity()
         val nodesJson = JSONArray()
@@ -1028,6 +1034,17 @@ class PamRenderer(
             view.transitionName?.let { node.put("testId", it) }
             if (view.isClickable) node.put("clickable", true)
             if (!view.isEnabled) node.put("disabled", true)
+            // The touch target hit testing really uses (hitSlop, 48dp minimum).
+            ((view.parent as? ViewGroup)?.touchDelegate as? PamTouchDelegateGroup)?.boundsOf(view)?.let { hit ->
+                node.put("hit", JSONArray().put(hit.width()).put(hit.height()))
+            }
+            for ((key, name) in LAYOUT_SNAPSHOT_STYLE_KEYS) {
+                when (val value = state.properties[key]) {
+                    is PropValue.Text -> node.put(name, value.value)
+                    is PropValue.Integer -> node.put(name, value.value)
+                    else -> Unit
+                }
+            }
             if (view.rotation != 0f || view.translationX != 0f || view.translationY != 0f ||
                 view.scaleX != 1f || view.scaleY != 1f
             ) {
