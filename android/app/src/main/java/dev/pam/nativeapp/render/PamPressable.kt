@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.os.Build
 import android.content.Context
 import android.graphics.Canvas
 import android.os.SystemClock
@@ -183,7 +184,7 @@ internal class PamPressable(context: Context) : PamContainer(context), PamDragOw
         isLongClickable = true
         isFocusable = true
         isFocusableInTouchMode = false
-        defaultFocusHighlightEnabled = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) defaultFocusHighlightEnabled = true
     }
 
     override fun setEnabled(enabled: Boolean) {

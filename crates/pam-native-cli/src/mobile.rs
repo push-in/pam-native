@@ -120,9 +120,9 @@ impl AndroidAbi {
 
     fn clang(self) -> &'static str {
         match self {
-            Self::Arm64 => "aarch64-linux-android26-clang",
-            Self::X86_64 => "x86_64-linux-android26-clang",
-            Self::ArmV7 => "armv7a-linux-androideabi26-clang",
+            Self::Arm64 => "aarch64-linux-android24-clang",
+            Self::X86_64 => "x86_64-linux-android24-clang",
+            Self::ArmV7 => "armv7a-linux-androideabi24-clang",
         }
     }
 }
@@ -722,7 +722,7 @@ struct PluginPhp {
 struct PluginAndroid {
     #[serde(default)]
     namespace: Option<String>,
-    #[serde(default = "default_min_sdk")]
+    #[serde(default = "default_plugin_min_sdk")]
     min_sdk: u32,
     #[serde(default)]
     permissions: Vec<String>,
@@ -921,18 +921,30 @@ struct PluginLockEntry<'a> {
     ios_extensions: Vec<&'a str>,
 }
 
+/// Lowest Android API level an app or plugin may declare (Android 7.0).
+/// Below 26 the host links `pam_bionic_compat.c` for the prebuilt PHP
+/// runtime, and the launcher icon gets a pre-adaptive fallback.
+const ANDROID_MIN_SDK_FLOOR: u32 = 24;
+
+/// An app without `android.minSdk` keeps Android 8.0 (API 26); opting in to
+/// Android 7.x is explicit because every plugin must support it too.
 fn default_min_sdk() -> u32 {
     26
 }
 
+/// A plugin that does not declare `minSdk` runs on every supported release.
+fn default_plugin_min_sdk() -> u32 {
+    ANDROID_MIN_SDK_FLOOR
+}
+
 /// A PHP-only plugin has no `android` section: it must default to the
-/// lowest supported minSdk (26), like an `android` section without
-/// `minSdk`, instead of 0.
+/// lowest supported minSdk, like an `android` section without `minSdk`,
+/// instead of 0.
 impl Default for PluginAndroid {
     fn default() -> Self {
         Self {
             namespace: None,
-            min_sdk: default_min_sdk(),
+            min_sdk: default_plugin_min_sdk(),
             permissions: Vec::new(),
             repositories: Vec::new(),
             dependencies: Vec::new(),
@@ -1774,8 +1786,12 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     {
         return Err("versionName must be a safe string no longer than 64 bytes".to_owned());
     }
-    if manifest.android.min_sdk < 26 || manifest.android.min_sdk > manifest.android.target_sdk {
-        return Err("Android minSdk must be at least 26 and no greater than targetSdk".to_owned());
+    if manifest.android.min_sdk < ANDROID_MIN_SDK_FLOOR
+        || manifest.android.min_sdk > manifest.android.target_sdk
+    {
+        return Err(format!(
+            "Android minSdk must be at least {ANDROID_MIN_SDK_FLOOR} and no greater than targetSdk"
+        ));
     }
     if manifest.android.target_sdk > 36 {
         return Err("this Pam Native release supports targetSdk up to 36".to_owned());
@@ -2436,9 +2452,11 @@ fn validate_plugin_manifest(
             "plugin {package} has invalid PHP provider {provider:?}"
         ));
     }
-    if manifest.android.min_sdk < 26 || manifest.android.min_sdk > app.android.min_sdk {
+    if manifest.android.min_sdk < ANDROID_MIN_SDK_FLOOR
+        || manifest.android.min_sdk > app.android.min_sdk
+    {
         return Err(format!(
-            "plugin {package} requires Android minSdk {}, but the app uses {}; plugin minSdk must be between 26 and the app minSdk",
+            "plugin {package} requires Android minSdk {}, but the app uses {}; plugin minSdk must be between {ANDROID_MIN_SDK_FLOOR} and the app minSdk",
             manifest.android.min_sdk, app.android.min_sdk
         ));
     }
@@ -6405,6 +6423,7 @@ fn configure_android(
     sync_splash_logos(project, &workspace.join("app/src/main/res"))?;
     crate::app_icon::sync_android_icon(
         project.manifest.android.icon.as_ref(),
+        project.manifest.android.min_sdk,
         &project.root,
         &workspace.join("app/src/main/res"),
         write_atomic,
@@ -11198,7 +11217,34 @@ mod tests {
             .1;
         assert!(validate_manifest(&root, &invalid).is_err());
 
+        // Android 7.0 (API 24) is the floor; the default stays API 26.
+        assert_eq!(project.manifest.android.min_sdk, 26);
+        for (min_sdk, valid) in [(24, true), (25, true), (23, false)] {
+            manifest["android"] =
+                serde_json::json!({ "debugApplicationIdSuffix": ".qa", "minSdk": min_sdk });
+            fs::write(
+                root.join(MANIFEST_NAME),
+                serde_json::to_vec(&manifest).expect("json"),
+            )
+            .expect("manifest");
+            let parsed = load_project_manifest(&root).expect("parse minSdk").1;
+            assert_eq!(
+                validate_manifest(&root, &parsed).is_ok(),
+                valid,
+                "minSdk {min_sdk}"
+            );
+        }
+
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn plugins_default_to_the_android_min_sdk_floor() {
+        assert_eq!(PluginAndroid::default().min_sdk, ANDROID_MIN_SDK_FLOOR);
+        let declared: PluginAndroid =
+            serde_json::from_str(r#"{"namespace":"community.example.plugin"}"#).expect("android");
+        assert_eq!(declared.min_sdk, 24);
+        assert_eq!(default_min_sdk(), 26);
     }
 
     #[test]

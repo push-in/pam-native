@@ -727,13 +727,18 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             addAction(DIAGNOSTICS_ACTION)
             addAction(LAYOUT_ACTION)
         }
-        registerReceiver(
-            receiver,
-            filter,
-            android.Manifest.permission.DUMP,
-            null,
-            Context.RECEIVER_EXPORTED,
-        )
+        // The flags overload is API 26; Android 7.x receivers are exported anyway.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            registerReceiver(
+                receiver,
+                filter,
+                android.Manifest.permission.DUMP,
+                null,
+                Context.RECEIVER_EXPORTED,
+            )
+        } else {
+            registerReceiver(receiver, filter, android.Manifest.permission.DUMP, null)
+        }
         devToolsReceiver = receiver
     }
 
@@ -1206,10 +1211,12 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             } else {
                 flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
             }
-            flags = if (lightNavigation) {
-                flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            } else {
-                flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = if (lightNavigation) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                }
             }
             window.decorView.systemUiVisibility = flags
         }

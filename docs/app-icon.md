@@ -20,8 +20,7 @@ the hosts keep the bundled PAM icon.
 
 ## Android
 
-`android.icon` describes an adaptive icon (API 26+, every release PAM Native
-supports):
+`android.icon` describes an adaptive icon (API 26+):
 
 | Field | Purpose |
 | --- | --- |
@@ -30,8 +29,10 @@ supports):
 | `monochrome` | Optional single-colour layer for Android 13+ themed icons. |
 
 The build copies the layers to `res/drawable-nodpi/pam_launcher_*` and writes
-`res/drawable-anydpi-v26/pam_launcher.xml`; the manifest's `android:icon` is
-`@drawable/pam_launcher`. Removing `android.icon` deletes the generated files
+`res/drawable-anydpi/pam_launcher.xml`; the manifest's `android:icon` is
+`@drawable/pam_launcher`. With `android.minSdk` below 26 the adaptive icon goes
+to `res/drawable-anydpi-v26/` and Android 7.x gets a square `layer-list` of the
+same background and foreground (the foreground cropped like the adaptive mask). Removing `android.icon` deletes the generated files
 and the PAM icon comes back. Porting a React Native app: use its
 `mipmap-xxxhdpi/ic_launcher_foreground` (and `_background`, `_monochrome`)
 images, or the colour of `ic_launcher_background`.

@@ -93,8 +93,8 @@ done
 rustup target add aarch64-linux-android x86_64-linux-android
 
 ndk_bin="${ndk_root}/toolchains/llvm/prebuilt/${ndk_host}/bin"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ndk_bin}/aarch64-linux-android26-clang"
-export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${ndk_bin}/x86_64-linux-android26-clang"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ndk_bin}/aarch64-linux-android24-clang"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${ndk_bin}/x86_64-linux-android24-clang"
 
 cargo build \
     --locked \

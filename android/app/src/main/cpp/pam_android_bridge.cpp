@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <dlfcn.h>
 #include <malloc.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -1807,7 +1808,16 @@ Java_dev_pam_nativeapp_PamRuntime_nativeDispatchModuleResult(
 extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativePurgeAllocator(JNIEnv*, jclass) {
 #ifdef M_PURGE
+#if __ANDROID_API__ >= 26
     mallopt(M_PURGE, 0);
+#else
+    // mallopt() is API 26: Android 7.x builds look it up at run time.
+    using Mallopt = int (*)(int, int);
+    static const auto purge = reinterpret_cast<Mallopt>(dlsym(RTLD_DEFAULT, "mallopt"));
+    if (purge != nullptr) {
+        purge(M_PURGE, 0);
+    }
+#endif
 #endif
 }
 

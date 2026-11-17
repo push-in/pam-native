@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.os.Build
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.SurfaceTexture
@@ -1031,7 +1032,11 @@ internal class PamMediaView(
 
     private fun seekPrepared(player: MediaPlayer, seconds: Double) {
         val positionMs = (seconds.coerceAtLeast(0.0) * 1_000).toLong()
-        player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+        } else {
+            player.seekTo(positionMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        }
     }
 
     private fun installListeners(player: MediaPlayer, generation: Long) {

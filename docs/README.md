@@ -40,6 +40,7 @@ short end-to-end recipes.
 | UI-thread animations, transitions and presets | [Animations](animations.md) |
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |
 | Edge-to-edge, safe areas, keyboard avoidance and IME | [Android safe area](android-safe-area.md) |
+| Android 7.0/7.1 support (`android.minSdk` 24) | [Android 7.x](android-min-sdk.md) |
 | Text measurement, nested spans, hairlines and fonts | [Typography](typography.md) |
 | Icons, sticky headers, content-sized lists, toasts and other React Native parity | [React Native components parity](react-native-components-parity.md) |
 | Runtime error overlay, `App::onError()` and module failures | [Error overlay](error-overlay.md) |

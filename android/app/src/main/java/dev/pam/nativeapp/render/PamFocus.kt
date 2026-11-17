@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.os.Build
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Outline
@@ -252,7 +253,7 @@ internal object PamFocus {
         if (wants && ring == null) {
             val drawable = FocusRing(view, view.foreground)
             view.setTag(R.id.pam_focus_ring, drawable)
-            view.defaultFocusHighlightEnabled = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) view.defaultFocusHighlightEnabled = false
             view.foreground = drawable
         } else if (!wants && ring != null) {
             view.setTag(R.id.pam_focus_ring, null)

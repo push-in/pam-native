@@ -174,7 +174,7 @@ internal class PamImageView(context: Context) : ImageView(context), PamSharedCon
         } ?: return
         val bitmap = bitmapDrawable.bitmap ?: return
         // Blurred images are heap bitmaps: only a sharp GPU bitmap is copied.
-        if (bitmap.config != Bitmap.Config.HARDWARE) return
+        if (!bitmap.isHardware) return
         val copy = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return
         copy.density = bitmap.density
         val tiled = bitmapDrawable.tileModeX == Shader.TileMode.REPEAT

@@ -60,6 +60,12 @@ add_library(pam_native_android SHARED
     pam_tree_encoder.cpp
 )
 
+# Android 7.x (minSdk 24/25): libphp.a needs mblen() and nl_langinfo(), which
+# bionic exports only from API 26. Builds for API 26+ keep libc's.
+if(ANDROID_PLATFORM_LEVEL LESS 26)
+    target_sources(pam_native_android PRIVATE pam_bionic_compat.c)
+endif()
+
 target_compile_definitions(pam_native_android PRIVATE
     HAVE_CONFIG_H
     __ANDROID__

@@ -80,7 +80,7 @@
             "properties": {
                 "minSdk": {
                     "type": "integer",
-                    "minimum": 26,
+                    "minimum": 24,
                     "maximum": 36,
                     "default": 26
                 },

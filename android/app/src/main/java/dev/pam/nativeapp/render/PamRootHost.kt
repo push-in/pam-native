@@ -224,7 +224,7 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         // The root absorbs the focus of a blurred input (below). Back leaves
         // touch mode, and Android 8+ would then paint its default focus
         // highlight (~8% black) over the whole screen until the next touch.
-        defaultFocusHighlightEnabled = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) defaultFocusHighlightEnabled = false
     }
 
     private fun imeInsetOf(insets: WindowInsets): Int =

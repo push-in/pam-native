@@ -96,10 +96,16 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
     private val broadcasts = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = changed()
     }
+    // API 26+ delivers on [main]; Android 7.x has no Handler overload, so the
+    // callback hops to the main thread itself.
     private val network = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = changed()
-        override fun onLost(network: Network) = changed()
-        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = changed()
+        override fun onAvailable(network: Network) = networkChanged()
+        override fun onLost(network: Network) = networkChanged()
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = networkChanged()
+    }
+
+    private fun networkChanged() {
+        if (Looper.myLooper() == Looper.getMainLooper()) changed() else main.post(::changed)
     }
 
     private fun registerSources() {
@@ -115,7 +121,12 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             appContext.registerReceiver(broadcasts, filter)
         }
         runCatching {
-            appContext.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network, main)
+            val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                connectivity.registerDefaultNetworkCallback(network, main)
+            } else {
+                connectivity.registerDefaultNetworkCallback(network)
+            }
         }
     }
 
