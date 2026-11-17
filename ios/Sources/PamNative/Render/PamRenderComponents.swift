@@ -2595,6 +2595,14 @@ private final class PamModalContentViewport: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.size != previousSize else { return }
+        // A child that filled the old viewport fills the new one (a screen
+        // in a full-screen modal, a sheet's content); a child the engine
+        // placed and sized (a dialog's card) keeps its frame. Autoresizing
+        // grew a 300pt card by the whole window when the modal appeared.
+        let filled = CGRect(origin: .zero, size: previousSize)
+        for child in subviews where child.autoresizingMask.isEmpty && child.frame == filled {
+            child.frame = bounds
+        }
         previousSize = bounds.size
         onBoundsChange?()
     }
@@ -2909,13 +2917,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         updatePresentationLayout()
     }
 
-    /// A dialog's child is a card the engine places and sizes (centred):
-    /// stretching it with the modal (flexible autoresizing) grew a 300pt
-    /// card to the window size plus its own. Full-screen modals and sheets
-    /// still fill their host.
+    /// The viewport resizes its children itself (see PamModalContentViewport):
+    /// filling children follow it, engine-placed ones keep their frames.
     private func applyChildResizing() {
-        let mask: UIView.AutoresizingMask = presentation == Presentation.dialog ? [] : [.flexibleWidth, .flexibleHeight]
-        contentHost.subviews.forEach { if $0 !== sheetHandle { $0.autoresizingMask = mask } }
+        contentHost.subviews.forEach { $0.autoresizingMask = [] }
     }
 
     func setVisible(_ value: Bool) {
