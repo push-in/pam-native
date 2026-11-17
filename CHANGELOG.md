@@ -31,7 +31,7 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   `underlineColorAndroid="transparent"` lost its whole box on Android: the
   underline tint was applied to PAM's own background drawable. The tint now
   colours only the platform underline.
-- Changed: Android snaps every edge on the absolute pixel grid: a view's
+- Changed: Android and iOS snap every edge on the absolute pixel grid: a view's
   position is its rounded absolute start minus its host's, so siblings that
   share an edge in dp share it in pixels (a card's button started 1px right
   of its title at 2.625x, and a centred icon could sit 2px off). React
