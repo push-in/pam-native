@@ -13,6 +13,13 @@ internal object DevBundle {
         bytes: ByteArray,
         destination: File,
         maximumBundleBytes: Int = MAX_BUNDLE_BYTES,
+        /**
+         * Production OTA slots: fsync every file and directory before the
+         * swap and record a [ReleaseIntegrity] marker (version [durable]) last,
+         * so a process killed mid-extraction is detected and redone instead
+         * of reused. Hot reload keeps the fast, non-durable path.
+         */
+        durable: String? = null,
     ): File {
         require(maximumBundleBytes in 1..MAX_PRODUCTION_BUNDLE_BYTES)
         require(bytes.size <= maximumBundleBytes) { "PAM Native bundle exceeds its size limit" }
@@ -28,7 +35,19 @@ internal object DevBundle {
 
         try {
             extractInto(bytes, staging)
+            val files = if (durable != null) {
+                ReleaseIntegrity.inventory(staging).also {
+                    ReleaseIntegrity.syncFiles(staging, it)
+                    ReleaseIntegrity.syncDirectories(staging, it)
+                }
+            } else {
+                emptyList()
+            }
             activate(staging, destination, backup)
+            if (durable != null) {
+                ReleaseIntegrity.syncDirectory(parent)
+                ReleaseIntegrity.write(destination, durable, files)
+            }
         } catch (error: Throwable) {
             staging.deleteRecursively()
             throw error

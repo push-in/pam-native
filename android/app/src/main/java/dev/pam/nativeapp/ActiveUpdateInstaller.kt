@@ -34,12 +34,14 @@ internal class ActiveUpdateInstaller(private val context: Context) {
             require(sha256(bundle) == expected) { "OTA bundle integrity check failed" }
 
             val destination = File(context.filesDir, "pam/ota-releases/$expected")
-            val existing = File(destination, "index.php")
-            if (existing.isFile) existing else DevBundle.extract(
-                bundle.readBytes(),
-                destination,
-                MAX_BUNDLE_BYTES,
-            )
+            // Same rule as the embedded release: a slot is reused only when its
+            // completion marker lists every file at its size; an extraction
+            // interrupted by a killed process is redone, never run truncated.
+            if (ReleaseIntegrity.isComplete(destination, expected)) {
+                File(destination, "index.php")
+            } else {
+                DevBundle.extract(bundle.readBytes(), destination, MAX_BUNDLE_BYTES, durable = expected)
+            }
         }.getOrElse {
             quarantine(updates)
             embeddedEntry

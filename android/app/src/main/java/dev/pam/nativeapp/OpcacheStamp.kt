@@ -10,7 +10,10 @@ import java.io.File
  * bundles live in content-addressed directories (`releases/<digest>`,
  * `ota-releases/<digest>`); the stamp records that directory and the CLI
  * content digest beside the entry, and any change drops the whole cache
- * (which also frees the opcodes of pruned releases).
+ * (which also frees the opcodes of pruned releases). A release re-extracted
+ * at the same path (an interrupted first install is discarded and redone)
+ * gets a new installation id in its completion marker, which the stamp also
+ * carries: opcodes compiled from the truncated sources must not survive.
  */
 internal object OpcacheStamp {
     private const val STAMP_FILE = "opcache.stamp"
@@ -21,7 +24,8 @@ internal object OpcacheStamp {
         val digest = runCatching {
             File(release, "manifest.sha256").bufferedReader().use { it.readLine() }?.trim()?.lowercase()
         }.getOrNull()?.takeIf { it.matches(DIGEST) }.orEmpty()
-        return "${release.absolutePath}|$digest"
+        val installation = ReleaseIntegrity.installationId(release).orEmpty()
+        return "${release.absolutePath}|$digest|$installation"
     }
 
     /** Returns true when the cache was dropped (first run, new bundle). */

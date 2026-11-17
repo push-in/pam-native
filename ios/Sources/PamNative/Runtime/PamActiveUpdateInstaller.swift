@@ -49,8 +49,21 @@ public enum PamActiveUpdateInstaller {
             guard actual == expected else { throw UpdateError.invalidBundle }
             let destination = documents.appendingPathComponent("pam/ota-releases/\(expected)", isDirectory: true)
             let entry = destination.appendingPathComponent("index.php", isDirectory: false)
-            if manager.fileExists(atPath: entry.path) { return entry }
-            return try PamDevBundle.extract(data, to: destination, maximumBytes: maximumBundleBytes)
+            // Reused only when its completion marker lists every file at its
+            // size: an extraction interrupted by a killed process is redone,
+            // never run truncated.
+            if PamReleaseIntegrity.isComplete(release: destination, version: expected) { return entry }
+            if manager.fileExists(atPath: destination.path) {
+                // Same path, new bytes: opcodes cached from the truncated
+                // sources (keyed by path, never revalidated) must go too.
+                PamPhpRuntimeConfiguration.invalidateOpcache()
+            }
+            return try PamDevBundle.extract(
+                data,
+                to: destination,
+                maximumBytes: maximumBundleBytes,
+                durableVersion: expected
+            )
         } catch {
             quarantine(updates: updates, manager: manager)
             return embeddedEntry

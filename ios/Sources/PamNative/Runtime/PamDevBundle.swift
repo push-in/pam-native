@@ -9,7 +9,8 @@ enum PamDevBundle {
     static func extract(
         _ data: Data,
         to destination: URL,
-        maximumBytes: Int = maximumBundleBytes
+        maximumBytes: Int = maximumBundleBytes,
+        durableVersion: String? = nil
     ) throws -> URL {
         guard (1...maximumProductionBundleBytes).contains(maximumBytes),
               data.count <= maximumBytes else {
@@ -37,8 +38,21 @@ enum PamDevBundle {
         try manager.createDirectory(at: staging, withIntermediateDirectories: false)
 
         do {
-            try extract(data, into: staging, manager: manager)
+            // Production OTA slots (`durableVersion`): every file and directory
+            // is fsynced before the swap and a PamReleaseIntegrity marker is
+            // written last, so an extraction killed midway is redone instead
+            // of reused. Hot reload keeps the fast, non-durable path.
+            try extract(data, into: staging, manager: manager, durable: durableVersion != nil)
+            var files: [PamReleaseIntegrity.File] = []
+            if durableVersion != nil {
+                files = try PamReleaseIntegrity.inventory(root: staging)
+                PamReleaseIntegrity.syncDirectories(root: staging, files: files)
+            }
             try activate(staging: staging, destination: destination, backup: backup, manager: manager)
+            if let durableVersion {
+                PamReleaseIntegrity.syncDirectory(parent.path)
+                try PamReleaseIntegrity.write(release: destination, version: durableVersion, files: files)
+            }
         } catch {
             try? manager.removeItem(at: staging)
             throw error
@@ -46,7 +60,7 @@ enum PamDevBundle {
         return destination.appendingPathComponent("index.php", isDirectory: false)
     }
 
-    private static func extract(_ data: Data, into staging: URL, manager: FileManager) throws {
+    private static func extract(_ data: Data, into staging: URL, manager: FileManager, durable: Bool) throws {
         var reader = Reader(data)
         guard try reader.text(4) == "PNA1" else {
             throw BundleError.invalidMagic
@@ -74,7 +88,11 @@ enum PamDevBundle {
                 at: target.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try contents.write(to: target, options: .atomic)
+            if durable {
+                try PamReleaseIntegrity.writeDurably(contents, to: target)
+            } else {
+                try contents.write(to: target, options: .atomic)
+            }
         }
         try reader.finish()
 

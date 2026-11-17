@@ -20,7 +20,7 @@ class OpcacheStampTest {
             val state = File(root, "state").apply { mkdirs() }
 
             val first = OpcacheStamp.stamp(entry)
-            assertTrue(first.endsWith("|" + "a".repeat(64)))
+            assertTrue(first.endsWith("|" + "a".repeat(64) + "|"))
             assertTrue(OpcacheStamp.prepare(state, first))
             val cached = File(state, "opcache/index.php.bin").apply { writeText("opcodes") }
 
@@ -60,7 +60,30 @@ class OpcacheStampTest {
         val root = Files.createTempDirectory("pam-opcache-manifest").toFile()
         try {
             File(root, "manifest.sha256").writeText("garbage\n")
-            assertEquals(root.absolutePath + "|", OpcacheStamp.stamp(File(root, "index.php")))
+            assertEquals(root.absolutePath + "||", OpcacheStamp.stamp(File(root, "index.php")))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aReleaseReExtractedAtTheSamePathDropsTheOpcodesOfTheTruncatedOne() {
+        val root = Files.createTempDirectory("pam-opcache-reextract").toFile()
+        try {
+            val version = "c".repeat(64)
+            val release = File(root, "releases/$version").apply { mkdirs() }
+            val entry = File(release, "index.php").apply { writeText("<?php echo 1;") }
+            File(release, "manifest.sha256").writeText(version + "\n")
+            val state = File(root, "state").apply { mkdirs() }
+            val files = ReleaseIntegrity.inventory(release)
+            ReleaseIntegrity.write(release, version, files)
+            val first = OpcacheStamp.stamp(entry)
+            assertTrue(OpcacheStamp.prepare(state, first))
+            val cached = File(state, "opcache/index.php.bin").apply { writeText("opcodes") }
+
+            ReleaseIntegrity.write(release, version, files)
+            assertTrue("A new extraction re-keys the cache", OpcacheStamp.prepare(state, OpcacheStamp.stamp(entry)))
+            assertFalse(cached.exists())
         } finally {
             root.deleteRecursively()
         }
