@@ -59,6 +59,62 @@ final class PamDevBundleTests: XCTestCase {
         XCTAssertFalse(backup.fileExists)
     }
 
+    func testDurableExtractionMarksTheReleaseCompleteLast() throws {
+        let root = fixtureDirectory("durable")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let version = String(repeating: "a", count: 64)
+        let destination = root.appendingPathComponent(version)
+
+        _ = try PamDevBundle.extract(bundle([
+            ("index.php", Data("<?php".utf8)),
+            ("src/Lang/I18n.php", Data("<?php final class I18n {}".utf8)),
+        ]), to: destination, durableVersion: version)
+
+        XCTAssertTrue(PamReleaseIntegrity.isComplete(release: destination, version: version))
+        XCTAssertFalse(PamReleaseIntegrity.isComplete(release: destination, version: String(repeating: "b", count: 64)))
+        XCTAssertNotNil(PamReleaseIntegrity.installationId(release: destination))
+        XCTAssertFalse(destination.appendingPathComponent(".pam-release.tmp").fileExists)
+    }
+
+    func testAReleaseWithoutMarkerOrWithATruncatedFileIsNotComplete() throws {
+        let root = fixtureDirectory("truncated")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let version = String(repeating: "c", count: 64)
+        let destination = root.appendingPathComponent(version)
+        let files: [(String, Data)] = [
+            ("index.php", Data("<?php".utf8)),
+            ("src/Lang/I18n.php", Data("<?php final class I18n {}".utf8)),
+        ]
+
+        // What a killed first extraction leaves: index.php, empty sources, no marker.
+        try FileManager.default.createDirectory(
+            at: destination.appendingPathComponent("src/Lang"),
+            withIntermediateDirectories: true
+        )
+        try files[0].1.write(to: destination.appendingPathComponent("index.php"))
+        try Data().write(to: destination.appendingPathComponent("src/Lang/I18n.php"))
+        XCTAssertFalse(PamReleaseIntegrity.isComplete(release: destination, version: version))
+
+        _ = try PamDevBundle.extract(bundle(files), to: destination, durableVersion: version)
+        XCTAssertTrue(PamReleaseIntegrity.isComplete(release: destination, version: version))
+        let first = PamReleaseIntegrity.installationId(release: destination)
+        XCTAssertEqual(
+            try Data(contentsOf: destination.appendingPathComponent("src/Lang/I18n.php")),
+            files[1].1
+        )
+
+        // Marker present, one file truncated afterwards: detected, extracted again.
+        try Data().write(to: destination.appendingPathComponent("src/Lang/I18n.php"))
+        XCTAssertFalse(PamReleaseIntegrity.isComplete(release: destination, version: version))
+        _ = try PamDevBundle.extract(bundle(files), to: destination, durableVersion: version)
+        XCTAssertTrue(PamReleaseIntegrity.isComplete(release: destination, version: version))
+        XCTAssertNotEqual(first, PamReleaseIntegrity.installationId(release: destination))
+
+        // Missing file.
+        try FileManager.default.removeItem(at: destination.appendingPathComponent("src/Lang/I18n.php"))
+        XCTAssertFalse(PamReleaseIntegrity.isComplete(release: destination, version: version))
+    }
+
     private func fixtureDirectory(_ name: String) -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "pam-ios-dev-bundle-\(name)-\(UUID().uuidString)"

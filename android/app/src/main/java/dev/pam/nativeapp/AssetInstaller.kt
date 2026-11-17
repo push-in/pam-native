@@ -8,15 +8,32 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-internal class AssetInstaller(private val context: Context) {
+internal class AssetInstaller(
+    private val filesDirectory: File,
+    /** Opens an APK asset by its path under `assets/` (streaming access). */
+    private val openAsset: (String) -> InputStream,
+    /** Lists an APK asset directory (empty for a file or a missing path). */
+    private val listAssets: (String) -> Array<out String>,
+) {
+    constructor(context: Context) : this(
+        context.filesDir,
+        { path -> context.assets.open(path, AssetManager.ACCESS_STREAMING) },
+        { path -> context.assets.list(path).orEmpty() },
+    )
+
     fun install(): File {
-        val version = context.assets.open("$ASSET_ROOT/manifest.sha256").bufferedReader().use {
+        val version = openAsset("$ASSET_ROOT/manifest.sha256").bufferedReader().use {
             it.readLine()?.trim().orEmpty()
         }
         require(version.matches(Regex("[a-f0-9]{64}"))) { "Invalid Pam Native asset manifest" }
-        val release = File(context.filesDir, "pam/releases/$version")
+        val release = File(filesDirectory, "pam/releases/$version")
         val entry = File(release, "index.php")
-        if (entry.isFile) {
+        // Reuse only a release whose completion marker lists every file at its
+        // size: a process killed during the first extraction can leave
+        // index.php beside zero-byte or missing sources (the rename reached
+        // the disk, their data did not), and that tree would fail on every
+        // launch until the app was reinstalled.
+        if (ReleaseIntegrity.isComplete(release, version)) {
             prepareDeferredAssets(release)
             scheduleReleaseCleanup(release)
             return entry
@@ -25,44 +42,52 @@ internal class AssetInstaller(private val context: Context) {
         // copied, producing a valid entry path whose nested templates vanish
         // before PHP starts. Installation is transactional application state,
         // not disposable cache, so stage beside the content-addressed releases.
-        val staging = installationStagingDirectory(context.filesDir, version)
+        val staging = installationStagingDirectory(filesDirectory, version)
         staging.deleteRecursively()
         check(staging.mkdirs()) { "Cannot create Pam Native staging directory" }
         var deferred = emptyList<PackedBundleFile>()
-        val pack = runCatching {
-            context.assets.open(BUNDLE_PACK, AssetManager.ACCESS_STREAMING)
-        }.getOrNull()
+        val pack = runCatching { openAsset(BUNDLE_PACK) }.getOrNull()
         if (pack != null) {
             // One packed asset: a single sequential stream (no per-file
             // AssetManager open/lock), files written and verified in parallel.
             pack.use { input ->
                 installPackedBundle(input, staging, installThreads(), deferAssets = { deferred = it }) { path ->
-                    context.assets.open("$ASSET_ROOT/$path")
+                    openAsset("$ASSET_ROOT/$path")
                 }
             }
         } else {
             val listing = runCatching {
-                context.assets.open(BUNDLE_LISTING).bufferedReader().use { it.readLines() }
+                openAsset(BUNDLE_LISTING).bufferedReader().use { it.readLines() }
             }.getOrNull()
             if (listing != null) {
                 // Build-time listing (1.14 bundles): no AssetManager.list() walk,
                 // files copied in parallel and each verified against its SHA-256.
                 installListedBundle(parseBundleListing(listing), staging, installThreads()) { path ->
-                    context.assets.open("$ASSET_ROOT/$path")
+                    openAsset("$ASSET_ROOT/$path")
                 }
             } else {
                 copyDirectory(ASSET_ROOT, staging)
                 verifyManifest(staging, version)
             }
         }
-        release.parentFile?.mkdirs()
+        // Data and directory entries durable before the tree becomes visible
+        // under its release name (writers do not fsync: one wide batch lets
+        // the filesystem merge the flushes).
+        val files = ReleaseIntegrity.inventory(staging)
+        ReleaseIntegrity.syncFiles(staging, files)
+        ReleaseIntegrity.syncDirectories(staging, files)
+        val releases = checkNotNull(release.parentFile)
+        releases.mkdirs()
         if (release.exists()) {
             check(release.deleteRecursively()) {
                 "Cannot remove an incomplete Pam Native application bundle"
             }
         }
         check(staging.renameTo(release)) { "Cannot activate Pam Native application bundle" }
+        ReleaseIntegrity.syncDirectory(releases)
         require(entry.isFile) { "Pam Native bundle does not contain index.php" }
+        // Last: only a fully durable tree is ever marked complete.
+        ReleaseIntegrity.write(release, version, files)
         if (deferred.isNotEmpty()) enqueueDeferredAssets(release, deferred)
         scheduleReleaseCleanup(release)
         return entry
@@ -70,7 +95,7 @@ internal class AssetInstaller(private val context: Context) {
 
     private fun prepareDeferredAssets(release: File) {
         if (File(release, ".assets-ready").isFile) return
-        val pack = runCatching { context.assets.open(BUNDLE_PACK) }.getOrNull() ?: return
+        val pack = runCatching { openAsset(BUNDLE_PACK) }.getOrNull() ?: return
         val files = pack.use { readPackedBundleIndex(java.io.DataInputStream(it)).plain }
             .filter { isDeferredBundleAsset(it.path) }
         if (files.isNotEmpty()) enqueueDeferredAssets(release, files)
@@ -80,9 +105,16 @@ internal class AssetInstaller(private val context: Context) {
         DeferredBundleAssets.enqueue {
             files.forEach { file ->
                 if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                installPlainBundleFile(release, file) { context.assets.open("$ASSET_ROOT/$it") }
+                installPlainBundleFile(release, file) { openAsset("$ASSET_ROOT/$it") }
             }
-            File(release, ".assets-ready").writeText("1")
+            // Each asset was fsynced before its rename; the flag follows its directories.
+            ReleaseIntegrity.syncDirectories(release, files.map { it.path to it.size.toLong() })
+            val ready = File(release, ".assets-ready")
+            java.io.FileOutputStream(ready).use { output ->
+                output.write('1'.code)
+                output.fd.sync()
+            }
+            ReleaseIntegrity.syncDirectory(release)
         }
     }
 
@@ -115,11 +147,11 @@ internal class AssetInstaller(private val context: Context) {
     }
 
     private fun copyDirectory(assetPath: String, destination: File) {
-        val children = context.assets.list(assetPath).orEmpty()
+        val children = listAssets(assetPath)
         if (children.isEmpty()) {
             destination.parentFile?.mkdirs()
             val temporary = File(destination.parentFile, "${destination.name}.tmp")
-            context.assets.open(assetPath).use { input ->
+            openAsset(assetPath).use { input ->
                 temporary.outputStream().use { output -> input.copyTo(output) }
             }
             check(temporary.renameTo(destination)) { "Cannot install ${destination.name}" }
@@ -546,6 +578,7 @@ internal fun installPlainBundleFile(destination: File, file: PackedBundleFile, o
                     digest.update(buffer, 0, count)
                     output.write(buffer, 0, count)
                 }
+                output.fd.sync()
             }
         }
         require(copied == file.size.toLong() && MessageDigest.isEqual(digest.digest(), file.sha256)) {

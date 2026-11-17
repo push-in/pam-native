@@ -56,6 +56,19 @@ re-hash `active.bundle`, decode it into a content-addressed private release, and
 start that entry. A malformed, truncated or mismatched active slot is
 quarantined as `failed.*` and startup falls back to the store bundle.
 
+Extraction is crash-safe for both the store bundle (Android
+`files/pam/releases/<digest>`) and OTA slots (`pam/ota-releases/<digest>`):
+files are written into a staging directory and fsynced, their directories are
+fsynced, the tree is renamed into place, and a `.pam-release` completion marker
+(`pam-release 1 <digest> <installation id>`, then `<size> <path>` per file) is
+written last. A launch reuses a release only when that marker names the
+expected digest and every listed file exists at its recorded size (one `stat`
+per file, no hashing). A release left by a process killed mid-extraction
+(empty or missing sources, no marker) is discarded and extracted again, and
+the OPcache file cache is dropped with it so no opcode compiled from a
+truncated source survives. Releases installed by earlier versions carry no
+marker and are extracted once more on the first launch after the update.
+
 The downloader and manifest endpoint are deliberately application choices.
 They may be plain HTTPS, PAM HTTP, Laravel, a CDN, or another backend. The
 native package imports no server package, and a server needs no native package;

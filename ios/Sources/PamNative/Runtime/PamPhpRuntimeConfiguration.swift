@@ -118,6 +118,18 @@ public struct PamPhpRuntimeConfiguration: Equatable {
         return digest
     }
 
+    /// Drops the file cache on the next `prepareOpcacheDirectory` (an OTA
+    /// slot re-extracted at the same path after an interrupted install).
+    static func invalidateOpcache(
+        root: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+        fileManager: FileManager = .default
+    ) {
+        guard let root else { return }
+        let base = root.appendingPathComponent("pam", isDirectory: true)
+        try? fileManager.removeItem(at: base.appendingPathComponent("opcache.stamp"))
+        try? fileManager.removeItem(at: base.appendingPathComponent("opcache", isDirectory: true))
+    }
+
     static func prepareOpcacheDirectory(
         stamp: String,
         root: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
