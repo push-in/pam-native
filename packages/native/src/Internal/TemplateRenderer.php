@@ -7944,38 +7944,61 @@ final class TemplateRenderer
         ?object $scope,
         ?Closure $explicit,
     ): Closure {
-        $property = ltrim($model, '$');
+        // `$field` or one level into an object property: `$form->email`.
         if (
             $scope === null
-            || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $property) !== 1
-            || !property_exists($scope, $property)
+            || preg_match('/^\$?([A-Za-z_][A-Za-z0-9_]*)(?:->([A-Za-z_][A-Za-z0-9_]*))?$/D', trim($model), $match) !== 1
+            || !property_exists($scope, $match[1])
         ) {
             throw new RuntimeException(
                 "p-model {$model} on {$tag} does not resolve to a property of the parent component.",
             );
         }
+        $property = $match[1];
+        $field = $match[2] ?? '';
         $reflection = self::reflectionProperty($scope, $property);
-        if ($reflection->isReadOnly()) {
-            throw new RuntimeException("p-model {$model} on {$tag} cannot write a readonly property.");
-        }
-        $type = $reflection->getType();
-
-        return static function (mixed $value = null) use ($reflection, $property, $scope, $explicit, $type): void {
-            if ($type instanceof \ReflectionNamedType && $type->isBuiltin() && $value !== null) {
-                $value = match ($type->getName()) {
-                    'int' => is_numeric($value) ? (int) $value : $value,
-                    'float' => is_numeric($value) ? (float) $value : $value,
-                    'string' => is_scalar($value) ? (string) $value : $value,
-                    'bool' => is_scalar($value) ? ($value === true || $value === 1 || $value === '1' || $value === 'true') : $value,
-                    default => $value,
-                };
+        if ($field === '') {
+            if ($reflection->isReadOnly()) {
+                throw new RuntimeException("p-model {$model} on {$tag} cannot write a readonly property.");
             }
-            $previous = $reflection->getValue($scope);
-            if ($previous !== $value) {
-                if ($scope instanceof Component) {
-                    $scope->__pamNotifyUpdating($property, $value, $previous);
+            $type = $reflection->getType();
+
+            return static function (mixed $value = null) use ($reflection, $property, $scope, $explicit, $type): void {
+                $value = self::coerceModel($type, $value);
+                $previous = $reflection->getValue($scope);
+                if ($previous !== $value) {
+                    if ($scope instanceof Component) {
+                        $scope->__pamNotifyUpdating($property, $value, $previous);
+                    }
+                    $reflection->setValue($scope, $value);
+                    if ($scope instanceof Component) {
+                        $scope->__pamNotifyUpdated($property);
+                        $scope->__pamFlushChanges();
+                    }
                 }
-                $reflection->setValue($scope, $value);
+                if ($explicit !== null) {
+                    $explicit($value);
+                }
+            };
+        }
+
+        return static function (mixed $value = null) use ($reflection, $property, $field, $scope, $explicit, $model, $tag): void {
+            $target = $reflection->getValue($scope);
+            if (!is_object($target) || !property_exists($target, $field)) {
+                throw new RuntimeException("p-model {$model} on {$tag} does not resolve to an object property.");
+            }
+            $fieldReflection = new \ReflectionProperty($target, $field);
+            $value = self::coerceModel($fieldReflection->getType(), $value);
+            if ($fieldReflection->getValue($target) !== $value) {
+                if ($scope instanceof Component) {
+                    $scope->__pamNotifyUpdating($property, $target, $target);
+                }
+                if ($target instanceof \Pam\Native\Forms\NativeForm) {
+                    // Marks the field dirty and touched and clears its error.
+                    $target->set($field, $value);
+                } else {
+                    $fieldReflection->setValue($target, $value);
+                }
                 if ($scope instanceof Component) {
                     $scope->__pamNotifyUpdated($property);
                     $scope->__pamFlushChanges();
@@ -7984,6 +8007,22 @@ final class TemplateRenderer
             if ($explicit !== null) {
                 $explicit($value);
             }
+        };
+    }
+
+    /** Casts a component's model value to the bound property's scalar type. */
+    private static function coerceModel(?\ReflectionType $type, mixed $value): mixed
+    {
+        if (!$type instanceof \ReflectionNamedType || !$type->isBuiltin() || $value === null) {
+            return $value;
+        }
+
+        return match ($type->getName()) {
+            'int' => is_numeric($value) ? (int) $value : $value,
+            'float' => is_numeric($value) ? (float) $value : $value,
+            'string' => is_scalar($value) ? (string) $value : $value,
+            'bool' => is_scalar($value) ? ($value === true || $value === 1 || $value === '1' || $value === 'true') : $value,
+            default => $value,
         };
     }
 
