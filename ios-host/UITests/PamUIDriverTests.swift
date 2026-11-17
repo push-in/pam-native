@@ -402,11 +402,19 @@ final class PamUIDriverTests: XCTestCase {
     }
 #endif
 
+    /// The element labelled exactly [label], else the first whose label
+    /// starts with it ("Delete" is the dialog's button, not "Delete project").
     private func element(labelled label: String, timeout: Double, step: Int) throws -> XCUIElement {
-        let predicate = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", label, label)
-        let element = app.descendants(matching: .any).matching(predicate).firstMatch
-        XCTAssertTrue(element.waitForExistence(timeout: timeout), "step \(step): no element labelled \(label)")
-        return element
+        let exact = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        let prefix = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if exact.exists { return exact }
+            if prefix.exists, !exact.waitForExistence(timeout: 0.3) { return prefix }
+        } while Date() < deadline
+        if exact.exists { return exact }
+        XCTAssertTrue(prefix.exists, "step \(step): no element labelled \(label)")
+        return prefix
     }
 
     private func screenshot(named name: String) throws {
