@@ -29,6 +29,11 @@
 #include "pam_native_engine.h"
 #include "pam_tree_encoder.h"
 
+// The PHP SDK and the tree encoder use 64-bit integers (node ids, ARGB
+// colors). PAM's 32-bit Android runtimes (armeabi-v7a, x86) keep them too;
+// a stock 32-bit PHP build does not, and must not link.
+static_assert(SIZEOF_ZEND_LONG == 8, "PAM Native needs a PHP runtime with 64-bit integers");
+
 namespace {
 
 constexpr char kLogTag[] = "PamNative";

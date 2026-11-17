@@ -8,11 +8,10 @@ Samsung (Tizen) and LG (webOS) TVs run HTML/JS apps: for them the same app
 is compiled to a static HTML/JS build, with no PHP and no server on the TV
 (see [Samsung and LG TVs](#samsung-and-lg-tvs-tizen-and-webos)). Apple TV
 runs the native UIKit renderer and PHP, like the iPhone app (see
-[Apple TV](#apple-tv-tvos)). The native Android renderer needs 64-bit Android (`arm64-v8a`, or `x86_64`
-emulators), because the PHP SDK uses 64-bit integers (ARGB colors, node ids).
-Devices that run 32-bit Android (`armeabi-v7a`, such as the 2020 Chromecast
-with Google TV and older Fire TV sticks) get the same APK and open the app's
-web build in a WebView instead (see [32-bit Android TVs](#32-bit-android-tvs)).
+[Apple TV](#apple-tv-tvos)). The native Android renderer runs on every Android
+ABI: `arm64-v8a` and `x86_64`, and 32-bit `armeabi-v7a` (the 2020 Chromecast
+with Google TV, older Fire TV sticks) and `x86`, whose PHP runtime keeps
+64-bit integers (see [32-bit Android](platform-runtime.md#32-bit-android)).
 
 ## Add the target
 
@@ -149,10 +148,12 @@ the build.
 
 ## 32-bit Android TVs
 
-With `android-tv` in `targets` and `pushinbr/pam-native-web` installed,
-`pam mobile build` also compiles the app to the web build (see below) into the
-APK assets and adds `armeabi-v7a` and `x86` to the APK with a 3 KB stub
-library, so the APK installs on 32-bit devices. There `PamActivity` hands off
+`pam mobile build` and `pam mobile release` build the native app for 32-bit
+Android too. A build limited to 64-bit ABIs (`--abi arm64-v8a --abi x86_64`)
+can still reach 32-bit TVs through the web build: with `android-tv` in
+`targets` and `pushinbr/pam-native-web` installed, it compiles the app to the
+web build (see below) into the APK assets and adds `armeabi-v7a` and `x86` to
+the APK with a 3 KB stub library, so the APK installs on 32-bit devices. There `PamActivity` hands off
 to `PamWebActivity`, a WebView with the web build: the D-pad, OK and the media
 keys reach the page, Back goes through the app's focus engine and leaves the app
 at the root. 64-bit devices keep the native renderer. If the app uses

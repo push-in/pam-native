@@ -203,6 +203,8 @@ jobs:
               android/app/build.gradle.kts \
               native/pam_native_engine.h \
               target/aarch64-linux-android/release/libpam_native_engine.a \
+              target/armv7-linux-androideabi/release/libpam_native_engine.a \
+              target/i686-linux-android/release/libpam_native_engine.a \
               target/x86_64-linux-android/release/libpam_native_engine.a \
               target/pam-native-engine-version
             gzip -n "${output%.gz}"
@@ -454,6 +456,8 @@ jobs:
           tar -xzf "candidate-renderer/${renderer}" -C "${candidate_package}" \
             --strip-components=1 \
             "pam-native-android-renderer-${version}/target/aarch64-linux-android/release/libpam_native_engine.a" \
+            "pam-native-android-renderer-${version}/target/armv7-linux-androideabi/release/libpam_native_engine.a" \
+            "pam-native-android-renderer-${version}/target/i686-linux-android/release/libpam_native_engine.a" \
             "pam-native-android-renderer-${version}/target/x86_64-linux-android/release/libpam_native_engine.a"
           protocol=$(sha256sum "${candidate_package}/crates/pam-native-protocol/src/lib.rs" | cut -c1-16)
           engine=$(cd "${candidate_package}" && find crates/pam-native-engine/Cargo.toml crates/pam-native-engine/src crates/pam-native-protocol/Cargo.toml crates/pam-native-protocol/src -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)

@@ -137,6 +137,8 @@ jobs:
             runtime/catalog.json \
             runtime/android \
             target/aarch64-linux-android/release/libpam_native_engine.a \
+            target/armv7-linux-androideabi/release/libpam_native_engine.a \
+            target/i686-linux-android/release/libpam_native_engine.a \
             target/x86_64-linux-android/release/libpam_native_engine.a
       - uses: actions/upload-artifact@v7
         with:

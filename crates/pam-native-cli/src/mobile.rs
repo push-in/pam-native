@@ -78,11 +78,11 @@ impl BuildMode {
 enum AndroidAbi {
     Arm64 = 1,
     X86_64 = 2,
-    /// 32-bit ARM (TV sticks with 32-bit Android). The host, engine and PHP
-    /// runtime build for it; the PHP SDK does not run on 32-bit integers yet,
-    /// so [AndroidAbi::parse] refuses it.
-    #[allow(dead_code)]
+    /// 32-bit ARM phones and TVs. PAM's 32-bit PHP runtimes keep 64-bit
+    /// integers, so the PHP SDK runs unchanged.
     ArmV7 = 3,
+    /// 32-bit x86 (old emulators and Chromebooks).
+    X86 = 4,
 }
 
 impl AndroidAbi {
@@ -90,14 +90,10 @@ impl AndroidAbi {
         match value {
             "arm64-v8a" | "arm64" | "aarch64" => Ok(Self::Arm64),
             "x86_64" | "x64" => Ok(Self::X86_64),
-            "armeabi-v7a" | "armv7" | "arm" => Err(
-                "armeabi-v7a is not a native ABI: the PAM PHP SDK needs 64-bit integers. \
-                 Apps with the android-tv target add armeabi-v7a by themselves, where they \
-                 open their web build (pushinbr/pam-native-web)"
-                    .to_owned(),
-            ),
+            "armeabi-v7a" | "armv7" | "arm" => Ok(Self::ArmV7),
+            "x86" | "i686" => Ok(Self::X86),
             _ => Err(format!(
-                "unsupported Android ABI {value:?}; expected arm64-v8a, armeabi-v7a or x86_64"
+                "unsupported Android ABI {value:?}; expected arm64-v8a, armeabi-v7a, x86 or x86_64"
             )),
         }
     }
@@ -107,6 +103,7 @@ impl AndroidAbi {
             Self::Arm64 => "arm64-v8a",
             Self::X86_64 => "x86_64",
             Self::ArmV7 => "armeabi-v7a",
+            Self::X86 => "x86",
         }
     }
 
@@ -115,6 +112,7 @@ impl AndroidAbi {
             Self::Arm64 => "aarch64-linux-android",
             Self::X86_64 => "x86_64-linux-android",
             Self::ArmV7 => "armv7-linux-androideabi",
+            Self::X86 => "i686-linux-android",
         }
     }
 
@@ -123,7 +121,12 @@ impl AndroidAbi {
             Self::Arm64 => "aarch64-linux-android24-clang",
             Self::X86_64 => "x86_64-linux-android24-clang",
             Self::ArmV7 => "armv7a-linux-androideabi24-clang",
+            Self::X86 => "i686-linux-android24-clang",
         }
+    }
+
+    fn is_32_bit(self) -> bool {
+        matches!(self, Self::ArmV7 | Self::X86)
     }
 }
 
@@ -1578,9 +1581,9 @@ fn parse_options(
             "--release" if allow_release => mode = BuildMode::Release,
             "--release" => return Err("`pam mobile dev` only supports debug builds".to_owned()),
             "--abi" => {
-                let value = arguments
-                    .next()
-                    .ok_or_else(|| "--abi requires arm64-v8a, armeabi-v7a or x86_64".to_owned())?;
+                let value = arguments.next().ok_or_else(|| {
+                    "--abi requires arm64-v8a, armeabi-v7a, x86 or x86_64".to_owned()
+                })?;
                 let abi = AndroidAbi::parse(&value.to_string_lossy())?;
                 if !abis.contains(&abi) {
                     abis.push(abi);
@@ -1644,12 +1647,18 @@ fn parse_release_options(
     Ok(ReleaseOptions { project, platform })
 }
 
+/// Every ABI Google Play serves: an App Bundle without the 32-bit ones loses
+/// every 32-bit-only phone and TV.
 fn default_abis() -> Vec<AndroidAbi> {
-    vec![AndroidAbi::Arm64, AndroidAbi::X86_64]
+    vec![
+        AndroidAbi::Arm64,
+        AndroidAbi::ArmV7,
+        AndroidAbi::X86,
+        AndroidAbi::X86_64,
+    ]
 }
 
-/// The ABIs to build. 32-bit ARM ([AndroidAbi::ArmV7]) is not added for TVs
-/// yet: the PHP SDK needs 64-bit integers.
+/// The ABIs to build.
 fn effective_abis(_project: &Project, requested: &[AndroidAbi]) -> Vec<AndroidAbi> {
     requested.to_vec()
 }
@@ -3288,8 +3297,13 @@ fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<
         let runtime = resolve_runtime(project, &extracted)?;
         for abi in default_abis() {
             if !runtime_ready_at(&runtime.root, abi) {
+                let hint = if abi.is_32_bit() {
+                    "; 32-bit runtimes ship with PAM releases after v2.2.20 (run `pam self-update`), or build with --abi arm64-v8a --abi x86_64"
+                } else {
+                    ""
+                };
                 return Err(format!(
-                    "Android runtime archive is missing PHP {} for {}",
+                    "Android runtime archive is missing PHP {} for {}{hint}",
                     runtime.release.php_version,
                     abi.android()
                 ));
@@ -6371,23 +6385,32 @@ fn configure_android(
 ) -> Result<(), String> {
     let sdk = android_sdk()?;
     let assets = workspace.join("app/src/main/assets");
-    let web_fallback = if project.manifest.targets_android_tv() {
+    // 32-bit Android runs the native app when the build has a 32-bit ABI.
+    // A TV build without one (`--abi arm64-v8a`) still reaches 32-bit TVs
+    // through the web build (PamWebActivity), carried as armeabi-v7a and x86.
+    let native_32_bit = abis.iter().any(|abi| abi.is_32_bit());
+    let web_fallback = if project.manifest.targets_android_tv() && !native_32_bit {
         crate::web_tv::android_fallback(&project.root, &assets)?
     } else {
         crate::web_tv::remove_android_fallback(&assets)?;
         false
     };
+    let web_abis = if web_fallback {
+        vec![AndroidAbi::ArmV7, AndroidAbi::X86]
+    } else {
+        Vec::new()
+    };
     let mut gradle_abis = display_abis(abis);
-    if web_fallback {
-        // 32-bit TVs, and x86 emulators to test them.
-        gradle_abis.push_str(",armeabi-v7a,x86");
+    if !web_abis.is_empty() {
+        gradle_abis.push(',');
+        gradle_abis.push_str(&display_abis(&web_abis));
     }
     write_atomic(
         &workspace.join("local.properties"),
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
     )?;
     let properties = format!(
-        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\ndebugFirebase={}\nbenchmarkApplicationIdSuffix={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
+        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\ndebugFirebase={}\nbenchmarkApplicationIdSuffix={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\nwebAbis={}\n",
         property_value(&native_home.to_string_lossy()),
         property_value(&runtime.root.to_string_lossy()),
         property_value(&project.root.to_string_lossy()),
@@ -6411,6 +6434,7 @@ fn configure_android(
         project.manifest.version_code,
         property_value(&project.manifest.version_name),
         gradle_abis,
+        display_abis(&web_abis),
     );
     write_atomic(
         &workspace.join("pam-native.properties"),
@@ -9356,11 +9380,6 @@ fn connected_abi() -> Result<AndroidAbi, String> {
         return Err("no authorized Android device is available through adb".to_owned());
     }
     let abi = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if abi.starts_with("armeabi") || abi == "x86" {
-        // The APK also carries armeabi-v7a and x86, where the app runs its web build.
-        println!("PAM Native: the device runs 32-bit Android; the app opens its web build there");
-        return Ok(AndroidAbi::Arm64);
-    }
     AndroidAbi::parse(&abi)
 }
 
@@ -10315,6 +10334,38 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_play_abi_builds_natively_by_default() {
+        assert_eq!(
+            display_abis(&default_abis()),
+            "arm64-v8a,armeabi-v7a,x86,x86_64"
+        );
+        for (name, abi, target, clang) in [
+            (
+                "armeabi-v7a",
+                AndroidAbi::ArmV7,
+                "armv7-linux-androideabi",
+                "armv7a-linux-androideabi24-clang",
+            ),
+            (
+                "x86",
+                AndroidAbi::X86,
+                "i686-linux-android",
+                "i686-linux-android24-clang",
+            ),
+        ] {
+            let parsed = AndroidAbi::parse(name).expect("32-bit ABI");
+            assert_eq!(parsed, abi);
+            assert!(parsed.is_32_bit());
+            assert_eq!(parsed.android(), name);
+            assert_eq!(parsed.rust_target(), target);
+            assert_eq!(parsed.clang(), clang);
+        }
+        assert!(!AndroidAbi::Arm64.is_32_bit() && !AndroidAbi::X86_64.is_32_bit());
+        assert_eq!(AndroidAbi::parse("i686"), Ok(AndroidAbi::X86));
+        assert!(AndroidAbi::parse("mips").is_err());
+    }
 
     #[test]
     fn branch_installs_use_the_cli_release_for_plugin_checks() {

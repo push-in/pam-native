@@ -5,18 +5,24 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# PAM_WEB_ABIS lists the ABIs that only carry the web build of an Android TV
+# app (PamWebActivity); every other ABI links the PHP runtime and the engine.
+if(DEFINED PAM_WEB_ABIS AND ANDROID_ABI IN_LIST PAM_WEB_ABIS)
+    add_library(pam_native_android SHARED pam_web_fallback.c)
+    return()
+endif()
+
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     set(PAM_RUST_TARGET "aarch64-linux-android")
 elseif(ANDROID_ABI STREQUAL "x86_64")
     set(PAM_RUST_TARGET "x86_64-linux-android")
-elseif(ANDROID_ABI STREQUAL "armeabi-v7a" OR ANDROID_ABI STREQUAL "x86")
-    # 32-bit Android (TV sticks and boxes, x86 emulators): the PHP SDK needs
-    # 64-bit integers, so these devices open the web build of the app in a
-    # WebView (PamWebActivity). The library only lets the APK install there.
-    add_library(pam_native_android SHARED pam_web_fallback.c)
-    return()
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    # 32-bit Android: the PHP runtime keeps 64-bit integers (PHP_INT_SIZE 8).
+    set(PAM_RUST_TARGET "armv7-linux-androideabi")
+elseif(ANDROID_ABI STREQUAL "x86")
+    set(PAM_RUST_TARGET "i686-linux-android")
 else()
-    message(FATAL_ERROR "Pam Native supports arm64-v8a and x86_64, plus armeabi-v7a and x86 in web mode")
+    message(FATAL_ERROR "Pam Native supports arm64-v8a, armeabi-v7a, x86 and x86_64")
 endif()
 
 if(NOT DEFINED PAM_NATIVE_ROOT)
