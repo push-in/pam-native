@@ -3801,6 +3801,161 @@ fn apple_runtime_ready(runtime: &ResolvedRuntime, os: AppleOs) -> bool {
 
 /// The iOS engine xcframework must be built from these sources: same SDK
 /// version and protocol, recorded next to it like the Android engine marker.
+/// Largest prebuilt engine archive accepted from a release.
+const MAX_APPLE_ENGINE_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The directory holding the `PamNativeEngine.xcframework` built from these
+/// pam-native sources: the PHP runtime slot when its engine matches (a local
+/// rebuild stays the fallback), else a cache keyed by version, protocol and
+/// engine fingerprint, filled once from the release asset
+/// `pam-native-ios-engine-<version>-<protocol>-<engine>.zip` after its SHA-256
+/// is verified. Projects on different pam-native versions never share, or
+/// overwrite, one engine slot.
+fn resolve_apple_engine(
+    runtime_root: &Path,
+    native_home: &Path,
+    os: AppleOs,
+) -> Result<PathBuf, String> {
+    let local = ios_engine_matches(runtime_root, native_home);
+    if local.is_ok() || os != AppleOs::Ios {
+        return local.map(|()| runtime_root.to_path_buf());
+    }
+    let version = env!("CARGO_PKG_VERSION");
+    let (Some(protocol), Some(engine)) = (
+        protocol_fingerprint(native_home),
+        engine_source_fingerprint(native_home),
+    ) else {
+        return local.map(|()| runtime_root.to_path_buf());
+    };
+    let key = format!("{version}-{protocol}-{engine}");
+    let cache = apple_engine_cache_root()?.join("ios").join(&key);
+    if ios_engine_matches(&cache, native_home).is_ok() {
+        return Ok(cache);
+    }
+    let base = std::env::var("PAM_NATIVE_RELEASE_BASE_URL").unwrap_or_else(|_| {
+        format!("https://github.com/push-in/pam-native/releases/download/v{version}")
+    });
+    match download_apple_engine(
+        base.trim_end_matches('/'),
+        &format!("pam-native-ios-engine-{key}.zip"),
+        &cache,
+    )
+    .and_then(|()| ios_engine_matches(&cache, native_home))
+    {
+        Ok(()) => {
+            println!("Using the prebuilt iOS engine {key} ({})", cache.display());
+            Ok(cache)
+        }
+        Err(download) => Err(format!(
+            "no prebuilt iOS engine for pam-native {version} could be used ({download}); {}",
+            local.unwrap_err()
+        )),
+    }
+}
+
+fn apple_engine_cache_root() -> Result<PathBuf, String> {
+    if let Some(configured) =
+        std::env::var_os("PAM_NATIVE_ENGINE_CACHE").filter(|path| !path.is_empty())
+    {
+        return Ok(PathBuf::from(configured));
+    }
+    if let Some(cache) = std::env::var_os("XDG_CACHE_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|cache| cache.is_absolute())
+    {
+        return Ok(cache.join("pam-native/engines"));
+    }
+    let home = std::env::var_os("HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME is not set; set PAM_NATIVE_ENGINE_CACHE".to_owned())?;
+    Ok(if cfg!(target_os = "macos") {
+        home.join("Library/Caches/pam-native/engines")
+    } else {
+        home.join(".cache/pam-native/engines")
+    })
+}
+
+/// Downloads, verifies and unpacks a prebuilt engine into [destination]
+/// (`<destination>/PamNativeEngine.xcframework`), atomically.
+fn download_apple_engine(base: &str, asset: &str, destination: &Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| format!("invalid engine cache {}", destination.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let temporary = parent.join(format!(
+        ".download-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir(&temporary)
+        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
+    let result = (|| {
+        let archive = temporary.join(asset);
+        let checksum = temporary.join(format!("{asset}.sha256"));
+        download_release_asset(
+            &format!("{base}/{asset}"),
+            &archive,
+            MAX_APPLE_ENGINE_ARCHIVE_BYTES,
+        )?;
+        download_release_asset(
+            &format!("{base}/{asset}.sha256"),
+            &checksum,
+            MAX_CHECKSUM_BYTES,
+        )?;
+        verify_release_checksum(&archive, &checksum, asset)?;
+        let listing = Command::new("unzip")
+            .args(["-Z1"])
+            .arg(&archive)
+            .output()
+            .map_err(|error| format!("cannot inspect the iOS engine archive: {error}"))?;
+        if !listing.status.success() {
+            return Err(format!(
+                "cannot inspect the iOS engine archive: {}",
+                listing.status
+            ));
+        }
+        for line in String::from_utf8_lossy(&listing.stdout).lines() {
+            let path = Path::new(line);
+            let safe = path.starts_with("PamNativeEngine.xcframework")
+                && path
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_)));
+            if !safe {
+                return Err(format!("unsafe iOS engine archive path: {line}"));
+            }
+        }
+        let unpacked = temporary.join("unpacked");
+        let status = Command::new("unzip")
+            .args(["-q"])
+            .arg(&archive)
+            .arg("-d")
+            .arg(&unpacked)
+            .status()
+            .map_err(|error| format!("cannot unpack the iOS engine: {error}"))?;
+        if !status.success() {
+            return Err(format!("cannot unpack the iOS engine: {status}"));
+        }
+        if destination.exists() {
+            fs::remove_dir_all(destination)
+                .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
+        }
+        fs::rename(&unpacked, destination).map_err(|error| {
+            format!(
+                "cannot store the iOS engine in {}: {error}",
+                destination.display()
+            )
+        })
+    })();
+    let _ = fs::remove_dir_all(&temporary);
+    result
+}
+
 fn ios_engine_matches(ios_root: &Path, native_home: &Path) -> Result<(), String> {
     let marker_path = ios_root.join("PamNativeEngine.xcframework/pam-native-engine-version");
     let marker = fs::read_to_string(&marker_path).unwrap_or_default();
@@ -3908,7 +4063,7 @@ fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
             runtime_root.display()
         ));
     }
-    ios_engine_matches(&runtime_root, &native_home)?;
+    let engine_root = resolve_apple_engine(&runtime_root, &native_home, os)?;
     write_runtime_lock(project, &runtime)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;
@@ -3955,13 +4110,16 @@ fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
     let runtime_destination = workspace.join("Runtime");
     fs::create_dir_all(&runtime_destination)
         .map_err(|error| format!("cannot create iOS runtime directory: {error}"))?;
-    for framework in ["PamPhp.xcframework", "PamNativeEngine.xcframework"] {
+    for (framework, source) in [
+        ("PamPhp.xcframework", &runtime_root),
+        ("PamNativeEngine.xcframework", &engine_root),
+    ] {
         let destination = runtime_destination.join(framework);
         if destination.exists() {
             fs::remove_dir_all(&destination)
                 .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
         }
-        copy_tree(&runtime_root.join(framework), &destination, &[])?;
+        copy_tree(&source.join(framework), &destination, &[])?;
     }
 
     write_ios_plugin_package(project, &workspace.join("PamNativeSDK"))?;
@@ -10084,12 +10242,11 @@ fn linked_vendor_packages(root: &Path) -> Vec<PathBuf> {
             continue;
         }
         for package in fs::read_dir(vendor.path()).into_iter().flatten().flatten() {
-            if package.file_type().is_ok_and(|kind| kind.is_symlink()) {
-                if let Ok(target) = fs::canonicalize(package.path()) {
-                    if target.is_dir() {
-                        packages.push(target);
-                    }
-                }
+            if package.file_type().is_ok_and(|kind| kind.is_symlink())
+                && let Ok(target) = fs::canonicalize(package.path())
+                && target.is_dir()
+            {
+                packages.push(target);
             }
         }
     }

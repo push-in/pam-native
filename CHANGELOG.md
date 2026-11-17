@@ -45,6 +45,15 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   frame.
 - Fixed: `pam dev` hot-reloads Composer path packages linked into `vendor/`
   (a component library or plugin developed next to the app).
+- Added: every release publishes a prebuilt `PamNativeEngine.xcframework`
+  (iOS arm64 device, arm64 and x86_64 simulator) as
+  `pam-native-ios-engine-<version>-<protocol>-<engine>.zip` with its SHA-256.
+  `pam mobile ios:*` downloads it once, verifies it and caches it per
+  version and fingerprint (`~/Library/Caches/pam-native/engines`,
+  `PAM_NATIVE_ENGINE_CACHE` overrides), so projects on different pam-native
+  versions no longer depend on, or overwrite, the single engine slot of the
+  shared PHP runtime. A matching locally rebuilt engine in that slot is still
+  used first.
 - Added: debug layout snapshots for UI geometry tests: Android
   `am broadcast -a dev.pam.nativeapp.action.CAPTURE_LAYOUT` and the iOS UI
   driver's `{"layout": "name"}` step write every view's frame, visible part,
