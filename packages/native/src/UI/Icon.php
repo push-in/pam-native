@@ -169,7 +169,12 @@ final class Icon
             throw new InvalidArgumentException('Icon glyph maps must be project-relative paths.');
         }
 
-        return self::projectRoot().'/'.$relative;
+        // The project root first (the working directory is not the project
+        // during Android hot reload), then the working directory.
+        $root = self::projectRoot().'/'.$relative;
+        $working = (getcwd() ?: '.').'/'.$relative;
+
+        return is_file($root) || !is_file($working) ? $root : $working;
     }
 
     /**

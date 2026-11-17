@@ -1191,7 +1191,7 @@ internal class NativeImageLoader(
         if (smallAssets[source] == false) return null
         val path = normalizedPamAssetPath(source) ?: return null
         val bytes = runCatching {
-            context.assets.open(path).use { input ->
+            PamDevAssets.open(context.assets, path).use { input ->
                 val buffer = ByteArray(ASSET_SYNC_MAX_BYTES + 1)
                 var length = 0
                 while (length < buffer.size) {
@@ -1555,7 +1555,8 @@ internal class NativeImageLoader(
                     File(context.filesDir, "pam-files"),
                     source,
                 ).inputStream().use(::readBounded)
-            "asset" -> context.assets.open(
+            "asset" -> PamDevAssets.open(
+                context.assets,
                 requireNotNull(normalizedPamAssetPath(source)) {
                     "Image asset path is invalid."
                 },

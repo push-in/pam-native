@@ -92,6 +92,10 @@ $assert(
     'Route params must reach setup() typed (link strings coerced).',
 );
 $assert($screen instanceof Screen, 'statusBar() must wrap the screen with a StatusBar.');
+$assert(
+    (float) ($screen->properties()[\Pam\Native\PropKey::FlexGrow->value] ?? 0) === 1.0,
+    'The statusBar() wrapper must fill the scene; without flexGrow the route rendered empty.',
+);
 $assert((new TypedRoute('chat', ['id' => '8']))->navigate() && $router->root()->current()->all() === ['id' => '8'], 'TypedRoute must navigate.');
 $expectError(static fn () => navigate('chat'), 'requires parameter id');
 $expectError(static fn () => navigate('chat', ['id' => '1', 'color' => 'red']), 'has no parameter color');

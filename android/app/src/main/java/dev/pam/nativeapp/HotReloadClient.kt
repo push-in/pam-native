@@ -49,7 +49,7 @@ internal class HotReloadClient(
                 bootDirectory?.let(HotReloadStore::directorySource),
                 HotReloadLocalSource { path -> runCatching { context.assets.open("pam/$path") }.getOrNull() },
             ),
-        )
+        ).also { dev.pam.nativeapp.render.PamDevAssets.liveRoot = it.live }
     }
 
     @Volatile

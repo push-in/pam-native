@@ -306,7 +306,8 @@ The template syntax includes:
 - `{{ expression }}` interpolation;
 - `:prop="expression"` and `:class="expression"` bindings;
 - `@press="method"` native events and `@event="method"` component events;
-- `bind:value="$property"` and `bind:checked="$property"` two-way bindings;
+- `bind:value="$property"` and `bind:checked="$property"` two-way bindings,
+  and `p-model="$property"` on inputs, switches and components (below);
 - `p-if`, `p-else-if`, and `p-else`;
 - `p-for="$item in $items"` for arrays and `Traversable` values;
 - `p-for="$number in $count"` for one-based repetition from `1` to `$count`;
@@ -345,6 +346,62 @@ editor metadata use the distinctive `p-*` PAM directives.
 A component still declares one root in source, but that root may use `p-if`.
 When its condition is false, PAM emits an inert invisible placeholder that
 consumes no flex space. Multiple rendered roots remain an error.
+
+### Two-way binding with `p-model`
+
+`p-model` works on components the way `v-model` works in Vue. The parent
+writes:
+
+```xml
+<EmailField p-model="$email" />
+<EmailField p-model="$form->email" />   <!-- one level into an object -->
+```
+
+and the component receives the value as its `modelValue` prop and sends
+changes back by emitting `model`:
+
+```php
+#[Tag('email-field')]
+#[Event('model', 'string')]
+final class EmailField extends Component
+{
+    public function __construct(
+        #[Prop(immutable: false)] public string $modelValue = '',
+    ) {
+    }
+
+    #[Action]
+    public function input(string $value): void
+    {
+        $this->modelValue = $value;
+        $this->emit('model', $value);
+    }
+}
+```
+
+The written value is cast to the bound property's scalar type (`int`,
+`float`, `string`, `bool`). On a `Pam\Native\Forms\NativeForm` the field is
+set through `set()`, which marks it dirty and touched and clears its error.
+An explicit `@model` listener still runs after the write.
+
+### Events on components
+
+A component declares its events with `#[Event(name, payload)]`; the payload is
+a class name or a scalar type (`'string'`, `'int'`, `'float'`, `'bool'`,
+`'array'`, `'mixed'`, `'null'`). Listen with `@change="method"` or
+`on:change="method"`: both spellings reach the component event. An `on:` name
+the component does not declare keeps its native meaning on the component's
+root element.
+
+### Expressions
+
+Template expressions read component properties, loop values, array keys and
+object properties (`$form->email`), call public methods of the component
+(`error('email')`), and support comparisons, `&&`/`||`, ternaries, `??` and
+string concatenation with `.` (`'Hello '.$name`; `+` is arithmetic only, as in
+PHP). They cannot call methods on other objects (`$form->error('email')`,
+`f($x)->g()`): templates only run the component's own public API, so wrap the
+call in a component method.
 
 ## Native scoped CSS
 

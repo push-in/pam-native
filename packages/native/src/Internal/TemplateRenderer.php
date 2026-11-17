@@ -1713,6 +1713,11 @@ final class TemplateRenderer
                 $attributes,
                 $factory !== null,
             );
+            if ($componentModel !== null) {
+                // Validates the target before `:modelValue` reads it, so a
+                // typo names the binding instead of a generic value error.
+                self::componentModelHandler($tag, $componentModel, $scope, null);
+            }
             $entry = null;
         } else {
             $checkedBinding = null;

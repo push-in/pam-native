@@ -29,7 +29,7 @@ internal class NativeTypefaceLoader(context: Context) {
         if (assetPath != null) {
             val key = "$assetPath:$resolvedWeight:$italic"
             return assetFonts[key] ?: runCatching {
-                Typeface.Builder(assets, assetPath)
+                (PamDevAssets.file(assetPath)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, assetPath))
                     .setWeight(resolvedWeight)
                     .setItalic(italic)
                     .setFontVariationSettings("'wght' $resolvedWeight")
@@ -47,7 +47,7 @@ internal class NativeTypefaceLoader(context: Context) {
                 // as is (no fake bold); otherwise the platform synthesizes the
                 // style from the closest file, like React Native's
                 // Typeface.create(typeface, weight, italic).
-                val base = Typeface.Builder(assets, path).build()
+                val base = (PamDevAssets.file(path)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, path)).build()
                 when {
                     exactStyle -> base
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> Typeface.create(base, resolvedWeight, italic)
@@ -71,10 +71,13 @@ internal class NativeTypefaceLoader(context: Context) {
 
     private val conventionalPaths = ConcurrentHashMap<String, String>()
 
-    private fun assetExists(path: String): Boolean =
-        conventionalPaths.getOrPut(path) {
-            if (runCatching { assets.open(path).close() }.isSuccess) "1" else "0"
+    private fun assetExists(path: String): Boolean {
+        // During `pam dev` a font can appear between two reloads: never cache a miss.
+        if (PamDevAssets.liveRoot != null) return PamDevAssets.exists(assets, path)
+        return conventionalPaths.getOrPut(path) {
+            if (PamDevAssets.exists(assets, path)) "1" else "0"
         } == "1"
+    }
 
     /**
      * React Native Android font-file conventions for a bare `fontFamily`:
