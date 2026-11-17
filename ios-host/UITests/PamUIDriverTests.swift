@@ -12,6 +12,7 @@ import XCTest
 ///     {"launch": true}                 cold start (default: activate)
 ///     {"tap": "Local marketplace"}     first element whose label matches
 ///     {"tapIfExists": "Back"}         tap when present, otherwise continue
+///     {"dismissKeyboard": true}        drag the content to close the keyboard
 ///     {"tapField": "Email"}            the editable field with that label,
 ///                                      then wait for keyboard focus
 ///     {"tapId": "composer.send"}       accessibility identifier
@@ -135,6 +136,22 @@ final class PamUIDriverTests: XCTestCase {
             field.tap()
             let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
             _ = XCTWaiter().wait(for: [focused], timeout: 3)
+            return
+        }
+        if step["dismissKeyboard"] as? Bool == true {
+            // Like a user: drag the content down (scroll views dismiss the
+            // keyboard on drag), else tap an empty spot near the top.
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                let window = app.windows.firstMatch
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                    .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+                if keyboard.exists {
+                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+                }
+                let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
+                XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "step \(index): the keyboard stayed open")
+            }
             return
         }
         if let label = step["tapIfExists"] as? String {

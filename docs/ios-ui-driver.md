@@ -33,6 +33,7 @@ Steps:
 | `{"launch": true}` | Cold start (default: `activate()` keeps the running state). |
 | `{"tap": "label"}` | First element whose accessibility label equals or starts with `label`. |
 | `{"tapIfExists": "label", "timeout": 2}` | Same, but continues when absent. |
+| `{"dismissKeyboard": true}` | Closes the keyboard the way a user does (a drag on the content, else a tap near the top) and asserts it closed. |
 | `{"tapField": "label"}` | The editable field (text field, secure field, text view) with that label or placeholder, not a caption sharing it; waits up to 3 s for keyboard focus. |
 | `{"tapId": "identifier"}` | Accessibility identifier (`testId`). |
 | `{"tapXY": [0.5, 0.9]}` | Normalized window coordinates. |
