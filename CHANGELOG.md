@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.50.4 - 2026-11-16
+
+Crash-safe release extraction. No API change.
+
+- Fixed: Android no longer reuses an embedded release left incomplete by a
+  process killed during first-launch extraction (zero-byte or missing PHP
+  sources caused "Class not found" on every launch until reinstall). Files and
+  directories are fsynced before the release is renamed into place, and a
+  `.pam-release` completion marker (file sizes) is written last.
+- Fixed: a release (embedded or OTA) is reused only when its `.pam-release`
+  marker matches and every listed file has its recorded size (parallel stat,
+  no hashing); otherwise it is discarded and extracted again. The first launch
+  after installing or updating takes ~190 ms longer (fsync, 16 threads); later
+  launches are unchanged.
+- Fixed: the Android OPcache stamp includes the release installation id, so
+  opcodes compiled from truncated sources are dropped when a release is
+  re-extracted at the same path.
+- Fixed: OTA slots on Android and iOS use the same crash-safe extraction and
+  completion marker; iOS drops the OPcache file cache when a slot is
+  re-extracted.
+
 ## 1.50.3 - 2026-11-16
 
 - Navigation: a held prewarm (`releaseAfterMs: null`) now survives switches
