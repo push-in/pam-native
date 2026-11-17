@@ -47,6 +47,9 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
 - Fixed: opening a sheet no longer requests a layout during layout
   ("requestLayout() improperly called"), which Android deferred to the next
   frame.
+- Fixed: `testID` (React Native's spelling) sets the native test identifier
+  like `testId`; it was dropped silently, so test ids written that way never
+  reached Android or iOS.
 - Fixed: `pam dev` hot-reloads Composer path packages linked into `vendor/`
   (a component library or plugin developed next to the app).
 - Added: every release publishes a prebuilt `PamNativeEngine.xcframework`
