@@ -118,7 +118,11 @@ internal class PamEditText @JvmOverloads constructor(
         }
     }
 
+    /** The underline colour the app asked for (`underlineColorAndroid`). */
+    private var underlineColor: Int? = null
+
     fun setUnderlineColor(color: Int?) {
+        underlineColor = color
         val transparent = color != null && Color.alpha(color) == 0
         if (transparent && background === originalBackground) {
             // A transparent tint still lets the framework EditText drawable
@@ -129,8 +133,26 @@ internal class PamEditText @JvmOverloads constructor(
         } else if (!transparent && background == null && originalBackground != null) {
             background = originalBackground
         }
-        backgroundTintList = color?.let(ColorStateList::valueOf)
-            ?: originalBackgroundTint
+        applyUnderlineTint()
+    }
+
+    /**
+     * The tint colours only the platform underline drawable. A background
+     * PAM draws (fill, border, radius) is shown as authored: tinting it with
+     * a transparent underline colour erased the whole box.
+     */
+    private fun applyUnderlineTint() {
+        val platform = background != null && background === originalBackground
+        val tint = if (platform) underlineColor?.let(ColorStateList::valueOf) ?: originalBackgroundTint else null
+        if (backgroundTintList != tint) super.setBackgroundTintList(tint)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun setBackgroundDrawable(background: Drawable?) {
+        super.setBackgroundDrawable(background)
+        // Called by the TextView constructor before this class's fields exist.
+        @Suppress("SENSELESS_COMPARISON")
+        if (originalBackground != null || underlineColor != null) applyUnderlineTint()
     }
 
     override fun onSelectionChanged(start: Int, end: Int) {

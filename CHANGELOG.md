@@ -27,6 +27,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
 - Fixed: a `VirtualizedList` mounted inside deferred content (a long list in
   a `BottomSheet`) is built through its adapter instead of receiving its rows
   as children (#262).
+- Fixed: an `Input` with a CSS box (background, border, radius) and
+  `underlineColorAndroid="transparent"` lost its whole box on Android: the
+  underline tint was applied to PAM's own background drawable. The tint now
+  colours only the platform underline.
 - Fixed: a child centred in its parent keeps equal pixel gaps at fractional
   densities (a 20dp icon in a 44dp button sat 1px low at 2.625x).
 - Fixed: opening a sheet no longer requests a layout during layout

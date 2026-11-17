@@ -49,6 +49,27 @@ class PamCssPaintInstrumentedTest {
     }
 
     @Test
+    fun aStyledInputKeepsItsBoxWithATransparentUnderline() {
+        // underlineColorAndroid="transparent" on an Input with a CSS box: the
+        // underline tint must not erase PAM's fill and border.
+        render(
+            mapOf(
+                PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF111318),
+                PropKey.BORDER_WIDTH to PropValue.Decimal(4.0),
+                PropKey.BORDER_COLOR to PropValue.Integer(0xFF30333B),
+                PropKey.BORDER_RADIUS to PropValue.Decimal(12.0),
+                PropKey.INPUT_UNDERLINE_COLOR to PropValue.Integer(0x00000000),
+            ),
+            NodeKind.INPUT,
+        ) { view ->
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            assertEquals(0xFF111318.toInt(), bitmap.getPixel(view.width / 2, view.height / 2))
+            assertEquals(0xFF30333B.toInt(), bitmap.getPixel(view.width / 2, dp(view, 2f)))
+        }
+    }
+
+    @Test
     fun textShadowFontFeaturesAndJustifyApply() {
         render(
             mapOf(
