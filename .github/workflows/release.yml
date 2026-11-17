@@ -468,6 +468,10 @@ jobs:
           PAM_NATIVE_PACKAGE_PATH: ${{ env.PAM_NATIVE_PACKAGE_PATH }}
           PAM_HOME: ${{ env.PAM_HOME }}
           PAM_NATIVE_CLI: ${{ env.PAM_NATIVE_CLI }}
+          # The candidate pam links the runner's embed SAPI, which loads no
+          # shared extensions (no tokenizer): the component prebuild runs on
+          # the runner's PHP CLI, as it runs on the static runtime users get.
+          PAM_NATIVE_PHP: php
           PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
         with:
           api-level: 36
