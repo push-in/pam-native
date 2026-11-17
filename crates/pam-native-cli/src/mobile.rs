@@ -10063,7 +10063,38 @@ fn project_fingerprint(root: &Path) -> Result<(u64, u128), String> {
     let mut count = 0;
     let mut latest = 0;
     visit(root, root, &mut count, &mut latest)?;
+    // Composer path repositories symlink a local package into vendor/: a
+    // component library or plugin being developed next to the app. Watch
+    // those sources too, so editing them hot-reloads like app code.
+    for package in linked_vendor_packages(root) {
+        visit(&package, &package, &mut count, &mut latest)?;
+    }
     Ok((count, latest))
+}
+
+/// `vendor/<vendor>/<package>` entries that are symlinks (Composer path
+/// repositories), resolved to their source directories.
+fn linked_vendor_packages(root: &Path) -> Vec<PathBuf> {
+    let Ok(vendors) = fs::read_dir(root.join("vendor")) else {
+        return Vec::new();
+    };
+    let mut packages = Vec::new();
+    for vendor in vendors.flatten() {
+        if !vendor.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        for package in fs::read_dir(vendor.path()).into_iter().flatten().flatten() {
+            if package.file_type().is_ok_and(|kind| kind.is_symlink()) {
+                if let Ok(target) = fs::canonicalize(package.path()) {
+                    if target.is_dir() {
+                        packages.push(target);
+                    }
+                }
+            }
+        }
+    }
+    packages.sort();
+    packages
 }
 
 fn display_abis(abis: &[AndroidAbi]) -> String {
@@ -10250,6 +10281,33 @@ mod tests {
             original
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hot_reload_watches_composer_path_packages_linked_into_vendor() {
+        let base = std::env::temp_dir().join(format!(
+            "pam-hot-reload-linked-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let root = base.join("app");
+        let library = base.join("ui/components");
+        fs::create_dir_all(root.join("vendor/acme")).expect("vendor directory");
+        fs::create_dir_all(&library).expect("library");
+        fs::write(library.join("Button.pam"), b"<?php").expect("component");
+        std::os::unix::fs::symlink(base.join("ui"), root.join("vendor/acme/ui"))
+            .expect("path repository link");
+
+        let original = project_fingerprint(&root).expect("initial fingerprint");
+        fs::write(library.join("Button.pam"), b"<?php // edited").expect("library edit");
+        assert_ne!(
+            project_fingerprint(&root).expect("library fingerprint"),
+            original
+        );
+        fs::remove_dir_all(base).expect("cleanup");
     }
 
     #[test]
