@@ -89,6 +89,7 @@ import dev.pam.nativeapp.views.NativePropertyView
 import dev.pam.nativeapp.views.NativeViewRegistry
 import dev.pam.nativeapp.views.NativeChildVisibilityHost
 import org.json.JSONArray
+import org.json.JSONObject
 import java.nio.ByteOrder
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -985,6 +986,70 @@ class PamRenderer(
 
     /** True while [id] is part of the committed tree (events for removed nodes are stale). */
     fun hasNode(id: Long): Boolean = nodes.indexOfKey(id) >= 0
+
+    /**
+     * Debug layout evidence (`pam-native layout` / UI geometry checks): every
+     * shown view of the committed tree with its engine frame in dp, its
+     * on-screen pixel rectangle, the part of it actually visible, and for
+     * text the baseline, line count and whether it was ellipsized.
+     */
+    internal fun layoutSnapshotJson(): String {
+        val density = resourcesDensity()
+        val nodesJson = JSONArray()
+        val onScreen = IntArray(2)
+        val inWindow = IntArray(2)
+        val visible = Rect()
+        for (index in 0 until nodes.size()) {
+            val state = nodes.valueAt(index)
+            val view = views[state.id] ?: continue
+            if (!view.isShown || view.width == 0 && view.height == 0) continue
+            view.getLocationOnScreen(onScreen)
+            view.getLocationInWindow(inWindow)
+            val node = JSONObject()
+                .put("id", state.id)
+                .put("parent", state.parent)
+                .put("kind", state.kind.name)
+                .put("x", onScreen[0])
+                .put("y", onScreen[1])
+                .put("w", view.width)
+                .put("h", view.height)
+                .put("alpha", view.alpha.toDouble())
+            frames[state.id]?.let {
+                node.put("frame", JSONArray().put(it.x.toDouble()).put(it.y.toDouble()).put(it.width.toDouble()).put(it.height.toDouble()))
+            }
+            if (view.getGlobalVisibleRect(visible)) {
+                val dx = onScreen[0] - inWindow[0]
+                val dy = onScreen[1] - inWindow[1]
+                node.put("visible", JSONArray().put(visible.left + dx).put(visible.top + dy).put(visible.right + dx).put(visible.bottom + dy))
+            } else {
+                node.put("visible", JSONArray())
+            }
+            view.contentDescription?.let { node.put("label", it.toString()) }
+            view.transitionName?.let { node.put("testId", it) }
+            if (view.isClickable) node.put("clickable", true)
+            if (!view.isEnabled) node.put("disabled", true)
+            if (view is TextView) {
+                node.put("text", view.text.toString()).put("textSize", (view.textSize / density).toDouble())
+                view.layout?.let { layout ->
+                    var ellipsized = false
+                    var widest = 0f
+                    for (line in 0 until layout.lineCount) {
+                        if (layout.getEllipsisCount(line) > 0) ellipsized = true
+                        widest = maxOf(widest, layout.getLineWidth(line))
+                    }
+                    node.put("baseline", onScreen[1] + view.baseline)
+                        .put("textHeight", layout.height)
+                        .put("contentHeight", view.height - view.totalPaddingTop - view.totalPaddingBottom)
+                        .put("contentWidth", view.width - view.totalPaddingLeft - view.totalPaddingRight)
+                        .put("lines", layout.lineCount)
+                        .put("ellipsized", ellipsized)
+                        .put("textWidth", widest.toDouble())
+                }
+            }
+            nodesJson.put(node)
+        }
+        return JSONObject().put("schemaVersion", 1).put("density", density.toDouble()).put("nodes", nodesJson).toString()
+    }
     private val frames = PamLongMap<Frame>(256)
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
