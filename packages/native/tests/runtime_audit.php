@@ -105,18 +105,24 @@ file_put_contents($directory.'/index.php', "<?php\necho iconv_strlen('x');\n");
 file_put_contents($directory.'/src/Ok.php', "<?php\necho mb_strtoupper('ação');\n");
 file_put_contents($directory.'/vendor/pushinbr/pam-native/src/Sdk.php', "<?php\necho sodium_bin2hex('x');\nif (function_exists('openssl_encrypt')) { openssl_encrypt('', 'aes-256-gcm', ''); }\n");
 file_put_contents($directory.'/vendor/acme/tool/tests/ToolTest.php', "<?php\necho curl_init();\n");
+// A require-dev package (Composer dev-package-names) never runs on the device.
+@mkdir($directory.'/vendor/composer', 0777, true);
+@mkdir($directory.'/vendor/phpunit/phpunit/src', 0777, true);
+file_put_contents($directory.'/vendor/composer/installed.json', '{"packages":[],"dev-package-names":["phpunit/phpunit"]}');
+file_put_contents($directory.'/vendor/phpunit/phpunit/src/Writer.php', "<?php\nnew XMLWriter();\n");
 $directoryFindings = (new MobileRuntimeAudit())->auditDirectory($directory);
 array_map('unlink', [
     $directory.'/index.php', $directory.'/src/Ok.php', $directory.'/vendor/pushinbr/pam-native/src/Sdk.php',
-    $directory.'/vendor/acme/tool/tests/ToolTest.php',
+    $directory.'/vendor/acme/tool/tests/ToolTest.php', $directory.'/vendor/composer/installed.json',
+    $directory.'/vendor/phpunit/phpunit/src/Writer.php',
 ]);
-foreach (['/vendor/acme/tool/tests', '/vendor/acme/tool', '/vendor/acme', '/vendor/pushinbr/pam-native/src', '/vendor/pushinbr/pam-native', '/vendor/pushinbr', '/vendor', '/src', ''] as $child) {
+foreach (['/vendor/acme/tool/tests', '/vendor/acme/tool', '/vendor/acme', '/vendor/pushinbr/pam-native/src', '/vendor/pushinbr/pam-native', '/vendor/pushinbr', '/vendor/composer', '/vendor/phpunit/phpunit/src', '/vendor/phpunit/phpunit', '/vendor/phpunit', '/vendor', '/src', ''] as $child) {
     @rmdir($directory.$child);
 }
 $assert(
     count($directoryFindings) === 2 && str_starts_with($directoryFindings[0], 'index.php:2: function iconv_strlen() comes from ext-iconv')
         && $directoryFindings[1] === 'vendor/pushinbr/pam-native/src/Sdk.php:2: function sodium_bin2hex() comes from ext-sodium, which the PAM mobile PHP runtime (Android/iOS) does not include; use bin2hex(), which works on the device',
-    "The directory audit must skip package tests and audit the SDK like any package (guards trusted):\n".implode("\n", $directoryFindings),
+    "The directory audit must skip package tests and dev packages and audit the SDK like any package (guards trusted):\n".implode("\n", $directoryFindings),
 );
 
 // The SDK's own sources are clean: its sodium/openssl use is guarded and

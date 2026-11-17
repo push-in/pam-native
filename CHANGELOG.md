@@ -41,6 +41,9 @@ found while rebuilding PAM Native UI 2.0 and porting PushinPay.
   first) instead of after restarting `pam dev`.
 - Fixed: a PHP-only plugin (no `android` section) defaults to `minSdk` 26
   instead of 0, which the CLI rejected.
+- Fixed: the mobile PHP extension audit skips Composer `require-dev`
+  packages: a fresh `pam init --template native-ui` printed 34 warnings for
+  PHPUnit files that never run on the device.
 - Performance: each `@media`/`@container` block of a component stylesheet
   carried a full copy of the sheet-level IR, bytecode, source map and the
   20 KB compatibility table (~75 KB per block). Query blocks keep only their

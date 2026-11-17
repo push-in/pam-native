@@ -140,10 +140,11 @@ final class MobileRuntimeAudit
     {
         $root = rtrim($root, '/');
         $files = [];
+        $devPackages = self::devPackageDirectories($root);
         $iterator = new RecursiveIteratorIterator(
             new \RecursiveCallbackFilterIterator(
                 new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS),
-                static function (\SplFileInfo $file) use ($root): bool {
+                static function (\SplFileInfo $file) use ($root, $devPackages): bool {
                     $relative = substr($file->getPathname(), strlen($root) + 1);
                     $parts = explode('/', $relative);
                     if (str_starts_with($file->getFilename(), '.') || in_array($parts[0], ['pam-prebuilt', 'node_modules'], true)) {
@@ -152,6 +153,10 @@ final class MobileRuntimeAudit
                     if ($file->isDir()) {
                         if ($parts[0] === 'vendor') {
                             if (($parts[1] ?? '') === 'composer' || ($parts[1] ?? '') === 'bin') {
+                                return false;
+                            }
+                            // require-dev packages (PHPUnit, PHPStan…) never run on the device.
+                            if (count($parts) === 3 && isset($devPackages[$parts[1].'/'.$parts[2]])) {
                                 return false;
                             }
                             if (count($parts) >= 4 && in_array($parts[count($parts) - 1], self::SKIPPED_DIRECTORIES, true)) {
@@ -177,6 +182,34 @@ final class MobileRuntimeAudit
         }
 
         return $this->findings();
+    }
+
+    /**
+     * Composer's `dev-package-names`: the development dependencies installed
+     * next to the application, never autoloaded by the app on the device.
+     *
+     * @return array<string, true>
+     */
+    private static function devPackageDirectories(string $root): array
+    {
+        $installed = $root.'/vendor/composer/installed.json';
+        if (!is_file($installed) || filesize($installed) > 8_388_608) {
+            return [];
+        }
+        try {
+            $document = json_decode((string) file_get_contents($installed), true, 64, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+        $names = is_array($document) && is_array($document['dev-package-names'] ?? null) ? $document['dev-package-names'] : [];
+        $directories = [];
+        foreach ($names as $name) {
+            if (is_string($name) && preg_match('~^[a-z0-9_.-]+/[a-z0-9_.-]+$~', $name) === 1) {
+                $directories[$name] = true;
+            }
+        }
+
+        return $directories;
     }
 
     /** Adds one file's declarations and uses. */
