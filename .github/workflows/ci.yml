@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  PAM_RUNTIME_RELEASE_TAG: v2.0.7
+  PAM_RUNTIME_RELEASE_TAG: v2.2.21
 
 defaults:
   run:
