@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running checks; main, releases
+# (workflow_call) and manual runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PAM_RUNTIME_RELEASE_TAG: v2.0.7
 
