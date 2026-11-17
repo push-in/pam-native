@@ -1053,6 +1053,18 @@ class PamRenderer(
             view.transitionName?.let { node.put("testId", it) }
             if (view.isClickable) node.put("clickable", true)
             if (!view.isEnabled) node.put("disabled", true)
+            // Content of a scroll container may pass under a system bar on
+            // its way; geometry checks treat it apart from fixed content.
+            var ancestor = view.parent as? View
+            while (ancestor != null) {
+                if (ancestor is android.widget.ScrollView || ancestor is android.widget.HorizontalScrollView ||
+                    ancestor is androidx.recyclerview.widget.RecyclerView || ancestor is PamScrollContainer
+                ) {
+                    node.put("scrolls", true)
+                    break
+                }
+                ancestor = ancestor.parent as? View
+            }
             // The touch target hit testing really uses (hitSlop, 48dp minimum).
             ((view.parent as? ViewGroup)?.touchDelegate as? PamTouchDelegateGroup)?.boundsOf(view)?.let { hit ->
                 node.put("hit", JSONArray().put(hit.width()).put(hit.height()))
