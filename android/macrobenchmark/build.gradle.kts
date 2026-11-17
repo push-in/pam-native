@@ -5,7 +5,7 @@ plugins {
 }
 
 val pamProperties = Properties().apply {
-    rootProject.file("pam-native.properties").inputStream().use(::load)
+    rootProject.file("pam-native.properties").reader(Charsets.UTF_8).use { load(it) }
 }
 val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp") +
     pamProperties.getProperty("benchmarkApplicationIdSuffix", "")
