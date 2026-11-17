@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.view.Gravity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PamPixelSnappingTest {
@@ -13,8 +14,9 @@ class PamPixelSnappingTest {
     }
 
     @Test
-    fun aCentredIconKeepsEqualPixelGapsAtFractionalDensities() {
+    fun aCentredIconSitsWithinAPixelOfTheCentreAtEveryDensity() {
         // A 20dp icon centred in a 44dp button: 12dp gaps are 31.5px at 2.625x.
+        // On the absolute grid the two gaps differ by at most one pixel.
         for (density in floatArrayOf(1f, 1.5f, 2f, 2.625f, 2.75f, 3f, 3.5f)) {
             for (parentStart in floatArrayOf(0f, 13.3f, 101.7f)) {
                 val parentExtent = 44f
@@ -23,15 +25,11 @@ class PamPixelSnappingTest {
                     extent = 20f,
                     parentStart = parentStart,
                     density = density,
-                    parentExtent = parentExtent,
                 )
                 val parentPixels = yogaPixelGrid((parentStart + parentExtent).toDouble(), density, false, false) -
                     yogaPixelGrid(parentStart.toDouble(), density, false, false)
-                assertEquals(
-                    "gaps at ${density}x from $parentStart",
-                    span.offset,
-                    parentPixels - span.offset - span.extent,
-                )
+                val trailing = parentPixels - span.offset - span.extent
+                assertTrue("gaps ${span.offset}/$trailing at ${density}x from $parentStart", kotlin.math.abs(span.offset - trailing) <= 1)
             }
         }
     }
@@ -117,12 +115,20 @@ class PamYogaRelativeRoundingTest {
     private val density = 2.625f
 
     @Test
-    fun positionsRoundRelativeToTheParentAndTextFloors() {
-        // Painel tile label 119.75 px below a tile whose own top is fractional.
+    fun positionsSnapToTheAbsoluteGridAndTextFloors() {
+        // A label 119.75 px below a tile whose own top is fractional (555.3 px):
+        // the tile sits at 555, the label at its absolute 675.05 -> 675.
         val parent = 555.3f / density
         val label = parent + 119.75f / density
-        assertEquals(119, snappedPixelSpan(label, 45f / density, parent, density, preserveContentExtent = true).offset)
+        assertEquals(120, snappedPixelSpan(label, 45f / density, parent, density, preserveContentExtent = true).offset)
         assertEquals(120, snappedPixelSpan(label, 45f / density, parent, density).offset)
+        // Two siblings 37dp in, under a parent at 20dp: both land on 97 px,
+        // the pixel of round(37 * 2.625), whatever the parent's rounding.
+        val card = 20f
+        val title = snappedPixelSpan(37f, 100f, card, density)
+        val button = snappedPixelSpan(37f, 60f, card, density)
+        assertEquals(title.offset, button.offset)
+        assertEquals(97, yogaPixelGrid(card.toDouble(), density, false, false) + title.offset)
     }
 
     @Test

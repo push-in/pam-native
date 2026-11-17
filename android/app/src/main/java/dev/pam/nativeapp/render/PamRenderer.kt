@@ -708,23 +708,23 @@ internal fun snappedPixelSpan(
     preserveContentExtent: Boolean = false,
     flattenedOffset: Int? = null,
     textRounding: Boolean = preserveContentExtent,
-    parentExtent: Float? = null,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
     val safeExtent = extent.coerceAtLeast(0f)
-    // Yoga's roundLayoutResultsToPixelGrid (what React Native mounts): the
-    // position is rounded RELATIVE to the parent (text floors it), and the
-    // size comes from the rounded absolute edges (a text's trailing edge
-    // ceils a fractional size and floors a whole one). Rounding absolute
-    // edges for the position moved children by a pixel against RN and
-    // grids drifted per row.
+    // Every edge snaps on the ABSOLUTE pixel grid: a node's position is its
+    // rounded absolute start minus its native host's rounded absolute start,
+    // and its size comes from its rounded absolute edges (a text's trailing
+    // edge ceils a fractional size and floors a whole one). Siblings that
+    // share an edge in dp therefore share it in pixels, wherever their
+    // parents sit. Yoga's roundLayoutResultsToPixelGrid (React Native) rounds
+    // the position relative to the parent instead, which put a card's button
+    // a pixel right of its title at 2.625x. Layout-only ancestors flattened
+    // away ([flattenedOffset]) need no special case: the host's start is
+    // [parentStart].
     val text = textRounding
     val fractionalExtent = !pixelGridWhole(safeExtent.toDouble() * safeDensity)
-    // Layout-only ancestors between the node and its native host: React
-    // Native's view flattening adds their rounded origins ([flattenedOffset]).
-    val offset = flattenedOffset
-        ?: yogaPixelGrid(start.toDouble() - parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
     val absoluteStart = yogaPixelGrid(start.toDouble(), safeDensity, forceCeil = false, forceFloor = text)
+    val offset = absoluteStart - yogaPixelGrid(parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
     val absoluteEnd = yogaPixelGrid(
         start.toDouble() + safeExtent.toDouble(),
         safeDensity,
@@ -739,24 +739,6 @@ internal fun snappedPixelSpan(
         // glyph onto a clipped second line ("QA" drawn as "Q").
         val content = kotlin.math.ceil(extent.coerceAtLeast(0f) * safeDensity - 0.01f).toInt()
         snappedExtent = max(snappedExtent, content)
-    }
-    // A child centred in its parent (equal gaps in dp) keeps equal gaps in
-    // pixels. At a fractional density (2.625x: a 20dp icon in a 44dp button
-    // starts at 31.5px) Yoga's rounding leaves one gap a pixel larger, and the
-    // glyph sits visibly off-centre. Snap it symmetrically instead; when the
-    // pixel remainder is odd the child grows by one pixel to stay centred.
-    if (parentExtent != null && flattenedOffset == null && !text) {
-        val relative = start - parentStart
-        val trailing = parentExtent - relative - safeExtent
-        if (relative > 0.01f && kotlin.math.abs(relative - trailing) < 0.01f) {
-            val parentPixels = yogaPixelGrid(parentStart.toDouble() + parentExtent, safeDensity, forceCeil = false, forceFloor = false) -
-                yogaPixelGrid(parentStart.toDouble(), safeDensity, forceCeil = false, forceFloor = false)
-            var childPixels = snappedExtent
-            if ((parentPixels - childPixels) % 2 != 0) childPixels += 1
-            if (childPixels in 1..parentPixels) {
-                return SnappedPixelSpan(offset = (parentPixels - childPixels) / 2, extent = childPixels)
-            }
-        }
     }
     return SnappedPixelSpan(
         offset = offset,
@@ -4108,7 +4090,6 @@ class PamRenderer(
             preserveContentExtent = text,
             textRounding = textRounding,
             flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, true, density, textRounding) else null,
-            parentExtent = parentFrame?.width,
         )
         val vertical = snappedPixelSpan(
             frame.y,
@@ -4118,7 +4099,6 @@ class PamRenderer(
             preserveContentExtent = text,
             textRounding = textRounding,
             flattenedOffset = if (flattened) flattenedPixelOffset(id, effectiveParentId, false, density, textRounding) else null,
-            parentExtent = parentFrame?.height,
         )
         traceFrame(id, state, effectiveParentId, frame, horizontal, vertical)
         val hostedParentState = nodes[effectiveParent(state.parent)]
