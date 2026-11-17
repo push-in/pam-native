@@ -1577,10 +1577,17 @@ final class TemplateRenderer
         $variant = $factory === null ? 'n' : 'f';
         if ($planNode !== null) {
             $plan = $planNode->pamTagPlans[$variant]
-                ??= self::tagPlan($tag, $attributes, $factory !== null, $childNodes);
+                ??= self::tagPlan(
+                    $tag,
+                    $factory !== null ? self::componentEventAliases($tag, $attributes) : $attributes,
+                    $factory !== null,
+                    $childNodes,
+                );
             $attributes = $plan['attributes'];
         } elseif ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
+        } else {
+            $attributes = self::componentEventAliases($tag, $attributes);
         }
         $declaredAttributes = $attributes;
         // $knownClass: already evaluated by fastNode() (never twice).
@@ -2212,8 +2219,12 @@ final class TemplateRenderer
             ),
             'VirtualizedList' => $lazyRows !== null
                 ? VirtualizedList::__pamRows($lazyRows)
-                : ($children === []
-                    ? FlatList::make(self::stringItems($values['items'] ?? []))
+                // An empty loop (data not loaded yet) is still a rich list:
+                // only the legacy `items` attribute means a string FlatList.
+                // Switching the node kind when rows arrive left the list
+                // without a native view (rows had nowhere to mount).
+                : ($children === [] && array_key_exists('items', $values)
+                    ? FlatList::make(self::stringItems($values['items']))
                     : VirtualizedList::make(...$children)),
             'VirtualGrid' => $lazyRows !== null
                 ? VirtualizedList::__pamRows($lazyRows)->columns(max(1, self::intValue(
@@ -7380,6 +7391,38 @@ final class TemplateRenderer
     }
 
     /**
+     * `on:change` on a component that declares a `change` event
+     * (`#[Event('change', …)]`) is its component event, exactly like
+     * `@change`: native elements accept both spellings, so typed components
+     * do too. Undeclared `on:` names keep their native meaning (attached to
+     * the component's root element).
+     *
+     * @param array<string, string|int|bool> $attributes
+     * @return array<string, string|int|bool>
+     */
+    public static function componentEventAliases(string $tag, array $attributes): array
+    {
+        $contract = TemplateRegistry::tagContract($tag);
+        if ($contract === null || $contract->events === []) {
+            return $attributes;
+        }
+        foreach ($contract->events as $event) {
+            $native = 'on:'.$event->name;
+            if (!array_key_exists($native, $attributes)) {
+                continue;
+            }
+            $alias = '@'.$event->name;
+            if (array_key_exists($alias, $attributes) && $attributes[$alias] !== $attributes[$native]) {
+                throw new RuntimeException("{$native} and {$alias} cannot disagree on {$tag}.");
+            }
+            $attributes[$alias] = $attributes[$native];
+            unset($attributes[$native]);
+        }
+
+        return $attributes;
+    }
+
+    /**
      * @param list<CompiledTemplateNode> $nodes
      * @return array{
      *     list<CompiledTemplateNode>,
@@ -8339,12 +8382,8 @@ final class TemplateRenderer
         array $children,
         bool $horizontal,
     ): Element {
-        if ($children === []) {
-            throw new RuntimeException(
-                'ScrollView requires at least one child.',
-            );
-        }
-
+        // An empty ScrollView (content not loaded yet) scrolls an empty
+        // container instead of failing; content mounts into it later.
         return $horizontal
             ? Row::make(...$children)
             : Column::make(...$children);

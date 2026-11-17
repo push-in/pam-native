@@ -69,6 +69,10 @@ final class TemplateContractValidator
                 $knownEvents[$event->name] = true;
             }
             foreach (array_keys($node->attributes) as $attribute) {
+                if (str_starts_with($attribute, 'on:') && isset($knownEvents[substr($attribute, 3)])) {
+                    // `on:change` is the same component event as `@change`.
+                    continue;
+                }
                 if (str_starts_with($attribute, '@')) {
                     $event = substr($attribute, 1);
                     if (!isset($knownEvents[$event])) {

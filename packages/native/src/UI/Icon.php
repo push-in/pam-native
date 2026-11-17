@@ -169,7 +169,23 @@ final class Icon
             throw new InvalidArgumentException('Icon glyph maps must be project-relative paths.');
         }
 
-        return (getcwd() ?: '.').'/'.$relative;
+        return self::projectRoot().'/'.$relative;
+    }
+
+    /**
+     * The application root, the same one App::components() and plugins use
+     * (the directory holding vendor/composer/installed.json). The working
+     * directory is not the project during Android hot reload.
+     */
+    private static function projectRoot(): string
+    {
+        $root = \Pam\Native\Plugin\PluginManager::projectRoot();
+        if ($root === null) {
+            $script = $_SERVER['SCRIPT_FILENAME'] ?? null;
+            $root = is_string($script) && $script !== '' ? dirname($script) : null;
+        }
+
+        return $root ?? (getcwd() ?: '.');
     }
 
     private static function assertFontName(string $font): void
