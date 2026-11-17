@@ -42,6 +42,7 @@ final class PamPhpRegistry
      * @var array<class-string<Component>, array{
      *     factory: Closure(array): Component,
      *     parameters: list<array{
+     *         type: string|null,
      *         name: string,
      *         default: bool,
      *         defaultValue: mixed,
@@ -569,8 +570,9 @@ final class PamPhpRegistry
                 );
             }
             if (array_key_exists($name, $props)) {
-                self::validateProp($className, $name, $props[$name], $parameter['prop']);
-                $arguments[] = $props[$name];
+                $value = self::coerce($props[$name], $parameter['type']);
+                self::validateProp($className, $name, $value, $parameter['prop']);
+                $arguments[] = $value;
             } elseif ($parameter['default']) {
                 $arguments[] = $parameter['defaultValue'];
             } else {
@@ -608,21 +610,37 @@ final class PamPhpRegistry
             if (!array_key_exists($name, $props) || !property_exists($component, $name)) {
                 continue;
             }
-            self::validateProp($component::class, $name, $props[$name], $parameter['prop']);
+            $value = self::coerce($props[$name], $parameter['type']);
+            self::validateProp($component::class, $name, $value, $parameter['prop']);
             $previous = $component->{$name};
-            if ($previous === $props[$name]) {
+            if ($previous === $value) {
                 continue;
             }
             if (!$parameter['mutable']) {
                 return false;
             }
-            $component->__pamNotifyUpdating($name, $props[$name], $previous);
-            $component->{$name} = $props[$name];
+            $component->__pamNotifyUpdating($name, $value, $previous);
+            $component->{$name} = $value;
             $component->__pamNotifyUpdated($name);
         }
         $component->__pamFlushChanges();
 
         return true;
+    }
+
+    /**
+     * Casts a scalar template value to a scalar parameter type: a static
+     * attribute arrives parsed (`label="2.0"` is a float, `count="3"` an int)
+     * while the constructor runs with strict types.
+     */
+    private static function coerce(mixed $value, ?string $type): mixed
+    {
+        return match (true) {
+            $type === 'string' && (is_int($value) || is_float($value)) => (string) $value,
+            $type === 'float' && is_int($value) => (float) $value,
+            $type === 'int' && is_float($value) && floor($value) === $value && abs($value) < PHP_INT_MAX => (int) $value,
+            default => $value,
+        };
     }
 
     private static function validateProp(
@@ -658,6 +676,7 @@ final class PamPhpRegistry
      * @return array{
      *     factory: Closure(array): Component,
      *     parameters: list<array{
+     *         type: string|null,
      *         name: string,
      *         default: bool,
      *         defaultValue: mixed,
@@ -683,7 +702,9 @@ final class PamPhpRegistry
                 ? $reflection->getProperty($parameter->getName())
                 : null;
             $attribute = $parameter->getAttributes(Prop::class)[0] ?? null;
+            $type = $parameter->getType();
             $parameters[] = [
+                'type' => $type instanceof \ReflectionNamedType && $type->isBuiltin() ? $type->getName() : null,
                 'name' => $parameter->getName(),
                 'default' => $parameter->isDefaultValueAvailable(),
                 'defaultValue' => $parameter->isDefaultValueAvailable()

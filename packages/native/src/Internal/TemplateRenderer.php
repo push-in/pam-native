@@ -2129,12 +2129,14 @@ final class TemplateRenderer
         }
         $contract = $factory !== null ? TemplateRegistry::tagContract($tag) : null;
         if ($contract !== null) {
+            $componentValues = self::staticStringProps($contract, $declaredAttributes, $componentValues);
             ContractValidator::validate(
                 $contract,
                 array_filter(
                     $componentValues,
                     static fn (string $name): bool =>
-                        !str_starts_with($name, '__pam') && $name !== 'className',
+                        // `key` is the element identity, never a prop.
+                        !str_starts_with($name, '__pam') && $name !== 'className' && $name !== 'key',
                     ARRAY_FILTER_USE_KEY,
                 ),
                 $slots,
@@ -3664,12 +3666,14 @@ final class TemplateRenderer
 
         $contract = TemplateRegistry::tagContract($tag);
         if ($contract !== null) {
+            $componentValues = self::staticStringProps($contract, $attributes, $componentValues);
             ContractValidator::validate(
                 $contract,
                 array_filter(
                     $componentValues,
                     static fn (string $name): bool =>
-                        !str_starts_with($name, '__pam') && $name !== 'className',
+                        // `key` is the element identity, never a prop.
+                        !str_starts_with($name, '__pam') && $name !== 'className' && $name !== 'key',
                     ARRAY_FILTER_USE_KEY,
                 ),
                 $slots,
@@ -8008,6 +8012,32 @@ final class TemplateRenderer
                 $explicit($value);
             }
         };
+    }
+
+    /**
+     * A static attribute is parsed as a literal (`label="2.0"` is the float
+     * 2.0, `code="007"` the int 7). For a string prop of a typed component the
+     * author meant the text as written: pass the attribute verbatim.
+     *
+     * @param array<string, mixed> $attributes
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function staticStringProps(\Pam\Native\UI\Contract\TagContract $contract, array $attributes, array $values): array
+    {
+        foreach ($contract->props as $prop) {
+            $raw = $attributes[$prop->name] ?? null;
+            if (
+                $prop->kind === \Pam\Native\UI\Contract\ValueKind::String
+                && is_string($raw)
+                && array_key_exists($prop->name, $values)
+                && (is_int($values[$prop->name]) || is_float($values[$prop->name]) || is_bool($values[$prop->name]))
+            ) {
+                $values[$prop->name] = $raw;
+            }
+        }
+
+        return $values;
     }
 
     /** Casts a component's model value to the bound property's scalar type. */
