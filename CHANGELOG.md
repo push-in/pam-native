@@ -41,6 +41,13 @@ found while rebuilding PAM Native UI 2.0 and porting PushinPay.
   first) instead of after restarting `pam dev`.
 - Fixed: a PHP-only plugin (no `android` section) defaults to `minSdk` 26
   instead of 0, which the CLI rejected.
+- Added: `maxResponseBytes` for HTTP: per client
+  (`Http::create(maxResponseBytes: 2 * 1024 * 1024)`, `withMaxResponseBytes()`)
+  and per request (`Request::withMaxResponseBytes()`, `Http::request(...,
+  maxResponseBytes:)`). The default stays 1 MiB; the hard limit is 16 MiB.
+  Responses were capped at 900 KiB by the native module bridge ("HTTP response
+  exceeds one MiB"); bodies over 900 KiB now reach PHP through a private cache
+  file on Android and iOS (a 1.17 MB store page loads with a 2 MiB limit).
 - Fixed: the mobile PHP extension audit skips Composer `require-dev`
   packages: a fresh `pam init --template native-ui` printed 34 warnings for
   PHPUnit files that never run on the device.

@@ -7,6 +7,53 @@ final class HttpModuleTests: XCTestCase {
         super.tearDown()
     }
 
+    func testLargeResponsesNeedAHigherLimitAndArriveThroughAPrivateFile() throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPURLProtocol.self]
+        let cache = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-http-limit-\(UUID().uuidString)/pam-http-uploads")
+        let module = HttpModule(configuration: configuration, uploadCache: cache)
+        let body = Data(repeating: 0x61, count: 1_200_000)
+        HTTPURLProtocol.handler = { request in
+            (
+                HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: [:])!,
+                body
+            )
+        }
+        func send(_ limit: Int64?, _ check: @escaping (ModuleResultStatus, Data) -> Void) throws {
+            var values: [String: WireValue] = [
+                "url": .text("https://api.example.test/page"),
+                "method": .text("GET"),
+                "headers": .text("{}"),
+            ]
+            if let limit { values["maxResponseBytes"] = .integer(limit) }
+            let done = expectation(description: "HTTP request completed")
+            module.invoke(method: "request", payload: try WireMap.encode(values)) { status, payload in
+                check(status, payload)
+                done.fulfill()
+            }
+            wait(for: [done], timeout: 10)
+        }
+
+        try send(nil) { status, payload in
+            XCTAssertEqual(status, .failure)
+            XCTAssertTrue(String(decoding: payload, as: UTF8.self).contains("raise maxResponseBytes"))
+        }
+        try send(2 * 1024 * 1024) { status, payload in
+            XCTAssertEqual(status, .success)
+            guard case let .text(path)? = (try? WireMap.decode(payload))?["bodyFile"] else {
+                return XCTFail("A body over the bridge size must arrive as a file")
+            }
+            XCTAssertTrue(path.hasSuffix(".pamhttp"))
+            XCTAssertEqual(FileManager.default.contents(atPath: path), body)
+        }
+        try send(32 * 1024 * 1024) { status, _ in
+            XCTAssertEqual(status, .failure)
+        }
+        module.close()
+        try? FileManager.default.removeItem(at: cache.deletingLastPathComponent())
+    }
+
     func testGenericJSONRequestPreservesMethodHeadersBodyAndTimeout() throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HTTPURLProtocol.self]

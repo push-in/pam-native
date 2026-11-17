@@ -81,6 +81,8 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                 }
                 request.httpMethod = requestMethod
                 request.addValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+                let maxResponseBytes = try HttpModule.responseLimit(values["maxResponseBytes"])
+                let responseCache = self.uploadCache.deletingLastPathComponent().appendingPathComponent("pam-http-responses")
                 if case let .integer(timeoutMs)? = values["timeoutMs"] {
                     request.timeoutInterval = Double(min(120_000, max(1_000, timeoutMs))) / 1_000
                 } else {
@@ -163,11 +165,26 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                         return
                     }
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard let bodyData = data, bodyData.count <= 900 * 1024 else {
-                        completion(.failure, "HTTP response too large".data(using: .utf8) ?? Data())
+                    let bodyData = data ?? Data()
+                    guard bodyData.count <= maxResponseBytes else {
+                        completion(.failure, Data("HTTP response exceeds \(maxResponseBytes) bytes; raise maxResponseBytes (up to 16 MiB)".utf8))
                         return
                     }
-                    let body = String(data: bodyData, encoding: .utf8) ?? ""
+                    // The module bridge carries at most 1 MiB: a larger body goes
+                    // through a private cache file that PHP reads once and deletes.
+                    var bodyFile: String?
+                    if bodyData.count > HttpModule.inlineResponseBytes {
+                        do {
+                            try FileManager.default.createDirectory(at: responseCache, withIntermediateDirectories: true)
+                            let url = responseCache.appendingPathComponent("\(UUID().uuidString).pamhttp")
+                            try bodyData.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                            bodyFile = url.path
+                        } catch {
+                            completion(.failure, Data("Cannot store the HTTP response body".utf8))
+                            return
+                        }
+                    }
+                    let body = bodyFile == nil ? (String(data: bodyData, encoding: .utf8) ?? "") : ""
                     var headers: [String: String] = [:]
                     for (name, value) in (response as? HTTPURLResponse)?.allHeaderFields ?? [:] {
                         if let name = name as? String, headers.count < 64 {
@@ -177,11 +194,13 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                     let headersJson = (try? JSONSerialization.data(withJSONObject: headers))
                         .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                     do {
-                        let responsePayload = try WireMap.encode([
+                        var result: [String: WireValue] = [
                             "statusCode": .integer(Int64(statusCode)),
                             "body": .text(body),
                             "headers": .text(headersJson),
-                        ])
+                        ]
+                        if let bodyFile { result["bodyFile"] = .text(bodyFile) }
+                        let responsePayload = try WireMap.encode(result)
                         completion(.success, responsePayload)
                     } catch {
                         completion(.failure, "Cannot encode response".data(using: .utf8) ?? Data())
@@ -402,6 +421,18 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
     private static let traceparentPattern = "^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$"
     private static let safeHeaderName = "^[A-Za-z0-9-]{1,64}$"
     private static let maxRequestBytes = 1_048_576
+    /** Largest body sent inline over the module bridge (1 MiB frames). */
+    static let inlineResponseBytes = 900 * 1024
+    static let defaultResponseBytes = 1_048_576
+    static let maxResponseLimit = 16 * 1024 * 1024
+
+    static func responseLimit(_ value: WireValue?) throws -> Int {
+        guard case let .integer(limit)? = value else { return defaultResponseBytes }
+        guard limit >= 1, limit <= Int64(maxResponseLimit) else {
+            throw RuntimeError("maxResponseBytes must be between 1 and 16 MiB")
+        }
+        return Int(limit)
+    }
 
     private static func origin(of url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else {

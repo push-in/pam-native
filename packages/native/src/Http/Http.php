@@ -21,6 +21,20 @@ final class Http
 {
     private const MAX_BODY_BYTES = 1_048_576;
 
+    /** Response bodies accepted when a request sets no limit. */
+    public const int DEFAULT_RESPONSE_BYTES = 1_048_576;
+
+    /** Hard upper bound for maxResponseBytes, protecting app memory. */
+    public const int MAX_RESPONSE_BYTES = 16_777_216;
+
+    /** @internal */
+    public static function assertResponseLimit(int $bytes): void
+    {
+        if ($bytes < 1 || $bytes > self::MAX_RESPONSE_BYTES) {
+            throw new \InvalidArgumentException('maxResponseBytes must be between 1 and 16 MiB (16777216 bytes).');
+        }
+    }
+
     private function __construct()
     {
     }
@@ -40,6 +54,7 @@ final class Http
         int $timeout = 30_000,
         int $retry = 0,
         int $retryDelay = 300,
+        int $maxResponseBytes = self::DEFAULT_RESPONSE_BYTES,
     ): HttpClient {
         return new HttpClient(
             $baseUrl,
@@ -47,6 +62,7 @@ final class Http
             $timeout,
             $retry,
             $retryDelay,
+            $maxResponseBytes,
         );
     }
 
@@ -132,8 +148,9 @@ final class Http
         ?string $body = null,
         int $timeoutMs = 30_000,
         ?OutboundTraceContext $trace = null,
+        int $maxResponseBytes = self::DEFAULT_RESPONSE_BYTES,
     ): int {
-        return self::send($method, $url, $callback, $headers, $body, $timeoutMs, $trace);
+        return self::send($method, $url, $callback, $headers, $body, $timeoutMs, $trace, maxResponseBytes: $maxResponseBytes);
     }
 
     /**
@@ -271,7 +288,9 @@ final class Http
         int $timeoutMs,
         ?OutboundTraceContext $trace,
         ?string $source = null,
+        int $maxResponseBytes = self::DEFAULT_RESPONSE_BYTES,
     ): int {
+        self::assertResponseLimit($maxResponseBytes);
         $method = strtoupper(trim($method));
         if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
             throw new RuntimeException("Unsupported HTTP method {$method}.");
@@ -291,6 +310,9 @@ final class Http
             'headers' => json_encode((object) $normalizedHeaders, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             'timeoutMs' => max(1_000, min(120_000, $timeoutMs)),
         ];
+        if ($maxResponseBytes !== self::DEFAULT_RESPONSE_BYTES) {
+            $payload['maxResponseBytes'] = $maxResponseBytes;
+        }
         if ($source !== null) {
             $payload['path'] = $source;
         }

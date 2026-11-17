@@ -572,9 +572,19 @@ Api::client()->get('/feed', ['cursor' => $cursor])->json()
     ->catch(fn (HttpError $e) => $this->error->set($e->json('message', 'Falha na rede.')));
 ```
 
-- `Http::create(baseUrl, headers, timeout, retry, retryDelay)`. The client is
-  immutable: `onRequest()`, `onResponse()`, `onError()`, `withHeaders()`,
-  `withBaseUrl()`, `withTimeout()` and `withRetry()` return a copy.
+- `Http::create(baseUrl, headers, timeout, retry, retryDelay, maxResponseBytes)`.
+  The client is immutable: `onRequest()`, `onResponse()`, `onError()`,
+  `withHeaders()`, `withBaseUrl()`, `withTimeout()`, `withRetry()` and
+  `withMaxResponseBytes()` return a copy.
+- Response bodies are capped at 1 MiB by default. Raise the cap per client
+  (`Http::create(maxResponseBytes: 2 * 1024 * 1024)`), per copy
+  (`$client->withMaxResponseBytes(...)->get(...)`) or per request
+  (`Request::withMaxResponseBytes()` in an interceptor), up to 16 MiB; a larger
+  value is refused. The host stops reading at the cap and fails with
+  "HTTP response exceeds N bytes; raise maxResponseBytes". Bodies over 900 KiB
+  reach PHP through a private cache file the host writes and PHP reads once and
+  deletes, because the native module bridge carries at most 1 MiB. On iOS the
+  cap is checked when URLSession finishes the download.
 - `get($url, $query)`, `delete($url, $query)`, `post/put/patch($url, $data)`
   (arrays and objects as JSON, strings as is) and `request()`.
 - `multipart($url, fn (MultipartRequest $form) => $form->field(...)->file(...), $progress)`

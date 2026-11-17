@@ -35,10 +35,21 @@ final readonly class HttpResponse
     public static function fromNative(array $values): self
     {
         $headers = json_decode((string) ($values['headers'] ?? '{}'), true);
+        $body = (string) ($values['body'] ?? '');
+        $file = $values['bodyFile'] ?? null;
+        if (is_string($file) && $file !== '') {
+            // A body over the native bridge's inline size arrives as a private
+            // cache file written by the host; it is read once and removed.
+            if (!str_ends_with($file, '.pamhttp') || str_contains($file, "\0") || !is_file($file)) {
+                throw new \RuntimeException('HTTP response body file is missing.');
+            }
+            $body = (string) file_get_contents($file);
+            @unlink($file);
+        }
 
         return new self(
             statusCode: (int) ($values['statusCode'] ?? 0),
-            body: (string) ($values['body'] ?? ''),
+            body: $body,
             headers: is_array($headers) ? $headers : [],
         );
     }

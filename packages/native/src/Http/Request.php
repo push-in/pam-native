@@ -37,7 +37,10 @@ final readonly class Request
         public int $attempt = 1,
         /** Free-form values interceptors share (e.g. ['skipAuth' => true]). */
         public array $context = [],
+        /** Largest response body accepted (bytes); see Http::MAX_RESPONSE_BYTES. */
+        public int $maxResponseBytes = Http::DEFAULT_RESPONSE_BYTES,
     ) {
+        Http::assertResponseLimit($maxResponseBytes);
         if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
             throw new InvalidArgumentException("Unsupported HTTP method {$method}.");
         }
@@ -110,6 +113,12 @@ final readonly class Request
         return $this->copy(timeoutMs: $milliseconds);
     }
 
+    /** Accepts response bodies up to $bytes (1 MiB by default, at most 16 MiB). */
+    public function withMaxResponseBytes(int $bytes): self
+    {
+        return $this->copy(maxResponseBytes: $bytes);
+    }
+
     public function withContext(string $key, mixed $value): self
     {
         return $this->copy(context: [...$this->context, $key => $value]);
@@ -179,6 +188,7 @@ final readonly class Request
         ?int $timeoutMs = null,
         ?int $attempt = null,
         ?array $context = null,
+        ?int $maxResponseBytes = null,
     ): self {
         return new self(
             method: $method ?? $this->method,
@@ -189,6 +199,7 @@ final readonly class Request
             timeoutMs: $timeoutMs ?? $this->timeoutMs,
             attempt: $attempt ?? $this->attempt,
             context: $context ?? $this->context,
+            maxResponseBytes: $maxResponseBytes ?? $this->maxResponseBytes,
         );
     }
 }
