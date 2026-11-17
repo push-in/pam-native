@@ -830,10 +830,12 @@ internal class PamModalHost @JvmOverloads constructor(
     /**
      * Activity-level fallback for synthetic/OEM Back dispatch that reaches
      * both the dialog and its host activity. A visible modal always owns Back;
-     * the activity must never pop its navigator or finish underneath it.
+     * the activity must never pop its navigator or finish underneath it. A
+     * modal the app has asked to present owns it too, from the commit: a
+     * quick Back before its window appeared popped the screen behind it.
      */
     fun consumeActivityBack(): Boolean {
-        if (!isPresented()) return false
+        if (!isPresented() && !(desiredVisible && isAttachedToWindow && removalExit == null)) return false
         if (desiredVisible) requestCloseFromBack()
         return true
     }
