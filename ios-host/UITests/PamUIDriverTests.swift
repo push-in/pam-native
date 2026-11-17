@@ -144,8 +144,14 @@ final class PamUIDriverTests: XCTestCase {
             let keyboard = app.keyboards.firstMatch
             if keyboard.exists {
                 let window = app.windows.firstMatch
-                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-                    .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+                // Into the keyboard: interactive dismissal follows the finger.
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)),
+                        withVelocity: .slow,
+                        thenHoldForDuration: 0
+                    )
                 if keyboard.exists {
                     window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
                 }
