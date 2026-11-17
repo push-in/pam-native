@@ -141,17 +141,23 @@ class PamYogaRelativeRoundingTest {
     }
 
     @Test
-    fun flattenedAncestorsAddTheirRoundedOrigins() {
-        // Tab bar: padding 6 dp, five 79.886 dp tabs in 411.43 dp, a 44 dp
-        // pill centered in each. RN mounts the 2nd tab's pill at
-        // round(225.45) + round(47.1) = 272 px; rounding the absolute
-        // 272.55 px gave 273 (pill and icon one pixel to the right).
+    fun aFlattenedNodeSharesThePixelOfASiblingAtTheSameOffset() {
+        // Tab bar: the 2nd tab's pill is 225.45 + 47.1 = 272.55 px from the
+        // host. Rounded once it is 273, the pixel an unflattened node at the
+        // same offset gets (summing rounded origins gave 272).
         val tab = 225.45 / density
         val pill = 47.1 / density
-        assertEquals(272, flattenedYogaOffset(listOf(pill, tab), density, text = false))
-        assertEquals(273, yogaPixelGrid(tab + pill, density, forceCeil = false, forceFloor = false))
-        // A text floors only its own position.
-        assertEquals(10 + 4, flattenedYogaOffset(listOf(10.9 / density, 3.5 / density), density, text = true))
+        assertEquals(273, flattenedYogaOffset(listOf(pill, tab), density, text = false))
+        assertEquals(yogaPixelGrid(tab + pill, density, forceCeil = false, forceFloor = false), flattenedYogaOffset(listOf(pill, tab), density, text = false))
+        // A card: title and a button in a flattened wrapper, both 37dp in.
+        val wrapper = 21.0
+        val button = 16.0
+        assertEquals(
+            yogaPixelGrid(37.0, 2.625f, forceCeil = false, forceFloor = false),
+            flattenedYogaOffset(listOf(button, wrapper), 2.625f, text = false),
+        )
+        // Text floors its position, as Yoga does for text nodes.
+        assertEquals(14, flattenedYogaOffset(listOf(10.9 / density, 3.5 / density), density, text = true))
     }
 
     @Test

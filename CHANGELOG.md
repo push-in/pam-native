@@ -31,6 +31,10 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   `underlineColorAndroid="transparent"` lost its whole box on Android: the
   underline tint was applied to PAM's own background drawable. The tint now
   colours only the platform underline.
+- Changed: a node inside flattened layout-only wrappers is placed by its
+  whole offset from its native host, rounded once, so it shares the pixel of
+  a sibling at the same dp offset (a card's button started 1px right of its
+  title at 2.625x). React Native adds each wrapper's rounded origin.
 - Fixed: a child centred in its parent keeps equal pixel gaps at fractional
   densities (a 20dp icon in a 44dp button sat 1px low at 2.625x).
 - Fixed: a bottom sheet's drag handle follows the sheet when it changes

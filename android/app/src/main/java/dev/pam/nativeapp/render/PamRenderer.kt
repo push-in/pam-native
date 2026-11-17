@@ -790,13 +790,15 @@ internal fun headerRunPixelSteps(starts: DoubleArray, density: Float): IntArray 
     return IntArray((starts.size - 1).coerceAtLeast(0)) { rounded[it + 1] - rounded[it] }
 }
 
-internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Float, text: Boolean): Int {
-    var sum = 0
-    relativesFromNodeUp.forEachIndexed { index, relative ->
-        sum += yogaPixelGrid(relative, density, forceCeil = false, forceFloor = text && index == 0)
-    }
-    return sum
-}
+/**
+ * A node whose layout-only ancestors were flattened away is placed by its
+ * whole offset from the native host, rounded once: exactly the pixel a
+ * sibling at the same dp offset gets. React Native adds each ancestor's
+ * rounded origin instead, so a button inside a flattened wrapper started a
+ * pixel right of the title above it at 2.625x.
+ */
+internal fun flattenedYogaOffset(relativesFromNodeUp: List<Double>, density: Float, text: Boolean): Int =
+    yogaPixelGrid(relativesFromNodeUp.sum(), density, forceCeil = false, forceFloor = text)
 
 // Yoga compares the scaled fraction with 0.0001; frames here are absolute
 // float sums, so a whole pixel can arrive a few 1e-4 px short of it.
