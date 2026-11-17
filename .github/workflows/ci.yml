@@ -209,9 +209,9 @@ jobs:
         with:
           api-level: ${{ matrix.api-level }}
           arch: x86_64
-          # The AOSP image: no Play services updating in the background
-          # while the instrumentation runs (the API 36 google_apis flakes).
-          target: default
+          # google_apis ships a real soft keyboard: the IME contracts need it
+          # (the AOSP default image failed every keyboard test).
+          target: google_apis
           profile: pixel_6
           disable-animations: true
           script: |

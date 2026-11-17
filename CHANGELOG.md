@@ -59,8 +59,8 @@ pixel-exact centring and the evidence tools behind PAM Native UI 2.1.
   driver's `{"layout": "name"}` step write every view's frame, visible part,
   real touch target and text metrics. The iOS driver also gains
   `{"expectText": id, "contains": [...]}`.
-- CI: instrumentation runs on the AOSP emulator image, resolves dependencies
-  before the emulator boots and retries only transient repository errors; the
+- CI: instrumentation resolves its dependencies before the emulator boots
+  and retries only transient repository errors (Maven Central 429s); the
   iOS plugin aggregate no longer imports the private media editor.
 
 ## 1.51.0 - 2026-11-17
