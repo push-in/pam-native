@@ -23,14 +23,14 @@ abstract class SyncGoogleServicesTask : DefaultTask() {
 }
 
 val pamProperties = Properties().apply {
-    rootProject.file("pam-native.properties").inputStream().use { input ->
+    rootProject.file("pam-native.properties").reader(Charsets.UTF_8).use { input ->
         load(input)
     }
 }
 val pamPluginProperties = Properties().apply {
     val pluginFile = rootProject.file("pam-plugins.properties")
     if (pluginFile.isFile) {
-        pluginFile.inputStream().use { input ->
+        pluginFile.reader(Charsets.UTF_8).use { input ->
             load(input)
         }
     }

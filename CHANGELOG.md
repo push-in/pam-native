@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.50.5 - 2026-11-16
+
+- Fixed: Android reads `pam-native.properties` and `pam-plugins.properties` as
+  UTF-8, so an app name with accents ("Zé Chat") reaches the launcher label
+  intact instead of "ZÃ© Chat".
+
 ## 1.50.4 - 2026-11-16
 
 Crash-safe release extraction. No API change.

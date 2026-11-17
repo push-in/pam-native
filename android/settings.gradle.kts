@@ -16,7 +16,7 @@ dependencyResolutionManagement {
         val pamPlugins = Properties()
         val pamPluginsFile = rootDir.resolve("pam-plugins.properties")
         if (pamPluginsFile.isFile) {
-            pamPluginsFile.inputStream().use(pamPlugins::load)
+            pamPluginsFile.reader(Charsets.UTF_8).use { pamPlugins.load(it) }
         }
         val repositoryCount = pamPlugins.getProperty("repository.count", "0").toInt()
         repeat(repositoryCount) { index ->
@@ -36,7 +36,7 @@ include(":plugin-api")
 val pamPlugins = Properties()
 val pamPluginsFile = rootDir.resolve("pam-plugins.properties")
 if (pamPluginsFile.isFile) {
-    pamPluginsFile.inputStream().use(pamPlugins::load)
+    pamPluginsFile.reader(Charsets.UTF_8).use { pamPlugins.load(it) }
 }
 val pluginCount = pamPlugins.getProperty("plugin.count", "0").toInt()
 repeat(pluginCount) { index ->
