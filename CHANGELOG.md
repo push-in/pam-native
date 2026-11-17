@@ -41,6 +41,11 @@ found while rebuilding PAM Native UI 2.0 and porting PushinPay.
   first) instead of after restarting `pam dev`.
 - Fixed: a PHP-only plugin (no `android` section) defaults to `minSdk` 26
   instead of 0, which the CLI rejected.
+- Performance: each `@media`/`@container` block of a component stylesheet
+  carried a full copy of the sheet-level IR, bytecode, source map and the
+  20 KB compatibility table (~75 KB per block). Query blocks keep only their
+  rules now: a themed component with light, dark and platform blocks compiles
+  ~4x smaller and loads with less memory.
 
 ## 1.50.5 - 2026-11-16
 
