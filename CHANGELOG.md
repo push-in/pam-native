@@ -11,6 +11,9 @@ gate failed on the two items below.
   distribution PHP (Ubuntu, setup-php) without its `conf.d` extensions:
   "Call to undefined function token_get_all()" during `pam dev`. Reproduced
   with `PHP_INI_SCAN_DIR= php`; a unit test covers the environment.
+- CI: the ecosystem Android certification and the release Android builds
+  retry Gradle only on transient repository errors (Maven Central 429), as
+  the contract jobs already did; main's ecosystem run failed on one.
 - Ecosystem: pam-native-audio 0.3.2, pam-native-calls 0.2.3,
   pam-native-share-extension 0.4.8 and pam-native-webrtc 0.3.3 check their
   PAM Native range against their own composer requirement; their releases

@@ -77,4 +77,5 @@ jobs:
           --package pam-native-cli -- prepare .
       - name: Compile and lint every plugin in one application
         working-directory: certification/android-ecosystem/.pam-native/android
-        run: ./gradlew :app:assembleDebug :app:lintDebug --stacktrace --no-daemon
+        # Maven Central answers 429 under load: retry only those failures.
+        run: ${GITHUB_WORKSPACE}/scripts/ci-gradle-retry.sh ./gradlew :app:assembleDebug :app:lintDebug --stacktrace --no-daemon
