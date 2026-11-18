@@ -473,7 +473,21 @@ class PamSheetKeyboardInstrumentedTest {
                     try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
                 }
             }
-            waitUntil(instrumentation, "tall sheet IME visible") { dialogImeTop(input) != null }
+            // A cold IME on a loaded CI emulator can drop the first request:
+            // ask again every few seconds instead of failing after one.
+            var lastRequest = SystemClock.uptimeMillis()
+            waitUntil(instrumentation, "tall sheet IME visible", timeoutMs = 20_000) {
+                val shown = dialogImeTop(input) != null
+                if (!shown && SystemClock.uptimeMillis() - lastRequest > 4_000) {
+                    lastRequest = SystemClock.uptimeMillis()
+                    input.post {
+                        input.requestFocus()
+                        activity.getSystemService(InputMethodManager::class.java)
+                            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                shown
+            }
             Thread.sleep(600)
             onMain(instrumentation) {
                 val sheet = input.parent as View
