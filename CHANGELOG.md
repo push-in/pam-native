@@ -16,6 +16,10 @@ was published (the release community gate failed; see "Fixed (release)").
   320 dp confirm dialog came out 272 dp wide with "Cancel" and "Delete"
   ellipsized to "C..." and "...". The card keeps the engine's size and is
   centred; an instrumented test checks the width and the labels.
+- Changed (Android): the first-launch bundle install inflates each chunk in
+  128 KiB steps. One call over a multi-MB chunk pinned its arrays (a JNI
+  critical section that blocks the GC) for 16 ms; ART logged it once in a
+  clean `pam init --template native-ui` run.
 - Changed (debug): the layout snapshot reports `ellipsized` for text that
   PamTextView truncated by replacing it (React Native tail truncation),
   which has no ellipsis in its own layout. The geometry check missed the

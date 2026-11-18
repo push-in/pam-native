@@ -336,6 +336,7 @@ private const val MAX_PACK_FILES = 100_000
 private const val MAX_PACK_FILE_BYTES = 256 * 1024 * 1024
 private const val MAX_PACK_CHUNK_BYTES = 256 * 1024 * 1024
 private const val MAX_PACK_BYTES_IN_FLIGHT = 16 * 1024 * 1024
+private const val INFLATE_STEP_BYTES = 128 * 1024
 
 /** One file of a packed bundle index (`<sha256> <size> <p|a> <path>`). */
 internal class PackedBundleFile(
@@ -597,7 +598,10 @@ private fun installChunk(destination: File, chunk: PackedBundleChunk, compressed
         inflater.setInput(compressed)
         var filled = 0
         while (filled < bytes.size) {
-            val count = inflater.inflate(bytes, filled, bytes.size - filled)
+            // Bounded steps: Inflater pins both arrays (a JNI critical
+            // section that blocks the GC) for the whole call, and one call
+            // over a multi-MB chunk held it 16 ms on the first launch.
+            val count = inflater.inflate(bytes, filled, minOf(INFLATE_STEP_BYTES, bytes.size - filled))
             if (count == 0) {
                 require(!inflater.finished() && !inflater.needsInput() && !inflater.needsDictionary()) {
                     "Pam Native bundle pack chunk is truncated"
