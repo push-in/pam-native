@@ -355,14 +355,33 @@ final class OfflineMutationQueue
         return $this->fire(null);
     }
 
-    /** Reports connectivity from another source (realtime socket, HTTP success). */
+    /**
+     * Reports connectivity from another source (realtime socket, HTTP
+     * success). Coming back online (false to true) makes every waiting retry
+     * due now, so the backoff that grew while offline does not hold the
+     * queue, then drains the Connectivity callbacks.
+     */
     public function online(bool $online = true): void
     {
         $previous = $this->online;
         $this->online = $online;
         if ($online && $previous === false) {
+            $this->retryNow();
             $this->fire(DrainTrigger::Connectivity);
         }
+    }
+
+    /** Brings every Retry mutation still waiting on its backoff forward to now. */
+    private function retryNow(): void
+    {
+        $now = ($this->clock)();
+        $moved = false;
+        foreach ($this->mutations as $id => $mutation) {
+            if ($mutation->status !== MutationStatus::Retry || $mutation->availableAtMs <= $now) continue;
+            $this->mutations[$id] = $mutation->withStatus(MutationStatus::Retry, $mutation->error, $now);
+            $moved = true;
+        }
+        if ($moved) $this->changed();
     }
 
     /**

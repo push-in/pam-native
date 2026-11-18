@@ -664,6 +664,34 @@ $drainSubscription->cancel();
 $triggered->enqueue('msg:2', 'message.send', ['body' => 'tchau']);
 $assert($drains === [1, 1, 1, 1] && $triggered->prune() === 1, 'A cancelled drain subscription must stop draining.');
 
+// Coming back online makes waiting retries due now (the backoff grown offline does not hold the queue).
+$backlog = [];
+$backoffQueue = new OfflineMutationQueue(backoff: new BackoffPolicy(baseMs: 2_000, maxMs: 1_024_000), clock: $queueClock);
+$backoffSubscription = $backoffQueue->drainOn(static function (OfflineMutationQueue $q) use (&$backlog): void { $backlog[] = count($q->ready()); }, DrainTrigger::Connectivity);
+$liked = $backoffQueue->enqueue('like:1', 'post.like', ['id' => 1]);
+$saved = $backoffQueue->enqueue('save:1', 'post.save', ['id' => 1]);
+$applied = $backoffQueue->enqueue('like:2', 'post.like', ['id' => 2]);
+foreach (range(1, 8) as $attempt) {
+    $backoffQueue->sending($liked->id);
+    $backoffQueue->retry($liked->id, $queueNow, 'offline');
+}
+$backoffQueue->sending($saved->id);
+$backoffQueue->retry($saved->id, $queueNow, 'offline');
+$backoffQueue->sending($applied->id);
+$backoffQueue->applied($applied->id);
+$assert($backoffQueue->ready() === [] && $backoffQueue->nextRetryAtMs() > $queueNow + 1_000, 'Both retries wait on their backoff.');
+$backoffQueue->online(false);
+$assert($backlog === [] && $backoffQueue->ready() === [], 'Going offline moves nothing.');
+$backoffQueue->online(true);
+$assert(
+    $backlog === [2] && count($backoffQueue->ready()) === 2 && $backoffQueue->nextRetryAtMs() === $queueNow
+        && $backoffQueue->get($liked->id)?->attempts === 8 && $backoffQueue->get($applied->id)?->status === MutationStatus::Applied,
+    'Connectivity coming back makes every waiting retry due now and drains them, keeping attempts and other statuses: '.json_encode($backlog),
+);
+$backoffQueue->online(true);
+$assert($backlog === [2], 'Staying online does not drain again.');
+$backoffSubscription->cancel();
+
 // 1.40 hardening: timer hooks, restart/ensure, failures, long delays, list windows.
 final class UtilitiesTimerHooksFixture extends Component
 {

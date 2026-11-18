@@ -390,3 +390,9 @@ private function send(OfflineMutationQueue $queue): void
   timer run only while mutations are pending and the app is in the
   foreground. `online()` reports connectivity from another source, `drain()`
   runs the callbacks now, and the returned `Subscription` stops everything.
+  When connectivity comes back (the watch or `online(true)` after
+  `online(false)`), every `Retry` mutation still waiting on its backoff
+  becomes due now, so a delay that grew while offline does not hold the
+  queue; attempts are kept. Apps without the watch can call
+  `online(false)`/`online(true)` from their own network health (a failed and
+  then a successful API request).
