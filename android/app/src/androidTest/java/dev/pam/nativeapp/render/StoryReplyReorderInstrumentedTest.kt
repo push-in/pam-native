@@ -100,6 +100,11 @@ class StoryReplyReorderInstrumentedTest {
                     lastRequest = SystemClock.uptimeMillis()
                     onMain {
                         input.requestFocus()
+                        // An explicit request: after an earlier test hid the
+                        // keyboard, SHOW_IMPLICIT alone is ignored.
+                        if (android.os.Build.VERSION.SDK_INT >= 30) {
+                            input.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
+                        }
                         manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
                     }
                 }

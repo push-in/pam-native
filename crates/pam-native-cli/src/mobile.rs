@@ -3513,7 +3513,7 @@ fn download_release_asset(url: &str, destination: &Path, maximum_bytes: u64) -> 
     status
         .success()
         .then_some(())
-        .ok_or_else(|| format!("Android runtime download failed with {status}"))
+        .ok_or_else(|| format!("download of {url} failed with {status}"))
 }
 
 fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Result<(), String> {
@@ -3818,17 +3818,9 @@ fn repair_android_environment(project_path: &Path) -> Result<(), String> {
     install_android_packages(&project, &runtime, true)
 }
 
-fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
-    apple_runtime_ready(runtime, AppleOs::Ios)
-}
-
-fn apple_runtime_ready(runtime: &ResolvedRuntime, os: AppleOs) -> bool {
-    let root = os.runtime_root(runtime);
-    root.join("PamPhp.xcframework/Info.plist").is_file()
-        && root
-            .join("PamNativeEngine.xcframework/Info.plist")
-            .is_file()
-        && root.join("runtime.json").is_file()
+/// The PHP half of an Apple runtime slot (the engine resolves separately).
+fn apple_php_ready(root: &Path) -> bool {
+    root.join("PamPhp.xcframework/Info.plist").is_file() && root.join("runtime.json").is_file()
 }
 
 /// The iOS engine xcframework must be built from these sources: same SDK
@@ -3883,6 +3875,169 @@ fn resolve_apple_engine(
             local.unwrap_err()
         )),
     }
+}
+
+/// Largest iOS PHP runtime archive accepted from a release.
+const MAX_IOS_RUNTIME_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Where the verified iOS PHP runtime `runtime_id` comes from: PAM's
+/// `runtime/ios-runtimes.json` pins its URL and SHA-256; without that file
+/// (PAM before 2.2.22) the immutable `runtime-ios-<id>` release and the
+/// `.sha256` published beside it.
+fn ios_runtime_source(pam_home: &Path, runtime_id: &str) -> (String, Option<String>) {
+    let pinned = fs::read_to_string(pam_home.join("runtime/ios-runtimes.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|manifest| manifest.get("runtimes")?.get(runtime_id).cloned())
+        .and_then(|entry| {
+            let url = entry.get("url")?.as_str()?.to_owned();
+            let sha256 = entry.get("sha256")?.as_str()?.to_ascii_lowercase();
+            (sha256.len() == 64 && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                .then_some((url, Some(sha256)))
+        });
+    pinned.unwrap_or_else(|| {
+        let base = std::env::var("PAM_IOS_RUNTIME_BASE_URL").unwrap_or_else(|_| {
+            format!("https://github.com/push-in/pam/releases/download/runtime-ios-{runtime_id}")
+        });
+        (
+            format!(
+                "{}/pam-ios-runtime-{runtime_id}.tar.gz",
+                base.trim_end_matches('/')
+            ),
+            None,
+        )
+    })
+}
+
+/// The cached, verified iOS PHP runtime for `runtime`, downloaded on first use.
+fn resolve_ios_php_runtime(runtime: &ResolvedRuntime) -> Result<PathBuf, String> {
+    let cache = apple_engine_cache_root()?
+        .join("ios-runtime")
+        .join(&runtime.id);
+    if apple_php_ready(&cache) {
+        return Ok(cache);
+    }
+    let (url, pinned) = ios_runtime_source(&pam_home()?, &runtime.id);
+    download_ios_php_runtime(&url, pinned.as_deref(), &runtime.id, &cache)?;
+    println!(
+        "Using the prebuilt iOS PHP runtime {} ({})",
+        runtime.id,
+        cache.display()
+    );
+    Ok(cache)
+}
+
+fn download_ios_php_runtime(
+    url: &str,
+    pinned_sha256: Option<&str>,
+    runtime_id: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| format!("invalid runtime cache {}", destination.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let temporary = parent.join(format!(
+        ".download-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir(&temporary)
+        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
+    let result = (|| {
+        let asset = url
+            .rsplit('/')
+            .next()
+            .unwrap_or("pam-ios-runtime.tar.gz")
+            .to_owned();
+        let archive = temporary.join(&asset);
+        download_release_asset(url, &archive, MAX_IOS_RUNTIME_ARCHIVE_BYTES)?;
+        let actual = bounded_file_sha256(
+            &archive,
+            MAX_IOS_RUNTIME_ARCHIVE_BYTES,
+            "iOS runtime archive",
+        )?;
+        let expected = match pinned_sha256 {
+            Some(sha256) => sha256.to_owned(),
+            None => {
+                let checksum = temporary.join(format!("{asset}.sha256"));
+                download_release_asset(&format!("{url}.sha256"), &checksum, MAX_CHECKSUM_BYTES)?;
+                fs::read_to_string(&checksum)
+                    .map_err(|error| format!("cannot read {}: {error}", checksum.display()))?
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            }
+        };
+        if expected.len() != 64 || !actual.eq_ignore_ascii_case(&expected) {
+            return Err(format!(
+                "iOS runtime checksum mismatch for {asset}: expected {expected}, got {actual}"
+            ));
+        }
+        let listing = Command::new("tar")
+            .arg("-tzf")
+            .arg(&archive)
+            .output()
+            .map_err(|error| format!("cannot inspect the iOS runtime archive: {error}"))?;
+        if !listing.status.success() {
+            return Err(format!(
+                "cannot inspect the iOS runtime archive: {}",
+                listing.status
+            ));
+        }
+        for line in String::from_utf8_lossy(&listing.stdout).lines() {
+            let path = Path::new(line.trim_start_matches("./"));
+            let safe = (path.starts_with("PamPhp.xcframework")
+                || path == Path::new("runtime.json"))
+                && path
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_)));
+            if !safe && !line.trim_start_matches("./").is_empty() {
+                return Err(format!("unsafe iOS runtime archive path: {line}"));
+            }
+        }
+        let unpacked = temporary.join("unpacked");
+        fs::create_dir(&unpacked)
+            .map_err(|error| format!("cannot create {}: {error}", unpacked.display()))?;
+        let status = Command::new("tar")
+            .arg("-xzf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&unpacked)
+            .status()
+            .map_err(|error| format!("cannot unpack the iOS runtime: {error}"))?;
+        if !status.success() {
+            return Err(format!("cannot unpack the iOS runtime: {status}"));
+        }
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(unpacked.join("runtime.json"))
+                .map_err(|error| format!("the iOS runtime has no runtime.json: {error}"))?,
+        )
+        .map_err(|error| format!("invalid iOS runtime.json: {error}"))?;
+        if manifest.get("runtimeId").and_then(|value| value.as_str()) != Some(runtime_id) {
+            return Err(format!("the iOS runtime archive is not {runtime_id}"));
+        }
+        if !apple_php_ready(&unpacked) {
+            return Err("the iOS runtime archive has no PamPhp.xcframework".to_owned());
+        }
+        if destination.exists() {
+            fs::remove_dir_all(destination)
+                .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
+        }
+        fs::rename(&unpacked, destination).map_err(|error| {
+            format!(
+                "cannot store the iOS runtime in {}: {error}",
+                destination.display()
+            )
+        })
+    })();
+    let _ = fs::remove_dir_all(&temporary);
+    result
 }
 
 fn apple_engine_cache_root() -> Result<PathBuf, String> {
@@ -4044,12 +4199,25 @@ fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
         simctl,
         tool_version("xcrun", &["--find", "simctl"]),
     );
-    let runtime_ready = ios_runtime_ready(&runtime);
-    healthy &= runtime_ready;
+    // An empty slot is fine: ios:prepare downloads the verified runtime.
+    let cached = apple_engine_cache_root()
+        .map(|root| root.join("ios-runtime").join(&runtime.id))
+        .ok()
+        .filter(|cache| apple_php_ready(cache));
+    let runtime_detail = if apple_php_ready(&runtime.ios_root) {
+        runtime.ios_root.display().to_string()
+    } else if let Some(cache) = &cached {
+        cache.display().to_string()
+    } else {
+        format!(
+            "downloaded on the first ios:prepare ({})",
+            ios_runtime_source(&pam_home().unwrap_or_default(), &runtime.id).0
+        )
+    };
     check(
         &format!("PHP {} iOS runtime", runtime.release.php_version),
-        runtime_ready,
-        runtime.ios_root.display().to_string(),
+        true,
+        runtime_detail,
     );
     let targets = installed_rust_targets().unwrap_or_default();
     for target in [
@@ -4084,17 +4252,33 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
 fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
     let native_home = native_home()?;
     let runtime = resolve_runtime(project, &pam_home()?)?;
-    let runtime_root = os.runtime_root(&runtime).to_path_buf();
-    if !apple_runtime_ready(&runtime, os) {
+    let slot = os.runtime_root(&runtime).to_path_buf();
+    let runtime_root = if apple_php_ready(&slot) {
+        slot
+    } else if os == AppleOs::Ios {
+        // PAM releases ship an empty iOS slot: the verified PHP XCFramework
+        // is a separate immutable asset, downloaded once and cached.
+        resolve_ios_php_runtime(&runtime).map_err(|download| {
+            format!(
+                "verified PHP {} iOS runtime is missing ({download}). It downloads from the \
+                 `runtime-ios-{}` PAM release; to build it locally instead (opt-in, about an \
+                 hour), run `runtime-builder/ios/build.sh --php {} all` in a PAM checkout and \
+                 point PAM_HOME at it (expected {})",
+                runtime.release.php_version,
+                runtime.id,
+                project.manifest.runtime.php,
+                slot.display()
+            )
+        })?
+    } else {
         return Err(format!(
-            "verified PHP {} {} runtime is missing; build it on macOS with `runtime-builder/ios/build.sh --php {} {}` (expected {})",
+            "verified PHP {} {} runtime is missing; build it on macOS with `runtime-builder/ios/build.sh --php {} tvos` (expected {})",
             runtime.release.php_version,
             os.name(),
             project.manifest.runtime.php,
-            if os == AppleOs::Ios { "all" } else { "tvos" },
-            runtime_root.display()
+            slot.display()
         ));
-    }
+    };
     let engine_root = resolve_apple_engine(&runtime_root, &native_home, os)?;
     write_runtime_lock(project, &runtime)?;
     write_plugin_lock(project)?;
@@ -10482,6 +10666,39 @@ mod tests {
         assert!(!transient_repository_error(
             "e: Unresolved reference: foo\nBUILD FAILED"
         ));
+    }
+
+    #[test]
+    fn ios_runtime_comes_from_the_pinned_manifest_or_its_immutable_release() {
+        let home =
+            std::env::temp_dir().join(format!("pam-ios-runtime-source-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(home.join("runtime")).unwrap();
+        let (url, pinned) = ios_runtime_source(&home, "8.5.12-r1");
+        assert!(
+            url.ends_with("/runtime-ios-8.5.12-r1/pam-ios-runtime-8.5.12-r1.tar.gz"),
+            "{url}"
+        );
+        assert_eq!(
+            pinned, None,
+            "without a manifest the release's .sha256 is used"
+        );
+        let sha = "A".repeat(64);
+        fs::write(
+            home.join("runtime/ios-runtimes.json"),
+            format!(r#"{{"schemaVersion":1,"runtimes":{{"8.5.12-r1":{{"url":"https://example.test/x.tar.gz","sha256":"{sha}"}}}}}}"#),
+        )
+        .unwrap();
+        let (url, pinned) = ios_runtime_source(&home, "8.5.12-r1");
+        assert_eq!(url, "https://example.test/x.tar.gz");
+        assert_eq!(pinned.as_deref(), Some("a".repeat(64).as_str()));
+        // Another runtime id still falls back to its own release.
+        assert!(
+            ios_runtime_source(&home, "8.4.27-r1")
+                .0
+                .contains("runtime-ios-8.4.27-r1")
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

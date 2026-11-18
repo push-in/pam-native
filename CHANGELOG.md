@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.53.4 - 2026-11-18
+
+A fresh Mac runs `pam mobile ios:*` with no manual step.
+
+- Added: `ios:prepare` downloads the verified iOS PHP runtime
+  (PamPhp.xcframework, device arm64 + simulator arm64/x86_64) when PAM's
+  slot is empty, as PAM's macOS release ships it. The runtime is built once
+  per PHP version and revision by PAM's `iOS PHP runtime` workflow and
+  published as the immutable `runtime-ios-<id>` release; the CLI verifies
+  the SHA-256 pinned in PAM's `runtime/ios-runtimes.json` (PAM 2.2.22+) or
+  the `.sha256` beside the asset, accepts only `PamPhp.xcframework/` and a
+  matching `runtime.json`, and caches it in `<engine cache>/ios-runtime`.
+  Building PHP locally stays an explicit opt-in (`runtime-builder/ios/build.sh`)
+  named in the error. `ios:doctor` reports a downloadable runtime as ready.
+- Fixed: Gradle builds (`pam dev`, `pam mobile build`, bundles) retry up to
+  three times on transient repository errors (Maven Central 429, 5xx,
+  timeouts) and return build failures at once.
+- Tests: the story-reply and tall-sheet keyboard tests ask the IME again
+  with an explicit `WindowInsetsController.show(ime())` while they wait:
+  after an earlier test hid the keyboard, `SHOW_IMPLICIT` alone was ignored
+  on CI (28 keyboard tests pass locally, idle and under CPU load).
+- CI: `scripts/ci-ime-ready.sh` waits for the default IME, binds it and lets
+  the soft keyboard show next to the emulator's hardware keyboard before the
+  instrumented contracts; a different keyboard test timed out waiting for
+  the IME on each API 36 run.
+
 ## 1.53.3 - 2026-11-18
 
 The 1.53.2 fixes, released: that tag was not published because the release
