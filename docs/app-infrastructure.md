@@ -311,12 +311,19 @@ Format::date($sentAt, DateStyle::Numeric);   // "12/10"; NumericWithYear "12/10/
 Format::dateTime($sentAt);                   // "12/10/2025 14:05"
 Format::relative($t, style: RelativeTimeStyle::Tiny, maxWeeks: 0,
     dateStyle: DateStyle::Medium);           // "5m", "3h", "2d", then "12 de out."
-Format::useLocale('en');                     // default locale (pt-BR)
+Format::useLocale('en');                     // fixed default locale; null follows I18n
 
 Text::fold('Ação');                          // "acao"
 Text::contains('Conversa com João', 'joao'); // true
 [$folded, $map] = Text::foldWithMap($name);  // highlight matches in the original
 ```
+
+Locales: Portuguese, English, Spanish and French (any other tag reads as
+English). Without `Format::useLocale()`, Format follows the active
+`I18n::locale()` once the app registers catalogs, otherwise pt-BR. Spanish:
+"1234", "12.345", "1,2 mil", "3,4 M", "hace 5 min", "12 de oct", "17:05".
+French: "1 234" (narrow no-break space), "1,2 k", "2 Md", "il y a 5 min",
+"il y a 3 j", "12 oct.", "12 octobre 2025", "1,5 Ko", "17:05".
 
 `relative()` accepts Unix seconds, ISO-8601 strings or `DateTimeInterface`,
 uses days up to `maxDays` (6; `PHP_INT_MAX` never stops), weeks up to

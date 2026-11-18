@@ -10,10 +10,12 @@ use DateTimeZone;
 use InvalidArgumentException;
 
 use function is_int;
+use function in_array;
 use function is_string;
 
 /**
- * Locale-aware display formatting for pt-BR and English without ext-intl.
+ * Locale-aware display formatting for Portuguese, English, Spanish and French
+ * without ext-intl.
  *
  *     Format::count(12345);                     // "12.345"
  *     Format::compact(1234);                    // "1,2 mil"   (en: "1.2K")
@@ -23,8 +25,11 @@ use function is_string;
  *     Format::time($sentAt, 'America/Sao_Paulo'); // "14:05"  (en: "2:05 PM")
  *     Format::date($sentAt, DateStyle::Medium);   // "12 de out." (en: "Oct 12")
  *
- * The locale defaults to pt-BR; set it once with Format::useLocale('en') or
- * pass it per call. Any "pt…" tag selects Portuguese, anything else English.
+ * The locale is the one given per call, else Format::useLocale(), else the
+ * active I18n locale when the app registered catalogs, else pt-BR. Tags are
+ * matched by language: "pt…", "es…", "fr…"; anything else is English.
+ * Spanish and French use 24 h clocks, day/month dates and their own grouping
+ * (es "12.345" from five digits, fr "12 345" with a narrow no-break space).
  */
 final class Format
 {
@@ -32,14 +37,20 @@ final class Format
     private const PT_MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     private const EN_MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     private const EN_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    private const ES_MONTHS_SHORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
+    private const ES_MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    private const FR_MONTHS_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    private const FR_MONTHS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+    private const FR_GROUP = "\u{202F}";
 
-    private static string $locale = 'pt-BR';
+    private static ?string $locale = null;
 
     private function __construct()
     {
     }
 
-    public static function useLocale(string $locale): void
+    /** Fixes the default locale; null follows I18n again (pt-BR without catalogs). */
+    public static function useLocale(?string $locale): void
     {
         if ($locale === '') {
             throw new InvalidArgumentException('Locale must not be empty.');
@@ -47,17 +58,20 @@ final class Format
         self::$locale = $locale;
     }
 
+    /** The default locale: useLocale(), else the active I18n locale when catalogs exist, else pt-BR. */
     public static function locale(): string
     {
-        return self::$locale;
+        if (self::$locale !== null) {
+            return self::$locale;
+        }
+
+        return \Pam\Native\I18n\I18n::locales() !== [] ? \Pam\Native\I18n\I18n::locale() : 'pt-BR';
     }
 
-    /** Integer with thousands separators: "12.345" / "12,345". */
+    /** Integer with thousands separators: "12.345" / "12,345" / es "1234", "12.345" / fr "12 345". */
     public static function count(int|float $value, ?string $locale = null): string
     {
-        $pt = self::portuguese($locale);
-
-        return number_format((float) round($value), 0, $pt ? ',' : '.', $pt ? '.' : ',');
+        return self::group(number_format(abs((float) round($value)), 0, '.', ''), self::language($locale), (float) round($value) < 0);
     }
 
     /** "1 item" / "1.234 itens": count() plus singular or plural noun. */
@@ -80,13 +94,19 @@ final class Format
         int $plainBelow = 1_000,
         int $decimalsBelow = 10,
     ): string {
-        $pt = self::portuguese($locale);
+        $language = self::language($locale);
         $sign = $value < 0 ? '-' : '';
         $absolute = abs((float) $value);
         if ($absolute < max(1_000, $plainBelow)) {
             return $sign.self::count($truncate ? floor($absolute) : $absolute, $locale);
         }
-        $units = $pt ? [' mil', ' mi', ' bi', ' tri'] : ['K', 'M', 'B', 'T'];
+        $units = match ($language) {
+            'pt' => [' mil', ' mi', ' bi', ' tri'],
+            'es' => [' mil', ' M', ' mil M', ' B'],
+            'fr' => [' k', ' M', ' Md', ' Bn'],
+            default => ['K', 'M', 'B', 'T'],
+        };
+        $comma = $language !== 'en';
         $unit = 0;
         $scaled = $absolute / 1_000;
         while ($scaled >= 1_000 && $unit < 3) {
@@ -101,9 +121,9 @@ final class Format
             ++$unit;
             $decimals = 1;
         }
-        $text = number_format($shown, $decimals, $pt ? ',' : '.', '');
+        $text = number_format($shown, $decimals, $comma ? ',' : '.', '');
         if ($decimals === 1) {
-            $text = rtrim(rtrim($text, '0'), $pt ? ',' : '.');
+            $text = rtrim(rtrim($text, '0'), $comma ? ',' : '.');
         }
 
         return $sign.$text.$units[$unit];
@@ -135,11 +155,16 @@ final class Format
         if ($timestamp === null) {
             return '';
         }
-        $pt = self::portuguese($locale);
+        $language = self::language($locale);
         $now ??= time();
         $elapsed = max(0, $now - $timestamp);
         if ($elapsed < 60) {
-            return $pt ? 'agora' : 'now';
+            return match ($language) {
+                'pt' => 'agora',
+                'es' => 'ahora',
+                'fr' => "à l'instant",
+                default => 'now',
+            };
         }
         $dayLimit = $maxDays >= PHP_INT_MAX / 86_400 - 1 ? PHP_INT_MAX : ($maxDays + 1) * 86_400;
         $steps = [[3_600, 60, 'min'], [86_400, 3_600, 'h'], [max(86_400, $dayLimit), 86_400, 'd']];
@@ -148,7 +173,7 @@ final class Format
         }
         foreach ($steps as [$limit, $unitSeconds, $unit]) {
             if ($elapsed < $limit) {
-                return self::elapsed(intdiv($elapsed, $unitSeconds), $unit, $style, $pt);
+                return self::elapsed(intdiv($elapsed, $unitSeconds), $unit, $style, $language);
             }
         }
 
@@ -185,7 +210,8 @@ final class Format
         if ($date === null || $today === null) {
             return '';
         }
-        $pt = self::portuguese($locale);
+        $language = self::language($locale);
+        $dayFirst = $language !== 'en';
         $dayNumber = (int) $date->format('j');
         $day = $padDay ? str_pad((string) $dayNumber, 2, '0', STR_PAD_LEFT) : (string) $dayNumber;
         $month = (int) $date->format('n') - 1;
@@ -193,18 +219,27 @@ final class Format
         $showYear = $withYear ?? ($year !== (int) $today->format('Y'));
 
         return match ($style) {
-            DateStyle::Numeric => $pt ? $date->format('d/m') : $date->format('m/d'),
-            DateStyle::NumericWithYear => $pt ? $date->format('d/m/Y') : $date->format('m/d/Y'),
-            DateStyle::NumericWithShortYear => $pt ? $date->format('d/m/y') : $date->format('m/d/y'),
-            DateStyle::Long => $pt
-                ? $day.' de '.self::PT_MONTHS_LONG[$month].($showYear ? ' de '.$year : '')
-                : self::EN_MONTHS_LONG[$month].' '.$day.($showYear ? ', '.$year : ''),
-            DateStyle::Medium => $pt
-                ? $day.' de '.self::PT_MONTHS_SHORT[$month].($showYear ? ' de '.$year : '')
-                : self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
-            DateStyle::Short => $pt
-                ? $day.' '.self::PT_MONTHS_SHORT[$month].($showYear ? ' '.$year : '')
-                : self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
+            DateStyle::Numeric => $dayFirst ? $date->format('d/m') : $date->format('m/d'),
+            DateStyle::NumericWithYear => $dayFirst ? $date->format('d/m/Y') : $date->format('m/d/Y'),
+            DateStyle::NumericWithShortYear => $dayFirst ? $date->format('d/m/y') : $date->format('m/d/y'),
+            DateStyle::Long => match ($language) {
+                'pt' => $day.' de '.self::PT_MONTHS_LONG[$month].($showYear ? ' de '.$year : ''),
+                'es' => $day.' de '.self::ES_MONTHS_LONG[$month].($showYear ? ' de '.$year : ''),
+                'fr' => $day.' '.self::FR_MONTHS_LONG[$month].($showYear ? ' '.$year : ''),
+                default => self::EN_MONTHS_LONG[$month].' '.$day.($showYear ? ', '.$year : ''),
+            },
+            DateStyle::Medium => match ($language) {
+                'pt' => $day.' de '.self::PT_MONTHS_SHORT[$month].($showYear ? ' de '.$year : ''),
+                'es' => $day.' de '.self::ES_MONTHS_SHORT[$month].($showYear ? ' de '.$year : ''),
+                'fr' => $day.' '.self::FR_MONTHS_SHORT[$month].($showYear ? ' '.$year : ''),
+                default => self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
+            },
+            DateStyle::Short => match ($language) {
+                'pt' => $day.' '.self::PT_MONTHS_SHORT[$month].($showYear ? ' '.$year : ''),
+                'es' => $day.' '.self::ES_MONTHS_SHORT[$month].($showYear ? ' '.$year : ''),
+                'fr' => $day.' '.self::FR_MONTHS_SHORT[$month].($showYear ? ' '.$year : ''),
+                default => self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
+            },
         };
     }
 
@@ -214,12 +249,12 @@ final class Format
      */
     public static function bytes(int $bytes, ?string $locale = null): string
     {
-        $pt = self::portuguese($locale);
+        $language = self::language($locale);
         $bytes = max(0, $bytes);
         if ($bytes < 1_024) {
-            return $bytes.' B';
+            return $bytes.($language === 'fr' ? ' o' : ' B');
         }
-        $units = ['KB', 'MB', 'GB', 'TB'];
+        $units = $language === 'fr' ? ['Ko', 'Mo', 'Go', 'To'] : ['KB', 'MB', 'GB', 'TB'];
         $value = $bytes / 1_024;
         $unit = 0;
         while ($value >= 1_024 && $unit < 3) {
@@ -231,10 +266,11 @@ final class Format
             ++$unit;
         }
         $decimals = round($value, 1) < 10 ? 1 : 0;
-        $text = number_format($value, $decimals, $pt ? ',' : '.', $pt ? '.' : ',');
-        if ($decimals === 1) {
-            $text = rtrim(rtrim($text, '0'), $pt ? ',' : '.');
+        $comma = $language !== 'en';
+        if ($decimals === 0) {
+            return self::group(number_format($value, 0, '.', ''), $language).' '.$units[$unit];
         }
+        $text = rtrim(rtrim(number_format($value, 1, $comma ? ',' : '.', ''), '0'), $comma ? ',' : '.');
 
         return $text.' '.$units[$unit];
     }
@@ -286,30 +322,54 @@ final class Format
             return '';
         }
 
-        return $date->format(self::portuguese($locale) ? 'H:i' : 'g:i A');
+        return $date->format(self::language($locale) === 'en' ? 'g:i A' : 'H:i');
     }
 
-    private static function elapsed(int $count, string $unit, RelativeTimeStyle $style, bool $pt): string
+    private static function elapsed(int $count, string $unit, RelativeTimeStyle $style, string $language): string
     {
         if ($style === RelativeTimeStyle::Long) {
-            $words = $pt
-                ? ['min' => ['minuto', 'minutos'], 'h' => ['hora', 'horas'], 'd' => ['dia', 'dias'], 'w' => ['semana', 'semanas']]
-                : ['min' => ['minute', 'minutes'], 'h' => ['hour', 'hours'], 'd' => ['day', 'days'], 'w' => ['week', 'weeks']];
+            $words = match ($language) {
+                'pt' => ['min' => ['minuto', 'minutos'], 'h' => ['hora', 'horas'], 'd' => ['dia', 'dias'], 'w' => ['semana', 'semanas']],
+                'es' => ['min' => ['minuto', 'minutos'], 'h' => ['hora', 'horas'], 'd' => ['día', 'días'], 'w' => ['semana', 'semanas']],
+                'fr' => ['min' => ['minute', 'minutes'], 'h' => ['heure', 'heures'], 'd' => ['jour', 'jours'], 'w' => ['semaine', 'semaines']],
+                default => ['min' => ['minute', 'minutes'], 'h' => ['hour', 'hours'], 'd' => ['day', 'days'], 'w' => ['week', 'weeks']],
+            };
             $word = $words[$unit][$count === 1 ? 0 : 1];
 
-            return $pt ? "há {$count} {$word}" : "{$count} {$word} ago";
+            return match ($language) {
+                'pt' => "há {$count} {$word}",
+                'es' => "hace {$count} {$word}",
+                'fr' => "il y a {$count} {$word}",
+                default => "{$count} {$word} ago",
+            };
         }
         if ($style === RelativeTimeStyle::Tiny) {
-            return $count.($unit === 'min' ? 'm' : ($unit === 'w' && $pt ? 'sem' : $unit));
+            return $count.match (true) {
+                $unit === 'min' => 'm',
+                $unit === 'w' && $language !== 'en' => 'sem',
+                $unit === 'd' && $language === 'fr' => 'j',
+                default => $unit,
+            };
         }
-        if ($pt) {
-            $short = $count.' '.($unit === 'w' ? 'sem' : $unit);
+        if ($language === 'en') {
+            $short = $count.($unit === 'min' ? 'm' : $unit);
 
-            return $style === RelativeTimeStyle::Narrow ? $short : 'há '.$short;
+            return $style === RelativeTimeStyle::Narrow ? $short : $short.' ago';
         }
-        $short = $count.($unit === 'min' ? 'm' : $unit);
+        $short = $count.' '.match (true) {
+            $unit === 'w' => $language === 'fr' ? 'sem.' : 'sem',
+            $unit === 'd' && $language === 'fr' => 'j',
+            default => $unit,
+        };
+        if ($style === RelativeTimeStyle::Narrow) {
+            return $short;
+        }
 
-        return $style === RelativeTimeStyle::Narrow ? $short : $short.' ago';
+        return match ($language) {
+            'es' => 'hace '.$short,
+            'fr' => 'il y a '.$short,
+            default => 'há '.$short,
+        };
     }
 
     private static function timestamp(int|string|DateTimeInterface $time): ?int
@@ -343,8 +403,27 @@ final class Format
         return (new DateTimeImmutable('@'.$timestamp))->setTimezone($zone);
     }
 
-    private static function portuguese(?string $locale): bool
+    /** "pt", "es", "fr" or "en" (any other language). */
+    private static function language(?string $locale): string
     {
-        return str_starts_with(strtolower($locale ?? self::$locale), 'pt');
+        $language = strtolower(substr($locale ?? self::locale(), 0, 2));
+
+        return in_array($language, ['pt', 'es', 'fr'], true) ? $language : 'en';
+    }
+
+    /** Groups an unsigned integer string: pt/es ".", fr narrow no-break space, en ","; es only from five digits. */
+    private static function group(string $digits, string $language, bool $negative = false): string
+    {
+        [$separator, $minimum] = match ($language) {
+            'pt' => ['.', 4],
+            'es' => ['.', 5],
+            'fr' => [self::FR_GROUP, 4],
+            default => [',', 4],
+        };
+        if (strlen($digits) >= $minimum) {
+            $digits = (string) preg_replace('/\B(?=(\d{3})+(?!\d))/', $separator, $digits);
+        }
+
+        return ($negative ? '-' : '').$digits;
     }
 }
