@@ -8425,6 +8425,7 @@ fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> 
             audit_tv_reachability(destination);
         }
     }
+    prune_build_tooling(destination)?;
     let version = directory_digest(destination)?;
     write_atomic(
         &destination.join("manifest.sha256"),
@@ -8532,6 +8533,17 @@ fn parse_bundle_exclusions(source: &str) -> Result<Vec<PathBuf>, String> {
             Ok(path)
         })
         .collect()
+}
+
+/// The SDK's build-time audits (`Pam\Native\Tooling`) run from the staged
+/// tree above; no device process loads them, so they leave the bundle.
+fn prune_build_tooling(destination: &Path) -> Result<(), String> {
+    let tooling = destination.join("vendor/pushinbr/pam-native/packages/native/src/Tooling");
+    if tooling.is_dir() {
+        fs::remove_dir_all(&tooling)
+            .map_err(|error| format!("cannot remove {}: {error}", tooling.display()))?;
+    }
+    Ok(())
 }
 
 fn ignored_project_path(path: &Path) -> bool {
@@ -13637,6 +13649,26 @@ mod bundle_exclusion_tests {
             assert!(parse_bundle_exclusions(input).is_err(), "{input}");
         }
     }
+    #[test]
+    fn staged_bundles_drop_the_sdk_build_tooling() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-prune-tooling-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let sdk = root.join("vendor/pushinbr/pam-native/packages/native/src");
+        fs::create_dir_all(sdk.join("Tooling")).expect("tooling");
+        fs::write(sdk.join("Tooling/TvAudit.php"), "<?php").expect("audit");
+        fs::write(sdk.join("App.php"), "<?php").expect("app");
+        prune_build_tooling(&root).expect("prune");
+        prune_build_tooling(&root).expect("prune again");
+        assert!(!sdk.join("Tooling").exists());
+        assert!(sdk.join("App.php").is_file());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     #[test]
     fn linking_open_schemes_reach_queries_resources_and_info_plist() {
         let linking: LinkingOptions =

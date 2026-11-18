@@ -52,9 +52,14 @@ Generic hooks for plugin modules (Android `:plugin-api`, iOS `PamNative`):
   it removes its listeners when the module closes. iOS PiP for calls is the
   calls plugin's (`AVPictureInPictureController`).
 
-Moved out of the core in 1.46 (the old class names are deprecated aliases
-for 1.46 only and throw `PluginException` naming the package when it is not
-installed):
+Moved out of the core in 1.46. The deprecated aliases under the old class
+names are removed: import the plugin classes (the new names below). Only the
+Drawer (`Navigation\Drawer*`, `UI\DrawerLayoutAndroid`,
+`Routing\DrawerRegistrar`), Toast (`System\Toast*`) and `UI\WebView` aliases
+remain, because `Route::drawer()` and the `<WebView>` template tag go through
+them and throw `PluginException` naming the package when it is not installed.
+The same applies to the notifications, media, auth and share-extension
+classes listed in the 1.46.0 CHANGELOG.
 
 | Old core class | Plugin | New class |
 | --- | --- | --- |

@@ -43,6 +43,7 @@ fn is_core_host_directory(directories: &[&str], name: &str) -> bool {
         // bin/ stays: the PAM toolchain resolves the package's Composer
         // scripts there when the build host runs PHP inside the bundle.
         ["packages", "native", "tests", ..] => true,
+        ["packages", "native", "benchmarks", ..] => true,
         _ => false,
     } || matches!(name, "Cargo.lock" | "Cargo.toml")
 }
@@ -89,6 +90,7 @@ mod tests {
             "vendor/pushinbr/pam-native/packages/web/resources/runtime.js",
             "vendor/pushinbr/pam-native/packages/native/tests/Fixtures/crypto-vectors.json",
             "vendor/pushinbr/pam-native/packages/native/README.md",
+            "vendor/pushinbr/pam-native/packages/native/benchmarks/encoder.php",
             "vendor/pushinbr/pam-native-lottie/android/src/main/kotlin/Lottie.kt",
             "vendor/pushinbr/pam-native-lottie/android/build.gradle.kts",
             "vendor/pushinbr/pam-native-auth/ios/Sources/Auth.swift",
@@ -109,6 +111,8 @@ mod tests {
             "vendor/pushinbr/pam-native/packages/native/src/App.php",
             "vendor/pushinbr/pam-native/packages/native/bin/pam-native",
             "vendor/pushinbr/pam-native/packages/native/src/Testing/functions.php",
+            // Build-time audits run from the staged tree, then it is pruned.
+            "vendor/pushinbr/pam-native/packages/native/src/Tooling/TvAudit.php",
             "vendor/pushinbr/pam-native/packages/native/resources/pam-native.schema.json",
             "vendor/pushinbr/pam-native-lottie/pam-native.plugin.json",
             "vendor/pushinbr/pam-native-lottie/pam-native.idl.json",
