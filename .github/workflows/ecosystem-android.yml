@@ -69,6 +69,8 @@ jobs:
       - name: Install exact public Composer packages
         working-directory: certification/android-ecosystem
         run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Route Maven Central through Google's mirror
+        run: ${GITHUB_WORKSPACE}/scripts/ci-gradle-mirror.sh
       - name: Generate the aggregate Android host
         working-directory: certification/android-ecosystem
         run: >-

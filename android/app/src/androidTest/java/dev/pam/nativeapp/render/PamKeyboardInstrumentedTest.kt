@@ -471,7 +471,7 @@ class PamKeyboardInstrumentedTest {
     /** Like a tap on the field: the focused editor asks the IME to show. */
     private fun showKeyboard(input: EditText) {
         input.context.getSystemService(InputMethodManager::class.java)
-            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
     }
 
     private fun waitUntil(

@@ -69,7 +69,7 @@ class PamImeFocusHighlightInstrumentedTest {
                 input = requireNotNull(activity.host.findByTransitionName("veil-input")) as EditText
                 input.requestFocus()
                 input.context.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
             waitUntil(instrumentation, "IME shown") { activity.host.imeBottomInset > 0 }
             Thread.sleep(500)

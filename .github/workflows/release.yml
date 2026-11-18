@@ -160,6 +160,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: android-release
+      - name: Route Maven Central through Google's mirror
+        run: scripts/ci-gradle-mirror.sh
       - name: Build renderer, engines, and plugin API
         run: |
           sdkmanager "platforms;android-36"
@@ -432,6 +434,8 @@ jobs:
         run: |
           sudo usermod -aG kvm "$USER"
           sudo chmod 666 /dev/kvm
+      - name: Route Maven Central through Google's mirror
+        run: scripts/ci-gradle-mirror.sh
       - name: Assemble the candidate PAM entrypoint and public runtime payload
         env:
           GH_TOKEN: ${{ github.token }}

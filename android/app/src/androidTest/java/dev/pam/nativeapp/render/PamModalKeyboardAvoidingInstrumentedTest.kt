@@ -164,7 +164,7 @@ class PamModalKeyboardAvoidingInstrumentedTest {
         instrumentation.runOnMainSync {
             input.requestFocus()
             input.context.getSystemService(InputMethodManager::class.java)
-                .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
         }
         waitUntil("palette directly above the IME", timeoutMs = 10_000) {
             val imeTop = imeTop(input) ?: return@waitUntil false
