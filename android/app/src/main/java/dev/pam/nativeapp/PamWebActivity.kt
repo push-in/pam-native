@@ -11,9 +11,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 
 /**
- * 32-bit Android (TV sticks and boxes with `armeabi-v7a` only): the PHP SDK
- * needs 64-bit integers, so the app runs its web build (`pushinbr/pam-native-web`,
- * the same one Samsung and LG TVs run) from the APK assets in a WebView. The
+ * 32-bit Android (TV sticks and boxes with `armeabi-v7a` only) when the APK was
+ * built without the native 32-bit ABIs (`pam mobile build --abi arm64-v8a`): the
+ * app runs its web build (`pushinbr/pam-native-web`, the same one Samsung and
+ * LG TVs run) from the APK assets in a WebView. The
  * remote's arrows, Enter and media keys reach the page as on a TV browser;
  * Back is handed to the app's focus engine and leaves the app at the root.
  */

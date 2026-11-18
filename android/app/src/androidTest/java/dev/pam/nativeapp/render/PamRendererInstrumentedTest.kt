@@ -1219,7 +1219,7 @@ class PamRendererInstrumentedTest {
                 pressable.setOnClickListener { activated = true }
                 assertTrue(pressable.isFocusable)
                 assertFalse(pressable.isFocusableInTouchMode)
-                assertTrue(pressable.defaultFocusHighlightEnabled)
+                if (Build.VERSION.SDK_INT >= 26) assertTrue(pressable.defaultFocusHighlightEnabled)
                 assertTrue(pressable.onKeyDown(KeyEvent.KEYCODE_ENTER, KeyEvent(
                     KeyEvent.ACTION_DOWN,
                     KeyEvent.KEYCODE_ENTER,
@@ -3107,7 +3107,11 @@ class PamRendererInstrumentedTest {
                     if (Build.VERSION.SDK_INT >= 28) assertEquals(weight.toInt(), text.typeface.weight)
                     val expected = reference / 64f * text.textSize
                     val drawn = text.paint.measureText(text.text.toString())
-                    assertTrue("drawn=$drawn expected=$expected weight=$weight", kotlin.math.abs(drawn - expected) <= 0.03f * expected)
+                    // Android 7.x synthesizes bold from the regular file (no wght axis):
+                    // only the regular weight matches the engine there.
+                    if (Build.VERSION.SDK_INT >= 26 || weight == 400L) {
+                        assertTrue("drawn=$drawn expected=$expected weight=$weight", kotlin.math.abs(drawn - expected) <= 0.03f * expected)
+                    }
                 }
                 renderer.close()
             }

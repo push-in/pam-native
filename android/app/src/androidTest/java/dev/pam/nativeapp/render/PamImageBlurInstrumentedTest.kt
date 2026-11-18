@@ -85,7 +85,7 @@ class PamImageBlurInstrumentedTest {
             drawable = blurred.drawable as PamBlurredDrawable
             hardware = (sharp.drawable as BitmapDrawable).bitmap
         }
-        assertTrue("the blurred one is a heap bitmap", drawable.bitmap.config != Bitmap.Config.HARDWARE)
+        assertTrue("the blurred one is a heap bitmap", !drawable.bitmap.isHardware)
         assertEquals("intrinsic size is the sharp decode's", hardware.width, drawable.intrinsicWidth)
         assertEquals(hardware.height, drawable.intrinsicHeight)
         // Before: the UI thread blurred the HARDWARE decode at the drawn σ.

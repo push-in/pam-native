@@ -34,8 +34,8 @@ internal object PamBitmapBlur {
      */
     fun blur(source: Bitmap, sigma: Float): Bitmap {
         if (sigma <= 0f || source.width <= 0 || source.height <= 0) return source
-        blurObserver?.invoke(source.config == Bitmap.Config.HARDWARE)
-        val readable = if (source.config == Bitmap.Config.HARDWARE) {
+        blurObserver?.invoke(source.isHardware)
+        val readable = if (source.isHardware) {
             source.copy(Bitmap.Config.ARGB_8888, false) ?: return source
         } else {
             source

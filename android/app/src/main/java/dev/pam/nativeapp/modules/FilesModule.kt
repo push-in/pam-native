@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.activity.result.PickVisualMediaRequest
@@ -191,7 +192,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             completion.complete(
                 ModuleResultStatus.SUCCESS,
                 WireMap.encode(
-                    mapOf("data" to WireValue.Text(Base64.getEncoder().encodeToString(file.readBytes()))),
+                    mapOf("data" to WireValue.Text(encodeBase64(file.readBytes()))),
                 ),
             )
         }.onFailure { completion.failure(it) }
@@ -201,7 +202,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         runCatching {
             val values = WireMap.decode(payload)
             val file = resolve(values.requiredText("path"))
-            val bytes = Base64.getDecoder().decode(values.requiredText("data"))
+            val bytes = decodeBase64(values.requiredText("data"))
             require(bytes.size <= MAX_READ_BYTES) { "File exceeds the one MiB bridge limit" }
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
@@ -220,12 +221,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 activity.assets.open("pam/$assetPath").use { input ->
                     temporary.outputStream().use { output -> input.copyTo(output) }
                 }
-                Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
+                atomicReplace(temporary, file)
             } finally {
                 temporary.delete()
             }
@@ -268,12 +264,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                         }
                     }
                 }
-                Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
+                atomicReplace(temporary, file)
                 val mime = connection.header("Content-Type")?.substringBefore(';')?.trim()
                     ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
                 completion.success(file, mime)
@@ -368,12 +359,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                     }
                 }
             }
-            Files.move(
-                temporary.toPath(),
-                file.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
+            atomicReplace(temporary, file)
             val mime = connection.header("Content-Type")?.substringBefore(';')?.trim()
                 ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
             channel.offer(downloadEvent(
@@ -821,6 +807,22 @@ internal fun transferPrivateFile(source: File, target: File, move: Boolean, over
     val parent = target.parentFile ?: error("Destination has no parent directory")
     require(parent.isDirectory || parent.mkdirs()) { "Unable to create destination directory" }
     if (move) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            // Android 7.x: rename(2) like ATOMIC_MOVE; across filesystems,
+            // copy then delete like the non-atomic Files.move.
+            runCatching { atomicReplace(source, target) }.getOrElse {
+                if (target.exists() && !overwrite) throw java.io.IOException("Destination already exists")
+                if (source.isFile) {
+                    copyThenReplace(source, target)
+                    if (!source.delete()) throw java.io.IOException("Unable to delete ${source.path}")
+                } else {
+                    if (!source.copyRecursively(target, overwrite) || !source.deleteRecursively()) {
+                        throw java.io.IOException("Unable to move ${source.path}")
+                    }
+                }
+            }
+            return
+        }
         val options = if (overwrite) {
             arrayOf(StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } else {
@@ -835,20 +837,55 @@ internal fun transferPrivateFile(source: File, target: File, move: Boolean, over
         }
         return
     }
+    copyThenReplace(source, target)
+}
+
+private fun copyThenReplace(source: File, target: File) {
+    val parent = target.parentFile ?: error("Destination has no parent directory")
     val temporary = File(parent, ".${target.name}.tmp-${UUID.randomUUID()}")
     try {
         source.inputStream().use { input -> temporary.outputStream().use { input.copyTo(it) } }
         require(temporary.length() == source.length()) { "Source changed during copy" }
-        Files.move(
-            temporary.toPath(),
-            target.toPath(),
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
-        )
+        atomicReplace(temporary, target)
     } finally {
         temporary.delete()
     }
 }
+
+/**
+ * `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)`: one rename(2), so readers see
+ * the old or the new file, never a partial one. Android 7.x has no
+ * java.nio.file; [File.renameTo] is the same single rename(2) there.
+ */
+internal fun atomicReplace(source: File, target: File) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Files.move(
+            source.toPath(),
+            target.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
+        return
+    }
+    if (!source.renameTo(target)) {
+        throw java.io.IOException("Unable to move ${source.path} to ${target.path}")
+    }
+}
+
+/** Standard Base64 without line breaks; java.util.Base64 is API 26+. */
+internal fun encodeBase64(bytes: ByteArray): String =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Base64.getEncoder().encodeToString(bytes)
+    } else {
+        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    }
+
+internal fun decodeBase64(text: String): ByteArray =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Base64.getDecoder().decode(text)
+    } else {
+        android.util.Base64.decode(text, android.util.Base64.NO_WRAP)
+    }
 
 /** Returns the narrowest MIME type that describes every shared file. */
 internal fun sharedMimeType(types: List<String>): String {

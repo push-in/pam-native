@@ -188,6 +188,9 @@ internal object ReleaseIntegrity {
         } catch (_: Throwable) {
             // JVM unit tests (no android.system.Os) or a filesystem without directory fsync.
         }
+        // Never reached on Android (the Os path above returns); runCatching
+        // also absorbs the missing java.nio.file of Android 7.x.
+        @Suppress("NewApi")
         runCatching { FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) } }
     }
 }

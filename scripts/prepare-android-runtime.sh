@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v2.0.7}
+runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v2.2.21}
 runtime_repository=${PAM_RUNTIME_REPOSITORY:-push-in/pam}
 
 if [[ ! ${runtime_tag} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -85,33 +85,43 @@ print(runtime_id)
 PY
 )
 runtime_root="${repository_root}/runtime/android/${runtime_id}"
-for abi in arm64-v8a x86_64; do
-    test -f "${runtime_root}/${abi}/lib/libphp.a"
+# 64-bit runtimes are required. The 32-bit ones (armeabi-v7a, x86) are copied
+# when the pinned PAM release has them (releases after v2.2.20).
+for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+    if [[ ! -f ${runtime_root}/${abi}/lib/libphp.a ]]; then
+        if [[ ${abi} == arm64-v8a || ${abi} == x86_64 ]]; then
+            echo "The PAM ${runtime_tag} Android runtime has no ${abi} build." >&2
+            exit 1
+        fi
+        echo "The PAM ${runtime_tag} Android runtime has no ${abi} build; skipping it."
+        continue
+    fi
+    rm -rf -- "${repository_root}/runtime/android/${abi}"
     cp -a "${runtime_root}/${abi}" "${repository_root}/runtime/android/${abi}"
 done
 
-rustup target add aarch64-linux-android x86_64-linux-android
+# The engine builds for every ABI, whatever the runtime: release archives
+# carry all four.
+rust_targets=(aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android)
+rustup target add "${rust_targets[@]}"
 
 ndk_bin="${ndk_root}/toolchains/llvm/prebuilt/${ndk_host}/bin"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ndk_bin}/aarch64-linux-android26-clang"
-export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${ndk_bin}/x86_64-linux-android26-clang"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ndk_bin}/aarch64-linux-android24-clang"
+export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="${ndk_bin}/armv7a-linux-androideabi24-clang"
+export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="${ndk_bin}/i686-linux-android24-clang"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${ndk_bin}/x86_64-linux-android24-clang"
 
-cargo build \
-    --locked \
-    --manifest-path "${repository_root}/Cargo.toml" \
-    --package pam-native-engine \
-    --release \
-    --target aarch64-linux-android
-cargo build \
-    --locked \
-    --manifest-path "${repository_root}/Cargo.toml" \
-    --package pam-native-engine \
-    --release \
-    --target x86_64-linux-android
+for rust_target in "${rust_targets[@]}"; do
+    cargo build \
+        --locked \
+        --manifest-path "${repository_root}/Cargo.toml" \
+        --package pam-native-engine \
+        --release \
+        --target "${rust_target}"
+    test -f "${repository_root}/target/${rust_target}/release/libpam_native_engine.a"
+done
 
 test -f "${repository_root}/runtime/android/arm64-v8a/lib/libphp.a"
 test -f "${repository_root}/runtime/android/x86_64/lib/libphp.a"
-test -f "${repository_root}/target/aarch64-linux-android/release/libpam_native_engine.a"
-test -f "${repository_root}/target/x86_64-linux-android/release/libpam_native_engine.a"
 
 echo "Android runtime ${runtime_tag}/${runtime_id} and native engine are ready."

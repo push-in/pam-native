@@ -29,11 +29,16 @@ internal class NativeTypefaceLoader(context: Context) {
         if (assetPath != null) {
             val key = "$assetPath:$resolvedWeight:$italic"
             return assetFonts[key] ?: runCatching {
-                (PamDevAssets.file(assetPath)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, assetPath))
-                    .setWeight(resolvedWeight)
-                    .setItalic(italic)
-                    .setFontVariationSettings("'wght' $resolvedWeight")
-                    .build()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    (PamDevAssets.file(assetPath)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, assetPath))
+                        .setWeight(resolvedWeight)
+                        .setItalic(italic)
+                        .setFontVariationSettings("'wght' $resolvedWeight")
+                        .build()
+                } else {
+                    // Android 7.x: no variable axes; the platform synthesizes the style.
+                    Typeface.create(legacyFontFile(assetPath), legacyStyle(resolvedWeight, italic))
+                }
             }.onFailure {
                 Log.w(TAG, "Unable to load packaged font $assetPath", it)
             }.getOrNull()?.also { assetFonts.putIfAbsent(key, it) }
@@ -47,7 +52,11 @@ internal class NativeTypefaceLoader(context: Context) {
                 // as is (no fake bold); otherwise the platform synthesizes the
                 // style from the closest file, like React Native's
                 // Typeface.create(typeface, weight, italic).
-                val base = (PamDevAssets.file(path)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, path)).build()
+                val base = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    (PamDevAssets.file(path)?.let { Typeface.Builder(it) } ?: Typeface.Builder(assets, path)).build()
+                } else {
+                    legacyFontFile(path)
+                }
                 when {
                     exactStyle -> base
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> Typeface.create(base, resolvedWeight, italic)
@@ -110,6 +119,16 @@ internal class NativeTypefaceLoader(context: Context) {
             }
         }
         return null
+    }
+
+    private fun legacyFontFile(path: String): Typeface =
+        PamDevAssets.file(path)?.let(Typeface::createFromFile) ?: Typeface.createFromAsset(assets, path)
+
+    private fun legacyStyle(weight: Int, italic: Boolean): Int = when {
+        weight >= 600 && italic -> Typeface.BOLD_ITALIC
+        weight >= 600 -> Typeface.BOLD
+        italic -> Typeface.ITALIC
+        else -> Typeface.NORMAL
     }
 
     private fun systemTypeface(family: String?, weight: Int, italic: Boolean): Typeface {

@@ -428,6 +428,7 @@ class PamTransitionVeilInstrumentedTest {
     }
 
     private fun capture(): Bitmap {
+        org.junit.Assume.assumeTrue("PixelCopy is API 26+", android.os.Build.VERSION.SDK_INT >= 26)
         val decor = activity.window.decorView
         val bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
         val done = CountDownLatch(1)

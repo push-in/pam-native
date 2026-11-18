@@ -96,6 +96,7 @@ class PamReactNativeRenderParityInstrumentedTest {
     }
 
     private fun windowPixels(activity: PamTestActivity): Pair<Bitmap, IntArray> {
+        org.junit.Assume.assumeTrue("PixelCopy is API 26+", android.os.Build.VERSION.SDK_INT >= 26)
         instrumentation.waitForIdleSync()
         Thread.sleep(300)
         instrumentation.waitForIdleSync()

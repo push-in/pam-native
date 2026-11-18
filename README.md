@@ -86,7 +86,7 @@ App::run(
 
 | Platform | Support | Notes |
 | --- | --- | --- |
-| Android | API 26+ (default `minSdk`), compiled against API 36 | Real Android Views; API 26 and API 36 contracts |
+| Android | API 26+ by default, API 24+ with `android.minSdk: 24`; compiled against API 36 | Real Android Views; API 26 and API 36 contracts; see [Android 7.x](docs/android-min-sdk.md) |
 | iOS | 15.0+ (default `ios.minimumVersion`) | UIKit controls; UIKit simulator tests |
 
 <a id="it-feels-familiar"></a>

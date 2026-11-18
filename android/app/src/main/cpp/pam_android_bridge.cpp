@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <dlfcn.h>
 #include <malloc.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,6 +28,11 @@
 
 #include "pam_native_engine.h"
 #include "pam_tree_encoder.h"
+
+// The PHP SDK and the tree encoder use 64-bit integers (node ids, ARGB
+// colors). PAM's 32-bit Android runtimes (armeabi-v7a, x86) keep them too;
+// a stock 32-bit PHP build does not, and must not link.
+static_assert(SIZEOF_ZEND_LONG == 8, "PAM Native needs a PHP runtime with 64-bit integers");
 
 namespace {
 
@@ -1807,7 +1813,16 @@ Java_dev_pam_nativeapp_PamRuntime_nativeDispatchModuleResult(
 extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativePurgeAllocator(JNIEnv*, jclass) {
 #ifdef M_PURGE
+#if __ANDROID_API__ >= 26
     mallopt(M_PURGE, 0);
+#else
+    // mallopt() is API 26: Android 7.x builds look it up at run time.
+    using Mallopt = int (*)(int, int);
+    static const auto purge = reinterpret_cast<Mallopt>(dlsym(RTLD_DEFAULT, "mallopt"));
+    if (purge != nullptr) {
+        purge(M_PURGE, 0);
+    }
+#endif
 #endif
 }
 

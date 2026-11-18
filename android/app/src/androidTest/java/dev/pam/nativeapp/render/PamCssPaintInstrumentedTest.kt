@@ -89,7 +89,7 @@ class PamCssPaintInstrumentedTest {
             assertEquals(dp(view, 2f).toFloat(), text.shadowDy, 1f)
             assertEquals(dp(view, 3f).toFloat(), text.shadowRadius, 1f)
             assertEquals("'tnum' 1", text.fontFeatureSettings)
-            assertEquals(Layout.JUSTIFICATION_MODE_INTER_WORD, text.justificationMode)
+            if (android.os.Build.VERSION.SDK_INT >= 26) assertEquals(Layout.JUSTIFICATION_MODE_INTER_WORD, text.justificationMode)
         }
     }
 
