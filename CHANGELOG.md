@@ -13,6 +13,10 @@
   320 dp confirm dialog came out 272 dp wide with "Cancel" and "Delete"
   ellipsized to "C..." and "...". The card keeps the engine's size and is
   centred; an instrumented test checks the width and the labels.
+- Changed (debug): the layout snapshot reports `ellipsized` for text that
+  PamTextView truncated by replacing it (React Native tail truncation),
+  which has no ellipsis in its own layout. The geometry check missed the
+  dialog's "C..." because of this.
 - Fixed (iOS): switching light/dark at runtime (`Appearance::set`) after
   the keyboard had been shown left a blank screen in the background colour.
   The new opaque background was also given to UIKit's transparent
