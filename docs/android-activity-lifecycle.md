@@ -53,7 +53,9 @@ the rebuilt ones:
   before the old editor goes, as on any blur. The input is captured when the
   configuration change arrives: the IME restarts for the new font scale or
   locale and hides for a moment, which does not count as the user closing it
-  (the usual blur on a hidden keyboard is held until the remount, at most 2 s).
+  (the usual blur on a hidden keyboard is held until 2 s after the remount). If
+  the IME hid before the change reached the Activity, PHP saw that blur and then
+  sees the refocus.
 
 Not kept: a fling in progress (it stops) and state inside views that are not
 mounted when the remount runs (a nested list in an off-screen cell).

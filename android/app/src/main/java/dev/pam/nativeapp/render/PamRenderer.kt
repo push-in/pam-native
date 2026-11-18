@@ -1895,7 +1895,7 @@ class PamRenderer(
         }
         cancelPendingMounts()
         remountViewState = if (preserveViewState && nodes.size() > 0) captureRemountViewState() else null
-        remountViewState?.focusedInput?.takeIf { it != 0L }?.let { remountFocusHandoff = it }
+        remountViewState?.takeIf { it.silent && it.focusedInput != 0L }?.let { remountFocusHandoff = it.focusedInput }
         if (preserveViewState && !remountFocusBlocked && host.hasFocus()) {
             // Removing the focused editor hands focus to the first focusable
             // view still mounted (another input, which would report focus to
@@ -1950,6 +1950,8 @@ class PamRenderer(
         val selectionStart: Int,
         val selectionEnd: Int,
         val imeVisible: Boolean,
+        /** PHP still sees the input focused: the rebuild hides blur and refocus from it. */
+        val silent: Boolean = true,
     )
 
     private var remountViewState: RemountViewState? = null
@@ -1967,16 +1969,41 @@ class PamRenderer(
      * A configuration change that remounts arrived: the IME restarts for it
      * and hides for a moment, which must not blur the focused input (the
      * root host blurs on a hidden IME). Its focus, selection and keyboard
-     * are captured now and restored by [finishRemount]; the hold ends there,
-     * or after [CONFIGURATION_FOCUS_HOLD_MS] if no remount follows.
+     * are captured now and restored by [finishRemount]; the hold ends
+     * [CONFIGURATION_FOCUS_HOLD_MS] after the remount (the restarted IME may
+     * still hide then), or after that long if no remount follows.
      */
     fun prepareConfigurationRemount() {
         check(Looper.myLooper() == Looper.getMainLooper())
-        val focus = focusedInputState(HashMap(), HashMap()) ?: return
+        val focus = focusedInputState(HashMap(), HashMap()) ?: inputBlurredByImeRestart() ?: return
         configurationFocus = focus
         (host as? PamRootHost)?.holdInputFocus = true
         main.removeCallbacks(releaseConfigurationFocus)
         main.postDelayed(releaseConfigurationFocus, CONFIGURATION_FOCUS_HOLD_MS)
+    }
+
+    /**
+     * The IME, restarted by the same configuration change, may hide before
+     * the change reaches the Activity: the root host then already blurred
+     * the input (and PHP saw onBlur). That input is taken back too, with the
+     * keyboard, and PHP sees the refocus.
+     */
+    private fun inputBlurredByImeRestart(): RemountViewState? {
+        val blurred = (host as? PamRootHost)?.recentImeBlur(IME_RESTART_BLUR_MS) ?: return null
+        for (id in inputIds) {
+            val input = views[id] as? EditText ?: continue
+            if (input !== blurred) continue
+            return RemountViewState(
+                HashMap(),
+                HashMap(),
+                id,
+                input.selectionStart,
+                input.selectionEnd,
+                imeVisible = true,
+                silent = false,
+            )
+        }
+        return null
     }
 
     private fun endConfigurationFocusHold() {
@@ -2019,7 +2046,7 @@ class PamRenderer(
         // The state the configuration change found wins: the IME may have
         // hidden since (it restarts for the new configuration).
         configurationFocus?.takeIf { (views[it.focusedInput] as? EditText)?.isAttachedToWindow == true }?.let { focus ->
-            return RemountViewState(scrolls, lists, focus.focusedInput, focus.selectionStart, focus.selectionEnd, focus.imeVisible)
+            return RemountViewState(scrolls, lists, focus.focusedInput, focus.selectionStart, focus.selectionEnd, focus.imeVisible, focus.silent)
         }
         return focusedInputState(scrolls, lists) ?: RemountViewState(scrolls, lists, 0L, -1, -1, false)
     }
@@ -2135,7 +2162,13 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper())
         val state = remountViewState
         remountViewState = null
-        endConfigurationFocusHold()
+        configurationFocus = null
+        if ((host as? PamRootHost)?.holdInputFocus == true) {
+            // The restarted IME may still hide after the rebuild (and the
+            // keyboard is asked back below): the hold outlives the remount.
+            main.removeCallbacks(releaseConfigurationFocus)
+            main.postDelayed(releaseConfigurationFocus, CONFIGURATION_FOCUS_HOLD_MS)
+        }
         if (remountFocusBlocked) {
             remountFocusBlocked = false
             host.descendantFocusability = remountSavedFocusability
@@ -12817,8 +12850,10 @@ class PamRenderer(
         const val MAX_VIRTUAL_DEPTH = 512
         /** Wrapper levels a remount scroll anchor descends through. */
         const val REMOUNT_ANCHOR_DEPTH = 16
-        /** How long a configuration change holds the focused input when no remount follows. */
+        /** How long a configuration change holds the focused input (after its remount, or without one). */
         const val CONFIGURATION_FOCUS_HOLD_MS = 2_000L
+        /** How recent a blur on a hidden IME counts as the configuration change's IME restart. */
+        const val IME_RESTART_BLUR_MS = 1_000L
         val LAYOUT_ONLY_KINDS = setOf(
             NodeKind.COLUMN,
             NodeKind.ROW,

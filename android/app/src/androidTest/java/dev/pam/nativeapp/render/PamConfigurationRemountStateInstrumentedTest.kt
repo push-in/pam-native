@@ -51,16 +51,27 @@ class PamConfigurationRemountStateInstrumentedTest {
     private var originalFontScale: String? = null
     private var localeChanged = false
 
+    /**
+     * Leaves the device as found before the next test class runs: the font
+     * scale and locale are restored and applied (the IME restarts for each
+     * change), and the keyboard is down. A keyboard contract running next
+     * must not meet an IME still restarting or left open.
+     */
     @After
     fun restoreConfiguration() {
         originalFontScale?.let { original ->
-            shell(
-                if (original == "null" || original.isBlank()) "settings delete system font_scale"
-                else "settings put system font_scale $original",
-            )
+            val unset = original == "null" || original.isBlank()
+            shell(if (unset) "settings delete system font_scale" else "settings put system font_scale $original")
+            val expected = if (unset) 1f else original.toFloatOrNull() ?: 1f
+            waitFor { context.applicationContext.resources.configuration.fontScale == expected }
         }
         if (localeChanged && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.getEmptyLocaleList()
+        }
+        instrumentation.waitForIdleSync()
+        val until = SystemClock.uptimeMillis() + 5_000
+        while (SystemClock.uptimeMillis() < until && shell("dumpsys input_method").contains("mInputShown=true")) {
+            SystemClock.sleep(100)
         }
     }
 
@@ -148,8 +159,12 @@ class PamConfigurationRemountStateInstrumentedTest {
                 before = surface.renderer.viewForNode(INPUT_ID) as EditText
                 assertTrue(before.requestFocus())
                 before.setSelection(2, 7)
-                (context.getSystemService(InputMethodManager::class.java))
-                    .showSoftInput(before, InputMethodManager.SHOW_IMPLICIT)
+                // Keyboard visibility is only observable (and asserted) on
+                // Android 11+; older releases check focus and selection only.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    (context.getSystemService(InputMethodManager::class.java))
+                        .showSoftInput(before, InputMethodManager.SHOW_IMPLICIT)
+                }
             }
             awaitTrue("input focused") { before.isFocused }
             val imeShown = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -171,8 +186,17 @@ class PamConfigurationRemountStateInstrumentedTest {
             val focusEvents = synchronized(events) {
                 events.filter { it.first == INPUT_ID && (it.second == EventKind.BLUR.value || it.second == EventKind.FOCUS.value) }
             }
-            assertEquals("no blur/focus reaches PHP across the remount", emptyList<Pair<Long, Int>>(), focusEvents)
+            // The remount itself is invisible to PHP. Only when the IME,
+            // restarted by the same change, hid (and blurred the input) before
+            // the change reached the activity does PHP see that blur, and
+            // then the refocus: it always ends knowing the input is focused.
+            val kinds = focusEvents.map { it.second }
+            assertTrue(
+                "no blur/focus across the remount, or a blur answered by a focus: $kinds",
+                kinds.isEmpty() || kinds == listOf(EventKind.BLUR.value, EventKind.FOCUS.value),
+            )
             main { (context.getSystemService(InputMethodManager::class.java)).hideSoftInputFromWindow(after.windowToken, 0) }
+            if (imeShown) awaitTrue("the keyboard is down again") { !imeVisible(after) }
         }
     }
 

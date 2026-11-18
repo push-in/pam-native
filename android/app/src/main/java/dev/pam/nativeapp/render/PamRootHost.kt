@@ -293,9 +293,18 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
      */
     internal var holdInputFocus = false
 
+    private var imeBlurredInput: java.lang.ref.WeakReference<View>? = null
+    private var imeBlurAt = 0L
+
+    /** The input blurred by a hidden IME within the last [withinMs], if any. */
+    internal fun recentImeBlur(withinMs: Long): View? =
+        imeBlurredInput?.get()?.takeIf { android.os.SystemClock.uptimeMillis() - imeBlurAt <= withinMs }
+
     private fun blurInputAfterImeHidden() {
         if (imeBottomInset != 0 || !isAttachedToWindow || holdInputFocus) return
         val focused = findFocus() as? android.widget.EditText ?: return
+        imeBlurredInput = java.lang.ref.WeakReference(focused)
+        imeBlurAt = android.os.SystemClock.uptimeMillis()
         isFocusableInTouchMode = true
         if (!requestFocus()) focused.clearFocus()
         // Only absorb this blur: the root must not keep taking focus (and
