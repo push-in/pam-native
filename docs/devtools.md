@@ -143,14 +143,29 @@ the next good save clears it and renders the fixed code.
 
 Transport:
 
-- The device always connects to `127.0.0.1:39100`; `adb reverse` maps it to
-  the host port (`PAM_NATIVE_ANDROID_DEV_PORT`, default 39100). This works the
-  same over USB and over adb Wi-Fi (`adb pair` / `adb connect`, or the
-  `adb-tls-connect` mDNS transports). Select a device with `ANDROID_SERIAL`.
-- When the device goes silent the CLI checks `adb reverse --list` every 3 s
-  and restores the mapping after a cable replug, an adb server restart or a
-  Wi-Fi reconnect. The device client retries with a short backoff
-  (0.3 s to 2 s) and resumes on its own.
+- Each app has its own device port, 39100-39899 from a hash of its debug
+  package name, so two apps on one phone never reach each other's server.
+  `adb reverse` maps it to the host port (the same number, or
+  `PAM_NATIVE_ANDROID_DEV_PORT`). This works the same over USB and over adb
+  Wi-Fi (`adb pair` / `adb connect`, or the `adb-tls-connect` mDNS
+  transports).
+- Every adb call names one device (`-s`): `ANDROID_SERIAL`, or the only
+  connected device. With several devices and no `ANDROID_SERIAL`, `pam dev`
+  stops and lists them.
+- The mapping is only ever added (`--no-rebind`). A device port that another
+  session maps to a different host port is reported, never taken over.
+- When the device goes silent the CLI checks `adb -s <serial> reverse --list`
+  every 3 s and adds the mapping back after a cable replug, an adb server
+  restart or a Wi-Fi reconnect. The device client retries with a short
+  backoff (0.3 s to 2 s) and resumes on its own.
+- When `pam dev` ends (Ctrl+C, SIGTERM, a crash or SIGKILL), a small watcher
+  process stops the app first (`am force-stop`, so its dev client stops
+  reconnecting), waits a second, and only then removes this session's
+  mapping, and only if it still points at this session. adb 37 aborts the
+  whole adb server when a device connects to a mapping that was just removed
+  ("handle_packet disallowed connect"), which drops every device, and a phone
+  on wireless debugging does not come back by itself. The CLI never runs
+  `reverse --remove-all`, `disconnect`, `kill-server`, `usb` or `tcpip`.
 - `pam native dev:serve .` runs only the sync server for a debug app that is
   already installed (no Gradle build, no reinstall), for example after
   restarting the terminal. Set `PAM_NATIVE_DEV_NO_ADB=1` to skip `adb`

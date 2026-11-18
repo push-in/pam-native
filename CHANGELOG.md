@@ -11,6 +11,18 @@
   the CLI and the JSON schema, and is part of every compiled component's
   cache key, so editing it recompiles and hot reloads. Apps without it are
   untouched (one cached lookup per directory).
+- Fixed: `pam dev` on Android can no longer take the adb server down. When
+  a session ended, the device client could still connect to a mapping that
+  was gone; adb 37 aborts the whole server on that ("handle_packet
+  disallowed connect to tcp:39100"), which dropped every device, and a
+  Galaxy S10 on wireless debugging stayed off adb until debugging was
+  toggled by hand. Now every adb call names the device (`-s`, from
+  `ANDROID_SERIAL` or the only connected device; several devices without it
+  is an error), the mapping is added with `--no-rebind` and a device port
+  mapped by another session is never taken over, and a watcher process that
+  survives Ctrl+C, SIGTERM, crashes and SIGKILL stops the app before it
+  removes only this session's own mapping. Tests drive the real watcher
+  against a fake adb and check the order of the calls.
 
 ## 1.53.8 - 2026-11-18
 

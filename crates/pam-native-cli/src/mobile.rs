@@ -17,6 +17,9 @@ mod plugin_share;
 #[path = "android_dev_port.rs"]
 mod android_dev_port;
 
+#[path = "android_dev_adb.rs"]
+mod android_dev_adb;
+
 #[path = "dev_sync.rs"]
 mod dev_sync;
 
@@ -10043,31 +10046,29 @@ fn dev(options: MobileOptions) -> Result<u8, String> {
 
 fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
     let apk = build_intermediate(options, true)?;
-    let device_port = android_dev_port::device_port(&debug_application_id(&apk.project));
+    let package = debug_application_id(&apk.project);
+    let device_port = android_dev_port::device_port(&package);
     let host_port = android_dev_port::resolve(device_port)?;
+    let serial = android_dev_adb::resolve_serial()?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Android,
         &apk.project.root,
         serde_json::json!({}),
     );
-    command_status(
-        "adb",
-        &[
-            "reverse",
-            &format!("tcp:{device_port}"),
-            &format!("tcp:{host_port}"),
-        ],
-    )?;
+    // The mapping and its teardown exist before the app starts, so the dev
+    // client never connects to a port this session will not clean up.
+    let mut transport = AdbReverse::new(Some(serial), package, device_port, host_port);
+    transport.establish()?;
     install_and_launch(&apk.project, &apk.path, BuildMode::Debug)?;
-    hot_reload_server(&apk.project, device_port, host_port, true)
+    hot_reload_server(&apk.project, device_port, host_port, Some(transport))
 }
 
 fn hot_reload_server(
     project: &Project,
     device_port: u16,
     host_port: u16,
-    adb: bool,
+    mut transport: Option<AdbReverse>,
 ) -> Result<u8, String> {
     let listener = TcpListener::bind(("127.0.0.1", host_port)).map_err(|error| {
         format!(
@@ -10079,14 +10080,13 @@ fn hot_reload_server(
         "Pam Native hot reload listening on 127.0.0.1:{host_port} (device port {device_port} for {}). Press Ctrl+C to stop.",
         debug_application_id(project)
     );
-    let mut transport = AdbReverse::new(device_port, host_port);
     run_dev_sync(
         project,
         listener,
         DevSurface::Android,
         serde_json::json!({"port": host_port}),
         |server| {
-            if adb {
+            if let Some(transport) = transport.as_mut() {
                 transport.keep_alive(server.idle_for());
             }
         },
@@ -10098,23 +10098,25 @@ fn hot_reload_server(
 /// with `adb reverse` unless `PAM_NATIVE_DEV_NO_ADB=1`.
 fn dev_serve(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
-    let device_port = android_dev_port::device_port(&debug_application_id(&project));
+    let package = debug_application_id(&project);
+    let device_port = android_dev_port::device_port(&package);
     let host_port = android_dev_port::resolve(device_port)?;
     let adb = std::env::var_os("PAM_NATIVE_DEV_NO_ADB").is_none_or(|value| value != "1");
-    if adb
-        && command_status(
-            "adb",
-            &[
-                "reverse",
-                &format!("tcp:{device_port}"),
-                &format!("tcp:{host_port}"),
-            ],
-        )
-        .is_err()
-    {
-        println!("Android sync: no device yet; adb reverse is retried every 3 s");
-    }
-    hot_reload_server(&project, device_port, host_port, adb)
+    let transport = if adb {
+        let mut transport = AdbReverse::new(
+            android_dev_adb::resolve_serial().ok(),
+            package,
+            device_port,
+            host_port,
+        );
+        if let Err(error) = transport.establish() {
+            println!("Android sync: {error}; adb reverse is retried every 3 s");
+        }
+        Some(transport)
+    } else {
+        None
+    };
+    hot_reload_server(&project, device_port, host_port, transport)
 }
 
 #[derive(Clone, Copy)]
@@ -10246,30 +10248,59 @@ fn dev_fingerprint(root: &Path) -> Result<(u64, u128, u128), String> {
     Ok((count, latest, vendor))
 }
 
-/// Keeps `adb reverse` alive while the device is silent: a USB replug, an
-/// `adb` server restart or a Wi-Fi reconnect drops reverse mappings, and the
-/// device client keeps retrying until the mapping is back.
+/// Keeps this session's `adb reverse` alive while the device is silent: a USB
+/// replug, an `adb` server restart or a Wi-Fi reconnect drops reverse
+/// mappings, and the device client keeps retrying until the mapping is back.
+/// Every call names the device (`-s`), a mapping is only ever added (never
+/// rebound), and the [`android_dev_adb::Teardown`] armed with the first
+/// mapping stops the app before removing it when `pam dev` ends.
 struct AdbReverse {
+    serial: Option<String>,
+    package: String,
     device_port: u16,
     host_port: u16,
     last_check: Instant,
     unreachable: bool,
+    foreign: bool,
+    teardown: Option<android_dev_adb::Teardown>,
 }
 
 impl AdbReverse {
     const CHECK_INTERVAL: Duration = Duration::from_secs(3);
 
-    fn new(device_port: u16, host_port: u16) -> Self {
+    fn new(serial: Option<String>, package: String, device_port: u16, host_port: u16) -> Self {
         Self {
+            serial,
+            package,
             device_port,
             host_port,
             last_check: Instant::now(),
             unreachable: false,
+            foreign: false,
+            teardown: None,
         }
     }
 
     fn mapping(&self) -> String {
         format!("tcp:{} tcp:{}", self.device_port, self.host_port)
+    }
+
+    /// Adds the mapping (unless it is already there) and arms the teardown.
+    fn establish(&mut self) -> Result<(), String> {
+        if self.serial.is_none() {
+            self.serial = Some(android_dev_adb::resolve_serial()?);
+        }
+        let serial = self.serial.clone().unwrap_or_default();
+        android_dev_adb::ensure_reverse(&serial, self.device_port, self.host_port)?;
+        if self.teardown.is_none() {
+            self.teardown = Some(android_dev_adb::Teardown::arm(
+                &serial,
+                &self.package,
+                self.device_port,
+                self.host_port,
+            ));
+        }
+        Ok(())
     }
 
     fn keep_alive(&mut self, idle: Duration) {
@@ -10279,55 +10310,28 @@ impl AdbReverse {
             return;
         }
         self.last_check = Instant::now();
-        let listed = Command::new("adb")
-            .args(["reverse", "--list"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
-        let present = match listed {
-            Ok(output) if output.status.success() => {
-                adb_reverse_listed(&String::from_utf8_lossy(&output.stdout), &self.mapping())
+        match self.establish() {
+            Ok(()) => {
+                if self.unreachable || self.foreign {
+                    println!("Android sync: adb reverse {} is in place", self.mapping());
+                }
+                self.unreachable = false;
+                self.foreign = false;
             }
-            _ => {
+            Err(error) if error.contains("another session") => {
+                if !self.foreign {
+                    println!("Android sync: {error}");
+                    self.foreign = true;
+                }
+            }
+            Err(_) => {
                 if !self.unreachable {
                     println!("Android sync: device not reachable through adb; retrying every 3 s");
                     self.unreachable = true;
                 }
-                return;
             }
-        };
-        if present {
-            if self.unreachable {
-                println!("Android sync: device reachable again");
-                self.unreachable = false;
-            }
-            return;
-        }
-        let restored = Command::new("adb")
-            .args([
-                "reverse",
-                &format!("tcp:{}", self.device_port),
-                &format!("tcp:{}", self.host_port),
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if restored {
-            println!("Android sync: restored adb reverse {}", self.mapping());
-            self.unreachable = false;
-        } else if !self.unreachable {
-            println!("Android sync: cannot restore adb reverse yet; retrying every 3 s");
-            self.unreachable = true;
         }
     }
-}
-
-fn adb_reverse_listed(listing: &str, mapping: &str) -> bool {
-    listing
-        .lines()
-        .any(|line| line.trim_end().ends_with(mapping))
 }
 
 /// Development index of the files `stage_project_at` would stage (same
@@ -11230,14 +11234,6 @@ mod tests {
             );
         }
         fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[test]
-    fn adb_reverse_listing_matches_the_exact_mapping() {
-        let listing = "UsbFfs tcp:39100 tcp:39102\nhost-19 tcp:8081 tcp:8081\n";
-        assert!(adb_reverse_listed(listing, "tcp:39100 tcp:39102"));
-        assert!(!adb_reverse_listed(listing, "tcp:39100 tcp:39100"));
-        assert!(!adb_reverse_listed("", "tcp:39100 tcp:39100"));
     }
 
     #[test]
