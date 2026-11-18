@@ -164,6 +164,20 @@ final class Sources
         (self::$askDevice)();
     }
 
+    /**
+     * @internal The host reported the system locale with its window metrics
+     * (Android applies a locale change in place, without the background /
+     * foreground round trip that re-asks DeviceInfo). Readers that already
+     * know the device locale ask again when it differs; nothing else runs.
+     */
+    public static function deviceLocaleReported(string $tag): void
+    {
+        if ($tag === '' || self::$askDevice === null || !self::$deviceAsked) return;
+        $known = self::$lastDevice?->locale;
+        if ($known === null || $known === $tag) return;
+        (self::$askDevice)();
+    }
+
     /** @internal Tests: the device locale and time zone as if the host reported them. */
     public static function reportDevice(DeviceInfo $info): void
     {

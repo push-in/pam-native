@@ -471,6 +471,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cleared_measurer_measures_again() {
+        // A font scale, density or locale change applied in place clears the
+        // cache: the same request must reach the host again.
+        let node = text_node("hello again");
+        let measurer = HostTextMeasurer::new(fake, std::ptr::null_mut());
+        let _scope = ActiveScope::enter(Some(&measurer));
+        let before = CALLS.with(Cell::get);
+        measure(&node, 100.0, 1.0).unwrap();
+        measure(&node, 100.0, 1.0).unwrap();
+        assert_eq!(CALLS.with(Cell::get) - before, 1);
+        measurer.clear();
+        measure(&node, 100.0, 1.0).unwrap();
+        assert_eq!(CALLS.with(Cell::get) - before, 2);
+    }
+
+    #[test]
     fn input_host_measurement_caps_single_line_but_wraps_multiline() {
         let mut input = text_node("abcdefghij");
         input.kind = NodeKind::Input;

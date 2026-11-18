@@ -168,6 +168,11 @@ PamStatus pam_native_engine_relayout_with_metrics(
     float text_scale,
     PamNativeBuffer *output
 );
+/* Drops cached host text measurements (font scale, density or locale changed
+ * in place); the next relayout measures every text box again. */
+PamStatus pam_native_engine_invalidate_text_measurements(
+    PamNativeEngineHandle *handle
+);
 /* Mounts the retained tree from scratch for a recreated host surface. */
 PamStatus pam_native_engine_remount(
     PamNativeEngineHandle *handle,

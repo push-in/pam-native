@@ -12590,6 +12590,84 @@ mod tests {
         );
     }
 
+    /// `android:configChanges` of the PamActivity element in [manifest].
+    fn pam_activity_config_changes(manifest: &str) -> BTreeSet<String> {
+        let activity = manifest
+            .find("<activity\n            android:name=\".PamActivity\"")
+            .expect("PamActivity element");
+        let element =
+            &manifest[activity..activity + manifest[activity..].find('>').expect("open tag")];
+        let value = element
+            .split("android:configChanges=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("configChanges");
+        value.split('|').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn pam_activity_handles_configuration_changes_in_place() {
+        // A recreated Activity retires the module registry: plugins that are
+        // not SurfaceRetirableModule lose their state. Everything PamActivity
+        // applies in place is declared (docs/android-activity-lifecycle.md).
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        let expected = [
+            "density",
+            "fontScale",
+            "keyboard",
+            "keyboardHidden",
+            "layoutDirection",
+            "locale",
+            "mcc",
+            "mnc",
+            "navigation",
+            "orientation",
+            "screenLayout",
+            "screenSize",
+            "smallestScreenSize",
+            "uiMode",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(pam_activity_config_changes(template), expected);
+
+        // Generated workspaces keep it after every manifest patch.
+        let root = std::env::temp_dir().join(format!(
+            "pam-config-changes-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(&manifest, template).expect("manifest");
+        sync_permissions(&manifest, &["android.permission.CAMERA".to_owned()])
+            .expect("permissions");
+        add_deep_links(
+            &manifest,
+            &[AndroidDeepLink {
+                scheme: "https".to_owned(),
+                host: Some("example.com".to_owned()),
+                path_prefix: None,
+                auto_verify: true,
+            }],
+        )
+        .expect("deep links");
+        add_share_targets(
+            &manifest,
+            &[plugin_share::ShareType {
+                mime: "image/*".to_owned(),
+                multiple: true,
+            }],
+        )
+        .expect("share targets");
+        let generated = fs::read_to_string(&manifest).expect("generated manifest");
+        assert_eq!(pam_activity_config_changes(&generated), expected);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     #[test]
     fn tv_markers_add_and_remove_the_leanback_launcher() {
         let root = std::env::temp_dir().join(format!(

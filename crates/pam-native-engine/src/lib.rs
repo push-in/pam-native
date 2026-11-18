@@ -25,7 +25,8 @@ use pam_native_protocol::{
 pub use auto_safe_area::{ContentKind as SafeAreaContentKind, SafeAreaViolation};
 pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
-    pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
+    pam_native_engine_commit, pam_native_engine_free,
+    pam_native_engine_invalidate_text_measurements, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
     pam_native_engine_remount, pam_native_engine_set_asset_root,
     pam_native_engine_set_keyboard_inset, pam_native_engine_set_native_child_visibility,

@@ -394,6 +394,13 @@ NativeModules::call(
 `call()` carries scalar maps through the bounded binary wire format.
 `callRaw()` is available for a package-owned binary protocol.
 
+A module that keeps runtime state (sockets, calls, event waiters, in-flight
+work) implements `SurfaceRetirableModule`: when Android recreates
+`PamActivity`, the old registry calls `retireSurface()` instead of `close()`.
+See [android-activity-lifecycle.md](android-activity-lifecycle.md) for the
+configuration changes that no longer recreate the Activity and those that
+still do.
+
 ## Native view
 
 View factory constructors also receive `Context`:
