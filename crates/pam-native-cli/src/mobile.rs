@@ -158,6 +158,11 @@ struct NativeManifest {
     web: crate::web_tv::WebOptions,
     #[serde(default)]
     appearance: crate::appearance::AppearanceOptions,
+    /// Compile-time theme: `tokens` names a project `.css` file of
+    /// `:root { --token: value; }` declarations that component libraries
+    /// (PAM Native UI) and the app's own components resolve their tokens from.
+    #[serde(default)]
+    theme: ThemeOptions,
     /// LogBox-style runtime error overlay: `true` (debug builds only, the
     /// default), `false` (never; debug builds use the release fallback) or
     /// `"always"` (also in release builds, for internal QA builds).
@@ -178,6 +183,13 @@ struct NativeManifest {
     /// Route compiler options (routes file, generated namespace/output).
     #[serde(default)]
     routes: Option<crate::routes::RoutesOptions>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ThemeOptions {
+    #[serde(default)]
+    tokens: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -1750,6 +1762,22 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         return Err("applicationId must be a dot-separated Java package name".to_owned());
     }
     manifest.appearance.validate()?;
+    if let Some(tokens) = &manifest.theme.tokens {
+        let relative = Path::new(tokens);
+        let safe = !tokens.is_empty()
+            && relative
+                .extension()
+                .and_then(|extension| extension.to_str())
+                == Some("css")
+            && relative
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)));
+        if !safe || !root.join(relative).is_file() {
+            return Err(format!(
+                "theme.tokens must name an existing project-relative .css file, got {tokens:?}"
+            ));
+        }
+    }
     if let Some(icon) = &manifest.android.icon {
         icon.validate()?;
     }

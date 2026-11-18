@@ -850,6 +850,76 @@ rmdir($cssImportRoot.'/src/screens');
 rmdir($cssImportRoot.'/src/styles');
 rmdir($cssImportRoot.'/src');
 rmdir($cssImportRoot);
+// App theme tokens (pam-native.json "theme.tokens") override a component
+// library's `:root` tokens at compile time; projects without them are untouched.
+$themeRoot = sys_get_temp_dir().'/pam-theme-tokens-'.bin2hex(random_bytes(4));
+$themeLibrary = $themeRoot.'/vendor/acme/ui';
+mkdir($themeLibrary.'/src', 0o755, true);
+file_put_contents($themeRoot.'/composer.json', '{"name":"app/theme"}');
+file_put_contents($themeLibrary.'/composer.json', '{"name":"acme/ui"}');
+file_put_contents($themeLibrary.'/src/app.css', ":root {\n    --p-accent: #F53003;\n    --p-accent-dark: #FF4433;\n    --p-radius: 12px;\n}\n");
+file_put_contents($themeLibrary.'/src/Badge.pam', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Acme\Ui;
+
+use Pam\Native\Component;
+
+final class Badge extends Component
+{
+}
+?>
+
+<template>
+    <Text class="badge">New</Text>
+</template>
+
+<style scoped>
+    .badge { color: var(--p-accent); border-radius: var(--p-radius); }
+    @media (prefers-color-scheme: dark) {
+        .badge { color: var(--p-accent-dark); }
+    }
+</style>
+PAM);
+$themeCache = $themeRoot.'/cache';
+$badgeStyles = static function () use ($themeLibrary, $themeCache): array {
+    $component = PamPhpCompiler::compileFile($themeLibrary.'/src/Badge.pam', $themeCache);
+
+    return json_decode((string) ($component->template->attributes['__pamStyles'] ?? ''), true, 32, JSON_THROW_ON_ERROR);
+};
+$plainBadge = $badgeStyles();
+file_put_contents($themeRoot.'/pam-native.json', '{"version":1,"theme":{"tokens":"src/theme.css"}}');
+mkdir($themeRoot.'/src');
+file_put_contents($themeRoot.'/src/theme.css', "/* Brand */\n:root {\n    --p-accent: #0055FF;\n    --p-accent-dark: #4D8DFF;\n}\n");
+$themedBadge = $badgeStyles();
+$assert(
+    ($plainBadge['classes']['badge']['textColor'] ?? null) === 0xFFF53003
+        && ($themedBadge['classes']['badge']['textColor'] ?? null) === 0xFF0055FF
+        && json_encode($themedBadge) !== json_encode($plainBadge)
+        && str_contains(json_encode($themedBadge), (string) 0xFF4D8DFF)
+        && ($themedBadge['classes']['badge']['borderRadius'] ?? null) === ($plainBadge['classes']['badge']['borderRadius'] ?? null),
+    'App theme tokens must override a library\'s light and dark tokens at compile time and invalidate its cache.',
+);
+file_put_contents($themeRoot.'/src/theme.css', ":root { --p-accent: #0055FF; }\n.badge { color: red; }\n");
+$themeRejected = false;
+try {
+    $badgeStyles();
+} catch (RuntimeException $error) {
+    $themeRejected = str_contains($error->getMessage(), ':root { --token: value; }');
+}
+$assert($themeRejected, 'Theme tokens must refuse selectors other than :root custom properties.');
+foreach ([...(glob($themeCache.'/*') ?: [])] as $cacheFile) {
+    unlink($cacheFile);
+}
+@rmdir($themeCache);
+foreach (['/src/theme.css', '/pam-native.json', '/composer.json', '/vendor/acme/ui/src/Badge.pam', '/vendor/acme/ui/src/app.css', '/vendor/acme/ui/composer.json'] as $file) {
+    unlink($themeRoot.$file);
+}
+foreach (['/src', '/vendor/acme/ui/src', '/vendor/acme/ui', '/vendor/acme', '/vendor', ''] as $directory) {
+    rmdir($themeRoot.$directory);
+}
 $shadowStyles = ScopedStyleCompiler::compile(
     '.card { box-shadow: 3px 4px 0 1px #FFD23F; }'
         .'.first { box-shadow: rgba(1, 2, 3, 0.5) 0 2px; }'
