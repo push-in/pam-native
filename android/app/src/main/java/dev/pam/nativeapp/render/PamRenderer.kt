@@ -10609,7 +10609,7 @@ class PamRenderer(
         translated: Boolean,
         includePressables: Boolean = true,
     ) {
-        (activity() as? PamActivity)?.rootHost?.replaceTranslatedTouchTargets(
+        ((activity() as? PamActivity)?.rootHost ?: host as? PamRootHost)?.replaceTranslatedTouchTargets(
             view,
             translated,
             includePressables,
