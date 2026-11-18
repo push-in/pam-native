@@ -319,6 +319,10 @@ internal class NativeImageLoader(
     // response holds a network thread, never a decoder, and visible images
     // (then nearby, then hidden ones) take the next free thread of each.
     private val networkLane = MediaWorkLane("pam-image-net", IMAGE_NETWORK_THREADS)
+
+    /** Sources of the downloads waiting for a network thread (tests). */
+    internal fun queuedNetworkSources(): List<String> =
+        networkLane.queuedJobs().mapNotNull { (it as? NetworkJob)?.source }
     private val decodeLane = MediaWorkLane("pam-image", DECODE_THREADS)
     /** Highest priority of the views waiting for each decoded key (written on the main thread). */
     private val demand = ConcurrentHashMap<String, Int>()
@@ -804,7 +808,7 @@ internal class NativeImageLoader(
      */
     private inner class NetworkJob(
         private val id: String,
-        private val source: String,
+        val source: String,
         private val request: NativeImageRequest,
         private val basePriority: Int,
         private val attempt: Int,
