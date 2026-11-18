@@ -91,7 +91,14 @@ class PamKeyboardInstrumentedTest {
             }
             // The IME may settle in several insets animations (suggestion
             // strip, toolbar); wait until the composer follows the final one.
-            waitUntil(instrumentation, "composer directly above the IME") {
+            var imeAsked = SystemClock.uptimeMillis()
+            waitUntil(instrumentation, "composer directly above the IME", timeoutMs = 20_000) {
+                // A cold IME on a loaded CI emulator can drop the first request.
+                if (activity.host.imeBottomInset == 0 && SystemClock.uptimeMillis() - imeAsked > 4_000) {
+                    imeAsked = SystemClock.uptimeMillis()
+                    input.requestFocus()
+                    showKeyboard(input)
+                }
                 val location = IntArray(2)
                 composer.getLocationOnScreen(location)
                 val settled = activity.host.rootWindowInsets
