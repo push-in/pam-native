@@ -1,4 +1,4 @@
-# iOS engine: prebuilt per release
+# iOS engine and PHP runtime: prebuilt, downloaded, cached
 
 `pam mobile ios:prepare`, `ios:run` and `ios:build` link
 `PamNativeEngine.xcframework`, the Rust engine built from the same
@@ -34,3 +34,24 @@ share or overwrite one engine.
 
 Deleting the cache directory is always safe: the next `ios:*` command
 downloads the engine again.
+
+## PHP runtime (PamPhp.xcframework)
+
+PAM's macOS release ships an empty `runtime/ios/<runtime-id>` slot. Since
+1.53.4 `ios:prepare` fills it from the immutable `runtime-ios-<runtime-id>`
+PAM release (`pam-ios-runtime-<runtime-id>.tar.gz`: PamPhp.xcframework for
+iOS device arm64 and simulator arm64 + x86_64, plus `runtime.json`):
+
+1. The slot itself, when it holds a runtime (a local build).
+2. The cache `<engine cache>/ios-runtime/<runtime-id>`.
+3. A download, verified against the SHA-256 pinned in PAM's
+   `runtime/ios-runtimes.json` (PAM 2.2.22 and later) or, for older PAM
+   installs, the `.sha256` published beside the asset. The archive may only
+   contain `PamPhp.xcframework/` and `runtime.json`, whose `runtimeId` must
+   match.
+
+The runtime is built once per PHP version and revision by PAM's
+`iOS PHP runtime` workflow on GitHub's macOS runner, never per release.
+Building it locally stays an explicit opt-in: `runtime-builder/ios/build.sh
+--php 8.5 all` in a PAM checkout, with `PAM_HOME` pointing at it.
+`PAM_IOS_RUNTIME_BASE_URL` overrides the release URL (a mirror).
