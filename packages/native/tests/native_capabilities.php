@@ -191,6 +191,22 @@ $assert(
 Runtime::dispatchModuleResult($move['requestId'], ModuleResultStatus::Success->value, Wire::map(['path' => 'sent/a.jpg', 'name' => 'a.jpg', 'mimeType' => 'image/jpeg', 'size' => 3]));
 $assert($moved instanceof FileReference && $moved->path === 'sent/a.jpg', 'Files::move must resolve the destination file.');
 $copyFailure = null;
+// Files::delete: a failure closure instead of an exception; missing files are deleted natively.
+$deleted = false;
+$deleteFailure = null;
+Files::delete('drafts/gone.txt', static function () use (&$deleted): void { $deleted = true; }, static function (string $message) use (&$deleteFailure): void { $deleteFailure = $message; });
+$assert($lastCall()['method'] === 'delete' && $lastCall()['values'] == ['path' => 'drafts/gone.txt'], 'Files::delete must bridge the path only.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'File path escapes sandbox');
+$assert(!$deleted && $deleteFailure === 'File path escapes sandbox', 'Files::delete failures must reach $failure without throwing.');
+Files::delete('drafts/gone.txt', static function () use (&$deleted): void { $deleted = true; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, '');
+$assert($deleted, 'Files::delete must call back on success.');
+// Files::cachePath: the cache folder Caches::clear() empties.
+$assert(Files::cachePath('pdf/terms.pdf') === 'cache/pdf/terms.pdf' && Files::CACHE_DIRECTORY === 'cache', 'Files::cachePath must point into the cache folder.');
+$assert($rejects(static fn () => Files::cachePath('../escape')) && $rejects(static fn () => Files::cachePath('')), 'Files::cachePath must stay inside the sandbox.');
+Files::download('https://cdn.example.test/terms.pdf', Files::cachePath('terms.pdf'), static fn ($_) => null);
+$assert($lastCall()['values']['path'] === 'cache/terms.pdf', 'Downloads accept a cache destination.');
+
 Files::copy('a.txt', 'b.txt', failure: static function (string $message) use (&$copyFailure): void { $copyFailure = $message; });
 $assert($lastCall()['method'] === 'copy' && $lastCall()['values']['overwrite'] === false, 'Files::copy must not overwrite by default.');
 Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Destination already exists');
@@ -494,3 +510,9 @@ Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Fail
 $assert($lastCall()['values'] == ['preserveOffline' => true], 'Caches::clear must keep preserving offline media by default.');
 Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'clear failed');
 $assert($cacheFailure === 'usage failed|clear failed', 'Cache failures must reach $failure without throwing.');
+\Pam\Native\System\Caches::clear(static fn ($_) => null, imports: true);
+$assert($lastCall()['values'] == ['preserveOffline' => true, 'imports' => true], 'Caches::clear(imports: true) must ask to remove imported files.');
+$importUsage = null;
+\Pam\Native\System\Caches::usage(static function (\Pam\Native\CacheUsage $usage) use (&$importUsage): void { $importUsage = $usage; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['fileCount' => 3, 'importBytes' => 70, 'temporaryBytes' => 30, 'totalBytes' => 100]));
+$assert($importUsage?->importBytes === 70 && $importUsage->totalBytes === 100, 'Caches::usage must decode importBytes.');

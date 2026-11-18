@@ -132,8 +132,11 @@ Caches::clear(
 );
 ```
 
-`Caches::clear()` removes decoded image files, ordinary media and temporary
-incoming-share files. Media explicitly marked `pinOffline()` is preserved by
+`Caches::clear()` removes decoded image files, ordinary media, temporary
+incoming-share files and the sandbox cache folder (`Files::cachePath()`).
+`Caches::usage()` also reports `importBytes`, the files pickers and imports
+copied into the sandbox (`pam-files/imports`), included in `totalBytes`;
+`clear(imports: true)` removes them too, once no pending upload needs them. Media explicitly marked `pinOffline()` is preserved by
 default. Pass `preserveOffline: false` only after explicit user confirmation to
 remove downloaded offline content as well.
 

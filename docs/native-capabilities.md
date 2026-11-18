@@ -205,8 +205,10 @@ form (`?FileReference`), and `Files::exists($path, fn (bool $exists) => ...)`
 answers on the file worker (directories report false; only paths outside the
 sandbox fail).
 `Files::list()` inventories regular files in a sandbox directory, and
-`Files::delete()` removes a single sandbox file. Directory deletion and paths
-escaping the application sandbox are rejected.
+`Files::delete($path, $done, $failure)` removes a single sandbox file. A file
+that is already gone counts as deleted (`$done` runs), so cleanup can repeat
+safely. Directory deletion and paths escaping the application sandbox are
+rejected; with `$failure` the error arrives there instead of being thrown.
 
 `Files::copyAsset()` copies a project-relative packaged asset directly into a
 sandbox-relative destination on the native file worker and returns its typed
@@ -221,6 +223,12 @@ editing, upload or durable app-owned use. Downloads run off the UI thread,
 reject embedded credentials and non-HTTPS URLs, enforce a caller-controlled
 size limit (64 MiB by default, 256 MiB maximum), and replace the destination
 atomically only after a successful transfer.
+
+For files the app can fetch again (React Native's `cacheDirectory`), download
+into the sandbox cache folder: `Files::download($url, Files::cachePath('pdf/terms.pdf'), ...)`.
+`Caches::clear()` ("clear cache") empties it and `Caches::usage()` counts it
+in `temporaryBytes`. The system does not evict it on low storage; keep
+durable files outside `Files::CACHE_DIRECTORY`.
 
 `Files::sha256($file->path, $callback, $failure)` computes a lowercase SHA-256
 digest on the native file worker. Only the private path and 64-character digest

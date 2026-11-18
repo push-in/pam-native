@@ -57,4 +57,41 @@ class CacheModuleTest {
             root.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun sandboxCacheFolderIsClearedAndImportsOnlyOnRequest() {
+        val root = Files.createTempDirectory("pam-cache-test-files")
+        try {
+            val images = root.resolve("pam-images-v1").also(Files::createDirectories)
+            val media = root.resolve("pam-media-v1").also(Files::createDirectories)
+            val temporary = root.resolve("pam-incoming-shares").also(Files::createDirectories)
+            val downloads = root.resolve("pam-files/cache/pdf").also(Files::createDirectories)
+            val imports = root.resolve("pam-files/imports").also(Files::createDirectories)
+            downloads.resolve("terms.pdf").writeBytes(ByteArray(23))
+            imports.resolve("picked.jpg").writeBytes(ByteArray(29))
+            val roots = CacheRoots(
+                images.toFile(),
+                media.toFile(),
+                temporary.toFile(),
+                downloads = root.resolve("pam-files/cache").toFile(),
+                imports = imports.toFile(),
+            )
+
+            val usage = roots.usage()
+            assertEquals(23, usage.temporaryBytes)
+            assertEquals(29, usage.importBytes)
+            assertEquals(52, usage.totalBytes)
+            assertEquals(2, usage.fileCount)
+
+            roots.clear(preserveOffline = true)
+            assertFalse(downloads.resolve("terms.pdf").toFile().exists())
+            assertTrue(imports.resolve("picked.jpg").toFile().exists())
+            assertEquals(29, roots.usage().totalBytes)
+
+            roots.clear(preserveOffline = true, imports = true)
+            assertEquals(0, roots.usage().totalBytes)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
 }

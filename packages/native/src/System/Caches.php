@@ -26,6 +26,11 @@ final class Caches
     }
 
     /**
+     * Removes decoded images, ordinary media, temporary files and the
+     * `Files::CACHE_DIRECTORY` sandbox folder. Picked/imported files
+     * (`importBytes`) stay unless `imports: true`, since a pending upload may
+     * still read them.
+     *
      * @param Closure(CacheUsage): void $callback
      * @param null|Closure(string): void $failure Receives the native error instead of an exception.
      */
@@ -33,10 +38,11 @@ final class Caches
         Closure $callback,
         bool $preserveOffline = true,
         ?Closure $failure = null,
+        bool $imports = false,
     ): int {
         return self::call(
             'clear',
-            ['preserveOffline' => $preserveOffline],
+            $imports ? ['preserveOffline' => $preserveOffline, 'imports' => true] : ['preserveOffline' => $preserveOffline],
             $callback,
             $failure,
         );
@@ -74,6 +80,7 @@ final class Caches
                     temporaryBytes: max(0, (int) ($values['temporaryBytes'] ?? 0)),
                     totalBytes: max(0, (int) ($values['totalBytes'] ?? 0)),
                     freedBytes: max(0, (int) ($values['freedBytes'] ?? 0)),
+                    importBytes: max(0, (int) ($values['importBytes'] ?? 0)),
                 ));
             },
         );

@@ -123,8 +123,11 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     private fun delete(payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
             val file = resolve(WireMap.decode(payload).requiredText("path"))
-            require(file.isFile) { "File does not exist" }
-            require(file.delete()) { "Unable to delete file" }
+            // Idempotent: a file that is already gone counts as deleted.
+            if (file.exists()) {
+                require(file.isFile) { "Path is a directory" }
+                require(file.delete() || !file.exists()) { "Unable to delete file" }
+            }
             completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
         }.onFailure { completion.failure(it) }
     }

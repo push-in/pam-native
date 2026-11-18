@@ -24,6 +24,12 @@ use function strlen;
 
 final class Files
 {
+    /**
+     * Sandbox folder for re-creatable files (React Native's cacheDirectory):
+     * `Caches::clear()` empties it and `Caches::usage()` counts it.
+     */
+    public const string CACHE_DIRECTORY = 'cache';
+
     private static int $nextDownload = 1;
 
     /** @var array<int, array{failure: ?Closure, native: ?int, progress: ?Closure, success: Closure}> */
@@ -289,13 +295,32 @@ final class Files
         });
     }
 
-    public static function delete(string $path, ?Closure $callback = null): int
+    /**
+     * Removes a sandbox file. A file that is already gone counts as deleted
+     * (the callback runs), so cleanup can be repeated safely; directories and
+     * paths outside the sandbox fail.
+     *
+     * @param null|Closure(): void $callback
+     * @param null|Closure(string): void $failure Receives the native error instead of an exception.
+     */
+    public static function delete(string $path, ?Closure $callback = null, ?Closure $failure = null): int
     {
-        return self::invoke(
+        return self::invokeOptionalFailure(
             'delete',
             ['path' => $path],
             static fn (array $_): mixed => $callback?->__invoke(),
+            $failure,
         );
+    }
+
+    /**
+     * A sandbox path inside the cache folder, for downloads and other files
+     * the app can fetch again: `Files::download($url, Files::cachePath('pdf/terms.pdf'), ...)`.
+     * "Clear cache" (`Caches::clear()`) removes them.
+     */
+    public static function cachePath(string $name): string
+    {
+        return self::privatePath(self::CACHE_DIRECTORY.'/'.ltrim($name, '/'), 'Cache file');
     }
 
     /**
