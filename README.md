@@ -47,6 +47,8 @@ pam dev
 
 `pam init --template native` already adds `pushinbr/pam-native` (`^1.0`) to the project's `composer.json`; add capabilities with `pam composer require pushinbr/pam-native-<capability>`. The [PAM Native overview](https://push-in.github.io/pam-docs/native/overview/) covers prerequisites, production setup and the complete workflow. PAM projects keep normal manifests and lockfiles; product features stay in the package that owns them.
 
+With the official component library, `pam init my-app --template native-ui` gives the same flow with [PAM Native UI](https://github.com/push-in/pam-native-ui). On a Mac, `pam mobile ios:run` needs only Xcode: the CLI downloads, verifies (SHA-256) and caches the prebuilt iOS PHP runtime and engine of your exact versions ([iOS engine and runtime](docs/ios-engine.md)). `pam dev` gives each Android app its own device port and keeps the running app when the installed bundle is already current, so pending native prompts and callbacks survive the first sync.
+
 Every build follows the mandatory [build hygiene contract](docs/build-hygiene.md): final APK/AAB/IPA/app deliverables are preserved in `dist`, while regenerable Gradle, Cargo and Xcode intermediates are removed when the command exits. Device bundles keep the PHP SDK and its resources; the SDK's native host sources and documentation stay on the development machine.
 
 <details>
@@ -227,7 +229,8 @@ PAM Native is open source under Apache-2.0. You may build and sell proprietary o
 - [Use native capabilities](docs/examples.md)
 - [Performance and recovery](docs/runtime-performance.md)
 - [UI Language 2](docs/ui-language-2.md)
-- [Plugin SDK](docs/plugins.md)
+- [Plugin SDK](docs/plugins.md) (modules with a pending prompt implement `ReloadAwareModule`)
+- [iOS engine and PHP runtime downloads](docs/ios-engine.md)
 - [Ecosystem architecture](docs/ecosystem-architecture.md)
 - [PAM Native Nitro](https://github.com/push-in/pam-native-nitro): typed, offline-first models and native SQLite queries
 - [Technical documentation index](docs/README.md)

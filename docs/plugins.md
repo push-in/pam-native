@@ -401,6 +401,16 @@ See [android-activity-lifecycle.md](android-activity-lifecycle.md) for the
 configuration changes that no longer recreate the Activity and those that
 still do.
 
+### Hot reload and pending prompts
+
+`pam dev` restarts the PHP request when files change; a callback waiting for
+a native prompt (a dialog, a biometric sheet, a picker) goes with it, and
+completions for the old request are dropped. A module holding such a prompt
+implements `dev.pam.nativeapp.modules.ReloadAwareModule` (PAM Native 1.53.7+)
+and closes it in `prepareReload()`. Plugins that support older SDKs can
+register a `dev.pam.nativeapp.HostEventListener` with
+`HostEvents.register(...)` and do the same in its `prepareReload()`.
+
 ## Native view
 
 View factory constructors also receive `Context`:
