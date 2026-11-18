@@ -3,6 +3,7 @@ package dev.pam.nativeapp
 import android.app.Activity
 import android.app.ActivityManager
 import android.annotation.SuppressLint
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
@@ -105,6 +106,14 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private var viewportUpdateReplayRequested = false
     private var forceScheduledViewportUpdate = false
 
+    /** The configuration the mounted views were built for (see onConfigurationChanged). */
+    private var appliedConfiguration: Configuration? = null
+    private var configurationRemountPending = false
+
+    /** Surface remounts caused by a handled font scale, density or locale change. */
+    internal var configurationRemounts = 0
+        private set
+
     /** Guards the hand-off between the runtime launch thread and onDestroy. */
     private val launchLock = Any()
     private var launchRequested = false
@@ -151,6 +160,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         val retainedAtCreate = PamRuntimeHost.runtime?.takeIf(PamRuntime::isRunning)
         if (retainedAtCreate == null) PamStartup.prepare(applicationContext)
         super.onCreate(savedInstanceState)
+        appliedConfiguration = Configuration(resources.configuration)
         PamAppearance.applyPlatformNightMode(this)
         // Export the effective scheme to PHP before its first frame.
         PamAppearance.exportEnvironment(this)
@@ -490,9 +500,21 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         runtime.dispatchLifecycle(EVENT_MEMORY_PRESSURE, MEMORY_PRESSURE_MODERATE.toString().toByteArray())
     }
 
+    /**
+     * Every change the manifest's `configChanges` declares arrives here
+     * instead of recreating the Activity, so PHP, its module registry and
+     * plugin state stay bound to this surface. Size, orientation, keyboard
+     * and uiMode changes are a relayout plus a dimensions event; font scale,
+     * density, locale and layout direction also rebuild the mounted views
+     * (see [SURFACE_REMOUNT_CHANGES] and docs/android-activity-lifecycle.md).
+     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        val current = Configuration(resources.configuration)
+        val changes = appliedConfiguration?.diff(current) ?: 0
+        appliedConfiguration = current
         if (!runtimeStarted) return
+        if (requiresSurfaceRemount(changes)) configurationRemountPending = true
         applyDefaultSystemBars()
         runtime.invalidateSystemBars()
         scheduleViewportUpdate(force = true)
@@ -979,6 +1001,12 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         viewportWidth = width
         viewportHeight = height
         dispatchedSafeArea = insets
+        val remount = configurationRemountPending
+        configurationRemountPending = false
+        // Text boxes are measured again with the new scale, density and
+        // locale by the relayout below; the remount after the dimensions
+        // event rebuilds the views from the retained tree.
+        if (remount) runtime.invalidateTextMeasurements()
         val density = resources.displayMetrics.density
         val widthDp = width / density
         val heightDp = height / density
@@ -1025,9 +1053,15 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                     "foldPosture" to WireValue.Text("flat"),
                     "memoryClass" to WireValue.Decimal(environment.memoryClass.toDouble()),
                     "performanceTier" to WireValue.Decimal(environment.performanceTier.toDouble()),
+                    // Same tag as DeviceInfo: useLocale() asks again when it differs.
+                    "locale" to WireValue.Text(java.util.Locale.getDefault().toLanguageTag()),
                 ),
             ),
         )
+        if (remount) {
+            configurationRemounts++
+            runtime.remountSurface()
+        }
     }
 
     private class StyleEnvironment(
@@ -1253,6 +1287,20 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             } else {
                 MEMORY_PRESSURE_MODERATE
             }
+
+        /**
+         * Declared `configChanges` whose values were baked into the mounted
+         * views (px sizes from density, text sizes from fontScale, locale
+         * dependent text transforms and number formats, RTL-resolved
+         * gravities): the views are rebuilt from the retained tree in place.
+         */
+        const val SURFACE_REMOUNT_CHANGES = ActivityInfo.CONFIG_FONT_SCALE or
+            ActivityInfo.CONFIG_DENSITY or
+            ActivityInfo.CONFIG_LOCALE or
+            ActivityInfo.CONFIG_LAYOUT_DIRECTION
+
+        /** [changes] is a `Configuration.diff()` mask. */
+        fun requiresSurfaceRemount(changes: Int): Boolean = changes and SURFACE_REMOUNT_CHANGES != 0
 
         /** UI_HIDDEN and the background levels: no window of the app is visible. */
         @Suppress("DEPRECATION")

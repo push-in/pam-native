@@ -420,6 +420,32 @@ class PamRuntime(
     private var layoutViewport = floatArrayOf(0f, 0f, 1f)
 
     /**
+     * The host's font scale, density, locale or layout direction changed
+     * while its Activity stayed alive (they are declared in the manifest's
+     * `configChanges`). Cached text measurements are dropped so the next
+     * [updateViewport] measures every text box again; call it before that.
+     */
+    fun invalidateTextMeasurements() {
+        synchronized(handleLock) {
+            val active = handle
+            if (active != 0L) nativeInvalidateTextMeasurements(active)
+        }
+    }
+
+    /**
+     * Rebuilds the mounted views from the retained tree on the same renderer:
+     * every px value, text size, typeface and RTL-resolved gravity is applied
+     * again for the new configuration. Modules and PHP state are untouched
+     * (unlike an Activity recreation, nothing is retired).
+     */
+    fun remountSurface() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (closed.get() || !attachedSurface) return
+        onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "surface remounted for configuration"))
+        requestRemount()
+    }
+
+    /**
      * Visible IME height in dp (0 when hidden). The engine lays out a
      * trailing panning KeyboardAvoidingView directly above the keyboard and
      * shrinks its flexible siblings, then relayouts synchronously so native
@@ -977,6 +1003,7 @@ class PamRuntime(
 
     private external fun nativeReload(handle: Long, entry: String)
     private external fun nativeRemount(handle: Long)
+    private external fun nativeInvalidateTextMeasurements(handle: Long)
     private external fun nativeStats(handle: Long): LongArray
     private external fun nativeReleaseBatch(batchHandle: Long)
     private external fun nativeStop(handle: Long)

@@ -91,9 +91,15 @@
         <profileable
             android:shell="true"
             tools:targetApi="q" />
+        <!--
+            Every value PAM applies in place (onConfigurationChanged): the PHP
+            runtime, its module registry and plugin state stay bound to this
+            Activity. See docs/android-activity-lifecycle.md before adding or
+            removing one.
+        -->
         <activity
             android:name=".PamActivity"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustNothing">

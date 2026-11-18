@@ -164,7 +164,7 @@ jobs:
         run: scripts/ci-gradle-mirror.sh
       - name: Build renderer, engines, and plugin API
         run: |
-          sdkmanager "platforms;android-36"
+          scripts/ci-sdkmanager.sh "platforms;android-36"
           cargo clean --package pam-native-engine --package pam-native-protocol
           scripts/prepare-android-runtime.sh
           scripts/ci-gradle-retry.sh ./android/gradlew -p android \
@@ -490,12 +490,26 @@ jobs:
           # the runner's PHP CLI, as it runs on the static runtime users get.
           PAM_NATIVE_PHP: php
           PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
+          # Keep the pam dev and logcat logs of every starter for the upload
+          # below; the projects themselves are not uploaded.
+          PAM_COMMUNITY_GATE_ROOT: ${{ runner.temp }}/pam-community-gate
+          PAM_COMMUNITY_GATE_KEEP: '1'
         with:
           api-level: 36
           arch: x86_64
           profile: pixel_6
           disable-animations: true
           script: pam-cli/scripts/community-experience-gate.sh all
+      - name: Keep the community starter logs of a failed journey
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pam-native-community-gate-logs
+          path: |
+            ${{ runner.temp }}/pam-community-gate/*.log
+            ${{ runner.temp }}/pam-community-gate/*.txt
+          if-no-files-found: warn
+          retention-days: 7
       - name: Remove regenerable build artifacts
         if: always()
         run: scripts/cleanup-build-artifacts.sh

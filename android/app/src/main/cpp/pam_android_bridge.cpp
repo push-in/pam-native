@@ -1589,6 +1589,16 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeInvalidateTextMeasurements(JNIEnv*, jobject, jlong handle) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(state->engine_mutex);
+    pam_native_engine_invalidate_text_measurements(state->engine);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeSetKeyboardInset(
     JNIEnv*,
     jobject,

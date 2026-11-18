@@ -483,6 +483,14 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     private fun Map<String, WireValue>.integer(key: String, fallback: Long): Long =
         (this[key] as? WireValue.Integer)?.value ?: fallback
 
+    /** A hot reload restarts PHP: open choice dialogs would answer nobody. */
+    fun prepareReload() {
+        main.post {
+            openDialogs.toList().forEach { runCatching { it.dismiss() } }
+            openDialogs.clear()
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         main.removeCallbacksAndMessages(null)

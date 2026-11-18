@@ -671,6 +671,9 @@ final class Runtime
                     performanceTier: (float) ($values['performanceTier'] ?? 1.0),
                 );
                 Appearance::synchronize($values, $previousAppearance);
+                if (is_string($values['locale'] ?? null)) {
+                    \Pam\Native\Composables\Sources::deviceLocaleReported($values['locale']);
+                }
                 // Hosts re-send the window on every surface bind (also right
                 // after boot). Identical metrics cannot change any rendered
                 // output, so only real changes re-render the whole tree.

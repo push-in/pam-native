@@ -3199,21 +3199,25 @@ fn runtime_update(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-pub fn repair_android(project_path: &Path) -> Result<(), String> {
+/// Installs the verified PHP runtime and the prebuilt engines that `abis`
+/// need and are missing. A device build (`pam dev`, `pam run`) asks only for
+/// the connected device's ABI, so an older PAM without the 32-bit runtimes,
+/// or a package without 32-bit engines, never blocks it or downloads the
+/// whole runtime bundle again on every run; store builds ask for all four.
+fn repair_android(project_path: &Path, abis: &[AndroidAbi]) -> Result<(), String> {
     let project = load_project(project_path)?;
     let pam_home = pam_home()?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home)?;
-    if default_abis()
-        .into_iter()
-        .any(|abi| !runtime_ready_at(&runtime.root, abi))
-    {
-        install_android_runtime_bundle(&project, &pam_home)?;
+    if let Some(missing) = missing_runtime_abis(&runtime.root, abis).first() {
+        install_android_runtime_bundle(&project, &pam_home, abis).map_err(|error| {
+            format!(
+                "{error}; {}",
+                missing_runtime_message(&runtime.release.php_version, *missing, "")
+            )
+        })?;
     }
-    if default_abis()
-        .into_iter()
-        .any(|abi| !engine_ready_at(&native_home, abi))
-    {
+    if abis.iter().any(|abi| !engine_ready_at(&native_home, *abi)) {
         install_android_renderer_bundle(&native_home)?;
     }
 
@@ -3221,8 +3225,30 @@ pub fn repair_android(project_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The ABIs of `abis` whose PHP runtime is not installed under `runtime_root`.
+fn missing_runtime_abis(runtime_root: &Path, abis: &[AndroidAbi]) -> Vec<AndroidAbi> {
+    abis.iter()
+        .copied()
+        .filter(|abi| !runtime_ready_at(runtime_root, *abi))
+        .collect()
+}
+
+/// Why an Android build cannot use the PHP runtime for `abi`, with the way
+/// out: a newer PAM for the 32-bit runtimes, or fewer ABIs.
+fn missing_runtime_message(php_version: &str, abi: AndroidAbi, detail: &str) -> String {
+    let hint = if abi.is_32_bit() {
+        "; 32-bit runtimes ship with PAM releases after v2.2.20 (run `pam self-update`), or build with --abi arm64-v8a --abi x86_64"
+    } else {
+        ""
+    };
+    format!(
+        "verified PHP {php_version} Android runtime is missing for {}{detail}{hint}",
+        abi.android()
+    )
+}
+
 fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
-    repair_android(&project_path)?;
+    repair_android(&project_path, &default_abis())?;
     let project = load_project(&project_path)?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     println!(
@@ -3232,7 +3258,11 @@ fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<(), String> {
+fn install_android_runtime_bundle(
+    project: &Project,
+    pam_home: &Path,
+    abis: &[AndroidAbi],
+) -> Result<(), String> {
     let asset = "pam-android-runtime.tar.gz";
     let configured_base = std::env::var("PAM_RELEASE_BASE_URL").ok();
     let base = android_runtime_release_base(configured_base.as_deref());
@@ -3295,19 +3325,12 @@ fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<
         }
 
         let runtime = resolve_runtime(project, &extracted)?;
-        for abi in default_abis() {
-            if !runtime_ready_at(&runtime.root, abi) {
-                let hint = if abi.is_32_bit() {
-                    "; 32-bit runtimes ship with PAM releases after v2.2.20 (run `pam self-update`), or build with --abi arm64-v8a --abi x86_64"
-                } else {
-                    ""
-                };
-                return Err(format!(
-                    "Android runtime archive is missing PHP {} for {}{hint}",
-                    runtime.release.php_version,
-                    abi.android()
-                ));
-            }
+        if let Some(abi) = missing_runtime_abis(&runtime.root, abis).first() {
+            return Err(missing_runtime_message(
+                &runtime.release.php_version,
+                *abi,
+                " in the downloaded Android runtime archive",
+            ));
         }
         copy_tree(
             &extracted.join("runtime/android"),
@@ -3812,7 +3835,7 @@ fn install_android_packages(
 }
 
 fn repair_android_environment(project_path: &Path) -> Result<(), String> {
-    repair_android(project_path)?;
+    repair_android(project_path, &default_abis())?;
     let project = load_project(project_path)?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, true)
@@ -8259,23 +8282,25 @@ fn build_intermediate(options: MobileOptions, installable: bool) -> Result<Built
     if options.mode == BuildMode::Debug {
         ensure_isolated_debug_application_id(&project)?;
     }
-    repair_android(&options.project)?;
+    let abis = effective_abis(&project, &options.abis);
+    repair_android(&options.project, &abis)?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, false)?;
-    let abis = effective_abis(&project, &options.abis);
+    if let Some(abi) = missing_runtime_abis(&runtime.root, &abis).first() {
+        return Err(missing_runtime_message(
+            &runtime.release.php_version,
+            *abi,
+            &format!(
+                " (expected {}; build it with `runtime-builder/android/build.sh --php {} {}`)",
+                runtime.root.join(abi.android()).display(),
+                project.manifest.runtime.php,
+                abi.android()
+            ),
+        ));
+    }
     let workspace = prepare(&project, &native_home, &abis)?;
     for abi in &abis {
-        if !runtime_ready_at(&runtime.root, *abi) {
-            return Err(format!(
-                "verified PHP {} Android runtime is missing for {}; build it with `runtime-builder/android/build.sh --php {} {}` (expected {})",
-                runtime.release.php_version,
-                abi.android(),
-                project.manifest.runtime.php,
-                abi.android(),
-                runtime.root.join(abi.android()).display()
-            ));
-        }
         build_engine(&native_home, *abi)?;
     }
     let gradlew = workspace.join("gradlew");
@@ -9989,8 +10014,9 @@ fn dev(options: MobileOptions) -> Result<u8, String> {
 }
 
 fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
-    let host_port = android_dev_port::resolve(DEFAULT_PORT)?;
     let apk = build_intermediate(options, true)?;
+    let device_port = android_dev_port::device_port(&debug_application_id(&apk.project));
+    let host_port = android_dev_port::resolve(device_port)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Android,
@@ -10001,19 +10027,31 @@ fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
         "adb",
         &[
             "reverse",
-            &format!("tcp:{DEFAULT_PORT}"),
+            &format!("tcp:{device_port}"),
             &format!("tcp:{host_port}"),
         ],
     )?;
     install_and_launch(&apk.project, &apk.path, BuildMode::Debug)?;
-    hot_reload_server(&apk.project, host_port, true)
+    hot_reload_server(&apk.project, device_port, host_port, true)
 }
 
-fn hot_reload_server(project: &Project, host_port: u16, adb: bool) -> Result<u8, String> {
-    let listener = TcpListener::bind(("127.0.0.1", host_port))
-        .map_err(|error| format!("cannot bind hot reload server: {error}"))?;
-    println!("Pam Native hot reload listening on 127.0.0.1:{host_port}. Press Ctrl+C to stop.");
-    let mut transport = AdbReverse::new(DEFAULT_PORT, host_port);
+fn hot_reload_server(
+    project: &Project,
+    device_port: u16,
+    host_port: u16,
+    adb: bool,
+) -> Result<u8, String> {
+    let listener = TcpListener::bind(("127.0.0.1", host_port)).map_err(|error| {
+        format!(
+            "cannot bind hot reload server on 127.0.0.1:{host_port}: {error} (another `pam dev`? \
+             set PAM_NATIVE_ANDROID_DEV_PORT to a free port)"
+        )
+    })?;
+    println!(
+        "Pam Native hot reload listening on 127.0.0.1:{host_port} (device port {device_port} for {}). Press Ctrl+C to stop.",
+        debug_application_id(project)
+    );
+    let mut transport = AdbReverse::new(device_port, host_port);
     run_dev_sync(
         project,
         listener,
@@ -10032,14 +10070,15 @@ fn hot_reload_server(project: &Project, host_port: u16, adb: bool) -> Result<u8,
 /// with `adb reverse` unless `PAM_NATIVE_DEV_NO_ADB=1`.
 fn dev_serve(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
-    let host_port = android_dev_port::resolve(DEFAULT_PORT)?;
+    let device_port = android_dev_port::device_port(&debug_application_id(&project));
+    let host_port = android_dev_port::resolve(device_port)?;
     let adb = std::env::var_os("PAM_NATIVE_DEV_NO_ADB").is_none_or(|value| value != "1");
     if adb
         && command_status(
             "adb",
             &[
                 "reverse",
-                &format!("tcp:{DEFAULT_PORT}"),
+                &format!("tcp:{device_port}"),
                 &format!("tcp:{host_port}"),
             ],
         )
@@ -10047,7 +10086,7 @@ fn dev_serve(project_path: PathBuf) -> Result<u8, String> {
     {
         println!("Android sync: no device yet; adb reverse is retried every 3 s");
     }
-    hot_reload_server(&project, host_port, adb)
+    hot_reload_server(&project, device_port, host_port, adb)
 }
 
 #[derive(Clone, Copy)]
@@ -10748,6 +10787,50 @@ mod tests {
         assert!(!AndroidAbi::Arm64.is_32_bit() && !AndroidAbi::X86_64.is_32_bit());
         assert_eq!(AndroidAbi::parse("i686"), Ok(AndroidAbi::X86));
         assert!(AndroidAbi::parse("mips").is_err());
+    }
+
+    #[test]
+    fn device_builds_need_only_their_abi_runtime_and_store_builds_need_all_four() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-runtime-abis-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        // A PAM runtime from before the 32-bit slices: arm64-v8a and x86_64.
+        for abi in [AndroidAbi::Arm64, AndroidAbi::X86_64] {
+            let slice = root.join(abi.android());
+            for file in [
+                "lib/libphp.a",
+                "include/php/main/php.h",
+                "include/php/sapi/embed/php_embed.h",
+            ] {
+                let path = slice.join(file);
+                fs::create_dir_all(path.parent().expect("parent")).expect("runtime dir");
+                fs::write(&path, b"x").expect("runtime file");
+            }
+        }
+        // `pam dev` / `pam run` on an x86_64 emulator or an arm64 phone.
+        assert!(missing_runtime_abis(&root, &[AndroidAbi::X86_64]).is_empty());
+        assert!(missing_runtime_abis(&root, &[AndroidAbi::Arm64]).is_empty());
+        // `pam build` / `pam release` for the stores.
+        assert_eq!(
+            missing_runtime_abis(&root, &default_abis()),
+            vec![AndroidAbi::ArmV7, AndroidAbi::X86]
+        );
+        fs::remove_dir_all(&root).expect("cleanup");
+
+        let store = missing_runtime_message("8.5.12", AndroidAbi::ArmV7, "");
+        assert!(store.contains("missing for armeabi-v7a"), "{store}");
+        assert!(store.contains("pam self-update"), "{store}");
+        assert!(store.contains("--abi arm64-v8a --abi x86_64"), "{store}");
+        let device = missing_runtime_message("8.5.12", AndroidAbi::X86_64, " (expected /r)");
+        assert!(
+            device.ends_with("missing for x86_64 (expected /r)"),
+            "{device}"
+        );
     }
 
     #[test]
@@ -12519,6 +12602,84 @@ mod tests {
         assert!(
             validate_plugin_config(&empty, &[share_plugin("vendor/bad", "Share-Ext")]).is_err()
         );
+    }
+
+    /// `android:configChanges` of the PamActivity element in [manifest].
+    fn pam_activity_config_changes(manifest: &str) -> BTreeSet<String> {
+        let activity = manifest
+            .find("<activity\n            android:name=\".PamActivity\"")
+            .expect("PamActivity element");
+        let element =
+            &manifest[activity..activity + manifest[activity..].find('>').expect("open tag")];
+        let value = element
+            .split("android:configChanges=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("configChanges");
+        value.split('|').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn pam_activity_handles_configuration_changes_in_place() {
+        // A recreated Activity retires the module registry: plugins that are
+        // not SurfaceRetirableModule lose their state. Everything PamActivity
+        // applies in place is declared (docs/android-activity-lifecycle.md).
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        let expected = [
+            "density",
+            "fontScale",
+            "keyboard",
+            "keyboardHidden",
+            "layoutDirection",
+            "locale",
+            "mcc",
+            "mnc",
+            "navigation",
+            "orientation",
+            "screenLayout",
+            "screenSize",
+            "smallestScreenSize",
+            "uiMode",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(pam_activity_config_changes(template), expected);
+
+        // Generated workspaces keep it after every manifest patch.
+        let root = std::env::temp_dir().join(format!(
+            "pam-config-changes-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(&manifest, template).expect("manifest");
+        sync_permissions(&manifest, &["android.permission.CAMERA".to_owned()])
+            .expect("permissions");
+        add_deep_links(
+            &manifest,
+            &[AndroidDeepLink {
+                scheme: "https".to_owned(),
+                host: Some("example.com".to_owned()),
+                path_prefix: None,
+                auto_verify: true,
+            }],
+        )
+        .expect("deep links");
+        add_share_targets(
+            &manifest,
+            &[plugin_share::ShareType {
+                mime: "image/*".to_owned(),
+                multiple: true,
+            }],
+        )
+        .expect("share targets");
+        let generated = fs::read_to_string(&manifest).expect("generated manifest");
+        assert_eq!(pam_activity_config_changes(&generated), expected);
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

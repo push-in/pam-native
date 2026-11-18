@@ -113,7 +113,7 @@ jobs:
           cache: gradle
       - uses: android-actions/setup-android@v4
       - name: Install Android build dependencies
-        run: sdkmanager "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
+        run: scripts/ci-sdkmanager.sh "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
         with:
@@ -195,7 +195,7 @@ jobs:
         with:
           key: android-macrobenchmark
       - name: Install Android build dependencies
-        run: sdkmanager "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
+        run: scripts/ci-sdkmanager.sh "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
       - uses: actions/download-artifact@v8
         with:
           name: pam-native-android-prerequisites

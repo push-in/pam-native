@@ -119,6 +119,11 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
     fun prepareReload() {
         generation.incrementAndGet()
         PamDeepLinks.prepareReload()
+        // Open prompts would answer a PHP request that is about to restart.
+        system.prepareReload()
+        modules.values.filterIsInstance<ReloadAwareModule>().forEach { module ->
+            runCatching { module.prepareReload() }
+        }
         dev.pam.nativeapp.HostEvents.prepareReload()
     }
 

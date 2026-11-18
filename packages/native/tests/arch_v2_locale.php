@@ -105,6 +105,20 @@ $second = $lastDeviceCall();
 $assert($second !== null && $second !== $first, 'Returning to the foreground must ask DeviceInfo again.');
 $answer($second, 'es-419', 'America/Mexico_City');
 $assert($locale->value === 'es-419' && $locale->language === 'es' && $locale->region === '419' && $zone->value === 'America/Mexico_City', 'A new device locale must reach readers.');
+
+// Android applies a locale change in place: the dimensions event carries the
+// system tag and only a different one asks DeviceInfo again.
+$dimensions = static function (string $tag): void {
+    Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+        'width' => 400.0, 'height' => 800.0, 'density' => 2.0, 'appearance' => 1, 'fontScale' => 1.0, 'locale' => $tag,
+    ]));
+};
+$dimensions('es-419');
+$assert($lastDeviceCall() === $second, 'The same locale in a dimensions event must not ask the host.');
+$dimensions('ar');
+$third = $lastDeviceCall();
+$assert($third !== null && $third !== $second, 'A different locale in a dimensions event must ask DeviceInfo again.');
+$answer($third, 'es-419', 'America/Mexico_City');
 $watcher->dispose();
 $assert(
     $seen === ['pt-BR|America/Sao_Paulo', 'en-US|America/Sao_Paulo', 'pt-BR|America/Sao_Paulo', 'pt-BR|Europe/Lisbon', 'pt-BR|America/Sao_Paulo', 'es-419|America/Mexico_City'],
