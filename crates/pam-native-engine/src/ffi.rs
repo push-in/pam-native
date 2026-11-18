@@ -502,6 +502,24 @@ pub unsafe extern "C" fn pam_native_engine_remount(
 }
 
 #[unsafe(no_mangle)]
+/// Drops the host text measurements the engine cached (the host's font
+/// scale, density or locale changed without recreating its surface). The
+/// next relayout measures every text box again.
+///
+/// # Safety
+///
+/// `handle` must point to a live, exclusively borrowed engine.
+pub unsafe extern "C" fn pam_native_engine_invalidate_text_measurements(
+    handle: *mut PamNativeEngineHandle,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    handle.engine.invalidate_text_measurements();
+    PamStatus::Success
+}
+
+#[unsafe(no_mangle)]
 /// Applies an encoded tree or patch and writes an owned mutation buffer.
 ///
 /// # Safety
@@ -689,6 +707,23 @@ mod tests {
         TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn ffi_invalidates_text_measurements_and_rejects_null_handles() {
+        let handle = pam_native_engine_new();
+        // SAFETY: The handle is live until freed below.
+        unsafe {
+            assert_eq!(
+                pam_native_engine_invalidate_text_measurements(handle),
+                PamStatus::Success
+            );
+            assert_eq!(
+                pam_native_engine_invalidate_text_measurements(std::ptr::null_mut()),
+                PamStatus::InvalidArgument
+            );
+            pam_native_engine_free(handle);
+        }
     }
 
     #[test]

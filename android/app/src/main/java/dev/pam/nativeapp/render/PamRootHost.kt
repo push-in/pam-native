@@ -323,10 +323,19 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         }
     }
 
+    /** Whether [view] is routed by the translated-target dispatcher (tests). */
+    internal fun isTranslatedTouchTarget(view: View): Boolean {
+        refreshTranslatedTouchTargets()
+        return view in translatedTouchTargets
+    }
+
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             observers.toList().forEach { it(event) }
         }
+        // A new gesture never inherits a target whose stream ended without
+        // UP/CANCEL reaching this host (e.g. an unhandled DOWN).
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) translatedTouchTarget = null
         translatedTouchTarget?.let { target ->
             val handled = dispatchToTranslatedTarget(target, event)
             if (
@@ -344,8 +353,9 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
                     !isOccludedByHigherSibling(child, event.rawX, event.rawY)
             }
             if (target != null) {
-                translatedTouchTarget = target
-                return dispatchToTranslatedTarget(target, event)
+                val handled = dispatchToTranslatedTarget(target, event)
+                if (handled) translatedTouchTarget = target
+                return handled
             }
         }
         return super.dispatchTouchEvent(event)
@@ -361,12 +371,16 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Delivers every event of the gesture (DOWN, MOVE, POINTER_*, UP/CANCEL)
+     * to [target] in its own coordinates, so a Pressable runs its whole
+     * gesture: pressOut, the long-press timer cancelled on release, press
+     * retention. Clicking it on UP instead left the gesture open (press, then
+     * the pending longPress) on every device that routes through here.
+     */
     private fun dispatchToTranslatedTarget(target: View, event: MotionEvent): Boolean {
+        // A detached Pressable already cancelled its gesture (onDetachedFromWindow).
         if (!target.isAttachedToWindow) return false
-        if (event.actionMasked == MotionEvent.ACTION_UP && target is PamPressable) {
-            target.performClick()
-            return true
-        }
         val location = IntArray(2)
         target.getLocationOnScreen(location)
         val local = MotionEvent.obtain(event)

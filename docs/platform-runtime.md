@@ -168,8 +168,12 @@ limits a build to some of them. On `armeabi-v7a` and `x86` the PHP runtime keeps
 node ids and timestamps behave exactly as on 64-bit devices, and the native
 bridge refuses to link a runtime without them. The opcache JIT is off there;
 opcache's bytecode cache stays on. The 32-bit runtimes come from PAM releases
-after v2.2.20; with an older PAM, `pam mobile release` stops and asks for the
-update (`pam self-update`).
+after v2.2.20; with an older PAM, `pam mobile build` and `pam mobile release`
+stop with the missing ABI and ask for the update (`pam self-update`) or for
+`--abi arm64-v8a --abi x86_64`. `pam dev` and `pam run` build only the ABI of
+the connected device and install or check only that ABI's PHP runtime and
+engine, so they keep working with an older PAM and never fetch the 32-bit
+runtimes they do not use.
 
 ## Typed bridge IDL
 

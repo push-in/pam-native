@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.53.6 - 2026-11-18
+
+Android keeps the running app and its plugins alive through font, display
+size and language changes.
+
+- Changed: PamActivity handles `density|fontScale|layoutDirection|locale|mcc|mnc|navigation`
+  in place instead of being recreated, so plugin modules (realtime, calls…)
+  keep their state. Font scale, density, locale and layout direction changes
+  re-measure text and remount the retained tree on the same surface. See
+  `docs/android-activity-lifecycle.md`.
+- Added: `pam_native_engine_invalidate_text_measurements` FFI drops cached host
+  text measurements.
+- Changed: the dimensions event carries the system `locale`; `useLocale()`
+  re-asks DeviceInfo when it changed without a background/foreground cycle.
+- Fixed: `pam dev` and `pam run` only require the connected device's ABI
+  runtime and engine, so a PAM without the 32-bit runtimes no longer blocks
+  them or downloads the runtime bundle on every run; store builds name a
+  missing 32-bit runtime; the release community gate uploads its starter logs
+  on failure.
+- Fixed: Android translated touch targets (a panning KeyboardAvoidingView
+  shifted by the IME): a Pressable receives the whole gesture (up/cancel
+  included) instead of a direct click on release, so a tap no longer fires
+  `longPress` after `press`, `pressOut` is always emitted and the control
+  never stays pressed. A pointer-down the translated target does not handle
+  no longer leaves it routing the next gesture.
+
 ## 1.53.5 - 2026-11-18
 
 1.53.4, released: its tag was not published because the release hit

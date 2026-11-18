@@ -39,6 +39,10 @@ their actual on-screen bounds.
   from microphone to send while the IME remains open is immediately tappable.
   A background `ScrollView` may geometrically extend behind the translated
   composer, but it is not treated as an overlay that can steal that touch.
+  The routed control receives the whole gesture (down, moves, up or cancel)
+  in its own coordinates, so a `Pressable` behaves as anywhere else: a tap
+  yields `pressIn`, `pressOut` and `press`; a hold yields `longPress` and
+  `pressOut`, never `press` as well; sliding off releases without either.
 
 ## Platform matrix
 
@@ -164,7 +168,9 @@ Before releasing an Android host change, exercise:
 5. IME open/close, IME animation, multiline growth, attachment sheets and
    touch actions while the composer is translated.
 6. `PamSafeAreaInsetsTest`, `PamSafeAreaLayoutTest`,
-   `PamKeyboardAvoidanceTest` and Android instrumentation tests.
+   `PamKeyboardAvoidanceTest` and Android instrumentation tests
+   (`PamTranslatedPressableInstrumentedTest` covers press and long press on a
+   translated composer, on API 24 and 36).
 
 ## Engine-managed SafeAreaView (1.3)
 
