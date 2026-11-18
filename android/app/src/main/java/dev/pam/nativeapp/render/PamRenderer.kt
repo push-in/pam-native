@@ -1369,6 +1369,7 @@ class PamRenderer(
         prewarmActive = false
         refreshMountTraceDetail()
         lastCommitStartNanos = System.nanoTime()
+        mountedDensity = resourcesDensity()
         val profileCommit = BuildConfig.DEBUG && Log.isLoggable(COMMIT_PERF_TAG, Log.DEBUG)
         val commitStarted = if (profileCommit) System.nanoTime() else 0L
         val retainedScrollOffsets = buildMap {
@@ -1504,6 +1505,8 @@ class PamRenderer(
                 flushRowOrder()
             }
         }
+        // Before the sliced mount: it builds the rows around the restored offset.
+        remountViewState?.let(::restoreRemountScrolls)
         if (mountCandidates != null || pendingMountRoots.isNotEmpty()) {
             pamTraceSection("PamCommit.slicedMount") { resolvePendingMounts(explicitlyUpdatedScrollOffsets) }
         }
@@ -1553,6 +1556,7 @@ class PamRenderer(
                 )
             }
         }
+        remountViewState?.let(::restoreRemountLists)
         ensureFocusedInputVisibleAfterCommit()
         scheduleIdlePrewarm()
         lastCommitEndNanos = System.nanoTime()
@@ -1878,11 +1882,28 @@ class PamRenderer(
      * batch was rejected or only partly mounted. Deepest nodes go first so no
      * parent is released before its children.
      */
-    fun resetTree() {
+    /**
+     * Drops every mounted view before the retained tree is replayed. With
+     * [preserveViewState] (a configuration remount: same node ids, new
+     * frames), the view state PHP does not own is captured first and put
+     * back by the next [commit] and [finishRemount]: scroll positions by
+     * anchor row, and the focused input with its selection and keyboard.
+     */
+    fun resetTree(preserveViewState: Boolean = false) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
         cancelPendingMounts()
+        remountViewState = if (preserveViewState && nodes.size() > 0) captureRemountViewState() else null
+        remountViewState?.focusedInput?.takeIf { it != 0L }?.let { remountFocusHandoff = it }
+        if (preserveViewState && !remountFocusBlocked && host.hasFocus()) {
+            // Removing the focused editor hands focus to the first focusable
+            // view still mounted (another input, which would report focus to
+            // PHP and lose it again a moment later).
+            remountFocusBlocked = true
+            remountSavedFocusability = host.descendantFocusability
+            host.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        }
         if (nodes.size() > 0) {
             val count = nodes.size()
             val depths = HashMap<Long, Int>(count)
@@ -1912,8 +1933,262 @@ class PamRenderer(
         rootId = 0L
     }
 
+    /** A scroll container's resting place by anchor node (see [captureScrollAnchor]). */
+    private class ScrollRemountAnchor(
+        val anchorId: Long,
+        val fraction: Float,
+        val atStart: Boolean,
+        val atEnd: Boolean,
+        val horizontal: Boolean,
+    )
+
+    /** View state PHP does not own, carried across a remount (see [resetTree]). */
+    private class RemountViewState(
+        val scrolls: MutableMap<Long, ScrollRemountAnchor>,
+        val lists: MutableMap<Long, PamRecyclerList.ConfigurationAnchor>,
+        val focusedInput: Long,
+        val selectionStart: Int,
+        val selectionEnd: Int,
+        val imeVisible: Boolean,
+    )
+
+    private var remountViewState: RemountViewState? = null
+    /** The focused input as the configuration change found it (see [prepareConfigurationRemount]). */
+    private var configurationFocus: RemountViewState? = null
+    private val releaseConfigurationFocus = Runnable { endConfigurationFocusHold() }
+    /** The focused input a remount rebuilds: its blur and refocus are not reported to PHP. */
+    private var remountFocusHandoff = 0L
+    private var remountFocusBlocked = false
+    private var remountSavedFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+    /** Density the mounted views were built with (the configuration may already be newer). */
+    private var mountedDensity = 0f
+
+    /**
+     * A configuration change that remounts arrived: the IME restarts for it
+     * and hides for a moment, which must not blur the focused input (the
+     * root host blurs on a hidden IME). Its focus, selection and keyboard
+     * are captured now and restored by [finishRemount]; the hold ends there,
+     * or after [CONFIGURATION_FOCUS_HOLD_MS] if no remount follows.
+     */
+    fun prepareConfigurationRemount() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val focus = focusedInputState(HashMap(), HashMap()) ?: return
+        configurationFocus = focus
+        (host as? PamRootHost)?.holdInputFocus = true
+        main.removeCallbacks(releaseConfigurationFocus)
+        main.postDelayed(releaseConfigurationFocus, CONFIGURATION_FOCUS_HOLD_MS)
+    }
+
+    private fun endConfigurationFocusHold() {
+        main.removeCallbacks(releaseConfigurationFocus)
+        configurationFocus = null
+        (host as? PamRootHost)?.holdInputFocus = false
+    }
+
+    private fun focusedInputState(
+        scrolls: MutableMap<Long, ScrollRemountAnchor>,
+        lists: MutableMap<Long, PamRecyclerList.ConfigurationAnchor>,
+    ): RemountViewState? {
+        for (id in inputIds) {
+            val input = views[id] as? EditText ?: continue
+            if (!input.isFocused) continue
+            return RemountViewState(
+                scrolls,
+                lists,
+                id,
+                input.selectionStart,
+                input.selectionEnd,
+                remountImeVisible(input),
+            )
+        }
+        return null
+    }
+
+    private fun captureRemountViewState(): RemountViewState {
+        val density = if (mountedDensity > 0f) mountedDensity else resourcesDensity()
+        val scrolls = HashMap<Long, ScrollRemountAnchor>()
+        for (position in 0 until scrollContainers.size()) {
+            val id = scrollContainers.keyAt(position)
+            captureScrollAnchor(id, scrollContainers.valueAt(position), density)?.let { scrolls[id] = it }
+        }
+        val lists = HashMap<Long, PamRecyclerList.ConfigurationAnchor>()
+        for (position in 0 until views.size()) {
+            val list = views.valueAt(position) as? PamRecyclerList ?: continue
+            list.captureConfigurationAnchor()?.let { lists[views.keyAt(position)] = it }
+        }
+        // The state the configuration change found wins: the IME may have
+        // hidden since (it restarts for the new configuration).
+        configurationFocus?.takeIf { (views[it.focusedInput] as? EditText)?.isAttachedToWindow == true }?.let { focus ->
+            return RemountViewState(scrolls, lists, focus.focusedInput, focus.selectionStart, focus.selectionEnd, focus.imeVisible)
+        }
+        return focusedInputState(scrolls, lists) ?: RemountViewState(scrolls, lists, 0L, -1, -1, false)
+    }
+
+    private fun remountImeVisible(input: View): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            input.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
+        } else {
+            val root = host as? PamRootHost
+            root != null && maxOf(root.imeBottomInset, root.legacyImeInsets.bottom) > 0
+        }
+
+    /**
+     * The node under the viewport's leading edge, descending through
+     * wrappers at least a viewport long (a content column) to the row the
+     * reader sees, and how far into it the edge is. Engine frames share one
+     * origin, so positions are taken relative to the scroll's own frame.
+     */
+    private fun captureScrollAnchor(id: Long, scroll: PamScrollContainer, density: Float): ScrollRemountAnchor? {
+        val horizontal = scroll.isHorizontal()
+        val (x, y) = scroll.snapshotOffsetPixels()
+        val offset = if (horizontal) x else y
+        if (offset <= 0) return ScrollRemountAnchor(0L, 0f, atStart = true, atEnd = false, horizontal = horizontal)
+        val atEnd = scroll.remainingPrimaryPixels() <= 1
+        val scrollFrame = frames[id] ?: return null
+        val viewport = if (horizontal) scrollFrame.width else scrollFrame.height
+        val inset = if (horizontal) scroll.contentInsetLeft else scroll.contentInsetTop
+        val edge = (offset - inset) / density
+        var parent = id
+        var anchor = 0L
+        var fraction = 0f
+        var depth = 0
+        while (depth++ < REMOUNT_ANCHOR_DEPTH) {
+            var hit = 0L
+            var hitStart = 0f
+            var hitExtent = 0f
+            for (child in children[parent] ?: break) {
+                val frame = frames[child] ?: continue
+                val start = if (horizontal) frame.x - scrollFrame.x else frame.y - scrollFrame.y
+                val extent = if (horizontal) frame.width else frame.height
+                if (extent > 0f && edge >= start && edge < start + extent) {
+                    hit = child
+                    hitStart = start
+                    hitExtent = extent
+                    break
+                }
+            }
+            if (hit == 0L) break
+            anchor = hit
+            fraction = (edge - hitStart) / hitExtent
+            if (hitExtent < viewport) break
+            parent = hit
+        }
+        if (anchor == 0L && !atEnd) return null
+        return ScrollRemountAnchor(anchor, fraction, atStart = false, atEnd = atEnd, horizontal = horizontal)
+    }
+
+    /** Runs once the remount batch's frames are in, before its sliced mount. */
+    private fun restoreRemountScrolls(state: RemountViewState) {
+        if (state.scrolls.isEmpty()) return
+        val density = resourcesDensity()
+        val iterator = state.scrolls.entries.iterator()
+        while (iterator.hasNext()) {
+            val (id, anchor) = iterator.next()
+            val scroll = views[id] as? PamScrollContainer ?: continue
+            iterator.remove()
+            if (scroll.isHorizontal() != anchor.horizontal) continue
+            val horizontal = anchor.horizontal
+            if (anchor.atStart) {
+                scroll.restoreRemountOffset(0, toEnd = false)
+                continue
+            }
+            val scrollFrame = frames[id] ?: continue
+            if (anchor.atEnd) {
+                var extent = 0f
+                children[id]?.forEach { child ->
+                    val frame = frames[child] ?: return@forEach
+                    extent = maxOf(
+                        extent,
+                        if (horizontal) frame.x + frame.width - scrollFrame.x else frame.y + frame.height - scrollFrame.y,
+                    )
+                }
+                val viewport = if (horizontal) scrollFrame.width else scrollFrame.height
+                scroll.restoreRemountOffset(((extent - viewport) * density).roundToInt(), toEnd = true)
+                continue
+            }
+            val frame = frames[anchor.anchorId] ?: continue
+            val start = if (horizontal) frame.x - scrollFrame.x else frame.y - scrollFrame.y
+            val extent = if (horizontal) frame.width else frame.height
+            val inset = if (horizontal) scroll.contentInsetLeft else scroll.contentInsetTop
+            scroll.restoreRemountOffset(((start + anchor.fraction * extent) * density).roundToInt() + inset, toEnd = false)
+        }
+    }
+
+    /** Runs once the lists received their rows and extents. */
+    private fun restoreRemountLists(state: RemountViewState) {
+        if (state.lists.isEmpty()) return
+        val iterator = state.lists.entries.iterator()
+        while (iterator.hasNext()) {
+            val (id, anchor) = iterator.next()
+            val list = views[id] as? PamRecyclerList ?: continue
+            iterator.remove()
+            list.restoreConfigurationAnchor(anchor)
+        }
+    }
+
+    /**
+     * Ends a remount started by [resetTree] (call it after that commit, also
+     * when it failed): focus is allowed again and the input that had it gets
+     * it back with its selection, and the keyboard if it was open.
+     */
+    fun finishRemount() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val state = remountViewState
+        remountViewState = null
+        endConfigurationFocusHold()
+        if (remountFocusBlocked) {
+            remountFocusBlocked = false
+            host.descendantFocusability = remountSavedFocusability
+        }
+        val id = state?.focusedInput ?: 0L
+        val input = if (id != 0L) views[id] as? PamEditText else null
+        if (state == null || input == null) {
+            remountFocusHandoff = 0L
+            return
+        }
+        restoreRemountFocus(id, input, state, SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS, delay = 0L)
+    }
+
+    /**
+     * Retried until the rebuilt input can take focus (a Modal's dialog is
+     * still being shown), bounded by [deadline]. Main-handler posts, not the
+     * view's: a view that never attaches must still end the handoff.
+     */
+    private fun restoreRemountFocus(id: Long, input: PamEditText, state: RemountViewState, deadline: Long, delay: Long) {
+        main.postDelayed({
+            if (destroyed || views[id] !== input || remountFocusHandoff != id) {
+                if (remountFocusHandoff == id) remountFocusHandoff = 0L
+                return@postDelayed
+            }
+            val focused = input.isAttachedToWindow && input.isShown && (input.hasFocus() || input.requestFocus())
+            if (!focused && SystemClock.uptimeMillis() < deadline) {
+                restoreRemountFocus(id, input, state, deadline, AUTO_FOCUS_RETRY_MS)
+                return@postDelayed
+            }
+            remountFocusHandoff = 0L
+            if (!focused) return@postDelayed
+            val length = input.text?.length ?: 0
+            if (state.selectionStart >= 0) {
+                input.setSelection(
+                    state.selectionStart.coerceIn(0, length),
+                    state.selectionEnd.coerceIn(0, length),
+                )
+            }
+            if (state.imeVisible && input.showSoftInputOnFocus) {
+                showAutoFocusKeyboard(input, SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS, retry = false)
+            }
+        }, delay)
+    }
+
     override fun close() {
         onPropertyError = null
+        remountViewState = null
+        remountFocusHandoff = 0L
+        endConfigurationFocusHold()
+        if (remountFocusBlocked) {
+            remountFocusBlocked = false
+            host.descendantFocusability = remountSavedFocusability
+        }
         unobserveFocus(host)
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
@@ -8111,7 +8386,10 @@ class PamRenderer(
                     }
                     ancestor = ancestor.parent as? View
                 }
-                if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
+                // The editor a remount rebuilt takes the focus back silently.
+                if (state.properties[PropKey.ON_FOCUS] != null && remountFocusHandoff != state.id) {
+                    dispatch(state.id, EVENT_FOCUS)
+                }
             } else {
                 // A normalized authored value may have arrived while editing.
                 // Apply it only if no newer keystroke invalidated that value.
@@ -8125,8 +8403,12 @@ class PamRenderer(
                 ) {
                     dispatchInput(state)
                 }
-                if (state.properties[PropKey.ON_BLUR] != null) dispatch(state.id, EVENT_BLUR)
-                if (state.properties[PropKey.ON_INPUT_END_EDITING] != null) {
+                // A remount removing the focused editor is not an end of
+                // editing: the rebuilt one takes the focus back. The draft
+                // above still reaches PHP (the rebuilt editor shows it).
+                val handoff = remountFocusHandoff == state.id
+                if (state.properties[PropKey.ON_BLUR] != null && !handoff) dispatch(state.id, EVENT_BLUR)
+                if (state.properties[PropKey.ON_INPUT_END_EDITING] != null && !handoff) {
                     dispatch(
                         state.id,
                         EVENT_INPUT_END_EDITING,
@@ -12533,6 +12815,10 @@ class PamRenderer(
         const val TEXT_DATA_EMAIL = 4
         const val TEXT_DATA_ALL = 5
         const val MAX_VIRTUAL_DEPTH = 512
+        /** Wrapper levels a remount scroll anchor descends through. */
+        const val REMOUNT_ANCHOR_DEPTH = 16
+        /** How long a configuration change holds the focused input when no remount follows. */
+        const val CONFIGURATION_FOCUS_HOLD_MS = 2_000L
         val LAYOUT_ONLY_KINDS = setOf(
             NodeKind.COLUMN,
             NodeKind.ROW,

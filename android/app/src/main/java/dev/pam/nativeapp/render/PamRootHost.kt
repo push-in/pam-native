@@ -286,8 +286,15 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     var publishedImeInset: Int = 0
         private set
 
+    /**
+     * Set while a configuration change rebuilds the surface: the IME
+     * restarting for the new font scale or locale hides for a moment, which
+     * is not the user closing it (see PamRenderer.prepareConfigurationRemount).
+     */
+    internal var holdInputFocus = false
+
     private fun blurInputAfterImeHidden() {
-        if (imeBottomInset != 0 || !isAttachedToWindow) return
+        if (imeBottomInset != 0 || !isAttachedToWindow || holdInputFocus) return
         val focused = findFocus() as? android.widget.EditText ?: return
         isFocusableInTouchMode = true
         if (!requestFocus()) focused.clearFocus()
