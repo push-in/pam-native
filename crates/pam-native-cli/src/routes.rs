@@ -6,7 +6,6 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Deserialize;
 
@@ -200,7 +199,7 @@ pub fn compile(root: &Path, options: &RoutesOptions) -> Result<Option<RouteManif
     // Same host PHP as every other build step (PAM_NATIVE_PHP, PAM_PHP,
     // `pam`, then `php`): build hosts with only the PAM toolchain have no
     // `php` on PATH.
-    let output = Command::new(crate::mobile::host_php())
+    let output = crate::mobile::host_php_command()
         .arg(&compiler)
         .arg(&file)
         .arg(root.join(&options.output))

@@ -7679,6 +7679,27 @@ pub(crate) fn host_php() -> String {
         })
 }
 
+/// A command for the host PHP that precompiles and audits components. PAM
+/// runs package executables with `PHP_INI_SCAN_DIR=""` so its own ini never
+/// reaches another PHP; a distribution PHP then skips its `conf.d` and loses
+/// every shared extension, tokenizer included ("Call to undefined function
+/// token_get_all"). The host PHP gets its own configuration back.
+pub(crate) fn php_command(php: &str) -> Command {
+    php_command_with_scan_dir(php, std::env::var_os("PHP_INI_SCAN_DIR"))
+}
+
+fn php_command_with_scan_dir(php: &str, scan_dir: Option<std::ffi::OsString>) -> Command {
+    let mut command = Command::new(php);
+    if scan_dir.is_some_and(|value| value.is_empty()) {
+        command.env_remove("PHP_INI_SCAN_DIR");
+    }
+    command
+}
+
+pub(crate) fn host_php_command() -> Command {
+    php_command(&host_php())
+}
+
 const TV_AUDIT: &str = "require 'vendor/autoload.php';\n\
     $audit = 'Pam\\\\Native\\\\Tooling\\\\TvAudit';\n\
     if (!class_exists($audit)) { exit(0); }\n\
@@ -7691,7 +7712,7 @@ fn audit_tv_reachability(destination: &Path) {
     if !destination.join("vendor/autoload.php").is_file() {
         return;
     }
-    match Command::new(host_php())
+    match host_php_command()
         .arg("-r")
         .arg(TV_AUDIT)
         .current_dir(destination)
@@ -7724,7 +7745,7 @@ fn audit_runtime_extensions(project: &Project, destination: &Path) {
         .and_then(|home| resolve_runtime(project, &home))
         .map(|runtime| runtime.release.extensions.join(","))
         .unwrap_or_default();
-    match Command::new(host_php())
+    match host_php_command()
         .arg("-r")
         .arg(RUNTIME_EXTENSION_AUDIT)
         .current_dir(destination)
@@ -7797,7 +7818,7 @@ fn run_component_prebuild(
         if (!class_exists($compiler) || !method_exists($compiler, 'prebuild')) { exit(0); }\n\
         $count = $compiler::prebuild(getcwd(), getcwd().'/src');\n\
         fwrite(STDOUT, \"Precompiled {$count} PAM components\\n\");\n";
-    let mut command = Command::new(php);
+    let mut command = php_command(php);
     command
         .arg("-r")
         .arg(script)
@@ -10334,6 +10355,20 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_php_gets_its_own_ini_scan_dir_back() {
+        let removed = |command: &Command| {
+            command
+                .get_envs()
+                .any(|(key, value)| key == "PHP_INI_SCAN_DIR" && value.is_none())
+        };
+        // PAM blanks it for package executables: a distribution PHP then
+        // loads no conf.d extension (no tokenizer for the component prebuild).
+        assert!(removed(&php_command_with_scan_dir("php", Some("".into()))));
+        assert!(!removed(&php_command_with_scan_dir("php", Some("/etc/php/conf.d".into()))));
+        assert!(!removed(&php_command_with_scan_dir("php", None)));
+    }
 
     #[test]
     fn every_play_abi_builds_natively_by_default() {

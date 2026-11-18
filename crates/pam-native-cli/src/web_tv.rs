@@ -150,7 +150,7 @@ fn build(target: &str, options: &Options) -> Result<PathBuf, String> {
 }
 
 fn compile(compiler: &Path, project: &Path, target: &str, out: &Path) -> Result<(), String> {
-    let status = Command::new(crate::mobile::host_php())
+    let status = crate::mobile::host_php_command()
         .arg(compiler)
         .arg("build")
         .arg(project)

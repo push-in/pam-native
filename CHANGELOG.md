@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.53.3 - 2026-11-18
+
+The 1.53.2 fixes, released: that tag was not published because the release
+gate failed on the two items below.
+
+- Fixed: the component prebuild, the TV audit and the route and web tools
+  run the host PHP with its own `PHP_INI_SCAN_DIR`. `pam` starts package
+  executables with it blanked (so its ini reaches no other PHP), which left a
+  distribution PHP (Ubuntu, setup-php) without its `conf.d` extensions:
+  "Call to undefined function token_get_all()" during `pam dev`. Reproduced
+  with `PHP_INI_SCAN_DIR= php`; a unit test covers the environment.
+- Ecosystem: pam-native-audio 0.3.2, pam-native-calls 0.2.3,
+  pam-native-share-extension 0.4.8 and pam-native-webrtc 0.3.3 check their
+  PAM Native range against their own composer requirement; their releases
+  raised it to 1.53.1 with the old expectation and failed certification.
+
 ## 1.53.2 - 2026-11-18
 
 The fixes below plus the 1.53.0 and 1.53.1 changes; neither of those tags
