@@ -12,6 +12,12 @@ Font size and language changes keep the reader's place.
   keyboard across that remount, without `onBlur`/`onEndEditing`/`onFocus`
   reaching PHP; the IME restart caused by the configuration change no longer
   blurs it.
+- Fixed: Android — while a panning KeyboardAvoidingView is translated by the
+  keyboard, a gesture enters through the outermost Pressable/GestureDetector
+  enclosing the touched control, so an enclosing GestureDetector (e.g. pan to
+  slide-cancel a voice recording) receives gestureBegin/Update/End while the
+  inner Pressable keeps its press, longPress and pressOut, as with the
+  keyboard closed.
 
 ## 1.53.7 - 2026-11-18
 
