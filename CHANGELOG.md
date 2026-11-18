@@ -12,6 +12,9 @@ Font size and language changes keep the reader's place.
   keyboard across that remount, without `onBlur`/`onEndEditing`/`onFocus`
   reaching PHP; the IME restart caused by the configuration change no longer
   blurs it.
+- Fixed: Android — the focused input also survives the IME restart a font
+  scale or locale change causes (it may hide right before or after the
+  remount); when it hid first, PHP sees the blur and then the refocus.
 - Fixed: Android — while a panning KeyboardAvoidingView is translated by the
   keyboard, a gesture enters through the outermost Pressable/GestureDetector
   enclosing the touched control, so an enclosing GestureDetector (e.g. pan to
