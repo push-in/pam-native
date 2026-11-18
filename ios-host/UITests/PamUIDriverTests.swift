@@ -134,9 +134,16 @@ final class PamUIDriverTests: XCTestCase {
                 .matching(NSPredicate(format: "elementType IN %@", [XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.secureTextField.rawValue, XCUIElement.ElementType.textView.rawValue]))
                 .matching(predicate).firstMatch
             XCTAssertTrue(field.waitForExistence(timeout: timeout), "step \(index): no editable field labelled \(label)")
-            field.tap()
-            let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
-            _ = XCTWaiter().wait(for: [focused], timeout: 3)
+            // The first keyboard on a freshly booted simulator can open over
+            // its own onboarding ("Continue") and the tap gets no focus: clear
+            // it and tap again, up to three times.
+            for _ in 0..<3 {
+                field.tap()
+                let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+                if XCTWaiter().wait(for: [focused], timeout: 3) == .completed { break }
+                let onboarding = app.buttons["Continue"]
+                if onboarding.exists, onboarding.isHittable { onboarding.tap() }
+            }
             return
         }
         if let label = step["tapIn"] as? String, let point = step["at"] as? [Double], point.count == 2 {
