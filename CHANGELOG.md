@@ -17,8 +17,10 @@ A fresh Mac runs `pam mobile ios:*` with no manual step.
 - Fixed: Gradle builds (`pam dev`, `pam mobile build`, bundles) retry up to
   three times on transient repository errors (Maven Central 429, 5xx,
   timeouts) and return build failures at once.
-- Tests: the story-reply instrumented test asks a cold IME again instead of
-  failing on one dropped request.
+- Tests: the story-reply and tall-sheet keyboard tests ask the IME again
+  with an explicit `WindowInsetsController.show(ime())` while they wait:
+  after an earlier test hid the keyboard, `SHOW_IMPLICIT` alone was ignored
+  on CI (28 keyboard tests pass locally, idle and under CPU load).
 
 ## 1.53.3 - 2026-11-18
 
