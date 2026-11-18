@@ -8095,13 +8095,16 @@ fn build_intermediate(options: MobileOptions, installable: bool) -> Result<Built
         build_engine(&native_home, *abi)?;
     }
     let gradlew = workspace.join("gradlew");
-    let status = Command::new(&gradlew)
-        .arg(format!(":app:{}", options.mode.gradle_task(installable)))
-        .arg("--stacktrace")
-        .env("GRADLE_USER_HOME", android_gradle_user_home(&project.root))
-        .current_dir(&workspace)
-        .status()
-        .map_err(|error| format!("cannot start Gradle: {error}"))?;
+    let status = gradle_status_with_retry(|| {
+        let mut command = Command::new(&gradlew);
+        command
+            .arg(format!(":app:{}", options.mode.gradle_task(installable)))
+            .arg("--stacktrace")
+            .env("GRADLE_USER_HOME", android_gradle_user_home(&project.root))
+            .current_dir(&workspace);
+        command
+    })
+    .map_err(|error| format!("cannot start Gradle: {error}"))?;
     if !status.success() {
         return Err(format!("Gradle exited with status {status}"));
     }
@@ -8198,21 +8201,103 @@ fn package_android(options: MobileOptions) -> Result<u8, String> {
     with_android_build_cleanup(&project_root, || package_android_intermediate(options))
 }
 
+/// Whether a failed Gradle run hit a transient repository error (Maven
+/// Central rate limits and server errors, timeouts) rather than a build error.
+fn transient_repository_error(output: &str) -> bool {
+    [
+        "status code 429 from server",
+        "Too Many Requests",
+        "Read timed out",
+        "Connect timed out",
+    ]
+    .iter()
+    .any(|needle| output.contains(needle))
+        || (500..600).any(|code| output.contains(&format!("status code {code} from server")))
+}
+
+/// Runs Gradle, streaming its output, and retries (up to three times, 20 s
+/// apart and growing) only when it failed on a transient repository error: a
+/// first build downloads hundreds of artifacts and Maven Central answers 429
+/// under load. Build and test failures are returned at once.
+fn gradle_status_with_retry(
+    mut command: impl FnMut() -> Command,
+) -> std::io::Result<std::process::ExitStatus> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::{Arc, Mutex};
+    const TAIL_BYTES: usize = 256 * 1024;
+    let mut attempt = 1;
+    loop {
+        let mut child = command()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        let tail = Arc::new(Mutex::new(String::new()));
+        let pump = |stream: Box<dyn std::io::Read + Send>, to_stderr: bool| {
+            let tail = Arc::clone(&tail);
+            std::thread::spawn(move || {
+                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    if to_stderr {
+                        let _ = writeln!(std::io::stderr(), "{line}");
+                    } else {
+                        let _ = writeln!(std::io::stdout(), "{line}");
+                    }
+                    let mut tail = tail.lock().unwrap_or_else(|poison| poison.into_inner());
+                    tail.push_str(&line);
+                    tail.push('\n');
+                    if tail.len() > TAIL_BYTES {
+                        let cut = tail.len() - TAIL_BYTES;
+                        let cut = (cut..tail.len())
+                            .find(|index| tail.is_char_boundary(*index))
+                            .unwrap_or(0);
+                        tail.drain(..cut);
+                    }
+                }
+            })
+        };
+        let out = child
+            .stdout
+            .take()
+            .map(|stream| pump(Box::new(stream), false));
+        let err = child
+            .stderr
+            .take()
+            .map(|stream| pump(Box::new(stream), true));
+        let status = child.wait()?;
+        for handle in [out, err].into_iter().flatten() {
+            let _ = handle.join();
+        }
+        let transient =
+            transient_repository_error(&tail.lock().unwrap_or_else(|poison| poison.into_inner()));
+        if status.success() || attempt == 4 || !transient {
+            return Ok(status);
+        }
+        let wait = 20 * attempt;
+        eprintln!(
+            "Transient repository error (Maven 429 or timeout); retrying Gradle in {wait} s ({attempt} of 3)."
+        );
+        std::thread::sleep(std::time::Duration::from_secs(wait));
+        attempt += 1;
+    }
+}
+
 fn package_android_intermediate(options: MobileOptions) -> Result<u8, String> {
     let signing_project = load_project(&options.project)?;
     validate_android_signing(&signing_project)?;
     let built = build_intermediate(options, false)?;
     let workspace = built.project.root.join(".pam-native/android");
     let gradlew = workspace.join("gradlew");
-    let status = Command::new(&gradlew)
-        .args([":app:bundleRelease", "--stacktrace"])
-        .env(
-            "GRADLE_USER_HOME",
-            android_gradle_user_home(&built.project.root),
-        )
-        .current_dir(&workspace)
-        .status()
-        .map_err(|error| format!("cannot create Android App Bundle: {error}"))?;
+    let status = gradle_status_with_retry(|| {
+        let mut command = Command::new(&gradlew);
+        command
+            .args([":app:bundleRelease", "--stacktrace"])
+            .env(
+                "GRADLE_USER_HOME",
+                android_gradle_user_home(&built.project.root),
+            )
+            .current_dir(&workspace);
+        command
+    })
+    .map_err(|error| format!("cannot create Android App Bundle: {error}"))?;
     if !status.success() {
         return Err(format!("Android App Bundle failed with {status}"));
     }
@@ -10355,6 +10440,49 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn gradle_runs_stream_and_return_a_build_failure_at_once() {
+        let mut runs = 0;
+        let started = std::time::Instant::now();
+        let status = gradle_status_with_retry(|| {
+            runs += 1;
+            let mut command = Command::new("sh");
+            command.args(["-c", "echo compiling; echo 'BUILD FAILED' >&2; exit 1"]);
+            command
+        })
+        .unwrap();
+        assert!(!status.success());
+        assert_eq!(runs, 1, "a build failure is not retried");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        let ok = gradle_status_with_retry(|| {
+            let mut command = Command::new("sh");
+            command.args(["-c", "echo done"]);
+            command
+        })
+        .unwrap();
+        assert!(ok.success());
+    }
+
+    #[test]
+    fn only_repository_hiccups_retry_gradle() {
+        assert!(transient_repository_error(
+            "Could not GET 'https://repo.maven.apache.org/x.pom'. Received status code 429 from server: Too Many Requests"
+        ));
+        assert!(transient_repository_error(
+            "Received status code 502 from server: Bad Gateway"
+        ));
+        assert!(transient_repository_error(
+            "java.net.SocketTimeoutException: Read timed out"
+        ));
+        assert!(!transient_repository_error(
+            "Received status code 404 from server: Not Found"
+        ));
+        assert!(!transient_repository_error(
+            "e: Unresolved reference: foo\nBUILD FAILED"
+        ));
+    }
 
     #[test]
     fn host_php_gets_its_own_ini_scan_dir_back() {
