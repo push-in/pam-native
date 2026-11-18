@@ -3199,21 +3199,25 @@ fn runtime_update(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-pub fn repair_android(project_path: &Path) -> Result<(), String> {
+/// Installs the verified PHP runtime and the prebuilt engines that `abis`
+/// need and are missing. A device build (`pam dev`, `pam run`) asks only for
+/// the connected device's ABI, so an older PAM without the 32-bit runtimes,
+/// or a package without 32-bit engines, never blocks it or downloads the
+/// whole runtime bundle again on every run; store builds ask for all four.
+fn repair_android(project_path: &Path, abis: &[AndroidAbi]) -> Result<(), String> {
     let project = load_project(project_path)?;
     let pam_home = pam_home()?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home)?;
-    if default_abis()
-        .into_iter()
-        .any(|abi| !runtime_ready_at(&runtime.root, abi))
-    {
-        install_android_runtime_bundle(&project, &pam_home)?;
+    if let Some(missing) = missing_runtime_abis(&runtime.root, abis).first() {
+        install_android_runtime_bundle(&project, &pam_home, abis).map_err(|error| {
+            format!(
+                "{error}; {}",
+                missing_runtime_message(&runtime.release.php_version, *missing, "")
+            )
+        })?;
     }
-    if default_abis()
-        .into_iter()
-        .any(|abi| !engine_ready_at(&native_home, abi))
-    {
+    if abis.iter().any(|abi| !engine_ready_at(&native_home, *abi)) {
         install_android_renderer_bundle(&native_home)?;
     }
 
@@ -3221,8 +3225,30 @@ pub fn repair_android(project_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The ABIs of `abis` whose PHP runtime is not installed under `runtime_root`.
+fn missing_runtime_abis(runtime_root: &Path, abis: &[AndroidAbi]) -> Vec<AndroidAbi> {
+    abis.iter()
+        .copied()
+        .filter(|abi| !runtime_ready_at(runtime_root, *abi))
+        .collect()
+}
+
+/// Why an Android build cannot use the PHP runtime for `abi`, with the way
+/// out: a newer PAM for the 32-bit runtimes, or fewer ABIs.
+fn missing_runtime_message(php_version: &str, abi: AndroidAbi, detail: &str) -> String {
+    let hint = if abi.is_32_bit() {
+        "; 32-bit runtimes ship with PAM releases after v2.2.20 (run `pam self-update`), or build with --abi arm64-v8a --abi x86_64"
+    } else {
+        ""
+    };
+    format!(
+        "verified PHP {php_version} Android runtime is missing for {}{detail}{hint}",
+        abi.android()
+    )
+}
+
 fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
-    repair_android(&project_path)?;
+    repair_android(&project_path, &default_abis())?;
     let project = load_project(&project_path)?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     println!(
@@ -3232,7 +3258,11 @@ fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<(), String> {
+fn install_android_runtime_bundle(
+    project: &Project,
+    pam_home: &Path,
+    abis: &[AndroidAbi],
+) -> Result<(), String> {
     let asset = "pam-android-runtime.tar.gz";
     let configured_base = std::env::var("PAM_RELEASE_BASE_URL").ok();
     let base = android_runtime_release_base(configured_base.as_deref());
@@ -3295,19 +3325,12 @@ fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<
         }
 
         let runtime = resolve_runtime(project, &extracted)?;
-        for abi in default_abis() {
-            if !runtime_ready_at(&runtime.root, abi) {
-                let hint = if abi.is_32_bit() {
-                    "; 32-bit runtimes ship with PAM releases after v2.2.20 (run `pam self-update`), or build with --abi arm64-v8a --abi x86_64"
-                } else {
-                    ""
-                };
-                return Err(format!(
-                    "Android runtime archive is missing PHP {} for {}{hint}",
-                    runtime.release.php_version,
-                    abi.android()
-                ));
-            }
+        if let Some(abi) = missing_runtime_abis(&runtime.root, abis).first() {
+            return Err(missing_runtime_message(
+                &runtime.release.php_version,
+                *abi,
+                " in the downloaded Android runtime archive",
+            ));
         }
         copy_tree(
             &extracted.join("runtime/android"),
@@ -3812,7 +3835,7 @@ fn install_android_packages(
 }
 
 fn repair_android_environment(project_path: &Path) -> Result<(), String> {
-    repair_android(project_path)?;
+    repair_android(project_path, &default_abis())?;
     let project = load_project(project_path)?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, true)
@@ -8259,23 +8282,25 @@ fn build_intermediate(options: MobileOptions, installable: bool) -> Result<Built
     if options.mode == BuildMode::Debug {
         ensure_isolated_debug_application_id(&project)?;
     }
-    repair_android(&options.project)?;
+    let abis = effective_abis(&project, &options.abis);
+    repair_android(&options.project, &abis)?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, false)?;
-    let abis = effective_abis(&project, &options.abis);
+    if let Some(abi) = missing_runtime_abis(&runtime.root, &abis).first() {
+        return Err(missing_runtime_message(
+            &runtime.release.php_version,
+            *abi,
+            &format!(
+                " (expected {}; build it with `runtime-builder/android/build.sh --php {} {}`)",
+                runtime.root.join(abi.android()).display(),
+                project.manifest.runtime.php,
+                abi.android()
+            ),
+        ));
+    }
     let workspace = prepare(&project, &native_home, &abis)?;
     for abi in &abis {
-        if !runtime_ready_at(&runtime.root, *abi) {
-            return Err(format!(
-                "verified PHP {} Android runtime is missing for {}; build it with `runtime-builder/android/build.sh --php {} {}` (expected {})",
-                runtime.release.php_version,
-                abi.android(),
-                project.manifest.runtime.php,
-                abi.android(),
-                runtime.root.join(abi.android()).display()
-            ));
-        }
         build_engine(&native_home, *abi)?;
     }
     let gradlew = workspace.join("gradlew");
@@ -10748,6 +10773,50 @@ mod tests {
         assert!(!AndroidAbi::Arm64.is_32_bit() && !AndroidAbi::X86_64.is_32_bit());
         assert_eq!(AndroidAbi::parse("i686"), Ok(AndroidAbi::X86));
         assert!(AndroidAbi::parse("mips").is_err());
+    }
+
+    #[test]
+    fn device_builds_need_only_their_abi_runtime_and_store_builds_need_all_four() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-runtime-abis-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        // A PAM runtime from before the 32-bit slices: arm64-v8a and x86_64.
+        for abi in [AndroidAbi::Arm64, AndroidAbi::X86_64] {
+            let slice = root.join(abi.android());
+            for file in [
+                "lib/libphp.a",
+                "include/php/main/php.h",
+                "include/php/sapi/embed/php_embed.h",
+            ] {
+                let path = slice.join(file);
+                fs::create_dir_all(path.parent().expect("parent")).expect("runtime dir");
+                fs::write(&path, b"x").expect("runtime file");
+            }
+        }
+        // `pam dev` / `pam run` on an x86_64 emulator or an arm64 phone.
+        assert!(missing_runtime_abis(&root, &[AndroidAbi::X86_64]).is_empty());
+        assert!(missing_runtime_abis(&root, &[AndroidAbi::Arm64]).is_empty());
+        // `pam build` / `pam release` for the stores.
+        assert_eq!(
+            missing_runtime_abis(&root, &default_abis()),
+            vec![AndroidAbi::ArmV7, AndroidAbi::X86]
+        );
+        fs::remove_dir_all(&root).expect("cleanup");
+
+        let store = missing_runtime_message("8.5.12", AndroidAbi::ArmV7, "");
+        assert!(store.contains("missing for armeabi-v7a"), "{store}");
+        assert!(store.contains("pam self-update"), "{store}");
+        assert!(store.contains("--abi arm64-v8a --abi x86_64"), "{store}");
+        let device = missing_runtime_message("8.5.12", AndroidAbi::X86_64, " (expected /r)");
+        assert!(
+            device.ends_with("missing for x86_64 (expected /r)"),
+            "{device}"
+        );
     }
 
     #[test]
