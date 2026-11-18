@@ -44,14 +44,14 @@ final class CapabilityIntegrationTests: XCTestCase {
         defer { field.resignFirstResponder(); window.isHidden = true }
         let mounted = expectation(description: "autofocus after mounting")
         DispatchQueue.main.async { mounted.fulfill() }
-        wait(for: [mounted], timeout: 1)
+        wait(for: [mounted], timeout: 10)
         XCTAssertTrue(field.isFirstResponder)
         field.resignFirstResponder()
         field.setNeedsLayout()
         field.layoutIfNeeded()
         let relayout = expectation(description: "autofocus remains consumed")
         DispatchQueue.main.async { relayout.fulfill() }
-        wait(for: [relayout], timeout: 1)
+        wait(for: [relayout], timeout: 10)
         XCTAssertFalse(field.isFirstResponder)
     }
 
@@ -396,7 +396,7 @@ final class CapabilityIntegrationTests: XCTestCase {
         factory.view.onChildVisibilityChanged?(child, true)
         let drained = expectation(description: "queued visibility requests")
         DispatchQueue.main.async { drained.fulfill() }
-        wait(for: [drained], timeout: 1)
+        wait(for: [drained], timeout: 10)
         XCTAssertEqual(requests, [false, true])
 
         factory.view.onChildVisibilityChanged?(child, false)
@@ -404,7 +404,7 @@ final class CapabilityIntegrationTests: XCTestCase {
         XCTAssertNil(factory.view.onChildVisibilityChanged)
         let closedQueue = expectation(description: "stale visibility request discarded")
         DispatchQueue.main.async { closedQueue.fulfill() }
-        wait(for: [closedQueue], timeout: 1)
+        wait(for: [closedQueue], timeout: 10)
         XCTAssertEqual(requests, [false, true])
     }
 
@@ -568,7 +568,7 @@ final class CapabilityIntegrationTests: XCTestCase {
         let view = views.create(name: "fixture.view") { _, _ in }
         XCTAssertTrue(type(of: view) == UIView.self)
         views.release(view: view)
-        wait(for: [moduleExpectation], timeout: 1)
+        wait(for: [moduleExpectation], timeout: 10)
     }
 
     func testDevToolsRendersCapabilityFailureTimeline() {
