@@ -217,6 +217,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
+            scripts/ci-ime-ready.sh
             scripts/ci-gradle-retry.sh ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest
             if [ "${{ matrix.api-level }}" = "36" ]; then composer install --working-dir=examples/showcase --no-interaction --prefer-dist --no-progress; fi
             if [ "${{ matrix.api-level }}" = "36" ]; then PAM_HOME="$GITHUB_WORKSPACE" PAM_NATIVE_HOME="$GITHUB_WORKSPACE" cargo run --locked --release --package pam-native-cli -- prepare examples/showcase; fi

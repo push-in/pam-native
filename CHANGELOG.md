@@ -21,6 +21,10 @@ A fresh Mac runs `pam mobile ios:*` with no manual step.
   with an explicit `WindowInsetsController.show(ime())` while they wait:
   after an earlier test hid the keyboard, `SHOW_IMPLICIT` alone was ignored
   on CI (28 keyboard tests pass locally, idle and under CPU load).
+- CI: `scripts/ci-ime-ready.sh` waits for the default IME, binds it and lets
+  the soft keyboard show next to the emulator's hardware keyboard before the
+  instrumented contracts; a different keyboard test timed out waiting for
+  the IME on each API 36 run.
 
 ## 1.53.3 - 2026-11-18
 
