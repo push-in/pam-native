@@ -33,6 +33,11 @@ was published (the release community gate failed; see "Fixed (release)").
   to the system `curl` (HTTPS only), still checking the SHA-256.
 - Fixed (release): the community gate prebuilds components with the
   runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
+- Tests: the iOS recycled-cell test mounts its list on screen. Off screen
+  the list mounts cells within a per-frame time budget, which a loaded CI
+  simulator exceeded (reproduced in a full local run, 969 tests twice green
+  after the change). The animated-image test reports the visibility state
+  when it fails.
 - Tests: the iOS clock-label test skips when the CI host scene is in the
   background, where the binding correctly does not tick.
 
