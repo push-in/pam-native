@@ -438,6 +438,17 @@ class PamRuntime(
      * again for the new configuration. Modules and PHP state are untouched
      * (unlike an Activity recreation, nothing is retired).
      */
+    /**
+     * Called as soon as a configuration change that remounts arrives, before
+     * the IME (restarted by the same change) can hide and blur the focused
+     * input: its focus, selection and keyboard are captured then.
+     */
+    fun prepareSurfaceRemount() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (closed.get() || !attachedSurface) return
+        renderer.prepareConfigurationRemount()
+    }
+
     fun remountSurface() {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (closed.get() || !attachedSurface) return
@@ -1112,8 +1123,13 @@ class PamRuntime(
                 Trace.endSection()
             }
             runCatching {
-                if (remount) renderer.resetTree()
-                renderer.commit(current.map(PendingBatch::mutations))
+                // Scroll positions, focus and the keyboard survive the replay.
+                if (remount) renderer.resetTree(preserveViewState = true)
+                try {
+                    renderer.commit(current.map(PendingBatch::mutations))
+                } finally {
+                    if (remount) renderer.finishRemount()
+                }
             }.onSuccess {
                 committed = true
             }.onFailure {

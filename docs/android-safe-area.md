@@ -43,6 +43,12 @@ their actual on-screen bounds.
   in its own coordinates, so a `Pressable` behaves as anywhere else: a tap
   yields `pressIn`, `pressOut` and `press`; a hold yields `longPress` and
   `pressOut`, never `press` as well; sliding off releases without either.
+  The gesture enters through the outermost `Pressable` or `GestureDetector`
+  enclosing the touched control inside the panning container, so Android's
+  regular dispatch and interception run from there: a `GestureDetector` pan
+  around a `Pressable` (slide to cancel a voice recording) gets
+  `gestureUpdate`/`gestureEnd` while the inner `Pressable` keeps its own
+  press, long press and `pressOut`, exactly as with the keyboard closed.
 
 ## Platform matrix
 
@@ -170,7 +176,8 @@ Before releasing an Android host change, exercise:
 6. `PamSafeAreaInsetsTest`, `PamSafeAreaLayoutTest`,
    `PamKeyboardAvoidanceTest` and Android instrumentation tests
    (`PamTranslatedPressableInstrumentedTest` covers press and long press on a
-   translated composer, on API 24 and 36).
+   translated composer, `PamTranslatedGestureAncestorInstrumentedTest` a pan
+   `GestureDetector` around that button, on API 24 and 36).
 
 ## Engine-managed SafeAreaView (1.3)
 

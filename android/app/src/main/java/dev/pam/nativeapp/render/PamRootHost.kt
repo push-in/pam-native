@@ -286,9 +286,25 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     var publishedImeInset: Int = 0
         private set
 
+    /**
+     * Set while a configuration change rebuilds the surface: the IME
+     * restarting for the new font scale or locale hides for a moment, which
+     * is not the user closing it (see PamRenderer.prepareConfigurationRemount).
+     */
+    internal var holdInputFocus = false
+
+    private var imeBlurredInput: java.lang.ref.WeakReference<View>? = null
+    private var imeBlurAt = 0L
+
+    /** The input blurred by a hidden IME within the last [withinMs], if any. */
+    internal fun recentImeBlur(withinMs: Long): View? =
+        imeBlurredInput?.get()?.takeIf { android.os.SystemClock.uptimeMillis() - imeBlurAt <= withinMs }
+
     private fun blurInputAfterImeHidden() {
-        if (imeBottomInset != 0 || !isAttachedToWindow) return
+        if (imeBottomInset != 0 || !isAttachedToWindow || holdInputFocus) return
         val focused = findFocus() as? android.widget.EditText ?: return
+        imeBlurredInput = java.lang.ref.WeakReference(focused)
+        imeBlurAt = android.os.SystemClock.uptimeMillis()
         isFocusableInTouchMode = true
         if (!requestFocus()) focused.clearFocus()
         // Only absorb this blur: the root must not keep taking focus (and
@@ -353,12 +369,48 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
                     !isOccludedByHigherSibling(child, event.rawX, event.rawY)
             }
             if (target != null) {
-                val handled = dispatchToTranslatedTarget(target, event)
-                if (handled) translatedTouchTarget = target
+                val root = translatedDispatchRoot(target, event.rawX, event.rawY)
+                var routed = root
+                var handled = dispatchToTranslatedTarget(root, event)
+                if (!handled && root !== target) {
+                    // Android's hit test below the enclosing Pressable did not
+                    // reach a consumer: keep the direct route to the target.
+                    routed = target
+                    handled = dispatchToTranslatedTarget(target, event)
+                }
+                if (handled) translatedTouchTarget = routed
                 return handled
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    /**
+     * Where a translated gesture enters the view tree: the outermost Pressable
+     * (a GestureDetector is one) that encloses [target] at the pointer inside
+     * its panned container, or [target] itself. From there Android's own
+     * dispatch runs as without a keyboard: every enclosing detector sees the
+     * stream before its children and intercepts by its usual rules, and the
+     * hit test reaches the innermost Pressable. Routing straight to the
+     * innermost target hid the stream from an enclosing pan (slide to cancel
+     * a recording never got gestureUpdate while the IME was up).
+     */
+    private fun translatedDispatchRoot(target: View, x: Float, y: Float): View {
+        if (target !is PamPressable) return target
+        var root: View = target
+        var ancestor = target.parent as? View
+        while (ancestor != null && ancestor !== this) {
+            if (translatedTouchContainers.containsKey(ancestor)) break
+            if (
+                ancestor is PamPressable &&
+                ancestor in translatedTouchTargets &&
+                containsScreenPoint(ancestor, x, y)
+            ) {
+                root = ancestor
+            }
+            ancestor = ancestor.parent as? View
+        }
+        return root
     }
 
     private fun refreshTranslatedTouchTargets() {
@@ -377,6 +429,7 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
      * gesture: pressOut, the long-press timer cancelled on release, press
      * retention. Clicking it on UP instead left the gesture open (press, then
      * the pending longPress) on every device that routes through here.
+     * [target] may be the enclosing Pressable chosen by [translatedDispatchRoot].
      */
     private fun dispatchToTranslatedTarget(target: View, event: MotionEvent): Boolean {
         // A detached Pressable already cancelled its gesture (onDetachedFromWindow).

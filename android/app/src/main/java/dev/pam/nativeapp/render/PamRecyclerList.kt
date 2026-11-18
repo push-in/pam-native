@@ -1802,6 +1802,151 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         }
     }
 
+    /**
+     * Where the list rests, by row identity: the item under the viewport's
+     * leading screen edge (top, or left when horizontal) and how far into it
+     * that edge is (a fraction of its extent, so a row that grew with the
+     * font keeps the same part under the edge). [atStart]/[atEnd] keep a
+     * list resting at either end there (a chat at its newest message).
+     */
+    class ConfigurationAnchor(
+        val itemId: Long,
+        val position: Int,
+        val fraction: Float,
+        val atStart: Boolean,
+        val atEnd: Boolean,
+        val scrolledToEnd: Boolean,
+        val scrollMoved: Boolean,
+    )
+
+    /** The resting position to carry across a surface remount, or null for an empty list. */
+    fun captureConfigurationAnchor(): ConfigurationAnchor? {
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        if (!isLaidOut || manager.childCount == 0 || (adapter?.itemCount ?: 0) == 0) return null
+        val towardsScreenStart = if (horizontal) canScrollHorizontally(-1) else canScrollVertically(-1)
+        val towardsScreenEnd = if (horizontal) canScrollHorizontally(1) else canScrollVertically(1)
+        // Item 0 sits at the screen's end edge of an inverted (reversed) list.
+        val reversed = manager.reverseLayout xor (horizontal && layoutDirection == LAYOUT_DIRECTION_RTL)
+        val atStart = if (reversed) !towardsScreenEnd else !towardsScreenStart
+        val atEnd = !atStart && (if (reversed) !towardsScreenStart else !towardsScreenEnd)
+        val edge = if (horizontal) paddingLeft else paddingTop
+        var anchor: View? = null
+        var anchorStart = Int.MAX_VALUE
+        for (index in 0 until manager.childCount) {
+            val child = manager.getChildAt(index) ?: continue
+            val start = if (horizontal) child.left else child.top
+            val end = if (horizontal) child.right else child.bottom
+            if (end <= start) continue
+            if (start <= edge && end > edge) {
+                anchor = child
+                break
+            }
+            if (start >= edge && start < anchorStart) {
+                anchor = child
+                anchorStart = start
+            }
+        }
+        val view = anchor ?: return null
+        val position = manager.getPosition(view)
+        if (position == NO_POSITION) return null
+        val start = if (horizontal) view.left else view.top
+        val extent = (if (horizontal) view.width else view.height).coerceAtLeast(1)
+        return ConfigurationAnchor(
+            itemId = richIds.getOrNull(position) ?: NO_ID,
+            position = position,
+            fraction = ((edge - start).toFloat() / extent).coerceIn(0f, 1f),
+            atStart = atStart,
+            atEnd = atEnd,
+            scrolledToEnd = scrolledToEnd,
+            scrollMoved = scrollMoved,
+        )
+    }
+
+    private var configurationCheck: ConfigurationAnchor? = null
+    private var configurationCheckFrames = 0
+    private val configurationCheckListener = android.view.ViewTreeObserver.OnPreDrawListener {
+        verifyConfigurationAnchor()
+    }
+
+    /**
+     * Puts a freshly mounted list (a configuration remount rebuilt it from
+     * the retained tree) back where [anchor] says: the same row under the
+     * leading edge, now with its re-measured extent. A pending initial index
+     * no longer applies (the reader had already left it).
+     */
+    fun restoreConfigurationAnchor(anchor: ConfigurationAnchor) {
+        val manager = layoutManager as? LinearLayoutManager ?: return
+        val count = adapter?.itemCount ?: 0
+        if (count == 0) return
+        initialPositionApplied = true
+        scrollMoved = anchor.scrollMoved
+        scrolledToEnd = anchor.scrolledToEnd
+        stopScroll()
+        val position = when {
+            anchor.atStart -> 0
+            anchor.atEnd -> count - 1
+            else -> richIds.indexOf(anchor.itemId).takeIf { it >= 0 }
+                ?: anchor.position.takeIf { richIds.isEmpty() && it < count }
+                ?: return
+        }
+        if (anchor.atStart) {
+            manager.scrollToPositionWithOffset(0, 0)
+            return
+        }
+        // A first guess from the row's new extent; the check before the next
+        // draw puts its leading part exactly under the edge.
+        val extent = richIds.getOrNull(position)?.let(richExtents::get) ?: dp(rowHeight)
+        val into = (anchor.fraction * extent).toInt()
+        val reversed = manager.reverseLayout xor (horizontal && layoutDirection == LAYOUT_DIRECTION_RTL)
+        val offset = if (anchor.atEnd) {
+            0
+        } else if (reversed) {
+            val viewport = if (horizontal) width - paddingLeft - paddingRight else height - paddingTop - paddingBottom
+            viewport - (extent - into)
+        } else {
+            -into
+        }
+        manager.scrollToPositionWithOffset(position, offset)
+        if (configurationCheck == null) viewTreeObserver.addOnPreDrawListener(configurationCheckListener)
+        configurationCheck = anchor
+        configurationCheckFrames = 0
+    }
+
+    private fun verifyConfigurationAnchor(): Boolean {
+        val anchor = configurationCheck ?: return true
+        if (!isLaidOut || isLayoutRequested) return true
+        val manager = layoutManager as? LinearLayoutManager
+        val position = when {
+            anchor.atEnd -> (adapter?.itemCount ?: 0) - 1
+            richIds.isEmpty() -> anchor.position
+            else -> richIds.indexOf(anchor.itemId)
+        }
+        val view = if (position >= 0) manager?.findViewByPosition(position) else null
+        if (view == null && ++configurationCheckFrames < CONFIGURATION_CHECK_FRAMES) return true
+        configurationCheck = null
+        viewTreeObserver.removeOnPreDrawListener(configurationCheckListener)
+        if (view == null || manager == null) return true
+        val delta = if (anchor.atEnd) {
+            // The last row rests against the list's end edge.
+            val reversed = manager.reverseLayout xor (horizontal && layoutDirection == LAYOUT_DIRECTION_RTL)
+            when {
+                horizontal && reversed -> view.left - paddingLeft
+                horizontal -> view.right - (width - paddingRight)
+                reversed -> view.top - paddingTop
+                else -> view.bottom - (height - paddingBottom)
+            }
+        } else {
+            val edge = if (horizontal) paddingLeft else paddingTop
+            val start = if (horizontal) view.left else view.top
+            val extent = if (horizontal) view.width else view.height
+            start - (edge - (anchor.fraction * extent).toInt())
+        }
+        if (delta == 0) return true
+        if (horizontal) scrollBy(delta, 0) else scrollBy(0, delta)
+        // This frame was laid out before the correction: draw the next one.
+        return false
+    }
+
     /** Adapter position of the item holding row [row] (windowed lists), or [row]. */
     private fun positionOfRow(row: Int): Int {
         if (rowSpan == null) return row
@@ -2054,6 +2199,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
 
     private companion object {
         const val MAX_PREFETCH_ITEMS = 32
+        /** Frames a remount anchor waits for its row to be laid out. */
+        const val CONFIGURATION_CHECK_FRAMES = 4
     }
 }
 

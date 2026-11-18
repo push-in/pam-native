@@ -193,7 +193,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         if (horizontal || offsetAnimator != null) return null
         // A request aimed at a testID looks the target view up: it must exist.
         if (anchorToEnd || maintainVisibleContentPosition || scrollTargetTestId.isNotEmpty()) return null
-        if (hasRequestedOffsetY) return if (requestedOffsetY == 0) 0 else null
+        if (hasRequestedOffsetY) return if (requestedOffsetY == 0 || remountOffsetPending) requestedOffsetY else null
         return scrollYOf(activeScroll)
     }
 
@@ -374,6 +374,39 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val animator = offsetAnimator ?: return
         offsetAnimator = null
         if (jump) animator.end() else animator.cancel()
+    }
+
+    /** A remount restore is pending: its target is known before layout (see [restoreRemountOffset]). */
+    private var remountOffsetPending = false
+    private var remountToEnd = false
+
+    /**
+     * A configuration remount rebuilt this container from the retained tree:
+     * the reader's position (computed from the anchor row's new frame) wins
+     * over the retained `contentOffset` and the initial end anchor. [toEnd]
+     * rests at the end of the re-measured content instead ([primary] is
+     * then only the estimate a sliced mount builds around). One-shot.
+     */
+    fun restoreRemountOffset(primary: Int, toEnd: Boolean) {
+        finishOffsetAnimation(jump = true)
+        val target = primary.coerceAtLeast(0)
+        if (horizontal) {
+            requestedOffsetX = target
+            hasRequestedOffsetX = true
+            hasRequestedOffsetY = false
+        } else {
+            requestedOffsetY = target
+            hasRequestedOffsetY = true
+            hasRequestedOffsetX = false
+        }
+        remountOffsetPending = true
+        remountToEnd = toEnd
+        // The initial end anchor of a fresh container would replace the
+        // reader's offset on the first layout; one at the end is restored to it.
+        if (anchorToEnd) initialEndAnchorApplied = true
+        // A restore is a jump, never a glide.
+        offsetAppliedOnce = false
+        requestOffsetApplication()
     }
 
     fun setContentOffsetY(value: Float) {
@@ -742,6 +775,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val newMax = primaryMaxOffset()
         primaryMaxOffsetBeforeLastLayout = previousMax
         previousPrimaryMaxOffset = newMax
+        val restoring = remountOffsetPending
         if (offsetAwaitsLayout) {
             // The first layout applies the requested offset in the same frame:
             // a pager opened on page N draws page N first (a navigation
@@ -749,6 +783,9 @@ internal class PamScrollContainer @JvmOverloads constructor(
             applyRequestedOffset(laidOut = true)
             scheduleRequestedOffset()
         }
+        // The remount restore just placed the reader: the end anchor and the
+        // kept-position rules compare against the empty first layout.
+        if (restoring && !remountOffsetPending) return
         when {
             anchorToEnd && !initialEndAnchorApplied -> {
                 initialEndAnchorApplied = true
@@ -829,6 +866,20 @@ internal class PamScrollContainer @JvmOverloads constructor(
             return
         }
         offsetAwaitsLayout = false
+        if (remountOffsetPending) {
+            remountOffsetPending = false
+            if (remountToEnd) {
+                remountToEnd = false
+                if (horizontal) requestedOffsetX = primaryMaxOffset() else requestedOffsetY = primaryMaxOffset()
+            }
+            scrollToPrimary(if (horizontal) requestedOffsetX else requestedOffsetY)
+            // One-shot: a target past the re-measured content is clamped, not
+            // kept pending (it would pull the reader there on a later layout).
+            hasRequestedOffsetX = false
+            hasRequestedOffsetY = false
+            offsetAppliedOnce = true
+            return
+        }
         if (offsetAnimator != null && pamRequestKeepsGlide(
                 hasRequestedOffsetX, requestedOffsetX,
                 hasRequestedOffsetY, requestedOffsetY,

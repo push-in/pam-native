@@ -514,7 +514,10 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         val changes = appliedConfiguration?.diff(current) ?: 0
         appliedConfiguration = current
         if (!runtimeStarted) return
-        if (requiresSurfaceRemount(changes)) configurationRemountPending = true
+        if (requiresSurfaceRemount(changes)) {
+            configurationRemountPending = true
+            runtime.prepareSurfaceRemount()
+        }
         applyDefaultSystemBars()
         runtime.invalidateSystemBars()
         scheduleViewportUpdate(force = true)

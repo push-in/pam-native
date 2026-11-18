@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.53.8 - 2026-11-18
+
+Font size and language changes keep the reader's place.
+
+- Fixed: Android — a font scale, density or locale change no longer loses
+  the reader's place: ScrollView and FlatList/VirtualizedList/SectionList
+  (inverted included) keep the row under their top edge, by item identity and
+  with its re-measured height, and lists resting at either end stay there.
+- Fixed: Android — the focused input keeps its focus, selection and open
+  keyboard across that remount, without `onBlur`/`onEndEditing`/`onFocus`
+  reaching PHP; the IME restart caused by the configuration change no longer
+  blurs it.
+- Fixed: Android — the focused input also survives the IME restart a font
+  scale or locale change causes (it may hide right before or after the
+  remount); when it hid first, PHP sees the blur and then the refocus.
+- Fixed: Android — while a panning KeyboardAvoidingView is translated by the
+  keyboard, a gesture enters through the outermost Pressable/GestureDetector
+  enclosing the touched control, so an enclosing GestureDetector (e.g. pan to
+  slide-cancel a voice recording) receives gestureBegin/Update/End while the
+  inner Pressable keeps its press, longPress and pressOut, as with the
+  keyboard closed.
+
 ## 1.53.7 - 2026-11-18
 
 - Fixed: a cold start under `pam dev` no longer restarts the PHP request

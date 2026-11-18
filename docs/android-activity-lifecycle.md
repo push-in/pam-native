@@ -28,10 +28,37 @@ place is declared in the `PamActivity` manifest entry
 
 The remount is the same operation a recreated Activity performs (all views
 rebuilt from the engine's retained tree, PHP untouched), minus the module
-registry replacement. Like a recreation, it resets native view-local state
-that PHP does not own (scroll offsets not bound to state, an open IME). These
-changes come from system settings, so they usually happen while the app is in
-the background.
+registry replacement. These changes come from system settings, so they usually
+happen while the app is in the background.
+
+### View state kept across the remount
+
+Node ids are stable across the replay, so the renderer captures the native
+state PHP does not own right before it drops the old views and puts it back on
+the rebuilt ones:
+
+- **Scroll position, by anchor row.** A `ScrollView` records the node under its
+  leading edge (descending through content wrappers at least a viewport long to
+  the row the reader sees) and how far into it the edge is, as a fraction of
+  its extent; a `FlatList`/`VirtualizedList`/`SectionList` records the row
+  under the top (left) edge the same way, by item id. After the replay the
+  same row is put back under the edge with its re-measured extent, so a font
+  that grew does not push the reader elsewhere. A list or scroll resting at
+  either end stays there (an inverted chat at its newest message, a feed at
+  its top, a log at its end). The retained `contentOffset` and
+  `initialScrollIndex` do not apply again: the reader had already left them.
+- **The focused input**: it gets the focus back with its selection, and the
+  keyboard reopens if it was open. The handoff is invisible to PHP (no
+  `onBlur`/`onEndEditing`/`onFocus`); a pending draft is still delivered
+  before the old editor goes, as on any blur. The input is captured when the
+  configuration change arrives: the IME restarts for the new font scale or
+  locale and hides for a moment, which does not count as the user closing it
+  (the usual blur on a hidden keyboard is held until 2 s after the remount). If
+  the IME hid before the change reached the Activity, PHP saw that blur and then
+  sees the refocus.
+
+Not kept: a fling in progress (it stops) and state inside views that are not
+mounted when the remount runs (a nested list in an off-screen cell).
 
 ## Not declared (the Activity is still recreated)
 
