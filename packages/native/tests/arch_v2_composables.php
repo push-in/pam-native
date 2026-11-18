@@ -115,6 +115,23 @@ $assert(
     $insets->top === 24.0 && $bottom->value === 34.0 && $insets->toArray() === ['top' => 24.0, 'right' => 0.0, 'bottom' => 34.0, 'left' => 0.0],
     'useSafeAreaInsets() must follow the host window.',
 );
+$cutoutTop = computed(static fn (): float => $insets->cutoutTop);
+$assert($cutoutTop->value === 0.0 && $insets->cutoutLeft === 0.0, 'Hosts that do not report a cutout leave it at zero.');
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 820.0, 'height' => 600.0, 'density' => 2.0, 'fontScale' => 1.8,
+    'safeAreaTop' => 24.0, 'safeAreaBottom' => 34.0, 'safeAreaLeft' => 0.0, 'safeAreaRight' => 0.0,
+    'cutoutTop' => 24.0, 'cutoutRight' => -3.0,
+]));
+$assert(
+    $cutoutTop->value === 24.0 && $insets->cutoutRight === 0.0 && $insets->cutoutBottom === 0.0 && $insets->bottom === 34.0
+        && \Pam\Native\App::windowMetrics()->cutoutTop === 24.0
+        && array_keys($insets->toArray()) === ['top', 'right', 'bottom', 'left'],
+    'useSafeAreaInsets() exposes the cutout alone (cutoutTop...), reactively; toArray() keeps the four safe-area edges.',
+);
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 820.0, 'height' => 600.0, 'density' => 2.0, 'fontScale' => 1.8,
+    'safeAreaTop' => 24.0, 'safeAreaBottom' => 34.0, 'safeAreaLeft' => 0.0, 'safeAreaRight' => 0.0,
+]));
 $assert(
     $window->width === 820.0 && $window->landscape && $window->scale === 2.0 && $window->deviceClass === DeviceClass::Medium,
     'useWindowDimensions() must follow the host window.',

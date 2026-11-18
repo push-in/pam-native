@@ -101,7 +101,7 @@ if (!\function_exists('Pam\Native\Testing\environment')) {
      * and the device locale and time zone. Composables and mounted
      * components update as on a device. Arguments left null keep their value.
      *
-     * @param array{top?: float|int, right?: float|int, bottom?: float|int, left?: float|int}|null $insets
+     * @param array{top?: float|int, right?: float|int, bottom?: float|int, left?: float|int, cutoutTop?: float|int, cutoutRight?: float|int, cutoutBottom?: float|int, cutoutLeft?: float|int}|null $insets
      * @param array{width?: float|int, height?: float|int, scale?: float|int, fontScale?: float|int}|null $window
      */
     function environment(
@@ -140,6 +140,10 @@ if (!\function_exists('Pam\Native\Testing\environment')) {
                 'foldPosture' => $metrics->foldPosture,
                 'memoryClass' => $metrics->memoryClass,
                 'performanceTier' => $metrics->performanceTier,
+                'cutoutTop' => (float) ($insets['cutoutTop'] ?? $metrics->cutoutTop),
+                'cutoutRight' => (float) ($insets['cutoutRight'] ?? $metrics->cutoutRight),
+                'cutoutBottom' => (float) ($insets['cutoutBottom'] ?? $metrics->cutoutBottom),
+                'cutoutLeft' => (float) ($insets['cutoutLeft'] ?? $metrics->cutoutLeft),
             ];
             if ($scheme !== null) {
                 // The forced scheme is the system one, followed by the System preference.

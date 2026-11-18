@@ -902,6 +902,7 @@ public final class PamRuntime {
         let performanceTier: Double = memoryClass >= 4_096 && refreshRate >= 90
             ? 3
             : (memoryClass >= 2_048 ? 2 : 1)
+        let cutout = PamCutoutInsets.from(safeArea: insets, idiom: idiom)
         if let payload = try? WireMap.encode([
             "width": .decimal(Double(widthDp)),
             "height": .decimal(Double(heightDp)),
@@ -914,6 +915,10 @@ public final class PamRuntime {
             "safeAreaRight": .decimal(Double(insets.right)),
             "safeAreaBottom": .decimal(Double(insets.bottom)),
             "safeAreaLeft": .decimal(Double(insets.left)),
+            "cutoutTop": .decimal(Double(cutout.top)),
+            "cutoutRight": .decimal(Double(cutout.right)),
+            "cutoutBottom": .decimal(Double(cutout.bottom)),
+            "cutoutLeft": .decimal(Double(cutout.left)),
             "refreshRate": .decimal(refreshRate),
             "reducedMotion": .flag(UIAccessibility.isReduceMotionEnabled),
             "deviceType": .text(deviceType),
@@ -973,6 +978,7 @@ public final class PamRuntime {
         let inputMode = idiom == .tv ? "remote" : (idiom == .mac ? "mouse" : "touch")
         let memoryClass = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576
         let refreshRate = Double(screen.maximumFramesPerSecond)
+        let cutout = PamCutoutInsets.from(safeArea: insets, idiom: idiom)
         let values: [String: Any] = [
             "width": Double(widthDp),
             "height": Double(heightDp),
@@ -982,6 +988,10 @@ public final class PamRuntime {
             "safeAreaRight": Double(insets.right),
             "safeAreaBottom": Double(insets.bottom),
             "safeAreaLeft": Double(insets.left),
+            "cutoutTop": Double(cutout.top),
+            "cutoutRight": Double(cutout.right),
+            "cutoutBottom": Double(cutout.bottom),
+            "cutoutLeft": Double(cutout.left),
             "refreshRate": refreshRate,
             "reducedMotion": UIAccessibility.isReduceMotionEnabled,
             "deviceType": deviceType,

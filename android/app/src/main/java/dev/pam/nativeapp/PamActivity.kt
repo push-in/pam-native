@@ -43,6 +43,8 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import dev.pam.nativeapp.render.PamRootHost
+import dev.pam.nativeapp.render.cutoutMetrics
+import dev.pam.nativeapp.render.displayCutoutInsets
 import dev.pam.nativeapp.modules.PamDeepLinks
 
 class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, NativeRefHost {
@@ -1090,7 +1092,8 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                     "performanceTier" to WireValue.Decimal(environment.performanceTier.toDouble()),
                     // Same tag as DeviceInfo: useLocale() asks again when it differs.
                     "locale" to WireValue.Text(java.util.Locale.getDefault().toLanguageTag()),
-                ),
+                ) + cutoutMetrics(displayCutoutInsets(window.decorView), density)
+                    .mapValues { WireValue.Decimal(it.value) },
             ),
         )
         if (remount) {
@@ -1231,6 +1234,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             .put("safeAreaRight", (insets.right / density).toDouble())
             .put("safeAreaBottom", (insets.bottom / density).toDouble())
             .put("safeAreaLeft", (insets.left / density).toDouble())
+        cutoutMetrics(displayCutoutInsets(window.decorView), density).forEach { (key, value) -> json.put(key, value) }
         // The same style environment the first dimensions event reports, so
         // PHP recognises that event as unchanged and skips a full re-render.
         val environment = styleEnvironment()

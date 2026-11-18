@@ -157,6 +157,10 @@ final class Runtime
             foldPosture: $metrics->foldPosture,
             memoryClass: $metrics->memoryClass,
             performanceTier: $metrics->performanceTier,
+            cutoutTop: $metrics->cutoutTop,
+            cutoutRight: $metrics->cutoutRight,
+            cutoutBottom: $metrics->cutoutBottom,
+            cutoutLeft: $metrics->cutoutLeft,
         );
         DependencyTracker::invalidateAll();
         if ($render) {
@@ -208,6 +212,10 @@ final class Runtime
             displayMode: self::styleEnvironmentKeyword($values['displayMode'] ?? null, 'standalone'),
             foldPosture: self::styleEnvironmentKeyword($values['foldPosture'] ?? null, 'flat'),
             memoryClass: $number('memoryClass', 0.0),
+            cutoutTop: $number('cutoutTop', 0.0),
+            cutoutRight: $number('cutoutRight', 0.0),
+            cutoutBottom: $number('cutoutBottom', 0.0),
+            cutoutLeft: $number('cutoutLeft', 0.0),
             performanceTier: $number('performanceTier', 1.0),
         );
     }
@@ -669,6 +677,10 @@ final class Runtime
                     foldPosture: self::styleEnvironmentKeyword($values['foldPosture'] ?? null, 'flat'),
                     memoryClass: (float) ($values['memoryClass'] ?? 0.0),
                     performanceTier: (float) ($values['performanceTier'] ?? 1.0),
+                    cutoutTop: max(0.0, (float) ($values['cutoutTop'] ?? 0.0)),
+                    cutoutRight: max(0.0, (float) ($values['cutoutRight'] ?? 0.0)),
+                    cutoutBottom: max(0.0, (float) ($values['cutoutBottom'] ?? 0.0)),
+                    cutoutLeft: max(0.0, (float) ($values['cutoutLeft'] ?? 0.0)),
                 );
                 Appearance::synchronize($values, $previousAppearance);
                 if (is_string($values['locale'] ?? null)) {
