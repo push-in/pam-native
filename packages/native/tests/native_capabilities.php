@@ -191,6 +191,17 @@ $assert(
 Runtime::dispatchModuleResult($move['requestId'], ModuleResultStatus::Success->value, Wire::map(['path' => 'sent/a.jpg', 'name' => 'a.jpg', 'mimeType' => 'image/jpeg', 'size' => 3]));
 $assert($moved instanceof FileReference && $moved->path === 'sent/a.jpg', 'Files::move must resolve the destination file.');
 $copyFailure = null;
+// App::reload(): asks the host for a fresh runtime on the active entry.
+$reloadFailure = null;
+\Pam\Native\App::reload(static function (string $message) use (&$reloadFailure): void { $reloadFailure = $message; });
+$assert($lastCall()['module'] === 'window' && $lastCall()['method'] === 'reload' && $lastCall()['values'] === [], 'App::reload() must call window.reload.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Unknown window method reload');
+$assert($reloadFailure === 'Unknown window method reload', 'An older host reports the reload failure to $failure.');
+\Pam\Native\App::reload();
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'Unknown window method reload');
+\Pam\Native\App::reload();
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, '');
+
 // Files::delete: a failure closure instead of an exception; missing files are deleted natively.
 $deleted = false;
 $deleteFailure = null;

@@ -752,6 +752,11 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         }
     }
 
+    /** App::reload(): the overlay's reload, posted so the calling PHP request finishes first. */
+    internal fun requestRuntimeReload() {
+        window.decorView.post { reloadAfterError() }
+    }
+
     /** Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry. */
     private fun reloadAfterError() {
         recoveryRunnable?.let(window.decorView::removeCallbacks)

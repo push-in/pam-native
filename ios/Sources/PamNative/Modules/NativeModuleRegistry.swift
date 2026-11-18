@@ -1,6 +1,11 @@
 import Foundation
 
 public final class NativeModuleRegistry: @unchecked Sendable {
+    /// `App::reload()`: the runtime's reload, set once by PamRuntime.
+    func setReloadHandler(_ handler: @escaping () -> Void) {
+        window.onReload = handler
+    }
+
     private let http = HttpModule()
     private let storage = StorageModule()
     private let system = SystemModule()

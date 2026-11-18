@@ -21,6 +21,12 @@ internal class WindowModule(private val activity: Activity) : NativeModule {
                     }
                 }
                 "isSecure" -> activity.runOnUiThread { completion.secure(isSecure(activity)) }
+                // App::reload(): answered first, the runtime is swapped on the next main-thread turn.
+                "reload" -> {
+                    val host = activity as? dev.pam.nativeapp.PamActivity ?: error("This host cannot reload the app")
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                    host.requestRuntimeReload()
+                }
                 else -> error("Unknown window method $method")
             }
         }.onFailure { completion.failure(it) }

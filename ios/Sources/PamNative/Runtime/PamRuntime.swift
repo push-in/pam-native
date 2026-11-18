@@ -414,6 +414,7 @@ public final class PamRuntime {
         self.renderer = makeRenderer(hostView: hostView)
 
         errorOverlay.onReload = { [weak self] in self?.reloadAfterError() }
+        modules.setReloadHandler { [weak self] in self?.reloadAfterError() }
         observeKeyboard()
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
