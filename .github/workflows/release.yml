@@ -433,10 +433,19 @@ jobs:
           sudo usermod -aG kvm "$USER"
           sudo chmod 666 /dev/kvm
       - name: Assemble the candidate PAM entrypoint and public runtime payload
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # The installer asks the anonymous GitHub API for the latest tag and
+          # hosted runners hit its rate limit (403): resolve the tag with the
+          # job token and retry transient download errors.
           curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
-            -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+            --retry 6 --retry-all-errors --retry-delay 15 \
+            -fsSL -o "${RUNNER_TEMP}/pam-install.sh" https://github.com/push-in/pam/releases/latest/download/install.sh
+          PAM_VERSION=$(gh release view -R push-in/pam --json tagName -q .tagName)
+          export PAM_VERSION
+          for attempt in 1 2 3; do sh "${RUNNER_TEMP}/pam-install.sh" && break; [ "${attempt}" = 3 ] && exit 1; sleep 30; done
           test -x "${HOME}/.local/bin/pam"
           pam_launcher=$(readlink -f "${HOME}/.local/bin/pam")
           pam_install_root=$(cd "$(dirname "${pam_launcher}")/.." && pwd)
