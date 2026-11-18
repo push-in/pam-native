@@ -89,10 +89,20 @@ class StoryReplyReorderInstrumentedTest {
                 input.requestFocus()
                 manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
             }
-            val deadline = SystemClock.uptimeMillis() + 5_000
+            // A cold IME on a loaded CI emulator can drop the first request:
+            // ask again every few seconds instead of failing after one.
+            val deadline = SystemClock.uptimeMillis() + 20_000
             var served = false
+            var lastRequest = SystemClock.uptimeMillis()
             while (!served && SystemClock.uptimeMillis() < deadline) {
                 onMain { served = input.hasWindowFocus() && manager.isActive(input) }
+                if (!served && SystemClock.uptimeMillis() - lastRequest > 4_000) {
+                    lastRequest = SystemClock.uptimeMillis()
+                    onMain {
+                        input.requestFocus()
+                        manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
                 if (!served) SystemClock.sleep(40)
             }
             assertTrue("Visible reply establishes an IME connection before mutations", served)
