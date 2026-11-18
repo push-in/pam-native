@@ -3513,7 +3513,7 @@ fn download_release_asset(url: &str, destination: &Path, maximum_bytes: u64) -> 
     status
         .success()
         .then_some(())
-        .ok_or_else(|| format!("Android runtime download failed with {status}"))
+        .ok_or_else(|| format!("download of {url} failed with {status}"))
 }
 
 fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Result<(), String> {
