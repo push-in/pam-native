@@ -127,30 +127,94 @@ exit(proc_close($process));
 
 function download(string $url, string $destination): void
 {
+    $maximum = 128 * 1024 * 1024;
+    $ssl = ['verify_peer' => true, 'verify_peer_name' => true];
+    $bundle = caBundle();
+    if ($bundle !== null) {
+        $ssl['cafile'] = $bundle;
+    }
     $context = stream_context_create([
         'http' => ['follow_location' => 1, 'max_redirects' => 5, 'timeout' => 120],
-        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        'ssl' => $ssl,
     ]);
     $input = @fopen($url, 'rb', false, $context);
-    $output = @fopen($destination, 'xb');
-    if (!is_resource($input) || !is_resource($output)) {
-        if (is_resource($input)) {
-            fclose($input);
-        }
-        if (is_resource($output)) {
-            fclose($output);
-        }
-        @unlink($destination);
-        fwrite(STDERR, "pam-native: cannot download {$url}\n");
-        exit(69);
+    if (!is_resource($input)) {
+        // No usable CA store or TLS in this PHP: the system curl verifies
+        // with the operating system's trust store (macOS ships it).
+        downloadWithCurl($url, $destination, $maximum);
+        return;
     }
-    $copied = stream_copy_to_stream($input, $output, 128 * 1024 * 1024 + 1);
+    $output = @fopen($destination, 'xb');
+    if (!is_resource($output)) {
+        fclose($input);
+        fwrite(STDERR, "pam-native: cannot write {$destination}\n");
+        exit(73);
+    }
+    $copied = stream_copy_to_stream($input, $output, $maximum + 1);
     fclose($input);
     fflush($output);
     fclose($output);
-    if (!is_int($copied) || $copied < 1 || $copied > 128 * 1024 * 1024) {
+    if (!is_int($copied) || $copied < 1 || $copied > $maximum) {
         @unlink($destination);
         fwrite(STDERR, "pam-native: invalid Native CLI download size\n");
         exit(65);
     }
+}
+
+function downloadWithCurl(string $url, string $destination, int $maximum): void
+{
+    $process = @proc_open(
+        [
+            'curl', '--proto', '=https', '--proto-redir', '=https', '--tlsv1.2', '--fail', '--silent',
+            '--show-error', '--location', '--max-redirs', '5', '--connect-timeout', '15', '--max-time', '600',
+            '--max-filesize', (string) $maximum, '--output', $destination, $url,
+        ],
+        [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDERR],
+        $pipes,
+        null,
+        null,
+        ['bypass_shell' => true],
+    );
+    if (is_resource($process)) {
+        fclose($pipes[0]);
+    }
+    $status = is_resource($process) ? proc_close($process) : -1;
+    clearstatcache(true, $destination);
+    $size = is_file($destination) ? filesize($destination) : false;
+    if ($status !== 0 || !is_int($size) || $size < 1 || $size > $maximum) {
+        @unlink($destination);
+        fwrite(STDERR, "pam-native: cannot download {$url}\n");
+        exit(69);
+    }
+}
+
+/**
+ * A CA bundle for PHP's TLS when its OpenSSL has none of its own: a static
+ * PHP built elsewhere points at its build directory, so verification fails
+ * on a fresh Mac. Null keeps PHP's configuration.
+ */
+function caBundle(): ?string
+{
+    $configured = ini_get('openssl.cafile');
+    $environment = getenv('SSL_CERT_FILE');
+    if ((is_string($configured) && $configured !== '') || (is_string($environment) && $environment !== '')) {
+        return null;
+    }
+    $locations = function_exists('openssl_get_cert_locations') ? openssl_get_cert_locations() : [];
+    if (is_file((string) ($locations['default_cert_file'] ?? ''))) {
+        return null;
+    }
+    foreach ([
+        '/etc/ssl/cert.pem',
+        '/etc/ssl/certs/ca-certificates.crt',
+        '/etc/pki/tls/certs/ca-bundle.crt',
+        '/etc/ssl/ca-bundle.pem',
+        '/opt/homebrew/etc/ca-certificates/cert.pem',
+        '/usr/local/etc/ca-certificates/cert.pem',
+    ] as $candidate) {
+        if (is_file($candidate) && is_readable($candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
 }

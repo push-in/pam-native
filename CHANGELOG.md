@@ -8,6 +8,12 @@
   crashed. The upload now fails with an `IOException` and its call reports
   the failure to PHP. A JVM test closes the module mid-upload and asserts
   that no thread dies.
+- Fixed (macOS): on a fresh Mac `pam mobile` could not fetch the Native
+  CLI ("cannot download"): the assets are public, but PAM's macOS PHP looks
+  for CA certificates in its build directory, so TLS verification failed.
+  The launcher now verifies against the system bundle (`/etc/ssl/cert.pem`
+  and the usual Linux and Homebrew paths) when PHP has none, and falls back
+  to the system `curl` (HTTPS only), still checking the SHA-256.
 - Fixed (release): the community gate prebuilds components with the
   runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
 - Tests: the iOS clock-label test skips when the CI host scene is in the
