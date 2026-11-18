@@ -205,6 +205,9 @@ internal class MediaWorkLane(
 
     val queued: Int get() = lock.withLockValue { queue.size }
 
+    /** The jobs waiting for a thread (tests: what a free thread chooses from). */
+    internal fun queuedJobs(): List<Job> = lock.withLockValue { queue.toList() }
+
     fun submit(job: Job) {
         job.order = sequence.incrementAndGet()
         val rejected = lock.withLockValue {

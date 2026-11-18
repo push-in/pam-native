@@ -155,7 +155,14 @@ class PamMediaNetworkResilienceInstrumentedTest {
         val hidden = loadImage("/hidden.png", parent = hiddenParent)
         val recycled = loadImage("/recycled.png")
         val visible = loadImage("/visible.png")
-        SystemClock.sleep(200)
+        // The downloads reach the network lane after a disk-cache lookup off
+        // the main thread; on a loaded CI emulator that took longer than a
+        // fixed sleep, and the freed thread found only the hidden one.
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (loader.queuedNetworkSources().none { it.endsWith("/visible.png") } && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(20)
+        }
+        assertTrue("visible download is queued", loader.queuedNetworkSources().any { it.endsWith("/visible.png") })
         main { loader.cancel(recycled.view) }
         // The cancel reaches the queue on the next demand refresh.
         SystemClock.sleep(400)
