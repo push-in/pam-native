@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer
 import dev.pam.nativeapp.net.PamHttpClient
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
+import java.io.File
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.CountDownLatch
@@ -113,6 +114,49 @@ class HttpTransportTest {
         } finally {
             module.close()
             server.stop(0)
+        }
+    }
+
+    @Test
+    fun closingTheModuleMidUploadFailsTheCallWithoutCrashingADispatcherThread() {
+        // The module closes (hot reload, activity gone) once the connection is
+        // up and the file body is about to stream. Anything but an IOException
+        // thrown from writeTo is rethrown by OkHttp on its dispatcher thread
+        // and kills the app.
+        val server = server()
+        val directory = java.nio.file.Files.createTempDirectory("pam-upload").toFile()
+        val root = File(directory, "files").apply { mkdirs() }
+        File(root, "big.bin").writeBytes(ByteArray(256 * 1024))
+        val crashes = java.util.Collections.synchronizedList(mutableListOf<Throwable>())
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, error -> crashes += error }
+        lateinit var module: HttpModule
+        val closing = PamHttpClient.shared.newBuilder()
+            .addNetworkInterceptor { chain -> module.close(); chain.proceed(chain.request()) }
+            .build()
+        module = HttpModule(root, File(directory, "cache"), closing)
+        try {
+            val done = CountDownLatch(1)
+            var status: ModuleResultStatus? = null
+            module.invoke(
+                "upload",
+                WireMap.encode(
+                    mapOf(
+                        "url" to WireValue.Text("http://127.0.0.1:${server.address.port}/put"),
+                        "headers" to WireValue.Text("{}"),
+                        "path" to WireValue.Text("big.bin"),
+                    ),
+                ),
+            ) { s, _ -> status = s; done.countDown() }
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+            assertEquals(ModuleResultStatus.FAILURE, status)
+            Thread.sleep(300)
+            assertEquals(emptyList<String>(), crashes.map { it.toString() })
+        } finally {
+            module.close()
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+            server.stop(0)
+            directory.deleteRecursively()
         }
     }
 }

@@ -169,6 +169,10 @@ internal class PamTextView(context: Context) : TextView(context) {
         }
     }
 
+    /** The shown text is a tail-truncated copy of the source ("Cancel" as "C…"). */
+    internal val isTailTruncated: Boolean
+        get() = sourceText?.let { text.toString() != it.toString() } == true
+
     private fun restoreSource() {
         val source = sourceText ?: return
         if (text === source || text.toString() == source.toString()) return

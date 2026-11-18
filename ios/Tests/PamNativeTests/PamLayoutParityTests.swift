@@ -276,8 +276,15 @@ final class PamLayoutParityTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testRecycledCellViewsComeBackClean() throws {
+        // On screen: a list nobody sees mounts its cells a few per frame
+        // within a time budget, and a loaded CI simulator ran out of it.
+        let window = pamTestWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.isHidden = false
+        defer { window.isHidden = true }
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.addSubview(host)
         let renderer = PamRenderer(hostView: host) { _, _, _ in }
         defer { renderer.close() }
         var mutations: [Mutation] = [

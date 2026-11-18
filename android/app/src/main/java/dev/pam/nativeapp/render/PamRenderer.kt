@@ -1119,6 +1119,9 @@ class PamRenderer(
                         // getLineMax excludes the trailing space a wrapped line ends with.
                         widest = maxOf(widest, layout.getLineMax(line))
                     }
+                    // PamTextView truncates by replacing its text (RN tail
+                    // truncation): its layout has no ellipsis of its own.
+                    if ((view as? PamTextView)?.isTailTruncated == true) ellipsized = true
                     node.put("baseline", onScreen[1] + view.baseline)
                         .put("textHeight", layout.height)
                         .put("contentHeight", view.height - view.totalPaddingTop - view.totalPaddingBottom)

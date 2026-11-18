@@ -64,6 +64,8 @@ class AssetInstallerTest {
                 "pam-prebuilt/components/abc.json" to "{}",
                 "src/Components/Row.pam" to "<template><View /></template>",
                 "src/Empty.php" to "",
+                // Larger than one bounded inflate step (128 KiB).
+                "src/Big.php" to (0 until 40_000).joinToString("\n") { "<?php // line $it" },
             )
             val plain = mapOf("assets/logo.svg" to "<svg/>", "manifest.sha256" to "${"a".repeat(64)}\n")
             plain.forEach { (path, text) ->

@@ -1420,6 +1420,14 @@ internal class PamModalHost @JvmOverloads constructor(
                 )
                 return@repeat
             }
+            if (presentation == PRESENTATION_DIALOG) {
+                // The card keeps the engine's size (width, padding, max-width
+                // included) and is centred. WRAP_CONTENT re-measured it from
+                // its children: a 320 dp card with 24 dp padding shrank to
+                // 272 dp and ellipsized its action labels ("C...").
+                setModalChildLayoutParams(child, dialogChildLayoutParams(child.layoutParams))
+                return@repeat
+            }
             setModalChildLayoutParams(child, modalChildLayoutParams(presentation, sheetHeight))
             if (entrancePending) child.translationY = sheetEntranceOffset!!
             else if (!sheetAnimating) child.translationY = keyboardTranslation
@@ -2356,6 +2364,14 @@ internal fun modalChildLayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
     )
 }
+
+/** A centred dialog child at its engine size (exact pixels), else wrapped. */
+internal fun dialogChildLayoutParams(current: ViewGroup.LayoutParams?): FrameLayout.LayoutParams =
+    FrameLayout.LayoutParams(
+        current?.width?.takeIf { it > 0 } ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+        current?.height?.takeIf { it > 0 } ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+        Gravity.CENTER,
+    )
 
 private class PamModalContent(context: Context) : FrameLayout(context) {
     var observeMotion: ((MotionEvent) -> Unit)? = null

@@ -110,8 +110,10 @@ final class PamAnimatedImageTests: XCTestCase {
         // take longer than 2 s for both.
         PamAnimatedImageClock.shared.step(by: 0.15)
         waitUntil(timeout: 10) { view.animationFrameIndex != 0 && view.image?.cgImage !== first }
-        XCTAssertNotEqual(view.animationFrameIndex, 0)
-        XCTAssertFalse(view.image?.cgImage === first, "the displayed bitmap changed")
+        let state = "visible=\(view.isAnimationVisible) covered=\(PamRouteCoverage.isCovered(view)) "
+            + "running=\(PamAnimatedImageClock.shared.isRunning) elapsed=\(view.animationElapsed)"
+        XCTAssertNotEqual(view.animationFrameIndex, 0, state)
+        XCTAssertFalse(view.image?.cgImage === first, "the displayed bitmap changed; \(state)")
 
         // Hidden ancestor (covered route / inactive tab): time stands still.
         let host = UIView(frame: window.bounds)

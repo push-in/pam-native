@@ -588,10 +588,15 @@ internal class PamScrollContainer @JvmOverloads constructor(
         obscuredInsetPx: Int,
         retry: Boolean,
         keyboardGuard: Boolean = false,
+        expectedOffset: Int? = null,
     ) {
         if (horizontal) return
         activeScroll.post {
             if (
+                // The follow-up check yields to a scroll made since the reveal
+                // (a finger, a PHP scrollTo): on a slow frame it ran after
+                // that scroll and dragged the viewport back to the field.
+                expectedOffset != null && primaryCurrentOffset() != expectedOffset ||
                 !isAttachedToWindow ||
                 !target.isAttachedToWindow ||
                 !isDescendantOfContent(target) ||
@@ -636,8 +641,15 @@ internal class PamScrollContainer @JvmOverloads constructor(
             // the next frame. Recheck once so the focused editor cannot be
             // left outside a newly reduced viewport after rotation.
             if (retry) {
+                val settled = primaryCurrentOffset()
                 activeScroll.postOnAnimation {
-                    ensureTargetVisible(target, obscuredInsetPx, retry = false, keyboardGuard = keyboardGuard)
+                    ensureTargetVisible(
+                        target,
+                        obscuredInsetPx,
+                        retry = false,
+                        keyboardGuard = keyboardGuard,
+                        expectedOffset = settled,
+                    )
                 }
             }
         }

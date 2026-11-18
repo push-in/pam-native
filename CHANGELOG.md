@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.53.2 - 2026-11-18
+
+The fixes below plus the 1.53.0 and 1.53.1 changes; neither of those tags
+was published (the release community gate failed; see "Fixed (release)").
+
+- Fixed (Android): closing the HTTP module (hot reload, activity finished)
+  while `Http::upload` streamed a file threw an `IllegalStateException` from
+  the request body, which OkHttp rethrows on its dispatcher thread: the app
+  crashed. The upload now fails with an `IOException` and its call reports
+  the failure to PHP. A JVM test closes the module mid-upload and asserts
+  that no thread dies.
+- Fixed (Android): a centred dialog card (`Modal` `presentation="dialog"`)
+  was re-measured from its children and lost its padding: PAM Native UI's
+  320 dp confirm dialog came out 272 dp wide with "Cancel" and "Delete"
+  ellipsized to "C..." and "...". The card keeps the engine's size and is
+  centred; an instrumented test checks the width and the labels.
+- Fixed (Android): the follow-up check of a keyboard reveal (one frame
+  after the focus scroll) yields to a scroll made in between. On a slow
+  frame it ran after a finger or PHP `scrollTo` and dragged the viewport
+  back to the field. Reproduced with a loaded emulator (2 of 3 runs of
+  `PamKeyboardAwareScrollInstrumentedTest` failed, the CI flake); 4 of 4
+  pass loaded and all 55 keyboard and scroll instrumented tests pass.
+- Changed (Android): the first-launch bundle install inflates each chunk in
+  128 KiB steps. One call over a multi-MB chunk pinned its arrays (a JNI
+  critical section that blocks the GC) for 16 ms; ART logged it once in a
+  clean `pam init --template native-ui` run.
+- Changed (debug): the layout snapshot reports `ellipsized` for text that
+  PamTextView truncated by replacing it (React Native tail truncation),
+  which has no ellipsis in its own layout. The geometry check missed the
+  dialog's "C..." because of this.
+- Fixed (iOS): switching light/dark at runtime (`Appearance::set`) after
+  the keyboard had been shown left a blank screen in the background colour.
+  The new opaque background was also given to UIKit's transparent
+  `UITextEffectsWindow`, which sits above the app. Only the app's own
+  opaque windows are repainted now; every window still gets the style.
+- Fixed (macOS): on a fresh Mac `pam mobile` could not fetch the Native
+  CLI ("cannot download"): the assets are public, but PAM's macOS PHP looks
+  for CA certificates in its build directory, so TLS verification failed.
+  The launcher now verifies against the system bundle (`/etc/ssl/cert.pem`
+  and the usual Linux and Homebrew paths) when PHP has none, and falls back
+  to the system `curl` (HTTPS only), still checking the SHA-256.
+- Fixed (release): the community gate prebuilds components with the
+  runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
+- Tests: the iOS recycled-cell test mounts its list on screen. Off screen
+  the list mounts cells within a per-frame time budget, which a loaded CI
+  simulator exceeded (reproduced in a full local run, 969 tests twice green
+  after the change). The animated-image test reports the visibility state
+  when it fails.
+- Tests: the iOS clock-label test skips when the CI host scene is in the
+  background, where the binding correctly does not tick.
+
 ## 1.53.1 - 2026-11-17
 
 - Fixed: apps above minSdk 24 (including the default 26) no longer fail
