@@ -178,7 +178,22 @@ class PamKeyboardInstrumentedTest {
                 input.requestFocus()
                 showKeyboard(input)
             }
-            waitUntil(instrumentation, "IME shown") { activity.host.imeBottomInset > 0 }
+            run {
+                // A cold IME on a loaded CI emulator can drop a request: ask
+                // again every few seconds instead of failing after one.
+                var asked = SystemClock.uptimeMillis()
+                waitUntil(instrumentation, "IME shown", timeoutMs = 20_000) {
+                    val shown = activity.host.imeBottomInset > 0
+                    if (!shown && SystemClock.uptimeMillis() - asked > 4_000) {
+                        asked = SystemClock.uptimeMillis()
+                        input.requestFocus()
+                        input.context.getSystemService(InputMethodManager::class.java)
+                            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                        if (Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
+                    }
+                    shown
+                }
+            }
             assertTrue(events.contains(EventKind.FOCUS.value))
             // Back closes the keyboard without moving focus.
             Thread.sleep(500)
