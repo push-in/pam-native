@@ -70,7 +70,18 @@ public enum PamAppearance {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
-            .forEach { apply(to: $0, mode: mode) }
+            .forEach { apply(runtimeChange: $0, mode: mode) }
+    }
+
+    /// The style reaches every window; the opaque background only the app's
+    /// own (opaque) windows. A scene also holds UIKit's transparent windows
+    /// above the app (`UITextEffectsWindow` once the keyboard has shown): an
+    /// opaque background there covered the whole app with a blank screen.
+    static func apply(runtimeChange window: UIWindow, mode: Int) {
+        window.overrideUserInterfaceStyle = interfaceStyle(for: mode)
+        guard let current = window.backgroundColor,
+              current.resolvedColor(with: window.traitCollection).cgColor.alpha >= 1 else { return }
+        window.backgroundColor = backgroundColor
     }
 
     /// Exports the boot appearance so PHP reads it synchronously.

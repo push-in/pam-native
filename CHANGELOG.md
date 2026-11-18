@@ -8,6 +8,11 @@
   crashed. The upload now fails with an `IOException` and its call reports
   the failure to PHP. A JVM test closes the module mid-upload and asserts
   that no thread dies.
+- Fixed (iOS): switching light/dark at runtime (`Appearance::set`) after
+  the keyboard had been shown left a blank screen in the background colour.
+  The new opaque background was also given to UIKit's transparent
+  `UITextEffectsWindow`, which sits above the app. Only the app's own
+  opaque windows are repainted now; every window still gets the style.
 - Fixed (macOS): on a fresh Mac `pam mobile` could not fetch the Native
   CLI ("cannot download"): the assets are public, but PAM's macOS PHP looks
   for CA certificates in its build directory, so TLS verification failed.
