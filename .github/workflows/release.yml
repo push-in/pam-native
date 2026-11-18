@@ -165,7 +165,7 @@ jobs:
           sdkmanager "platforms;android-36"
           cargo clean --package pam-native-engine --package pam-native-protocol
           scripts/prepare-android-runtime.sh
-          ./android/gradlew -p android \
+          scripts/ci-gradle-retry.sh ./android/gradlew -p android \
             -PpamNativeRoot="$GITHUB_WORKSPACE" \
             :app:assembleRelease \
             :plugin-api:assembleRelease
@@ -217,7 +217,7 @@ jobs:
         run: |
           version=${PAM_RELEASE_TAG#v}
           artifact="dist/pam-native-android-plugin-api-${version}.aar"
-          ./android/gradlew -p android \
+          scripts/ci-gradle-retry.sh ./android/gradlew -p android \
             -PpamNativeRoot="$GITHUB_WORKSPACE" \
             :plugin-api:clean \
             :plugin-api:assembleRelease
