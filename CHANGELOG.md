@@ -8,6 +8,11 @@
   crashed. The upload now fails with an `IOException` and its call reports
   the failure to PHP. A JVM test closes the module mid-upload and asserts
   that no thread dies.
+- Fixed (Android): a centred dialog card (`Modal` `presentation="dialog"`)
+  was re-measured from its children and lost its padding: PAM Native UI's
+  320 dp confirm dialog came out 272 dp wide with "Cancel" and "Delete"
+  ellipsized to "C..." and "...". The card keeps the engine's size and is
+  centred; an instrumented test checks the width and the labels.
 - Fixed (iOS): switching light/dark at runtime (`Appearance::set`) after
   the keyboard had been shown left a blank screen in the background colour.
   The new opaque background was also given to UIKit's transparent
