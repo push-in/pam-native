@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.53.8 - 2026-11-18
+
+Font size and language changes keep the reader's place.
+
+- Fixed: Android — a font scale, density or locale change no longer loses
+  the reader's place: ScrollView and FlatList/VirtualizedList/SectionList
+  (inverted included) keep the row under their top edge, by item identity and
+  with its re-measured height, and lists resting at either end stay there.
+- Fixed: Android — the focused input keeps its focus, selection and open
+  keyboard across that remount, without `onBlur`/`onEndEditing`/`onFocus`
+  reaching PHP; the IME restart caused by the configuration change no longer
+  blurs it.
+
 ## 1.53.7 - 2026-11-18
 
 - Fixed: a cold start under `pam dev` no longer restarts the PHP request
