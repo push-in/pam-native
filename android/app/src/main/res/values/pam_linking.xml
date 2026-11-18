@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "linking.openSchemes" by the PAM Native CLI. -->
+<resources>
+    <string-array name="pam_open_url_schemes" translatable="false">
+    </string-array>
+</resources>

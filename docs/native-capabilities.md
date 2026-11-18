@@ -69,6 +69,21 @@ Linking::open(
 callback as their final argument. Omitting it preserves the original exception
 behavior for compatibility.
 
+`Linking::open()` accepts `https`, `http`, `mailto`, `tel` and `geo` URLs, in
+any letter case (`Https://` opens like `https://`). Other schemes are declared
+by the app in `pam-native.json`:
+
+```json
+"linking": { "openSchemes": ["otpauth"] }
+```
+
+The URL is handed to the system directly, as React Native does, so it opens
+whenever an installed app handles it and fails (the failure callback) when
+none does. The CLI also adds an Android `<queries>` entry and the iOS
+`LSApplicationQueriesSchemes` for each scheme, so `Linking::canOpen()` sees
+the apps that handle them. `file`, `content`, `intent`, `android-app`,
+`javascript`, `data` and similar schemes are rejected.
+
 ## Voice recording
 
 `AudioRecorder` records AAC/M4A voice media and exposes bounded amplitude

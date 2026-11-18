@@ -186,6 +186,63 @@ struct NativeManifest {
     /// Route compiler options (routes file, generated namespace/output).
     #[serde(default)]
     routes: Option<crate::routes::RoutesOptions>,
+    /// Outgoing links (`Linking::open()`/`canOpen()`).
+    #[serde(default)]
+    linking: LinkingOptions,
+}
+
+/// `linking` in pam-native.json: what `Linking::open()` may hand to other apps.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LinkingOptions {
+    /// URI schemes opened besides https, http, mailto, tel and geo (for
+    /// example `otpauth` for authenticator apps). Android gets a matching
+    /// `<queries>` entry and iOS `LSApplicationQueriesSchemes`, so
+    /// `Linking::canOpen()` sees the apps that handle them.
+    #[serde(default)]
+    open_schemes: Vec<String>,
+}
+
+/// Schemes `Linking::open()` always accepts.
+const DEFAULT_OPEN_SCHEMES: &[&str] = &["https", "http", "mailto", "tel", "geo"];
+
+/// Schemes that reach local files, other apps' private components or script
+/// and never become openable through `linking.openSchemes`.
+const BLOCKED_OPEN_SCHEMES: &[&str] = &[
+    "file",
+    "content",
+    "intent",
+    "android-app",
+    "javascript",
+    "vbscript",
+    "data",
+    "blob",
+    "about",
+    "jar",
+];
+
+impl LinkingOptions {
+    fn validate(&self) -> Result<(), String> {
+        let mut seen = BTreeSet::new();
+        for scheme in &self.open_schemes {
+            if !valid_uri_scheme(scheme) || scheme.to_ascii_lowercase() != *scheme {
+                return Err(format!(
+                    "invalid linking.openSchemes entry {scheme:?}; expected a lower-case URI scheme such as otpauth"
+                ));
+            }
+            if BLOCKED_OPEN_SCHEMES.contains(&scheme.as_str()) {
+                return Err(format!(
+                    "linking.openSchemes cannot include {scheme:?}: it reaches local files, app components or script"
+                ));
+            }
+            if DEFAULT_OPEN_SCHEMES.contains(&scheme.as_str()) || !seen.insert(scheme.as_str()) {
+                return Err(format!(
+                    "linking.openSchemes entry {scheme:?} is a default or repeated scheme"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1813,6 +1870,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         ));
     }
     validate_ios_app_options(&manifest.ios)?;
+    manifest.linking.validate()?;
     if !matches!(manifest.runtime.php.as_str(), "8.4" | "8.5") {
         return Err("runtime.php must be 8.4 or 8.5".to_owned());
     }
@@ -2281,6 +2339,30 @@ fn merge_ios_links(
         )?;
     }
     Ok(!ios.associated_domains.is_empty())
+}
+
+/// `linking.openSchemes` on iOS: `LSApplicationQueriesSchemes` for
+/// `canOpenURL` and `PamOpenURLSchemes`, the list SystemModule accepts.
+fn merge_ios_open_schemes(
+    linking: &LinkingOptions,
+    info: &mut serde_json::Value,
+) -> Result<(), String> {
+    linking.validate()?;
+    let object = info
+        .as_object_mut()
+        .ok_or_else(|| "App/Info.plist must contain a top-level dictionary".to_owned())?;
+    object.insert(
+        "PamOpenURLSchemes".to_owned(),
+        serde_json::json!(linking.open_schemes),
+    );
+    if !linking.open_schemes.is_empty() {
+        merge_plist_value(
+            info,
+            serde_json::json!({"LSApplicationQueriesSchemes": linking.open_schemes}),
+            "linking.openSchemes",
+        )?;
+    }
+    Ok(())
 }
 
 fn valid_uri_scheme(value: &str) -> bool {
@@ -4710,6 +4792,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
     }
 
     has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
+    merge_ios_open_schemes(&project.manifest.linking, &mut info)?;
     merge_ios_app_info(&project.manifest.ios, &mut info)?;
     let firebase = ios_firebase_config(&project.root);
     has_entitlements |= apply_ios_push_entitlement(&mut entitlements, firebase.is_some());
@@ -6837,7 +6920,58 @@ fn configure_android(
         "supportsPictureInPicture",
         project.manifest.android.picture_in_picture.then_some("true"),
     )?;
+    add_open_scheme_queries(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        &project.manifest.linking.open_schemes,
+    )?;
+    write_atomic(
+        &workspace.join("app/src/main/res/values/pam_linking.xml"),
+        linking_resources(&project.manifest.linking.open_schemes).as_bytes(),
+    )?;
     configure_android_tv(project, workspace)
+}
+
+/// `linking.openSchemes` as the string array SystemModule accepts.
+fn linking_resources(schemes: &[String]) -> String {
+    let mut items = String::new();
+    for scheme in schemes {
+        items.push_str(&format!("        <item>{scheme}</item>\n"));
+    }
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Generated from pam-native.json \"linking.openSchemes\" by the PAM Native CLI. -->\n<resources>\n    <string-array name=\"pam_open_url_schemes\" translatable=\"false\">\n{items}    </string-array>\n</resources>\n"
+    )
+}
+
+/// One `<queries>` VIEW intent per `linking.openSchemes` entry, so
+/// `Linking::canOpen()` sees the apps that handle it on Android 11+.
+fn add_open_scheme_queries(manifest: &Path, schemes: &[String]) -> Result<(), String> {
+    const START: &str = "        <!-- pam-native:open-schemes:start -->";
+    const END: &str = "        <!-- pam-native:open-schemes:end -->";
+
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    if let Some(start) = contents.find(START)
+        && let Some(end_offset) = contents[start..].find(END)
+    {
+        let end = start + end_offset + END.len();
+        let trailing = usize::from(contents.as_bytes().get(end) == Some(&b'\n'));
+        contents.replace_range(start..end + trailing, "");
+    }
+    if !schemes.is_empty() {
+        let close = contents
+            .find("    </queries>")
+            .ok_or_else(|| "Android manifest has no queries element".to_owned())?;
+        let mut block = format!("{START}\n");
+        for scheme in schemes {
+            block.push_str(&format!(
+                "        <intent>\n            <action android:name=\"android.intent.action.VIEW\" />\n            <data android:scheme=\"{scheme}\" />\n        </intent>\n"
+            ));
+        }
+        block.push_str(END);
+        block.push('\n');
+        contents.insert_str(close, &block);
+    }
+    write_atomic(manifest, contents.as_bytes())
 }
 
 /// `targets: ["android-tv"]`: the TV launcher entry (LEANBACK_LAUNCHER), a
@@ -13503,6 +13637,69 @@ mod bundle_exclusion_tests {
             assert!(parse_bundle_exclusions(input).is_err(), "{input}");
         }
     }
+    #[test]
+    fn linking_open_schemes_reach_queries_resources_and_info_plist() {
+        let linking: LinkingOptions =
+            serde_json::from_value(serde_json::json!({"openSchemes": ["otpauth", "whatsapp"]}))
+                .unwrap();
+        linking.validate().unwrap();
+        for bad in [
+            serde_json::json!({"openSchemes": ["file"]}),
+            serde_json::json!({"openSchemes": ["intent"]}),
+            serde_json::json!({"openSchemes": ["javascript"]}),
+            serde_json::json!({"openSchemes": ["OTPAUTH"]}),
+            serde_json::json!({"openSchemes": ["https"]}),
+            serde_json::json!({"openSchemes": ["otpauth", "otpauth"]}),
+            serde_json::json!({"openSchemes": ["bad scheme"]}),
+        ] {
+            let options: LinkingOptions = serde_json::from_value(bad.clone()).unwrap();
+            assert!(options.validate().is_err(), "{bad}");
+        }
+        assert!(serde_json::from_value::<LinkingOptions>(serde_json::json!({"schemes": []})).is_err());
+
+        let root = std::env::temp_dir().join(format!(
+            "pam-open-schemes-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        fs::write(&manifest, template).expect("manifest");
+        add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries");
+        add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries again");
+        let generated = fs::read_to_string(&manifest).expect("generated");
+        let queries = &generated[generated.find("<queries>").unwrap()..generated.find("</queries>").unwrap()];
+        assert_eq!(queries.matches("android:scheme=\"otpauth\"").count(), 1, "idempotent");
+        assert_eq!(queries.matches("android:scheme=\"whatsapp\"").count(), 1);
+        add_open_scheme_queries(&manifest, &[]).expect("queries removed");
+        assert_eq!(fs::read_to_string(&manifest).expect("manifest"), template);
+        fs::remove_dir_all(root).expect("cleanup");
+
+        let resources = linking_resources(&linking.open_schemes);
+        assert!(resources.contains("<string-array name=\"pam_open_url_schemes\""));
+        assert!(resources.contains("<item>otpauth</item>") && resources.contains("<item>whatsapp</item>"));
+        assert_eq!(
+            linking_resources(&[]),
+            include_str!("../../../android/app/src/main/res/values/pam_linking.xml"),
+            "the checked-in default is the generated empty list"
+        );
+
+        let mut info = serde_json::json!({"LSApplicationQueriesSchemes": ["instagram", "otpauth"]});
+        merge_ios_open_schemes(&linking, &mut info).unwrap();
+        merge_ios_open_schemes(&linking, &mut info).unwrap();
+        assert_eq!(
+            info["LSApplicationQueriesSchemes"],
+            serde_json::json!(["instagram", "otpauth", "whatsapp"])
+        );
+        assert_eq!(info["PamOpenURLSchemes"], serde_json::json!(["otpauth", "whatsapp"]));
+        let mut empty = serde_json::json!({});
+        merge_ios_open_schemes(&LinkingOptions::default(), &mut empty).unwrap();
+        assert_eq!(empty, serde_json::json!({"PamOpenURLSchemes": []}));
+    }
+
     #[test]
     fn ios_links_merge_preserves_plugin_entitlements_and_diagnostics() {
         let ios: IosOptions = serde_json::from_value(serde_json::json!({

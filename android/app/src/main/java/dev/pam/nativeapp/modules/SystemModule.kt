@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.ClipData
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -22,6 +23,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.pam.nativeapp.PamActivity
+import dev.pam.nativeapp.R
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,6 +34,10 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     private val closed = AtomicBoolean()
     /** Choice dialogs still on screen; dismissed (answering -1) when the module closes. Main thread only. */
     private val openDialogs = mutableSetOf<AlertDialog>()
+    /** Defaults plus pam-native.json `linking.openSchemes`. */
+    private val openSchemes by lazy {
+        OpenUrlSchemes(context.resources.getStringArray(R.array.pam_open_url_schemes).asList())
+    }
 
     fun invoke(
         operation: NativeOperation,
@@ -181,10 +187,14 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        require(intent.resolveActivity(context.packageManager) != null) {
-            "No Android activity can open this URL"
+        // Started directly, like React Native: Android 11+ package visibility
+        // hides handlers of schemes the manifest does not query from
+        // resolveActivity, not from startActivity.
+        try {
+            context.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            throw IllegalArgumentException("No Android activity can open this URL")
         }
-        context.startActivity(intent)
         completion.success()
     }
 
@@ -453,9 +463,10 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
             ) { "Invalid Android permission" }
         }
 
+    /** The scheme is matched and handed on in lower case (`Https://` opens like `https://`). */
     private fun safeUri(value: String): Uri =
-        Uri.parse(value).also { uri ->
-            require(uri.scheme in setOf("https", "http", "mailto", "tel", "geo")) {
+        Uri.parse(value).normalizeScheme().also { uri ->
+            require(openSchemes.accepts(uri.scheme)) {
                 "Unsupported URL scheme"
             }
         }
