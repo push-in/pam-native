@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.53.1 - 2026-11-17
+
+- Fixed: apps above minSdk 24 (including the default 26) no longer fail
+  `:app:lintDebug` with `ObsoleteSdkInt` on the host's Android 7.0 version
+  checks; the framework still lints the host at minSdk 24. 1.53.0 was tagged
+  but never published because the ecosystem Android certification caught
+  this.
+
 ## 1.53.0 - 2026-11-17
 
 Android apps reach the same devices as a typical React Native app: 32-bit
