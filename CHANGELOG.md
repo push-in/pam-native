@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.53.9 - 2026-11-18
+
+- Added: app theme tokens. `pam-native.json` `"theme": {"tokens":
+  "src/theme.css"}` names a file of `:root { --token: value; }`
+  declarations that the compiler appends after every component library's own
+  `src/app.css` (and to the app's components): a library such as PAM Native
+  UI takes the app's palette, radii and sizes at compile time, in light and
+  dark. The file may only declare custom properties (64 KiB), is validated by
+  the CLI and the JSON schema, and is part of every compiled component's
+  cache key, so editing it recompiles and hot reloads. Apps without it are
+  untouched (one cached lookup per directory).
+
 ## 1.53.8 - 2026-11-18
 
 Font size and language changes keep the reader's place.
