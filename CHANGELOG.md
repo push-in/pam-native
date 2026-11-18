@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.53.7 - 2026-11-18
+
+- Fixed: a cold start under `pam dev` no longer restarts the PHP request
+  when the installed bundle already is the served version. It switched to
+  the live directory (a full PHP restart) even with "0 files changed",
+  right after the first mount, dropping every pending native callback: a
+  biometric prompt opened in onMounted then answered nobody (Galaxy S10,
+  pam-native-auth). The client hashes the installed bundle once against the
+  manifest; any difference still reloads as before.
+- Fixed: a hot reload closes prompts that would otherwise answer a PHP
+  request that no longer exists: system choice dialogs, and any module
+  implementing the new plugin API `ReloadAwareModule.prepareReload()`.
+- Fixed: each Android app talks to its own `pam dev` device port
+  (39100-39899 from its package name; the CLI computes the same). Every app
+  used device port 39100, so a second `pam dev` on the same phone pushed its
+  bundle into another app. The host port follows the device port unless
+  `PAM_NATIVE_ANDROID_DEV_PORT` is set, and a busy host port says so.
+
 ## 1.53.6 - 2026-11-18
 
 Android keeps the running app and its plugins alive through font, display

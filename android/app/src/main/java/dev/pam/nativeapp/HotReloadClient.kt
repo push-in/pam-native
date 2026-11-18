@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Debug-only client of the `pam dev` sync server (reached through
- * `adb reverse tcp:39100`, over USB or Wi-Fi).
+ * `adb reverse tcp:<devicePort(package)>`, over USB or Wi-Fi).
  *
  * It long-polls `/status`, fetches the manifest (a delta after the first
  * sync), downloads only the files the device does not hold and hands the
@@ -39,10 +39,18 @@ internal class HotReloadClient(
     private val reporter = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pam-hot-reload-report").apply { isDaemon = true }
     }
+    private val BASE_URL = "http://127.0.0.1:${devicePort(context.packageName)}"
+
+    /** The installed bundle the app booted from, while it is not running live/. */
+    private val bootDirectory: File? = initialEntryPath?.let(::File)?.parentFile
+        ?.takeUnless { it.absolutePath == File(context.filesDir.resolve("pam/dev"), "live").absolutePath }
+
+    /** The `pam dev` version the installed bundle already is (no reload needed). */
+    @Volatile
+    private var bootVersion: String? = null
+
     private val store: HotReloadStore = run {
         val root = context.filesDir.resolve("pam/dev")
-        val bootDirectory = initialEntryPath?.let(::File)?.parentFile
-            ?.takeUnless { it.absolutePath == File(root, "live").absolutePath }
         HotReloadStore(
             root,
             listOfNotNull(
@@ -97,7 +105,32 @@ internal class HotReloadClient(
     }
 
     private fun currentVersion(): String? =
-        if (runningLive) store.liveManifest?.version else null
+        if (runningLive) store.liveManifest?.version else bootVersion
+
+    /**
+     * Whether the installed bundle the app booted from holds exactly
+     * [manifest]'s files. A cold start under `pam dev` used to switch to
+     * live/ (restarting the PHP request) even when nothing had changed,
+     * dropping every pending native callback (a biometric prompt opened by
+     * onMounted then answered nobody).
+     */
+    private fun bootBundleMatches(manifest: HotReloadManifest): Boolean {
+        val root = bootDirectory ?: return false
+        val buffer = ByteArray(64 * 1024)
+        return manifest.files.values.all { file ->
+            val local = File(root, file.path)
+            if (!local.isFile || local.length() != file.size) return@all false
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            local.inputStream().use { input ->
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) } == file.sha256
+        }
+    }
 
     private fun sync() {
         if (closed.get()) return
@@ -113,7 +146,7 @@ internal class HotReloadClient(
         } catch (error: HotReloadTransportException) {
             failures++
             if (!transportLogged) {
-                Log.i(TAG, "Waiting for `pam dev` on 127.0.0.1:39100 (adb reverse): ${error.cause?.message}")
+                Log.i(TAG, "Waiting for `pam dev` on $BASE_URL (adb reverse): ${error.cause?.message}")
                 transportLogged = true
             }
             backoff()
@@ -183,6 +216,13 @@ internal class HotReloadClient(
             next,
             base,
         )
+        if (!runningLive && bootVersion == null && bootBundleMatches(manifest)) {
+            // Same files as the installed bundle: keep the running request.
+            // A later edit switches to live/ through a normal reload.
+            bootVersion = next
+            Log.i(TAG, "Version ${next.take(12)} matches the installed bundle: no reload")
+            return
+        }
         val plan = store.plan(manifest)
         if (plan.missing.isNotEmpty()) {
             val body = plan.missing.joinToString("\n", postfix = "\n").toByteArray(Charsets.US_ASCII)
@@ -303,7 +343,18 @@ internal class HotReloadClient(
 
     internal companion object {
         const val TAG = "PamNativeHotReload"
-        const val BASE_URL = "http://127.0.0.1:39100"
+        /**
+         * This app's device port, 39100-39899 from an FNV-1a hash of its
+         * package name (the CLI's `android_dev_port::device_port`): two apps
+         * on one phone never reach each other's `pam dev`.
+         */
+        fun devicePort(packageName: String): Int {
+            var hash = 0x811c9dc5.toInt()
+            for (byte in packageName.toByteArray(Charsets.UTF_8)) {
+                hash = (hash xor (byte.toInt() and 0xff)) * 0x01000193
+            }
+            return 39_100 + (hash.toUInt() % 800u).toInt()
+        }
         const val CONNECT_TIMEOUT_MILLIS = 500
         const val READ_TIMEOUT_MILLIS = 10_000
         /** The server answers a long poll within 20 s. */
