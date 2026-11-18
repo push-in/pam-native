@@ -10014,8 +10014,9 @@ fn dev(options: MobileOptions) -> Result<u8, String> {
 }
 
 fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
-    let host_port = android_dev_port::resolve(DEFAULT_PORT)?;
     let apk = build_intermediate(options, true)?;
+    let device_port = android_dev_port::device_port(&debug_application_id(&apk.project));
+    let host_port = android_dev_port::resolve(device_port)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Android,
@@ -10026,19 +10027,31 @@ fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
         "adb",
         &[
             "reverse",
-            &format!("tcp:{DEFAULT_PORT}"),
+            &format!("tcp:{device_port}"),
             &format!("tcp:{host_port}"),
         ],
     )?;
     install_and_launch(&apk.project, &apk.path, BuildMode::Debug)?;
-    hot_reload_server(&apk.project, host_port, true)
+    hot_reload_server(&apk.project, device_port, host_port, true)
 }
 
-fn hot_reload_server(project: &Project, host_port: u16, adb: bool) -> Result<u8, String> {
-    let listener = TcpListener::bind(("127.0.0.1", host_port))
-        .map_err(|error| format!("cannot bind hot reload server: {error}"))?;
-    println!("Pam Native hot reload listening on 127.0.0.1:{host_port}. Press Ctrl+C to stop.");
-    let mut transport = AdbReverse::new(DEFAULT_PORT, host_port);
+fn hot_reload_server(
+    project: &Project,
+    device_port: u16,
+    host_port: u16,
+    adb: bool,
+) -> Result<u8, String> {
+    let listener = TcpListener::bind(("127.0.0.1", host_port)).map_err(|error| {
+        format!(
+            "cannot bind hot reload server on 127.0.0.1:{host_port}: {error} (another `pam dev`? \
+             set PAM_NATIVE_ANDROID_DEV_PORT to a free port)"
+        )
+    })?;
+    println!(
+        "Pam Native hot reload listening on 127.0.0.1:{host_port} (device port {device_port} for {}). Press Ctrl+C to stop.",
+        debug_application_id(project)
+    );
+    let mut transport = AdbReverse::new(device_port, host_port);
     run_dev_sync(
         project,
         listener,
@@ -10057,14 +10070,15 @@ fn hot_reload_server(project: &Project, host_port: u16, adb: bool) -> Result<u8,
 /// with `adb reverse` unless `PAM_NATIVE_DEV_NO_ADB=1`.
 fn dev_serve(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
-    let host_port = android_dev_port::resolve(DEFAULT_PORT)?;
+    let device_port = android_dev_port::device_port(&debug_application_id(&project));
+    let host_port = android_dev_port::resolve(device_port)?;
     let adb = std::env::var_os("PAM_NATIVE_DEV_NO_ADB").is_none_or(|value| value != "1");
     if adb
         && command_status(
             "adb",
             &[
                 "reverse",
-                &format!("tcp:{DEFAULT_PORT}"),
+                &format!("tcp:{device_port}"),
                 &format!("tcp:{host_port}"),
             ],
         )
@@ -10072,7 +10086,7 @@ fn dev_serve(project_path: PathBuf) -> Result<u8, String> {
     {
         println!("Android sync: no device yet; adb reverse is retried every 3 s");
     }
-    hot_reload_server(&project, host_port, adb)
+    hot_reload_server(&project, device_port, host_port, adb)
 }
 
 #[derive(Clone, Copy)]
