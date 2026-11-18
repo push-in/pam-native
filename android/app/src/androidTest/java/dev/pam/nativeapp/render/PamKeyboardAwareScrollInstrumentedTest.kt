@@ -154,7 +154,7 @@ class PamKeyboardAwareScrollInstrumentedTest {
                 assertEquals("detach releases the keyboard content inset", 0, f.scroll.keyboardAvoidanceInsetPixels())
                 parent.addView(f.scroll, index)
                 f.first.requestFocus()
-                f.first.context.getSystemService(InputMethodManager::class.java).showSoftInput(f.first, InputMethodManager.SHOW_IMPLICIT)
+                f.first.context.getSystemService(InputMethodManager::class.java).showSoftInput(f.first, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) f.first.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
             f.waitFor("reattached consumer measures the keyboard again") { f.visiblePixels(f.first, f.imePixels(), f.dp(180)) }
             f.onMain {
@@ -236,7 +236,7 @@ class PamKeyboardAwareScrollInstrumentedTest {
             onMain {
                 first.requestFocus()
                 imeShowAccepted = first.context.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(first, InputMethodManager.SHOW_IMPLICIT)
+                    .showSoftInput(first, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) first.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
         }
         fun tap(input: EditText) {

@@ -74,7 +74,7 @@ class PamKeyboardDismissInstrumentedTest {
             onMain {
                 input.requestFocus()
                 activity.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
             await("IME initially visible") { visible() }
             SystemClock.sleep(500)

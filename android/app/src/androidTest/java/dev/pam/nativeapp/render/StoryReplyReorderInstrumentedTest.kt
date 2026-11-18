@@ -87,7 +87,7 @@ class StoryReplyReorderInstrumentedTest {
                 val views = field.get(renderer) as android.util.LongSparseArray<View>
                 input = views[7] as EditText
                 input.requestFocus()
-                manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
             // A cold IME on a loaded CI emulator can drop the first request:
             // ask again every few seconds instead of failing after one.
@@ -105,7 +105,7 @@ class StoryReplyReorderInstrumentedTest {
                         if (android.os.Build.VERSION.SDK_INT >= 30) {
                             input.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
                         }
-                        manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                        manager.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
                     }
                 }
                 if (!served) SystemClock.sleep(40)

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.53.5 - 2026-11-18
+
+1.53.4, released: its tag was not published because the release hit
+Maven Central rate limits and a lost macOS runner.
+
+- Fixed (Android): restoring a keyboard-avoiding input, a modal's focused
+  field and a root host's target ask for the IME with
+  `WindowInsetsController.show(ime())` next to `SHOW_IMPLICIT`, as autofocus
+  already did: an implicit request made before the field's input connection
+  is served is dropped. The keyboard instrumented tests request it the same
+  way (each CI run had one keyboard test time out waiting for the IME).
+- CI: Gradle resolves Maven Central through Google's public mirror
+  (`scripts/ci-gradle-mirror.sh`, an init script). A release starts dozens of
+  Gradle jobs at once and repo.maven.apache.org answered 429 for longer than
+  three retries; the mirror serves the same artifacts.
+
 ## 1.53.4 - 2026-11-18
 
 A fresh Mac runs `pam mobile ios:*` with no manual step.

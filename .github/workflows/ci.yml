@@ -120,6 +120,8 @@ jobs:
           key: android
       - name: Prepare checksummed runtime and native engine
         run: scripts/prepare-android-runtime.sh
+      - name: Route Maven Central through Google's mirror
+        run: scripts/ci-gradle-mirror.sh
       - name: Test and build the Android renderer
         run: >-
           ./android/gradlew
@@ -200,6 +202,8 @@ jobs:
           path: dist
       - name: Restore native prerequisites
         run: tar -xzf dist/pam-native-android-prerequisites.tar.gz
+      - name: Route Maven Central through Google's mirror
+        run: scripts/ci-gradle-mirror.sh
       - name: Resolve instrumentation dependencies before the emulator boots
         run: scripts/ci-gradle-retry.sh ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest --dry-run
       - name: Enable KVM

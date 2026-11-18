@@ -74,7 +74,7 @@ class PamLegacyKeyboardVisibilityInstrumentedTest {
             await("input has window focus") { input.isShown && input.hasWindowFocus() }
             instrumentation.runOnMainSync {
                 input.requestFocus()
-                input.context.getSystemService(InputMethodManager::class.java).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                input.context.getSystemService(InputMethodManager::class.java).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
             }
             await("legacy visible transition") { events.lastOrNull() == true }
             SystemClock.sleep(500)

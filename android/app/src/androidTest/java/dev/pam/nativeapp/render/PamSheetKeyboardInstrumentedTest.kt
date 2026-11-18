@@ -453,7 +453,7 @@ class PamSheetKeyboardInstrumentedTest {
                 assertTrue("sheet starts below safe top before IME: top=$top safe=$safeTop snap=$snapPoint", top >= safeTop)
                 if (!relayout) {
                     input.requestFocus()
-                    (activity.getSystemService(InputMethodManager::class.java)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    (activity.getSystemService(InputMethodManager::class.java)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
                 }
             }
             if (relayout) {
@@ -488,7 +488,7 @@ class PamSheetKeyboardInstrumentedTest {
                             input.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
                         }
                         activity.getSystemService(InputMethodManager::class.java)
-                            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                            .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
                     }
                 }
                 shown
@@ -607,7 +607,7 @@ class PamSheetKeyboardInstrumentedTest {
                 onMain(instrumentation) {
                     sheetInput.requestFocus()
                     sheetInput.context.getSystemService(InputMethodManager::class.java)
-                        .showSoftInput(sheetInput, InputMethodManager.SHOW_IMPLICIT)
+                        .showSoftInput(sheetInput, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) sheetInput.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
                 }
             }
             waitUntil(instrumentation, "sheet field and save above the IME", timeoutMs = 10_000) {

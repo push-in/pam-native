@@ -10644,7 +10644,7 @@ class PamRenderer(
         if (!input.isAttachedToWindow || !input.isShown) return
         if (!input.hasFocus()) input.requestFocus()
         (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-            ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
     }
 
     private fun requestAutoFocus(view: View, id: Long) {

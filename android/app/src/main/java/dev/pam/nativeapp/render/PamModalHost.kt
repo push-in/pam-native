@@ -1180,7 +1180,7 @@ internal class PamModalHost @JvmOverloads constructor(
                     if (focusKeyboard && focus is EditText) {
                         val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
                             as? InputMethodManager
-                        keyboard?.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
+                        keyboard?.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) focus.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
                     }
                 }
             }
