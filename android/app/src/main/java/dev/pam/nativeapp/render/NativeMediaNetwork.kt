@@ -2,8 +2,9 @@ package dev.pam.nativeapp.render
 
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
@@ -63,10 +64,17 @@ internal fun parseRetryAfterMs(value: String?, nowMs: Long = System.currentTimeM
         val seconds = text.toLongOrNull() ?: return MEDIA_RETRY_MAX_MS
         return seconds.coerceAtMost(MEDIA_RETRY_MAX_MS / 1_000) * 1_000
     }
-    val date = runCatching { ZonedDateTime.parse(text, DateTimeFormatter.RFC_1123_DATE_TIME) }.getOrNull()
-        ?: return null
-    return (date.toInstant().toEpochMilli() - nowMs).coerceIn(0, MEDIA_RETRY_MAX_MS)
+    val date = parseHttpDateMs(text) ?: return null
+    return (date - nowMs).coerceIn(0, MEDIA_RETRY_MAX_MS)
 }
+
+/** RFC 1123 HTTP date (`Tue, 14 Nov 2023 22:13:25 GMT`); java.time is API 26+. */
+private fun parseHttpDateMs(text: String): Long? = runCatching {
+    SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("GMT")
+        isLenient = false
+    }.parse(text)?.time
+}.getOrNull()
 
 /**
  * Backoff before retry number [attempt] (0 = first retry): 0.5 s doubling up

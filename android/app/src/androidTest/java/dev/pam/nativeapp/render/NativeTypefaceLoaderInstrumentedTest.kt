@@ -27,7 +27,8 @@ class NativeTypefaceLoaderInstrumentedTest {
         widths.zip(engineWidths).forEach { (drawn, measured) ->
             assertTrue("Engine width $measured is smaller than Android width $drawn", drawn <= kotlin.math.ceil(measured))
         }
-        assertTrue(widths.last() > widths.first())
+        // Android 7.x has no variable-font axes: synthetic bold keeps the advance.
+        if (android.os.Build.VERSION.SDK_INT >= 26) assertTrue(widths.last() > widths.first())
         widths.zipWithNext().forEach { (lighter, heavier) ->
             assertTrue("Expected nondecreasing widths, got $widths", heavier >= lighter)
         }

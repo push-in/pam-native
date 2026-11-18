@@ -173,7 +173,9 @@ The package advertises one descriptor:
 All paths are package-relative. PAM canonicalizes them and rejects traversal,
 symlink escapes, oversized descriptors, duplicate binding names, incompatible
 SDK/protocol ranges, non-HTTPS repositories, invalid Maven coordinates, and a
-plugin `minSdk` above the app `minSdk`.
+plugin `minSdk` above the app `minSdk`. A plugin `minSdk` may be 24 to 36 and
+defaults to 24; an app that targets Android 7.x (`android.minSdk` 24) can only
+use plugins that declare 24 or omit it, see [Android 7.x](android-min-sdk.md).
 
 Maven View libraries and precompiled Compose/View AARs work through
 `dependencies` or `localAars`. The plugin module participates in normal Android

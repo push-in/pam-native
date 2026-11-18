@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.52.1 - 2026-11-18
+## 1.53.1 - 2026-11-18
 
 - Fixed (Android): closing the HTTP module (hot reload, activity finished)
   while `Http::upload` streamed a file threw an `IllegalStateException` from
@@ -18,6 +18,27 @@
   runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
 - Tests: the iOS clock-label test skips when the CI host scene is in the
   background, where the binding correctly does not tick.
+
+## 1.53.0 - 2026-11-17
+
+Android apps reach the same devices as a typical React Native app: 32-bit
+ARM and x86 phones and Android 7.0/7.1.
+
+- Added: native `armeabi-v7a` and `x86` builds. `pam-native build android`
+  now packages arm64-v8a, armeabi-v7a, x86 and x86_64 by default, linked
+  against the 32-bit PHP 8.5 runtimes from PAM v2.2.21 (64-bit integers on
+  every ABI). The bridge refuses a runtime without 64-bit `zend_long`.
+- Added: Android 7.0/7.1 support. `android.minSdk` accepts 24 (the default
+  stays 26) and plugins default to minSdk 24. Below API 26 the host links a
+  small bionic shim (`mblen`, `nl_langinfo`) for the prebuilt PHP runtime,
+  and `android.icon` adds a square pre-adaptive launcher icon.
+- Fixed: every API newer than 24 in the Android host has a version check and
+  fallback (hardware bitmaps no longer throw `NoSuchFieldError`,
+  `Typeface.Builder`, `java.nio.file`, `java.util.Base64`, `java.time`,
+  autofill, tooltip, justification, autosize, focus highlight, light
+  navigation bar, vibration, network callback, `MediaPlayer` seek, animator
+  scale, dev-tools receiver); lint runs at minSdk 24.
+- Changed: the engine and the Android runtimes are pinned to PAM v2.2.21.
 
 ## 1.52.0 - 2026-11-17
 

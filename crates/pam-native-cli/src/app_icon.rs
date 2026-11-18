@@ -36,11 +36,17 @@ const ANDROID_LAYERS: [&str; 3] = [
     "pam_launcher_background",
     "pam_launcher_monochrome",
 ];
-/// minSdk is 26, so the adaptive icon needs no `-v26` qualifier (lint
+/// With minSdk 26+ the adaptive icon needs no `-v26` qualifier (lint
 /// ObsoleteSdkInt); `anydpi` still wins over the bundled `drawable` icon.
 const ANDROID_ADAPTIVE: &str = "drawable-anydpi/pam_launcher.xml";
-/// Where releases before 1.46.18 wrote it; removed so two variants never coexist.
-const ANDROID_ADAPTIVE_LEGACY: &str = "drawable-anydpi-v26/pam_launcher.xml";
+/// With minSdk 24/25 the adaptive icon moves here and `ANDROID_ADAPTIVE`
+/// holds the pre-adaptive fallback (Android 7.x cannot inflate
+/// `<adaptive-icon>`). Releases 1.46.18 and older also wrote it here; it is
+/// removed on every sync so the variants never go stale.
+const ANDROID_ADAPTIVE_V26: &str = "drawable-anydpi-v26/pam_launcher.xml";
+/// Adaptive icons show the middle 72 dp of the 108 dp layers; the 48 dp
+/// legacy icon crops the same share (48 / 72 * 18 dp = 12 dp per side).
+const ANDROID_LEGACY_CROP_DP: u32 = 12;
 const ANDROID_COLOR: &str = "values/pam_launcher.xml";
 
 impl AndroidIcon {
@@ -73,9 +79,12 @@ impl AndroidIcon {
 /// Writes (or removes) the adaptive launcher icon resources under `res`.
 /// The manifest always points at `@drawable/pam_launcher`; the bundled
 /// `drawable/pam_launcher.xml` is the PAM icon and the generated
-/// `drawable-anydpi` variant replaces it on every supported release.
+/// `drawable-anydpi` variant replaces it on every supported release. Below
+/// `min_sdk` 26 the adaptive icon is qualified `-v26` and Android 7.x gets a
+/// square layer-list of the same background and foreground.
 pub fn sync_android_icon(
     icon: Option<&AndroidIcon>,
+    min_sdk: u32,
     project_root: &Path,
     res: &Path,
     write: impl Fn(&Path, &[u8]) -> Result<(), String>,
@@ -86,7 +95,7 @@ pub fn sync_android_icon(
         }
     }
     remove_if_present(&res.join(ANDROID_ADAPTIVE))?;
-    remove_if_present(&res.join(ANDROID_ADAPTIVE_LEGACY))?;
+    remove_if_present(&res.join(ANDROID_ADAPTIVE_V26))?;
     remove_if_present(&res.join(ANDROID_COLOR))?;
     let Some(icon) = icon else {
         return Ok(());
@@ -127,10 +136,18 @@ pub fn sync_android_icon(
         }
         None => "",
     };
+    let adaptive = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n{GENERATED}\n<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <background android:drawable=\"{background}\" />\n    <foreground android:drawable=\"@drawable/pam_launcher_foreground\" />{monochrome}\n</adaptive-icon>\n"
+    );
+    if min_sdk >= 26 {
+        return write(&res.join(ANDROID_ADAPTIVE), adaptive.as_bytes());
+    }
+    write(&res.join(ANDROID_ADAPTIVE_V26), adaptive.as_bytes())?;
+    let crop = ANDROID_LEGACY_CROP_DP;
     write(
         &res.join(ANDROID_ADAPTIVE),
         format!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n{GENERATED}\n<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <background android:drawable=\"{background}\" />\n    <foreground android:drawable=\"@drawable/pam_launcher_foreground\" />{monochrome}\n</adaptive-icon>\n"
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n{GENERATED}\n<!-- Android 7.x: no adaptive icons; the same layers as a square icon. -->\n<layer-list xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <item android:drawable=\"{background}\" />\n    <item\n        android:drawable=\"@drawable/pam_launcher_foreground\"\n        android:bottom=\"-{crop}dp\"\n        android:left=\"-{crop}dp\"\n        android:right=\"-{crop}dp\"\n        android:top=\"-{crop}dp\" />\n</layer-list>\n"
         )
         .as_bytes(),
     )
@@ -255,7 +272,7 @@ mod tests {
             background: Some("#000".into()),
             monochrome: Some("assets/mono.png".into()),
         };
-        sync_android_icon(Some(&icon), &root, &res, write).unwrap();
+        sync_android_icon(Some(&icon), 26, &root, &res, write).unwrap();
         let files = written.borrow();
         let adaptive = String::from_utf8(files[ANDROID_ADAPTIVE].clone()).unwrap();
         assert!(
@@ -275,7 +292,7 @@ mod tests {
         assert_eq!(files["drawable-nodpi/pam_launcher_monochrome.png"], b"mono");
         drop(files);
 
-        sync_android_icon(None, &root, &res, |_: &Path, _: &[u8]| Ok(())).unwrap();
+        sync_android_icon(None, 26, &root, &res, |_: &Path, _: &[u8]| Ok(())).unwrap();
         assert!(!res.join(ANDROID_ADAPTIVE).exists());
         assert!(!res.join(ANDROID_COLOR).exists());
         assert!(
@@ -285,6 +302,42 @@ mod tests {
         assert!(
             !res.join("drawable-nodpi/pam_launcher_monochrome.png")
                 .exists()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn android_icon_below_api_26_adds_a_pre_adaptive_fallback() {
+        let root = temp_dir("android-legacy");
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::write(root.join("assets/fg.png"), b"fg").unwrap();
+        let res = root.join("res");
+        let write = |path: &Path, bytes: &[u8]| -> Result<(), String> {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+            Ok(())
+        };
+        let icon = AndroidIcon {
+            foreground: "assets/fg.png".into(),
+            background: None,
+            monochrome: None,
+        };
+        sync_android_icon(Some(&icon), 24, &root, &res, write).unwrap();
+        let adaptive = fs::read_to_string(res.join(ANDROID_ADAPTIVE_V26)).unwrap();
+        assert!(adaptive.contains("<adaptive-icon"));
+        let legacy = fs::read_to_string(res.join(ANDROID_ADAPTIVE)).unwrap();
+        assert!(legacy.contains("<layer-list"));
+        assert!(legacy.contains("@color/pam_launcher_background"));
+        assert!(legacy.contains("android:left=\"-12dp\""));
+        assert!(!legacy.contains("adaptive-icon"));
+
+        // Raising minSdk back to 26 drops the -v26 copy (lint ObsoleteSdkInt).
+        sync_android_icon(Some(&icon), 26, &root, &res, write).unwrap();
+        assert!(!res.join(ANDROID_ADAPTIVE_V26).exists());
+        assert!(
+            fs::read_to_string(res.join(ANDROID_ADAPTIVE))
+                .unwrap()
+                .contains("<adaptive-icon")
         );
         fs::remove_dir_all(root).unwrap();
     }

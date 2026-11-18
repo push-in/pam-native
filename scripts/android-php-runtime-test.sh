@@ -44,8 +44,10 @@ PY
 abi=$("${adb}" shell getprop ro.product.cpu.abi | tr -d '\r')
 case "${abi}" in
     arm64-v8a) clang="${ndk_bin}/aarch64-linux-android26-clang" ;;
+    armeabi-v7a) clang="${ndk_bin}/armv7a-linux-androideabi26-clang" ;;
+    x86) clang="${ndk_bin}/i686-linux-android26-clang" ;;
     x86_64) clang="${ndk_bin}/x86_64-linux-android26-clang" ;;
-    *) echo "PAM's Android runtime supports arm64-v8a and x86_64, not ${abi}." >&2; exit 1 ;;
+    *) echo "PAM's Android runtime supports arm64-v8a, armeabi-v7a, x86 and x86_64, not ${abi}." >&2; exit 1 ;;
 esac
 runtime="${pam_home}/runtime/android/${runtime_id}/${abi}"
 test -f "${runtime}/lib/libphp.a"

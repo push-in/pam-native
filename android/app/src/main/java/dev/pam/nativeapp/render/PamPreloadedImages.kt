@@ -55,12 +55,12 @@ internal object PamPreloadedImages {
             runCatching {
                 BitmapFactory.decodeByteArray(
                     bytes, 0, bytes.size,
-                    options(if (hardware) Bitmap.Config.HARDWARE else Bitmap.Config.ARGB_8888),
+                    options(if (hardware) hardwareBitmapConfig else Bitmap.Config.ARGB_8888),
                 )
             }.getOrNull()
                 ?: BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options(Bitmap.Config.ARGB_8888)),
         ) { "Unsupported image format." }
-        if (bitmap.config != Bitmap.Config.HARDWARE) bitmap.prepareToDraw()
+        if (!bitmap.isHardware) bitmap.prepareToDraw()
         return bitmap
     }
 }

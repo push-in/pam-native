@@ -163,6 +163,7 @@ class PamZIndexHostInstrumentedTest {
     }
 
     private fun assertPixel(activity: PamTestActivity, expected: Int) {
+        org.junit.Assume.assumeTrue("PixelCopy is API 26+", android.os.Build.VERSION.SDK_INT >= 26)
         instrumentation.waitForIdleSync()
         Thread.sleep(150)
         lateinit var bitmap: Bitmap

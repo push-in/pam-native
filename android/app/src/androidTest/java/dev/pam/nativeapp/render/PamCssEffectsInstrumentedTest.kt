@@ -97,7 +97,9 @@ class PamCssEffectsInstrumentedTest {
             ),
         ) { _, views ->
             val circle = software(views.getValue(2))
-            val center = circle.getPixel(circle.width / 2, circle.height / 2)
+            // Android 7.x Skia paints the one pixel at distance 0 black: sample beside it.
+            val nudge = if (android.os.Build.VERSION.SDK_INT < 26) 1 else 0
+            val center = circle.getPixel(circle.width / 2 + nudge, circle.height / 2)
             val edge = circle.getPixel(1, circle.height / 2)
             assertTrue("radial center is white: ${hex(center)}", Color.red(center) > 245)
             assertTrue("radial edge is black: ${hex(edge)}", Color.red(edge) < 10)
@@ -371,6 +373,7 @@ class PamCssEffectsInstrumentedTest {
 
     /** Reads one composited window pixel (hardware render effects included). */
     private fun lastActivityPixel(viewId: Long = 2, point: (View) -> Pair<Int, Int>): Int {
+        org.junit.Assume.assumeTrue("PixelCopy is API 26+", android.os.Build.VERSION.SDK_INT >= 26)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val current = activity ?: error("No activity")
         // Effects render on the RenderThread after the frame that records

@@ -832,7 +832,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
         val glide = offsetAnimationMs > 0L && offsetAppliedOnce && !pointerDown &&
-            isAttachedToWindow && ValueAnimator.areAnimatorsEnabled() &&
+            isAttachedToWindow && PamMotionPolicy.animatorsEnabled(context) &&
             (x != scrollXOf(activeScroll) || y != scrollYOf(activeScroll))
         offsetAppliedOnce = true
         if (glide) {

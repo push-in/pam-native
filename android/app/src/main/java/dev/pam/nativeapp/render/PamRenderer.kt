@@ -1,5 +1,7 @@
 package dev.pam.nativeapp.render
 
+import androidx.core.view.ViewCompat
+import androidx.core.widget.TextViewCompat
 import android.annotation.SuppressLint
 import android.animation.ArgbEvaluator
 import android.animation.Animator
@@ -4876,7 +4878,7 @@ class PamRenderer(
             }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
             PropKey.ACCESSIBILITY_HINT -> {
-                view.tooltipText = null
+                ViewCompat.setTooltipText(view, null)
                 configureAccessibilityDelegate(view, state)
             }
             PropKey.TEST_ID -> view.transitionName = value.text(key)
@@ -5991,7 +5993,7 @@ class PamRenderer(
             }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> {
-                view.tooltipText = null
+                ViewCompat.setTooltipText(view, null)
                 configureAccessibilityDelegate(view, state)
             }
             PropKey.ACCESSIBILITY_ROLE -> {
@@ -9204,9 +9206,19 @@ class PamRenderer(
             else -> TextUtils.TruncateAt.END
         }
 
+    // Compile-time constants, only passed to ViewCompat (a no-op before API 26).
+    @SuppressLint("InlinedApi")
+    private fun autofillImportance(value: Int): Int = when (value) {
+        INPUT_AUTOFILL_NO -> View.IMPORTANT_FOR_AUTOFILL_NO
+        INPUT_AUTOFILL_NO_EXCLUDE -> View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        INPUT_AUTOFILL_YES -> View.IMPORTANT_FOR_AUTOFILL_YES
+        INPUT_AUTOFILL_YES_EXCLUDE -> View.IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS
+        else -> View.IMPORTANT_FOR_AUTOFILL_AUTO
+    }
+
     private fun applyTextSizing(view: TextView, state: NodeState) {
         state.initialTextUpdates?.let { it.size = true; return }
-        view.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
+        TextViewCompat.setAutoSizeTextTypeWithDefaults(view, TextViewCompat.AUTO_SIZE_TEXT_TYPE_NONE)
         val baseSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f)
         val metrics = view.resources.displayMetrics
         val allowScaling = state.flag(PropKey.TEXT_ALLOW_FONT_SCALING, true)
@@ -9231,7 +9243,9 @@ class PamRenderer(
             .coerceIn(0.01f, 1f)
         val minimumPx = max(1, (maximumPx * minimumScale).toInt())
         val maximumPxInt = max(minimumPx, maximumPx.toInt())
-        view.setAutoSizeTextTypeUniformWithConfiguration(
+        // Android 7.x autosizes only AppCompat text views (TextViewCompat).
+        TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+            view,
             minimumPx,
             maximumPxInt,
             1,
@@ -9292,14 +9306,17 @@ class PamRenderer(
     private fun applyTextAlignment(view: TextView, state: NodeState) {
         if (view is PamEditText) return
         val authored = state.properties[PropKey.TEXT_ALIGN]?.integer()?.toInt()
-        val justification = if (authored == TEXT_ALIGN_JUSTIFY) {
-            android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
-        } else {
-            android.text.Layout.JUSTIFICATION_MODE_NONE
-        }
         // TextView.setJustificationMode() drops the text layout and requests
         // a layout even for the same mode; this runs on every frame update.
-        if (view.justificationMode != justification) view.justificationMode = justification
+        // Android 7.x cannot justify and keeps start alignment.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val justification = if (authored == TEXT_ALIGN_JUSTIFY) {
+                android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
+            } else {
+                android.text.Layout.JUSTIFICATION_MODE_NONE
+            }
+            if (view.justificationMode != justification) view.justificationMode = justification
+        }
         val horizontal = when (authored) {
             2 -> Gravity.CENTER_HORIZONTAL
             3 -> Gravity.END
@@ -11044,6 +11061,8 @@ class PamRenderer(
             )
             return
         }
+        // Android 7.x has no light navigation bar.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         decor.systemUiVisibility = if (darkIcons) {
             decor.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         } else {
@@ -11534,23 +11553,20 @@ class PamRenderer(
         }
         input.gravity = horizontal or vertical
 
-        input.setAutofillHints(
+        // Autofill is Android 8+; ViewCompat makes both calls no-ops on 7.x.
+        ViewCompat.setAutofillHints(
+            input,
             *autofillHints(state.textOrNull(PropKey.AUTO_COMPLETE)),
         )
-        input.importantForAutofill = when (
-            state.integer(
-                PropKey.INPUT_AUTOFILL_IMPORTANCE,
-                INPUT_AUTOFILL_AUTO.toLong(),
-            ).toInt()
-        ) {
-            INPUT_AUTOFILL_NO -> View.IMPORTANT_FOR_AUTOFILL_NO
-            INPUT_AUTOFILL_NO_EXCLUDE ->
-                View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-            INPUT_AUTOFILL_YES -> View.IMPORTANT_FOR_AUTOFILL_YES
-            INPUT_AUTOFILL_YES_EXCLUDE ->
-                View.IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS
-            else -> View.IMPORTANT_FOR_AUTOFILL_AUTO
-        }
+        ViewCompat.setImportantForAutofill(
+            input,
+            autofillImportance(
+                state.integer(
+                    PropKey.INPUT_AUTOFILL_IMPORTANCE,
+                    INPUT_AUTOFILL_AUTO.toLong(),
+                ).toInt(),
+            ),
+        )
         input.isCursorVisible = !state.flag(PropKey.INPUT_CARET_HIDDEN, false)
         input.setContextMenuHidden(
             state.flag(PropKey.INPUT_CONTEXT_MENU_HIDDEN, false),
@@ -11689,7 +11705,7 @@ class PamRenderer(
                     super.onInitializeAccessibilityNodeInfo(host, info)
                 }
                 if (role != 1) info.className = accessibilityClass(role)
-                if (hint != null) {
+                if (hint != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     info.hintText = hint
                 }
                 applyAccessibilityRoleInfo(info, role, state)

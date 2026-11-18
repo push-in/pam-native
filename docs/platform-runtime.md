@@ -155,7 +155,21 @@ without `pam_native_crypto()`, updates and journals fail closed. The host's
 crypto itself runs in the instrumented tests `NativeCryptoInstrumentedTest`
 (vectors through `PamCrypto`) and `NativeCryptoBridgeInstrumentedTest` (a PHP
 entry calling `pam_native_crypto()` through the real runtime; run that class on
-its own). It removes everything it pushed.
+its own). `packages/native/tests/device/integer_runtime.php` checks the 64-bit
+integers of the 32-bit runtimes (see below). It removes everything it pushed.
+
+### 32-bit Android
+
+Android apps ship four ABIs: `arm64-v8a`, `armeabi-v7a`, `x86` and `x86_64`.
+`pam mobile build` and `pam mobile release` build all four by default, so the
+App Bundle reaches the same devices as a React Native or Flutter app; `--abi`
+limits a build to some of them. On `armeabi-v7a` and `x86` the PHP runtime keeps
+64-bit integers (`PHP_INT_SIZE` is 8, as on the x32 ABI): the SDK's ARGB colors,
+node ids and timestamps behave exactly as on 64-bit devices, and the native
+bridge refuses to link a runtime without them. The opcache JIT is off there;
+opcache's bytecode cache stays on. The 32-bit runtimes come from PAM releases
+after v2.2.20; with an older PAM, `pam mobile release` stops and asks for the
+update (`pam self-update`).
 
 ## Typed bridge IDL
 

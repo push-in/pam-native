@@ -204,7 +204,7 @@ scrubbed to the CSS radius; its color functions log a diagnostic.
 | `font-variant-numeric`, `font-variant(-caps/-ligatures)`, `font-feature-settings` | `tabular-nums`, `lining-nums`, `oldstyle-nums`, `slashed-zero`, `small-caps`, ligatures, `"tag" on/off/N` | A i |
 | `line-height` | `<length>`, unitless multiplier, `%`, `em`, `normal` | A i |
 | `letter-spacing` | `<length>`, `em`, `normal` | A i |
-| `text-align` | `left`/`start`, `center`, `right`/`end`, `justify` | A (justify API 26+), i |
+| `text-align` | `left`/`start`, `center`, `right`/`end`, `justify` | A (justify API 26+; start on 7.x), i |
 | `text-transform` | `none`, `uppercase`, `lowercase`, `capitalize` | A i |
 | `text-decoration`, `text-decoration-line` | `none`, `underline`, `line-through`, both (solid, text color) | A i |
 | `text-shadow` | one shadow `x y [blur] [color]`, `none` | A i |

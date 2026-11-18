@@ -66,6 +66,11 @@ require(pamHotReloadP95BudgetMs in 1L..60_000L) {
 val pamAbis = pamProperties.getProperty("abis", "arm64-v8a,x86_64")
     .split(',')
     .filter(String::isNotBlank)
+// ABIs that only carry the web build of an Android TV app (PamWebActivity);
+// the others link the PHP runtime and the engine.
+val pamWebAbis = pamProperties.getProperty("webAbis", "")
+    .split(',')
+    .filter(String::isNotBlank)
 val pamProjectRoot = pamProperties.getProperty("projectRoot", "")
 val pamGoogleServicesSource = listOf(
     file("$pamProjectRoot/.pam/google-services.json"),
@@ -127,6 +132,9 @@ android {
             cmake {
                 arguments += "-DPAM_NATIVE_ROOT=$pamNativeHome"
                 arguments += "-DPAM_PHP_RUNTIME_ROOT=$pamRuntimeHome"
+                if (pamWebAbis.isNotEmpty()) {
+                    arguments += "-DPAM_WEB_ABIS=${pamWebAbis.joinToString(";")}"
+                }
                 cppFlags += listOf(
                     "-std=c++20",
                     "-fexceptions",

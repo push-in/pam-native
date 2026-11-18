@@ -174,7 +174,7 @@ internal fun mediaStoreFallsBackToFileDecode(video: Boolean): Boolean = !video
 internal val MEDIA_STORE_THUMBNAIL_STORAGE = NativeBitmapStorage.RGB_565
 
 internal fun NativeBitmapStorage.decodeConfig(): Bitmap.Config = when (this) {
-    NativeBitmapStorage.HARDWARE -> Bitmap.Config.HARDWARE
+    NativeBitmapStorage.HARDWARE -> hardwareBitmapConfig
     NativeBitmapStorage.RGB_565 -> Bitmap.Config.RGB_565
     NativeBitmapStorage.ARGB_8888 -> Bitmap.Config.ARGB_8888
 }
@@ -1415,7 +1415,7 @@ internal class NativeImageLoader(
                     mimeType = null,
                 ) == NativeBitmapStorage.HARDWARE
             ) {
-                runCatching { scaled.copy(Bitmap.Config.HARDWARE, false) }.getOrNull()
+                runCatching { scaled.copy(hardwareBitmapConfig, false) }.getOrNull()
                     ?.also { scaled.recycle() }
                     ?: scaled.also(Bitmap::prepareToDraw)
             } else {
@@ -1852,7 +1852,7 @@ internal class NativeImageLoader(
             }
         }
         val config = when (storage) {
-            NativeBitmapStorage.HARDWARE -> Bitmap.Config.HARDWARE
+            NativeBitmapStorage.HARDWARE -> hardwareBitmapConfig
             NativeBitmapStorage.RGB_565 -> Bitmap.Config.RGB_565
             NativeBitmapStorage.ARGB_8888 -> Bitmap.Config.ARGB_8888
         }
@@ -1872,7 +1872,7 @@ internal class NativeImageLoader(
         // A scaled decode carries the target "density"; restore the display
         // density so BitmapDrawable's intrinsic size stays the pixel size.
         if (plan.scaled) bitmap.density = context.resources.displayMetrics.densityDpi
-        if (bitmap.config != Bitmap.Config.HARDWARE && !heap) {
+        if (!bitmap.isHardware && !heap) {
             // Starts the GPU texture upload now, on the RenderThread, instead
             // of inside the frame that first draws the image: a 1080x2042
             // feed photo spent 8.5 ms of a scroll frame in "Texture upload" on

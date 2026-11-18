@@ -97,9 +97,10 @@ only when the size changes). A synchronous `LayoutBuilder` would need the
 engine to call back into PHP mid-layout and is intentionally not offered.
 
 ### Platform guards
-- Android `minSdk` 26 (Android 8.0). Every API newer than 26 sits behind a
-  `Build.VERSION.SDK_INT` check with a fallback; `lintDebug` (NewApi as an
-  error) runs in CI.
+- Android `minSdk` 26 (Android 8.0) by default and 24 (Android 7.0) at the
+  lowest ([Android 7.x](android-min-sdk.md)). Every API newer than 24 sits
+  behind a `Build.VERSION.SDK_INT` check with a fallback; `lintDebug` (NewApi
+  as an error) runs in CI against minSdk 24.
 - iOS deployment target from `pam-native.json` (`__PAM_IOS_MINIMUM__`);
   newer APIs behind `if #available` with a fallback.
 
