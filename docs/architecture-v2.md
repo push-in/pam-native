@@ -451,6 +451,19 @@ missing required parameter or a value that cannot become the declared type
 throws. `Route::current()`, `Route::path('chat', ['id' => 5])`,
 `Route::has()`, `Route::refresh()` and `Route::open($uri)` complete the API.
 
+`Route::open($uri)` navigates by default: when the linked route already has
+an entry in the stack, the screens above it are removed and that entry gets
+the link's params. For links opened from inside the app (a profile link in a
+chat, a post link in a comment) pass `mode: 'push'`, as React Navigation's
+deep links do: the linked screen opens over the current one and Back returns
+to it. The focused screen is reused (its params updated in place) only when
+it is the same route with the same path params; a tab link always selects
+its tab. `Route::openInitial()` takes the same `mode`.
+
+```php
+Route::open('https://example.com/u/ana', mode: 'push'); // stacks a new profile
+```
+
 `Route::openInitial($uri)` opens a link as React Navigation's initial state
 from a deep link: no transition, settled before the next frame, with the
 stack under it kept for Back. Use it for a cold-start link, or for one an app
