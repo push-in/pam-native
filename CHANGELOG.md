@@ -19,6 +19,12 @@ size and language changes.
   them or downloads the runtime bundle on every run; store builds name a
   missing 32-bit runtime; the release community gate uploads its starter logs
   on failure.
+- Fixed: Android translated touch targets (a panning KeyboardAvoidingView
+  shifted by the IME): a Pressable receives the whole gesture (up/cancel
+  included) instead of a direct click on release, so a tap no longer fires
+  `longPress` after `press`, `pressOut` is always emitted and the control
+  never stays pressed. A pointer-down the translated target does not handle
+  no longer leaves it routing the next gesture.
 
 ## 1.53.5 - 2026-11-18
 
