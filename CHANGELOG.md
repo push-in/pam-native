@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.53.1 - 2026-11-18
+## 1.53.2 - 2026-11-18
+
+The fixes below plus the 1.53.0 and 1.53.1 changes; neither of those tags
+was published (the release community gate failed; see "Fixed (release)").
 
 - Fixed (Android): closing the HTTP module (hot reload, activity finished)
   while `Http::upload` streamed a file threw an `IllegalStateException` from
@@ -32,6 +35,14 @@
   runner's PHP CLI, which has the tokenizer the embedded runtime lacks.
 - Tests: the iOS clock-label test skips when the CI host scene is in the
   background, where the binding correctly does not tick.
+
+## 1.53.1 - 2026-11-17
+
+- Fixed: apps above minSdk 24 (including the default 26) no longer fail
+  `:app:lintDebug` with `ObsoleteSdkInt` on the host's Android 7.0 version
+  checks; the framework still lints the host at minSdk 24. 1.53.0 was tagged
+  but never published because the ecosystem Android certification caught
+  this.
 
 ## 1.53.0 - 2026-11-17
 

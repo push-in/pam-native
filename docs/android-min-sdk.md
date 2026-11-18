@@ -19,7 +19,10 @@ rejects a plugin whose `minSdk` is above the app's.
 ## What changes below API 26
 
 The renderer is lint-clean (`NewApi`/`InlinedApi` as errors) at minSdk 24 and
-keeps the API 26+ path unchanged on newer devices. On Android 7.x:
+keeps the API 26+ path unchanged on newer devices. Its `Build.VERSION` checks
+are written for minSdk 24, so an app with a higher `minSdk` builds with lint's
+`ObsoleteSdkInt` check turned off (some of those checks are always true there);
+the framework's own lint run at minSdk 24 keeps it enforced. On Android 7.x:
 
 | Area | Behaviour on API 24/25 |
 | --- | --- |
