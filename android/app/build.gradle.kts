@@ -52,6 +52,10 @@ val pamRuntimeHome = pamProperties.getProperty(
     "$pamNativeHome/runtime/android",
 )
 val pamMinSdk = pamProperties.getProperty("minSdk", "26").toInt()
+// Lowest minSdk the host supports. Its Build.VERSION checks are written for
+// this floor, and the framework's own lint run (android/pam-native.properties)
+// keeps them clean there.
+val pamMinSdkFloor = 24
 val pamTargetSdk = pamProperties.getProperty("targetSdk", "36").toInt()
 val pamVersionCode = pamProperties.getProperty("versionCode", "1").toInt()
 val pamVersionName = pamProperties.getProperty("versionName", "0.2.1")
@@ -265,6 +269,11 @@ android {
             "ChromeOsAbiSupport",
             "GradleDependency",
         )
+        // Above the floor some of those checks are always true. That is the
+        // host's support for older devices, not a defect of the app.
+        if (pamMinSdk > pamMinSdkFloor) {
+            disable += "ObsoleteSdkInt"
+        }
     }
 }
 
