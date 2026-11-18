@@ -10366,7 +10366,10 @@ mod tests {
         // PAM blanks it for package executables: a distribution PHP then
         // loads no conf.d extension (no tokenizer for the component prebuild).
         assert!(removed(&php_command_with_scan_dir("php", Some("".into()))));
-        assert!(!removed(&php_command_with_scan_dir("php", Some("/etc/php/conf.d".into()))));
+        assert!(!removed(&php_command_with_scan_dir(
+            "php",
+            Some("/etc/php/conf.d".into())
+        )));
         assert!(!removed(&php_command_with_scan_dir("php", None)));
     }
 
