@@ -11290,6 +11290,23 @@ mod tests {
     }
 
     #[test]
+    fn host_lint_ignores_obsolete_sdk_checks_only_above_the_floor() {
+        let build = include_str!("../../../android/app/build.gradle.kts");
+        assert!(build.contains(&format!("val pamMinSdkFloor = {ANDROID_MIN_SDK_FLOOR}\n")));
+        assert!(build.contains(
+            "if (pamMinSdk > pamMinSdkFloor) {\n            disable += \"ObsoleteSdkInt\"\n        }"
+        ));
+        // The framework lints its own host at the floor, so the checks stay
+        // enforced there.
+        let properties = include_str!("../../../android/pam-native.properties");
+        assert!(
+            properties
+                .lines()
+                .any(|line| line == format!("minSdk={ANDROID_MIN_SDK_FLOOR}"))
+        );
+    }
+
+    #[test]
     fn plugins_default_to_the_android_min_sdk_floor() {
         assert_eq!(PluginAndroid::default().min_sdk, ANDROID_MIN_SDK_FLOOR);
         let declared: PluginAndroid =
