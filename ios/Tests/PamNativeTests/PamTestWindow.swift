@@ -24,7 +24,7 @@ func pamTestWindow(frame: CGRect) -> UIWindow {
 /// of a fixed sleep: a loaded CI simulator can take far longer than a frame.
 @MainActor
 @discardableResult
-func pamSpin(until condition: () -> Bool, timeout: TimeInterval = 5) -> Bool {
+func pamSpin(until condition: () -> Bool, timeout: TimeInterval = 5, step: TimeInterval = 0.01) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition() {
         if Date() >= deadline {
@@ -33,7 +33,7 @@ func pamSpin(until condition: () -> Bool, timeout: TimeInterval = 5) -> Bool {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             return condition()
         }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        RunLoop.main.run(until: Date().addingTimeInterval(step))
     }
     return true
 }
