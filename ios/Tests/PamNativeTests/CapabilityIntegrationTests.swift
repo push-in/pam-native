@@ -383,17 +383,26 @@ final class CapabilityIntegrationTests: XCTestCase {
             .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .column, properties: [:])),
             .setRoot(1),
         ]])
-        let child = try XCTUnwrap(factory.view.subviews.first)
+        // The renderer's view for node 3 (not whatever subview comes first).
+        let child = try XCTUnwrap(factory.view.viewWithTag(3))
+        XCTAssertTrue(child.superview === factory.view)
+        XCTAssertNotNil(factory.view.onChildVisibilityChanged, "the renderer listens to its native host")
         var requests: [Bool] = []
+        let delivered = expectation(description: "both visibility requests delivered")
+        delivered.expectedFulfillmentCount = 2
         renderer.onNativeChildVisibility = { owner, childId, visible in
             XCTAssertEqual(owner, 2)
             XCTAssertEqual(childId, 3)
             requests.append(visible)
+            delivered.fulfill()
         }
         let foreignChild = UIView()
         factory.view.onChildVisibilityChanged?(foreignChild, false)
         factory.view.onChildVisibilityChanged?(child, false)
         factory.view.onChildVisibilityChanged?(child, true)
+        // Requests are delivered on a later main-queue turn: wait for them,
+        // then one more turn so a foreign request (queued first) had its chance.
+        wait(for: [delivered], timeout: 10)
         let drained = expectation(description: "queued visibility requests")
         DispatchQueue.main.async { drained.fulfill() }
         wait(for: [drained], timeout: 10)
