@@ -27,7 +27,12 @@ func pamTestWindow(frame: CGRect) -> UIWindow {
 func pamSpin(until condition: () -> Bool, timeout: TimeInterval = 5) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while !condition() {
-        if Date() >= deadline { return false }
+        if Date() >= deadline {
+            // A stalled CI simulator can pass the deadline without the run loop
+            // turning: give timers that came due meanwhile one last pass.
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            return condition()
+        }
         RunLoop.main.run(until: Date().addingTimeInterval(0.01))
     }
     return true
