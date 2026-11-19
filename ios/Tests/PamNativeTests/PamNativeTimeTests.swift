@@ -83,7 +83,8 @@ final class PamNativeTimeTests: XCTestCase {
         XCTAssertTrue(label.pamTimeBinding?.isTicking == true)
         // The label ticks on its own. A loaded CI simulator may fire the next
         // tick late (or skip a second), so assert that it advanced.
-        pamSpin(until: { label.text != "00:05" }, timeout: 6)
+        // Run-loop slices as long as the ones these timers passed with before (50 ms).
+        pamSpin(until: { label.text != "00:05" }, timeout: 6, step: 0.05)
         if label.text == "00:05", window.windowScene?.activationState == .background {
             // The host scene went to the background mid-test: the binding
             // (correctly) stopped and waits for the screen; it cannot tick.
@@ -99,7 +100,7 @@ final class PamNativeTimeTests: XCTestCase {
         // loaded simulator) finds it hidden and stops.
         route.isHidden = true
         let shown = label.text
-        pamSpin(until: { label.pamTimeBinding?.isTicking != true }, timeout: 4)
+        pamSpin(until: { label.pamTimeBinding?.isTicking != true }, timeout: 4, step: 0.05)
         XCTAssertFalse(label.pamTimeBinding?.isTicking == true)
         XCTAssertTrue(label.pamTimeBinding?.isWaiting == true)
         XCTAssertEqual(label.text, shown, "a covered clock does not redraw")
@@ -124,7 +125,7 @@ final class PamNativeTimeTests: XCTestCase {
         PamTimeBinding.sync(label, clock: nil, progress: nil, reveal: PamRevealSpec(charMs: 40, durationMs: 0, key: "a"))
         XCTAssertEqual(label.revealEnd, 0)
         // 5 characters at 40 ms: done after 200 ms, later on a loaded simulator.
-        pamSpin(until: { label.revealEnd == -1 }, timeout: 4)
+        pamSpin(until: { label.revealEnd == -1 }, timeout: 4, step: 0.05)
         XCTAssertEqual(label.revealEnd, -1, "reveal stopped at \(label.revealEnd) (scene: \(pamSceneState(window)))")
         XCTAssertFalse(label.pamTimeBinding?.isTicking == true)
     }
