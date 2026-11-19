@@ -2364,8 +2364,26 @@ class PamRenderer(
         return true
     }
 
+    /**
+     * Test hook: while true, [viewBuildNanos] adds up the UI-thread time
+     * spent building views (create, attach, initial properties, events),
+     * the part of a commit that a sliced mount bounds to the viewport.
+     */
+    internal var measureViewBuilds = false
+    internal var viewBuildNanos = 0L
+
     /** Creates, attaches and configures the view of hosted node [state]. */
     private fun buildHostedView(state: NodeState) {
+        if (!measureViewBuilds) {
+            buildHostedViewNow(state)
+            return
+        }
+        val started = System.nanoTime()
+        buildHostedViewNow(state)
+        viewBuildNanos += System.nanoTime() - started
+    }
+
+    private fun buildHostedViewNow(state: NodeState) {
         val kind = state.kind
         val view = mountTraceSection(MOUNT_CREATE_SECTIONS, kind) { createView(kind, state) }
         if (view is TextView) {

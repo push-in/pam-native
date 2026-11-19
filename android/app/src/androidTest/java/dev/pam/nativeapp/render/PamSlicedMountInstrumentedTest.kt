@@ -116,6 +116,10 @@ class PamSlicedMountInstrumentedTest {
         val slicedRuns = (1..RUNS).map { measureMount(sliced = true) }
         val fullWork = fullRuns.minOf { it.commitMs }
         val commitWork = slicedRuns.minOf { it.commitMs }
+        val fullBuild = fullRuns.minOf { it.commitBuildMs }
+        val commitBuild = slicedRuns.minOf { it.commitBuildMs }
+        val fullOther = fullRuns.minOf { it.commitMs - it.commitBuildMs }
+        val commitOther = slicedRuns.minOf { it.commitMs - it.commitBuildMs }
         val worstSlice = slicedRuns.minOf { run -> run.slices.maxOf { it.workNanos } } / NANOS_PER_MS
         // A slice's work past its budget beyond what the budget allows: the
         // pass building what scrolled into view and the one subtree it
@@ -128,7 +132,8 @@ class PamSlicedMountInstrumentedTest {
         val renderer = PamGlRenderer.name
         Log.i(
             TAG,
-            "mount work: full commit ${ms(fullWork)}ms; sliced commit ${ms(commitWork)}ms, worst slice " +
+            "mount work: full commit ${ms(fullWork)}ms (views ${ms(fullBuild)}ms); sliced commit ${ms(commitWork)}ms " +
+                "(views ${ms(commitBuild)}ms), worst slice " +
                 "${ms(worstSlice)}ms (past budget + one subtree ${ms(sliceExcess)}ms); with layout/measure: " +
                 "full ${ms(fullTotal)}ms, sliced ${ms(slicedTotal)}ms (GL renderer: $renderer)",
         )
@@ -145,9 +150,24 @@ class PamSlicedMountInstrumentedTest {
                 )
             }
         }
+        // The commit's view building (what slicing bounds to the viewport) is
+        // under half the full mount's. The rest of a commit (node state for
+        // all 180 nodes, frames, layout events) is paid by both paths; on a
+        // fast host it is a third of the full mount, and comparing whole
+        // commits failed there (9.8 ms against 16.7 ms) with the same 14 rows
+        // built. So it is held separately: the deferral adds no per-node cost.
         assertTrue(
-            "the sliced commit's work ${ms(commitWork)}ms is not under half the full mount's ${ms(fullWork)}ms",
-            commitWork * 2 <= fullWork,
+            "the sliced commit built views for ${ms(commitBuild)}ms, not under half the full mount's ${ms(fullBuild)}ms",
+            commitBuild * 2 <= fullBuild,
+        )
+        assertTrue(
+            "the sliced commit's other work ${ms(commitOther)}ms is over ${COMMIT_OTHER_MAX}x the full mount's " +
+                "${ms(fullOther)}ms (+${ms(COMMIT_OTHER_TOLERANCE_MS)}ms): deferring rows costs more than building them",
+            commitOther <= fullOther * COMMIT_OTHER_MAX + COMMIT_OTHER_TOLERANCE_MS,
+        )
+        assertTrue(
+            "the sliced commit's work ${ms(commitWork)}ms is not under the full mount's ${ms(fullWork)}ms",
+            commitWork < fullWork,
         )
         assertTrue(
             "a mount slice worked ${ms(sliceExcess)}ms past its budget and the subtree it finished",
@@ -202,6 +222,8 @@ class PamSlicedMountInstrumentedTest {
     private class MountRun(
         val frames: MountFrames,
         val commitMs: Double,
+        /** The part of [commitMs] spent building views. */
+        val commitBuildMs: Double,
         val slices: List<MountSliceStats>,
         val layoutMs: Double,
         val builtRows: Int,
@@ -339,6 +361,7 @@ class PamSlicedMountInstrumentedTest {
         val layouts = Collections.synchronizedList(ArrayList<Long>())
         val slices = ArrayList<MountSliceStats>()
         var commitMs = 0.0
+        var commitBuildMs = 0.0
         var builtRows = 0
         val metricsThread = HandlerThread("pam-frame-metrics").apply { start() }
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
@@ -357,9 +380,13 @@ class PamSlicedMountInstrumentedTest {
                 activity.window.addOnFrameMetricsAvailableListener(listener, Handler(metricsThread.looper))
             }
             commitInFrame {
+                renderer.viewBuildNanos = 0L
+                renderer.measureViewBuilds = true
                 val started = System.nanoTime()
                 renderer.commit(listOf(tree()))
                 commitMs = (System.nanoTime() - started) / 1_000_000.0
+                renderer.measureViewBuilds = false
+                commitBuildMs = renderer.viewBuildNanos / 1_000_000.0
                 builtRows = (0 until ROWS).count { renderer.viewForNode(rowId(it)) != null }
             }
             awaitMounted(renderer)
@@ -380,13 +407,14 @@ class PamSlicedMountInstrumentedTest {
         val layoutMs = synchronized(layouts) { layouts.sum() } / 1_000_000.0
         Log.i(
             TAG,
-            "sliced=$sliced frames(ms)=$millis commit=${ms(commitMs)}ms rows=$builtRows " +
+            "sliced=$sliced frames(ms)=$millis commit=${ms(commitMs)}ms (views ${ms(commitBuildMs)}ms) rows=$builtRows " +
                 "slices(ms)=${sliceStats.map { ms(it.workNanos / NANOS_PER_MS) + "/" + it.subtrees }} layout=${ms(layoutMs)}ms",
         )
         if (sliced) assertTrue("the sliced mount ran its slices", sliceStats.isNotEmpty())
         return MountRun(
             frames = MountFrames(first = millis.first(), rest = millis.drop(1).maxOrNull() ?: 0L),
             commitMs = commitMs,
+            commitBuildMs = commitBuildMs,
             slices = sliceStats.ifEmpty { listOf(MountSliceStats(0L, 0L, 0L, 0, 0L, 0L)) },
             layoutMs = layoutMs,
             builtRows = builtRows,
@@ -564,6 +592,16 @@ class PamSlicedMountInstrumentedTest {
          * only finishes the row it started (~1 ms here) and its bookkeeping.
          */
         const val SLICE_TOLERANCE_MS = 4.0
+
+        /**
+         * The sliced commit's work besides building views against the full
+         * mount's: both create every node's state, the full one lays out 60
+         * rows, the sliced one 14 and resolves what waits (~0.4x here). A
+         * per-node cost of deferring (a scan per pending node) blows far
+         * past this; scheduler noise does not.
+         */
+        const val COMMIT_OTHER_MAX = 1.5
+        const val COMMIT_OTHER_TOLERANCE_MS = 2.0
 
         const val NANOS_PER_MS = 1_000_000.0
 
