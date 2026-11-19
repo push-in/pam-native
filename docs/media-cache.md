@@ -79,6 +79,28 @@ Available policies are `none`, `memory`, `disk`, `memory-and-disk`,
 `stale-while-revalidate`. In PHP these are the sequential integer-backed
 `MediaCachePolicy` cases.
 
+## Streaming and the cache copy (Android)
+
+With `streamingCache()` or `downloadWhilePlaying()` the player streams the
+remote URL at once and the copy for the cache starts 4 s later, so both do not
+split the bandwidth of the first frames. That copy belongs to the player:
+releasing it (a closed viewer, a new source, a covered or hidden route, a
+detached view) cancels a copy that has not started and stops a running
+download no other player of the same source waits for. A player watched to
+the end with `downloadWhilePlaying()` still reads the file twice (stream and
+copy); omit it where caching the whole file is not needed.
+
+## Playback side effects (Android)
+
+A playing `MediaPlayer` keeps the screen on (`keepScreenOn` while it plays:
+loops and viewers do not dim and lock), released when it pauses, ends,
+fails, hides or is removed. With sound (not muted, volume above 0) it holds
+the audio focus like expo-video's `auto` mode: another app's audio stops
+(Android 8+ ducks it for a notification), another app taking the focus or
+unplugged headphones pause the player, and a call holds it until the call
+ends. Muted players never take the focus. The app's players share one focus
+request, so two PAM players do not pause each other.
+
 ## Events
 
 Images and media players expose `onCacheHit`, `onCacheMiss`, `onCacheProgress`, and

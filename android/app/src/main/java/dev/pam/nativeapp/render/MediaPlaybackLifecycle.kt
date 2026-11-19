@@ -10,12 +10,18 @@ internal class MediaPlaybackLifecycle {
     private var visible = false
     /** Visible autoplay: the native policy's decision (always true without it). */
     private var visibleGate = true
+    /** Audio focus: false while another app holds it for a moment (a call). */
+    private var focusGate = true
 
     /** Play intent (autoPlay or a native play request), independent of host and visibility. */
     val wantsPlay: Boolean get() = requested
 
     @Volatile
     var mayPlay = false
+        private set
+
+    /** Everything but audio focus lets the player play: it should hold focus (with sound). */
+    var wantsFocus = false
         private set
 
     fun autoPlay(value: Boolean) {
@@ -37,11 +43,15 @@ internal class MediaPlaybackLifecycle {
     }
 
     fun visibleGate(value: Boolean) { visibleGate = value; update() }
+    fun focusGate(value: Boolean) { focusGate = value; update() }
 
     fun completed(looping: Boolean) {
         if (!looping) requested = false
         update()
     }
 
-    private fun update() { mayPlay = requested && hostActive && ownerActive && attached && visible && visibleGate }
+    private fun update() {
+        wantsFocus = requested && hostActive && ownerActive && attached && visible && visibleGate
+        mayPlay = wantsFocus && focusGate
+    }
 }
