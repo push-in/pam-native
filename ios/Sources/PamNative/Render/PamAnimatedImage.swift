@@ -31,9 +31,13 @@ final class PamAnimatedImage: @unchecked Sendable {
     private let frames = NSCache<NSNumber, CGImage>()
     private let lock = NSLock()
 
+    // Frames are decoded for an animation on screen, ahead of the tick that
+    // shows them: user-initiated work. At utility QoS a loaded host (a CI
+    // simulator, a busy device) starved the queue for seconds and the
+    // animation froze on its first frame.
     private static let decodeQueue = DispatchQueue(
         label: "dev.pam.image.animated",
-        qos: .utility
+        qos: .userInitiated
     )
 
     private init?(source: CGImageSource, targetSize: CGSize, scale: CGFloat, multiplier: CGFloat) {
@@ -203,6 +207,9 @@ final class PamAnimatedImagePlayer {
     private var decoding = false
     private let display: (CGImage) -> Void
 
+    /// A frame decode is in flight (tests, diagnostics).
+    var isDecoding: Bool { decoding }
+
     init(animation: PamAnimatedImage, display: @escaping (CGImage) -> Void) {
         self.animation = animation
         self.display = display
@@ -216,6 +223,11 @@ final class PamAnimatedImagePlayer {
         if animation.duration > 0 {
             elapsed = elapsed.truncatingRemainder(dividingBy: animation.duration)
         }
+        showCurrentFrame()
+    }
+
+    /// Shows the frame `elapsed` points at, decoding it first when needed.
+    private func showCurrentFrame() {
         let target = PamAnimatedImage.frameIndex(elapsed: elapsed, delays: animation.delays)
         guard target != frameIndex else { return }
         show(target)
@@ -229,6 +241,7 @@ final class PamAnimatedImagePlayer {
             return
         }
         // Not decoded yet: keep the current frame and draw it when ready.
+        // A decode in flight catches up when it lands (below).
         guard !decoding else { return }
         decoding = true
         animation.decodeFrameAsync(index) { [weak self] frame in
@@ -237,14 +250,33 @@ final class PamAnimatedImagePlayer {
             guard let frame else { return }
             self.frameIndex = index
             self.display(frame)
-            self.prefetch((index + 1) % self.animation.frameCount)
+            self.catchUp(after: index)
         }
     }
 
     private func prefetch(_ index: Int) {
         guard animation.cachedFrame(index) == nil, !decoding else { return }
         decoding = true
-        animation.decodeFrameAsync(index) { [weak self] _ in self?.decoding = false }
+        animation.decodeFrameAsync(index) { [weak self] _ in
+            guard let self else { return }
+            self.decoding = false
+            self.showCurrentFrame()
+        }
+    }
+
+    /// After a frame decode lands: time that passed while it ran (a slow
+    /// host, a long GIF frame) was skipped by `show`, so move on to the frame
+    /// `elapsed` points at now, otherwise prefetch the next one. Without this
+    /// the animation stood still until the next tick that changed the
+    /// target, and for good once the clock stopped (a manual step, the view
+    /// leaving the screen). A prefetch landing only does the first part.
+    private func catchUp(after index: Int) {
+        let target = PamAnimatedImage.frameIndex(elapsed: elapsed, delays: animation.delays)
+        if target != frameIndex {
+            show(target)
+        } else {
+            prefetch((index + 1) % animation.frameCount)
+        }
     }
 }
 
