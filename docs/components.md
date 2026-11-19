@@ -1005,6 +1005,11 @@ feedback may flash but `on:press` does not fire); iOS adds a tap gesture
 recognizer to the `UIScrollView` and, in `never`, makes the scroll view the
 hit view while the keyboard is up. Protocol property `538`.
 
+`fadingEdgeLength` (dp, Android only, like React Native) fades the scroll-axis
+edges of a `Scroll` and of a `VirtualizedList`/`FlatList`/`SectionList` where
+more content lies beyond them; an inverted chat list resting on its newest row
+fades only its top. iOS ignores it.
+
 Pull to refresh (`:refreshing`, `on:refresh`, `tintColor`, `refreshColors`,
 `progressViewOffset`, `refreshEnabled`) goes straight on `ScrollView` and the
 lists; see [Pull to refresh](pull-to-refresh.md).

@@ -35,4 +35,27 @@ $assert(
     'VirtualizedList forwards keyboardDismissMode only when set: '.json_encode($values),
 );
 
+// fadingEdgeLength fades a list's edges too (RN FlatList, Android).
+$fade = PropKey::ScrollFadingEdgeLength->value;
+$template = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column>'
+        .'<VirtualizedList fadingEdgeLength="24"><Text>a</Text></VirtualizedList>'
+        .'<VirtualizedList><Text>b</Text></VirtualizedList>'
+        .'<Scroll fadingEdgeLength="12"><Text>c</Text></Scroll>'
+        .'</Column>',
+        'fading-edge-lists.pam.php',
+    ),
+    new stdClass(),
+    [],
+);
+$values = array_map(
+    static fn ($child): mixed => $child->properties()[$fade] ?? null,
+    $template->children(),
+);
+$assert(
+    $values == [24, null, 12] && $values[1] === null,
+    'VirtualizedList forwards fadingEdgeLength only when set: '.json_encode($values),
+);
+
 echo "KEYBOARD_DISMISS_MODE_LISTS_OK\n";
