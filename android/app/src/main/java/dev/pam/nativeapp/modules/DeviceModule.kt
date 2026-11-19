@@ -53,8 +53,10 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
      * closer together than `intervalMs` are coalesced into one delivery.
      */
     private fun start(payload: ByteArray, completion: ModuleCompletion) {
-        val interval = ((WireMap.decode(payload)["intervalMs"] as? WireValue.Integer)?.value ?: 1_000)
+        val values = WireMap.decode(payload)
+        val interval = ((values["intervalMs"] as? WireValue.Integer)?.value ?: 1_000)
             .coerceIn(250, 60_000)
+        val fields = DeviceStatusFields.of((values["fields"] as? WireValue.Integer)?.value)
         val id = nextId.getAndIncrement()
         val channel = WatchChannel()
         val changes = DeviceStatusChanges()
@@ -62,15 +64,16 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
         runnable = Runnable {
             val watch = watches[id] ?: return@Runnable
             watch.pending = false
-            val status = statusPayload()
-            if (changes.accept(status)) {
-                channel.offer(status)
+            val status = statusValues()
+            // Only the watched fields count as a change; the delivery carries all.
+            if (changes.accept(WireMap.encode(DeviceStatusFields.select(status, fields)))) {
+                channel.offer(WireMap.encode(status))
                 watch.lastDeliveryMs = SystemClock.uptimeMillis()
             }
         }
-        watches[id] = DeviceWatch(channel, runnable, interval)
+        watches[id] = DeviceWatch(channel, runnable, interval, fields)
         main.post {
-            registerSources()
+            syncSources()
             runnable.run()
         }
         completion.complete(
@@ -79,12 +82,15 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
         )
     }
 
-    /** A system change: every watch samples once, no sooner than its interval after the last delivery. */
-    private fun changed() {
+    /**
+     * A system change of [source] fields: every watch of them samples once, no
+     * sooner than its interval after the last delivery.
+     */
+    private fun changed(source: Int) {
         main.post {
             val now = SystemClock.uptimeMillis()
             for (watch in watches.values) {
-                if (watch.pending) continue
+                if (watch.pending || watch.fields and source == 0) continue
                 watch.pending = true
                 val wait = (watch.lastDeliveryMs + watch.intervalMs - now).coerceAtLeast(0)
                 main.postDelayed(watch.runnable, wait)
@@ -92,9 +98,16 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
         }
     }
 
-    private var sourcesRegistered = false
+    /** Field mask whose system sources are registered (main thread). */
+    private var registeredFields = 0
     private val broadcasts = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) = changed()
+        override fun onReceive(context: Context, intent: Intent) = changed(
+            if (intent.action == Intent.ACTION_BATTERY_CHANGED) {
+                DeviceStatusFields.BATTERY
+            } else {
+                DeviceStatusFields.POWER_SAVE
+            },
+        )
     }
     // API 26+ delivers on [main]; Android 7.x has no Handler overload, so the
     // callback hops to the main thread itself.
@@ -105,39 +118,54 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
     }
 
     private fun networkChanged() {
-        if (Looper.myLooper() == Looper.getMainLooper()) changed() else main.post(::changed)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            changed(DeviceStatusFields.NETWORK)
+        } else {
+            main.post { changed(DeviceStatusFields.NETWORK) }
+        }
     }
 
-    private fun registerSources() {
-        if (sourcesRegistered || watches.isEmpty()) return
-        sourcesRegistered = true
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_BATTERY_CHANGED)
-            addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(broadcasts, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            appContext.registerReceiver(broadcasts, filter)
-        }
-        runCatching {
-            val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                connectivity.registerDefaultNetworkCallback(network, main)
-            } else {
-                connectivity.registerDefaultNetworkCallback(network)
+    /**
+     * Registers only the system sources the live watches ask for: a
+     * network-only watch never listens to battery steps or the charger.
+     * Main thread; called when a watch starts or stops.
+     */
+    private fun syncSources() {
+        val wanted = watches.values.fold(0) { mask, watch -> mask or watch.fields }
+        if (wanted == registeredFields) return
+        val broadcastFields = DeviceStatusFields.BATTERY or DeviceStatusFields.POWER_SAVE
+        if (wanted and broadcastFields != registeredFields and broadcastFields) {
+            if (registeredFields and broadcastFields != 0) runCatching { appContext.unregisterReceiver(broadcasts) }
+            val filter = IntentFilter().apply {
+                if (wanted and DeviceStatusFields.BATTERY != 0) addAction(Intent.ACTION_BATTERY_CHANGED)
+                if (wanted and DeviceStatusFields.POWER_SAVE != 0) addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+            }
+            if (filter.countActions() > 0) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    appContext.registerReceiver(broadcasts, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    appContext.registerReceiver(broadcasts, filter)
+                }
             }
         }
+        val wantsNetwork = wanted and DeviceStatusFields.NETWORK != 0
+        if (wantsNetwork != (registeredFields and DeviceStatusFields.NETWORK != 0)) {
+            runCatching {
+                val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+                when {
+                    !wantsNetwork -> connectivity.unregisterNetworkCallback(network)
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                        connectivity.registerDefaultNetworkCallback(network, main)
+                    else -> connectivity.registerDefaultNetworkCallback(network)
+                }
+            }
+        }
+        registeredFields = wanted
     }
 
-    private fun unregisterSources() {
-        if (!sourcesRegistered || watches.isNotEmpty()) return
-        sourcesRegistered = false
-        runCatching { appContext.unregisterReceiver(broadcasts) }
-        runCatching { appContext.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
-    }
+    private fun statusPayload(): ByteArray = WireMap.encode(statusValues())
 
-    private fun statusPayload(): ByteArray {
+    private fun statusValues(): Map<String, WireValue> {
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -157,7 +185,7 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
         ) == false
         val lowPower = context.getSystemService(PowerManager::class.java).isPowerSaveMode
-        return WireMap.encode(mapOf(
+        return mapOf(
             "batteryLevel" to WireValue.Decimal(
                 if (level >= 0 && scale > 0) level.toDouble() / scale else -1.0,
             ),
@@ -165,7 +193,7 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             "networkType" to WireValue.Integer(type.toLong()),
             "expensiveNetwork" to WireValue.Flag(expensive),
             "lowPowerMode" to WireValue.Flag(lowPower),
-        ))
+        )
     }
 
     private fun watch(payload: ByteArray): DeviceWatch =
@@ -180,7 +208,7 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             main.removeCallbacks(it.runnable)
             it.channel.close()
         }
-        main.post(::unregisterSources)
+        main.post(::syncSources)
     }
 
     override fun close() {
@@ -191,6 +219,7 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
         val channel: WatchChannel,
         val runnable: Runnable,
         val intervalMs: Long,
+        val fields: Int,
     ) {
         var pending = false
         var lastDeliveryMs = 0L
@@ -206,4 +235,27 @@ internal class DeviceStatusChanges {
         last = status
         return true
     }
+}
+
+/** `DeviceStatusField` bitmask of a watch (PHP `DeviceStatusField`). */
+internal object DeviceStatusFields {
+    const val BATTERY = 1
+    const val NETWORK = 2
+    const val POWER_SAVE = 4
+    const val ALL = BATTERY or NETWORK or POWER_SAVE
+
+    /** Absent or empty asks for every field (watches from older SDKs). */
+    fun of(value: Long?): Int = (value ?: 0L).toInt().and(ALL).takeIf { it != 0 } ?: ALL
+
+    private val keys = mapOf(
+        "batteryLevel" to BATTERY,
+        "charging" to BATTERY,
+        "networkType" to NETWORK,
+        "expensiveNetwork" to NETWORK,
+        "lowPowerMode" to POWER_SAVE,
+    )
+
+    /** The entries of [status] a watch of [fields] compares. */
+    fun <V> select(status: Map<String, V>, fields: Int): Map<String, V> =
+        status.filterKeys { key -> (keys[key] ?: ALL) and fields != 0 }
 }

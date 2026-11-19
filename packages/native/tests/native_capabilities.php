@@ -268,6 +268,12 @@ Runtime::dispatchModuleResult(
 );
 $assert($device instanceof DeviceInfo && $device->appVersion === '1.0.121' && $device->buildNumber === '121' && $device->locale === 'pt-BR', 'DeviceInfo must expose the installed app version, build number and system locale.');
 $assert((new DeviceStatusValue(1.0, false, NetworkType::Wifi, false, true))->powerSaveMode(), 'DeviceStatus must expose power-save mode.');
+$assert(
+    \Pam\Native\DeviceStatusField::mask([]) === 7
+        && \Pam\Native\DeviceStatusField::mask([\Pam\Native\DeviceStatusField::Network]) === 2
+        && \Pam\Native\DeviceStatusField::mask([\Pam\Native\DeviceStatusField::Battery, \Pam\Native\DeviceStatusField::PowerSave]) === 5,
+    'DeviceStatus watch fields must map to the host bitmask (empty = every field).',
+);
 
 // 7. Image prefetch.
 $prefetched = null;

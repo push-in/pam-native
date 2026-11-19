@@ -9,6 +9,7 @@ use Pam\Native\AppState;
 use Pam\Native\Composables\SharedSource;
 use Pam\Native\Composables\Sources;
 use Pam\Native\DeviceClass;
+use Pam\Native\DeviceStatusField;
 use Pam\Native\EventKind;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\Wire;
@@ -67,6 +68,13 @@ $scope = effectScope(static function () use (&$values, $assert): void {
     useWindowDimensions();
 });
 $watchCall = $lastCall();
+$watchPayload = class_exists('TestDiagnostics', false) && TestDiagnostics::$moduleCall !== null
+    ? TestDiagnostics::$moduleCall['payload']
+    : (end($GLOBALS['pamArchV2NativeCalls'])[3] ?? '');
+$assert(
+    (Wire::decodeMap($watchPayload)['fields'] ?? null) === DeviceStatusField::Network->value,
+    'useNetwork() must watch only network fields so battery changes never wake PHP.',
+);
 $assert(
     SharedSource::active() === ['appearance' => 1, 'window' => 5, 'keyboard' => 1, 'appState' => 1, 'network' => 1]
         && Runtime::windowMetricsListeners() === $windowBaseline + 1
