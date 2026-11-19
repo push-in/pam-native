@@ -14,6 +14,32 @@ place is declared in the `PamActivity` manifest entry
 (`android/app/src/main/AndroidManifest.xml`, copied into every generated
 `.pam-native/android` workspace by `pam`).
 
+## Locking the orientation
+
+`android.orientations` in `pam-native.json` (same values as
+`ios.orientations`) becomes `android:screenOrientation` on `PamActivity`:
+
+| `android.orientations` | `screenOrientation` |
+| --- | --- |
+| `["portrait"]` | `portrait` |
+| `["portraitUpsideDown"]` | `reversePortrait` |
+| `["portrait", "portraitUpsideDown"]` | `sensorPortrait` |
+| `["landscapeRight"]` | `landscape` (natural landscape, home side on the right) |
+| `["landscapeLeft"]` | `reverseLandscape` |
+| `["landscapeLeft", "landscapeRight"]` | `sensorLandscape` |
+| omitted, or portrait and landscape mixed | not set: follows the sensor and the user's rotation lock |
+
+A route's `NavigationOrientation::PlatformDefault` returns to this value, so
+a portrait app stays portrait after a route that freed rotation. With
+`targetSdk` 36, Android 16 ignores the lock on large screens
+(`smallestScreenWidthDp` >= 600), so tablets and unfolded foldables still
+rotate. `orientation` stays in `configChanges`: rotations that do happen are
+applied in place.
+
+```json
+{ "android": { "orientations": ["portrait"] } }
+```
+
 ## Declared `configChanges`
 
 | Value | What PamActivity does in `onConfigurationChanged` |
