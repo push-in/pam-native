@@ -24,7 +24,8 @@
         "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 80
+            "maxLength": 80,
+            "description": "Application name shown to the user. On iOS/tvOS the executable and .app folder (Xcode PRODUCT_NAME) use an ASCII spelling of it (accents transliterated, other symbols dropped) so code signing stays valid; CFBundleDisplayName and CFBundleName keep this exact name."
         },
         "entry": {
             "type": "string",
@@ -336,7 +337,7 @@
                             "landscapeRight"
                         ]
                     },
-                    "description": "Supported interface orientations (iPhone and iPad). Omit to keep the host default (portrait and both landscapes)."
+                    "description": "Supported interface orientations (iPhone and iPad). Omit to keep the host default (portrait and both landscapes). Fewer than all four also sets UIRequiresFullScreen, which App Store validation requires for an iPad app that does not support every orientation."
                 },
                 "developmentRegion": {
                     "type": "string",

@@ -680,6 +680,95 @@ impl NativeManifest {
             .as_deref()
             .unwrap_or(&self.application_id)
     }
+
+    /// Xcode `PRODUCT_NAME` of the iOS/tvOS app: the `.app` folder and the
+    /// executable inside it. See [`ios_product_name`].
+    fn ios_product_name(&self) -> String {
+        ios_product_name(&self.name, self.ios_application_id())
+    }
+}
+
+/// ASCII-safe Xcode product name for an application name. The executable
+/// and `.app` folder are named after it; APFS stores a non-ASCII file name
+/// decomposed (NFD) while `CFBundleExecutable` stays composed (NFC), so
+/// codesign seals the main binary as a missing resource and App Store
+/// Connect rejects the upload (ITMS-90034). ASCII names are returned
+/// unchanged; otherwise accents are transliterated (é -> e, ç -> c, ß -> ss)
+/// and only ASCII letters, digits, spaces, `-` and `_` are kept. Falls back
+/// to the last segment of the bundle identifier, then `PamNativeApp`.
+fn ios_product_name(name: &str, application_id: &str) -> String {
+    if name.is_ascii() {
+        return name.to_owned();
+    }
+    let mut product = String::with_capacity(name.len());
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+            product.push(character);
+        } else if character.is_whitespace() {
+            product.push(' ');
+        } else {
+            push_ascii_spelling(character, &mut product);
+        }
+    }
+    let product = product.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !product.is_empty() {
+        return product;
+    }
+    let segment = application_id
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect::<String>();
+    if segment.is_empty() {
+        "PamNativeApp".to_owned()
+    } else {
+        segment
+    }
+}
+
+/// Appends the ASCII spelling of a Latin-1 Supplement or Latin Extended-A
+/// letter; combining marks (a decomposed accent) and anything else add
+/// nothing.
+fn push_ascii_spelling(character: char, output: &mut String) {
+    // One letter per code point from U+00C0 and U+0100; `*` is spelled
+    // below with two letters, `?` (×, ÷) has no spelling.
+    const LATIN1: &[u8; 64] = b"AAAAAA*CEEEEIIIIDNOOOOO?OUUUUY**aaaaaa*ceeeeiiiidnooooo?ouuuuy*y";
+    const EXTENDED_A: &[u8; 128] = b"\
+        AaAaAaCcCcCcCcDd\
+        DdEeEeEeEeEeGgGg\
+        GgGgHhHhIiIiIiIi\
+        Ii**JjKkkLlLlLlL\
+        lLlNnNnNnnNnOoOo\
+        Oo**RrRrRrSsSsSs\
+        SsTtTtTtUuUuUuUu\
+        UuUuWwYyYZzZzZzs";
+    let pair = match character {
+        'Æ' => "AE",
+        'æ' => "ae",
+        'Þ' => "Th",
+        'þ' => "th",
+        'ß' => "ss",
+        'Ĳ' => "IJ",
+        'ĳ' => "ij",
+        'Œ' => "OE",
+        'œ' => "oe",
+        _ => "",
+    };
+    if !pair.is_empty() {
+        output.push_str(pair);
+        return;
+    }
+    let code = u32::from(character);
+    let letter = match code {
+        0xC0..=0xFF => LATIN1[(code - 0xC0) as usize],
+        0x100..=0x17F => EXTENDED_A[(code - 0x100) as usize],
+        _ => return,
+    };
+    if letter.is_ascii_alphabetic() {
+        output.push(char::from(letter));
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -2252,6 +2341,15 @@ fn merge_ios_app_info(ios: &IosOptions, info: &mut serde_json::Value) -> Result<
             "UISupportedInterfaceOrientations~ipad".to_owned(),
             serde_json::Value::Array(values),
         );
+        // App Store validation rejects an iPad (TARGETED_DEVICE_FAMILY 1,2)
+        // app that supports fewer than all four orientations unless it opts
+        // out of multitasking; full screen keeps the lock on iPad.
+        if ios.orientations.len() < 4 {
+            object.insert(
+                "UIRequiresFullScreen".to_owned(),
+                serde_json::Value::Bool(true),
+            );
+        }
     }
     if let Some(region) = &ios.development_region {
         object.insert(
@@ -2270,6 +2368,19 @@ fn merge_ios_app_info(ios: &IosOptions, info: &mut serde_json::Value) -> Result<
                     .collect(),
             ),
         );
+    }
+    Ok(())
+}
+
+/// The names the user sees (home screen, Settings, App Store) keep the
+/// manifest spelling, accents included; `PRODUCT_NAME` is only the
+/// ASCII-safe executable and bundle folder name ([`ios_product_name`]).
+fn merge_ios_app_names(name: &str, info: &mut serde_json::Value) -> Result<(), String> {
+    let object = info
+        .as_object_mut()
+        .ok_or_else(|| "App/Info.plist must contain a top-level dictionary".to_owned())?;
+    for key in ["CFBundleDisplayName", "CFBundleName"] {
+        object.insert(key.to_owned(), serde_json::Value::String(name.to_owned()));
     }
     Ok(())
 }
@@ -4605,6 +4716,7 @@ fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
     if os == AppleOs::Tvos {
         adapt_host_for_tvos(&workspace)?;
     }
+    let product_name = project.manifest.ios_product_name();
     replace_ios_placeholders(
         &workspace.join("PamNativeApp.xcodeproj/project.pbxproj"),
         &[
@@ -4612,7 +4724,7 @@ fn prepare_apple(project: &Project, os: AppleOs) -> Result<PathBuf, String> {
                 "__PAM_APPLICATION_ID__",
                 project.manifest.ios_application_id(),
             ),
-            ("__PAM_APPLICATION_NAME__", project.manifest.name.as_str()),
+            ("__PAM_APPLICATION_NAME__", product_name.as_str()),
             (
                 "__PAM_VERSION_CODE__",
                 &project.manifest.version_code.to_string(),
@@ -4701,6 +4813,7 @@ fn adapt_host_for_tvos(workspace: &Path) -> Result<(), String> {
             "UIRequiredDeviceCapabilities",
             "UISupportedInterfaceOrientations",
             "UISupportedInterfaceOrientations~ipad",
+            "UIRequiresFullScreen",
             "UIViewControllerBasedStatusBarAppearance",
             "UILaunchScreen",
         ] {
@@ -4792,6 +4905,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
     has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
     merge_ios_open_schemes(&project.manifest.linking, &mut info)?;
     merge_ios_app_info(&project.manifest.ios, &mut info)?;
+    merge_ios_app_names(&project.manifest.name, &mut info)?;
     let firebase = ios_firebase_config(&project.root);
     has_entitlements |= apply_ios_push_entitlement(&mut entitlements, firebase.is_some());
     if let Some(config) = &firebase {
@@ -5699,7 +5813,7 @@ fn build_apple_intermediate(
     let app = derived
         .join("Build/Products")
         .join(format!("{configuration}-{}", os.simulator_sdk()))
-        .join(format!("{}.app", project.manifest.name));
+        .join(format!("{}.app", project.manifest.ios_product_name()));
     if !app.is_dir() {
         return Err(format!("Xcode did not produce {}", app.display()));
     }
@@ -5989,7 +6103,7 @@ fn devices_ios(project_path: PathBuf) -> Result<u8, String> {
 fn logs_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     let simulator = booted_ios_simulator()?;
-    let predicate = format!("process == {:?}", project.manifest.name);
+    let predicate = format!("process == {:?}", project.manifest.ios_product_name());
     command_status(
         "xcrun",
         &[
@@ -6181,7 +6295,11 @@ fn package_ios_intermediate(project_path: PathBuf) -> Result<u8, String> {
         .map_err(|error| format!("cannot create {}: {error}", dist.display()))?;
     let destination = dist.join(format!(
         "{}-{}-ios.ipa",
-        project.manifest.name.to_ascii_lowercase().replace(' ', "-"),
+        project
+            .manifest
+            .ios_product_name()
+            .to_ascii_lowercase()
+            .replace(' ', "-"),
         project.manifest.version_name
     ));
     fs::copy(&ipa, &destination).map_err(|error| format!("cannot copy IPA: {error}"))?;
@@ -13844,6 +13962,11 @@ mod bundle_exclusion_tests {
             info["UISupportedInterfaceOrientations~ipad"],
             serde_json::json!(["UIInterfaceOrientationPortrait"])
         );
+        assert_eq!(
+            info["UIRequiresFullScreen"],
+            serde_json::json!(true),
+            "a locked iPad app must opt out of multitasking to pass App Store validation"
+        );
 
         for bundle in ["single", "com.bad_underscore", "com..empty", ""] {
             let ios = IosOptions {
@@ -13864,6 +13987,98 @@ mod bundle_exclusion_tests {
             ..IosOptions::default()
         };
         assert!(validate_ios_app_options(&ios).is_err());
+    }
+
+    #[test]
+    fn ios_all_or_no_orientations_keep_ipad_multitasking() {
+        let all: IosOptions = serde_json::from_value(serde_json::json!({
+            "orientations": ["portrait", "portraitUpsideDown", "landscapeLeft", "landscapeRight"]
+        }))
+        .unwrap();
+        let mut info = serde_json::json!({});
+        merge_ios_app_info(&all, &mut info).unwrap();
+        assert_eq!(
+            info["UISupportedInterfaceOrientations~ipad"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(info.get("UIRequiresFullScreen").is_none());
+
+        let mut untouched = serde_json::json!({});
+        merge_ios_app_info(&IosOptions::default(), &mut untouched).unwrap();
+        assert!(untouched.get("UIRequiresFullScreen").is_none());
+        assert!(untouched.get("UISupportedInterfaceOrientations").is_none());
+
+        let landscape: IosOptions = serde_json::from_value(serde_json::json!({
+            "orientations": ["landscapeLeft", "landscapeRight"]
+        }))
+        .unwrap();
+        let mut info = serde_json::json!({});
+        merge_ios_app_info(&landscape, &mut info).unwrap();
+        assert_eq!(info["UIRequiresFullScreen"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn ios_product_name_is_ascii_and_keeps_ascii_names() {
+        for name in ["PAM Native", "My App 2", "Buck's Shop!", "a_b-c"] {
+            assert_eq!(ios_product_name(name, "com.example.app"), name);
+        }
+        assert_eq!(ios_product_name("Zé Chat", "app.pam.zechat"), "Ze Chat");
+        // The same name decomposed (NFD), as APFS stores it.
+        assert_eq!(
+            ios_product_name("Ze\u{301} Chat", "app.pam.zechat"),
+            "Ze Chat"
+        );
+        assert_eq!(
+            ios_product_name("Ação Çedilha ãõ", "com.example.app"),
+            "Acao Cedilha ao"
+        );
+        assert_eq!(
+            ios_product_name("Straße Œuvre Łódź Ærø", "com.example.app"),
+            "Strasse OEuvre Lodz AEro"
+        );
+        assert_eq!(
+            ios_product_name("Café ☕ & Co", "com.example.app"),
+            "Cafe Co"
+        );
+        assert_eq!(ios_product_name("日本語", "com.example.my-shop"), "my-shop");
+        assert_eq!(ios_product_name("☕", "☕"), "PamNativeApp");
+        for name in ["Zé Chat", "Ñandú", "øæå ÀÿŽž", "日本語"] {
+            let product = ios_product_name(name, "com.example.app");
+            assert!(!product.is_empty());
+            assert!(
+                product
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b" -_".contains(&byte)),
+                "{product:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ios_info_plist_shows_the_manifest_name_with_accents() {
+        let template: serde_json::Value = serde_json::json!({
+            "CFBundleDisplayName": "$(PRODUCT_NAME)",
+            "CFBundleExecutable": "$(EXECUTABLE_NAME)",
+            "CFBundleName": "$(PRODUCT_NAME)"
+        });
+        let mut info = template.clone();
+        merge_ios_app_names("Zé Chat", &mut info).unwrap();
+        assert_eq!(info["CFBundleDisplayName"], "Zé Chat");
+        assert_eq!(info["CFBundleName"], "Zé Chat");
+        assert_eq!(info["CFBundleExecutable"], "$(EXECUTABLE_NAME)");
+
+        let host = include_str!("../../../ios-host/App/Info.plist");
+        assert!(host.contains("<string>$(EXECUTABLE_NAME)</string>"));
+        let pbx = include_str!("../../../ios-host/PamNativeApp.xcodeproj/project.pbxproj");
+        assert_eq!(
+            pbx.matches("PRODUCT_NAME = \"__PAM_APPLICATION_NAME__\";")
+                .count(),
+            2,
+            "the app target's PRODUCT_NAME is the substituted ASCII product name"
+        );
     }
 
     #[test]

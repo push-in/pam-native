@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: iOS/tvOS — an application name with accents or other non-ASCII
+  characters (e.g. "Zé Chat") no longer breaks the code signature. Xcode's
+  `PRODUCT_NAME` (executable and `.app` folder) is now an ASCII spelling of
+  the name (`Ze Chat`); APFS stored the non-ASCII executable decomposed
+  while `CFBundleExecutable` stayed composed, so codesign sealed the binary
+  as a missing resource and App Store Connect rejected the upload with
+  ITMS-90034. `CFBundleDisplayName` and `CFBundleName` keep the exact
+  manifest name. ASCII names are unchanged; `ios:build`, `ios:logs` and the
+  release IPA follow the new product name.
+- Fixed: iOS — `ios.orientations` with fewer than all four orientations also
+  sets `UIRequiresFullScreen`, so a locked universal (iPhone and iPad) app
+  passes App Store validation; the lock applies full screen on iPad.
+
 ## 1.54.3 - 2026-11-19
 
 - Added: the `#[Transient]` property attribute keeps bookkeeping fields
