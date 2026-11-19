@@ -33,6 +33,19 @@ void pam_native_runtime_reload_prepared(
     }
 }
 
+void pam_native_runtime_reload_fresh_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+) {
+    (void)handle;
+    (void)entry;
+    if (prepare != 0) {
+        prepare(context);
+    }
+}
+
 void pam_native_runtime_remount(void) {}
 
 void pam_native_runtime_stats(void) {}

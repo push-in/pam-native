@@ -1644,11 +1644,13 @@ void pam_native_runtime_remount(uint64_t handle, PamNativeBatchCallback on_remou
     enqueue(state, Event{EventType::Remount, 0, 0, std::string()}, false);
 }
 
-void pam_native_runtime_reload_prepared(
+namespace {
+void enqueue_prepared_reload(
     uint64_t handle,
     const char* entry,
     PamNativeReloadPrepareCallback prepare,
-    void* context
+    void* context,
+    std::int64_t mode
 ) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || entry == nullptr) {
@@ -1670,7 +1672,26 @@ void pam_native_runtime_reload_prepared(
         // Superseded before a request boundary: release it without waiting.
         previous(previous_context);
     }
-    enqueue(state, Event{EventType::Reload, 0, 0, std::string(entry)}, false);
+    enqueue(state, Event{EventType::Reload, mode, 0, std::string(entry)}, false);
+}
+}  // namespace
+
+void pam_native_runtime_reload_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+) {
+    enqueue_prepared_reload(handle, entry, prepare, context, 0);
+}
+
+void pam_native_runtime_reload_fresh_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+) {
+    enqueue_prepared_reload(handle, entry, prepare, context, kReloadFresh);
 }
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry) {

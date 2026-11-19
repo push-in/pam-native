@@ -135,6 +135,14 @@ private func pam_native_runtime_reload_prepared(
     _ context: UnsafeMutableRawPointer?,
 )
 
+@_silgen_name("pam_native_runtime_reload_fresh_prepared")
+private func pam_native_runtime_reload_fresh_prepared(
+    _ handle: UInt64,
+    _ entry: UnsafePointer<CChar>,
+    _ prepare: PamNativeReloadPrepareCallback,
+    _ context: UnsafeMutableRawPointer?,
+)
+
 @_silgen_name("pam_native_runtime_remount")
 private func pam_native_runtime_remount(_ handle: UInt64, _ on_remount: PamNativeBatchCallback)
 
@@ -368,6 +376,15 @@ public final class PamRuntime {
     /// thread instead of waiting for the next display-link tick (Android
     /// parity: PamRuntime.surfaceAwaitingFirstFrame). Main thread only.
     private var surfaceAwaitingFirstFrame = true
+
+    /// Main thread only. The host view was detached (its controller went
+    /// away): the next `attach(hostView:)` opens like a new screen, without
+    /// the old renderer's scroll anchors.
+    private var surfaceDetached = false
+    /// `App::reload()`: set (under `stateLock`) on the PHP worker between the
+    /// old request and the new one; the new request's first batch is then
+    /// replaced by a remount on a fresh renderer (see `onNativeBatch`).
+    private var freshRequestStarted = false
     /// Cold start metric: logged once per process (first committed frame).
     private var firstFrameLogged = false
 
@@ -501,9 +518,14 @@ public final class PamRuntime {
         dispatchPrecondition(condition: .onQueue(.main))
         keyboardVisibility.setActive(true)
         let previous = renderer
+        // Attached over a host that never detached: its rows are still
+        // there, and the remount puts every ScrollView and list back on them.
+        let anchors = surfaceDetached ? [:] : (previous?.captureScrollAnchors() ?? [:])
+        surfaceDetached = false
         previous?.onNativeChildVisibility = nil
         previous?.close()
         renderer = makeRenderer(hostView: hostView)
+        renderer.adoptScrollAnchors(anchors)
         refreshKeyboardVisibility()
         surfaceAwaitingFirstFrame = true
         requestRemount()
@@ -515,6 +537,7 @@ public final class PamRuntime {
         dispatchPrecondition(condition: .onQueue(.main))
         keyboardVisibility.setActive(false)
         awaitingRemount = true
+        surfaceDetached = true
         dropPendingBatches()
         renderer?.onNativeChildVisibility = nil
         renderer?.close()
@@ -527,6 +550,26 @@ public final class PamRuntime {
     private func resynchronize() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard !closed, !awaitingRemount, currentHandle() != 0,
+              let previous = renderer, let hostView = previous.hostView else { return }
+        // The reader stays on the same rows across the replay.
+        let anchors = previous.captureScrollAnchors()
+        previous.onNativeChildVisibility = nil
+        previous.close()
+        renderer = makeRenderer(hostView: hostView)
+        renderer.adoptScrollAnchors(anchors)
+        requestRemount()
+    }
+
+    /// `App::reload()`'s new request rendered: its first frame is a diff
+    /// against the old tree, so views whose node ids it reuses (and their
+    /// scroll offsets) would survive. The new tree is mounted from scratch on
+    /// a fresh renderer instead, like a cold start; the old screen stays up
+    /// until the remount replaces it. A detached host mounts fresh on attach.
+    private func remountFresh() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        // A pending remount (attach, resynchronize) already mounts on an
+        // empty renderer, with its anchors dropped by reloadFresh.
+        guard !closed, !awaitingRemount, currentHandle() != 0, !surfaceDetached,
               let previous = renderer, let hostView = previous.hostView else { return }
         previous.onNativeChildVisibility = nil
         previous.close()
@@ -1072,8 +1115,25 @@ public final class PamRuntime {
     private func reloadFresh(entry: String) {
         let currentHandle = currentHandle()
         guard !entry.isEmpty, currentHandle != 0 else { return }
-        entry.withCString { pam_native_runtime_reload_fresh(currentHandle, $0) }
+        // A remount still pending from before keeps no anchors either.
+        renderer?.adoptScrollAnchors([:])
+        let context = Unmanaged.passRetained(PamReloadPreparation { [weak self] in
+            self?.markFreshRequestStarted()
+        }).toOpaque()
+        entry.withCString { buffer in
+            pam_native_runtime_reload_fresh_prepared(currentHandle, buffer, { context in
+                guard let context else { return }
+                Unmanaged<PamReloadPreparation>.fromOpaque(context).takeRetainedValue().run()
+            }, context)
+        }
         didRequestReload(entry: entry)
+    }
+
+    /// PHP worker: batches from here on belong to the relaunched request.
+    private func markFreshRequestStarted() {
+        stateLock.lock()
+        freshRequestStarted = true
+        stateLock.unlock()
     }
 
     private func didRequestReload(entry: String) {
@@ -1282,14 +1342,19 @@ public final class PamRuntime {
             return false
         }
         let decodeNanos = Int64(DispatchTime.now().uptimeNanoseconds - start)
+        stateLock.lock()
+        let freshMount = freshRequestStarted
+        freshRequestStarted = false
+        stateLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            guard self.currentHandle() != 0 && !self.closed && !self.awaitingRemount else {
+            guard !freshMount, self.currentHandle() != 0 && !self.closed && !self.awaitingRemount else {
                 self.releaseBatch(batchHandle)
                 self.stateLock.lock()
                 _ = self.ownedBatchHandles.remove(batchHandle)
                 self.stateLock.unlock()
+                if freshMount { self.remountFresh() }
                 return
             }
 

@@ -620,7 +620,7 @@ final class PamAnchoredScrollView: PamContentScrollView {
         horizontal ? contentOffset.x : contentOffset.y
     }
 
-    private var primaryMaxOffset: CGFloat {
+    var primaryMaxOffset: CGFloat {
         if horizontal {
             return max(-adjustedContentInset.left, contentSize.width - bounds.width + adjustedContentInset.right)
         }
@@ -639,6 +639,22 @@ final class PamAnchoredScrollView: PamContentScrollView {
                 max(-adjustedContentInset.top, value)
             )
         }
+    }
+
+    /// Puts the reader back where a remount or a Dynamic Type re-measure
+    /// found them (`PamScrollRemountAnchor`). After a remount the retained
+    /// `contentOffset` and the initial end anchor no longer apply: the
+    /// reader had already left them. The next layout sees no content change
+    /// to follow (end anchor, maintainVisibleContentPosition).
+    func pamRestoreAnchoredOffset(_ value: CGFloat, remount: Bool) {
+        if remount {
+            initialEndAnchorApplied = true
+            pamRequestedContentOffsetX = nil
+            pamRequestedContentOffsetY = nil
+        }
+        pamStopDeceleration()
+        setPrimaryOffset(value)
+        previousMaxOffset = primaryMaxOffset
     }
 
     /// `scrollAnimated`: requests glide to their target.
