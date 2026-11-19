@@ -44,6 +44,8 @@ class PamTranslatedGestureParityInstrumentedTest {
     @Volatile
     private var lastGeometry = ""
 
+    private var rootHost: PamRootHost? = null
+
     @Test
     fun aPanAroundThePannedContainerGetsTheSameDragWithTheKeyboardOpen() {
         val button = Collections.synchronizedList(ArrayList<Int>())
@@ -176,6 +178,7 @@ class PamTranslatedGestureParityInstrumentedTest {
         ) as PamTestActivity
         lateinit var renderer: PamRenderer
         var created = false
+        rootHost = activity.host
         try {
             waitUntil("host laid out") { activity.host.isLaidOut && activity.host.height > 0 }
             instrumentation.runOnMainSync {
@@ -186,6 +189,10 @@ class PamTranslatedGestureParityInstrumentedTest {
                 val density = activity.host.resources.displayMetrics.density
                 val width = activity.host.width / density
                 val height = activity.host.height / density
+                // The composer rests above the bottom system bar: below API 29
+                // the navigation bar is its own window and a touch injected
+                // there is refused (INJECT_EVENTS).
+                val bottom = height - systemBarBottom(activity.host) / density
                 val composerHeight = 120f
                 renderer.commit(listOf(buildList {
                     add(Mutation.Create(spec(SCREEN, 0, 0, NodeKind.SCREEN)))
@@ -193,10 +200,10 @@ class PamTranslatedGestureParityInstrumentedTest {
                     add(Mutation.Create(spec(TIMELINE, COLUMN, 0, NodeKind.VIEW, mapOf(
                         PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFF7F6F2),
                     ))))
-                    addAll(tree(width, height))
+                    addAll(tree(width, bottom))
                     add(Mutation.Layout(SCREEN, Frame(0f, 0f, width, height)))
                     add(Mutation.Layout(COLUMN, Frame(0f, 0f, width, height)))
-                    add(Mutation.Layout(TIMELINE, Frame(0f, 0f, width, height - composerHeight)))
+                    add(Mutation.Layout(TIMELINE, Frame(0f, 0f, width, bottom - composerHeight)))
                     add(Mutation.SetRoot(SCREEN))
                 }))
             }
@@ -208,7 +215,20 @@ class PamTranslatedGestureParityInstrumentedTest {
                 input = requireNotNull(activity.host.findTagged("tp-input")) as EditText
             }
             waitUntil("input has window focus") { input.isShown && input.hasWindowFocus() }
+            // The closed run needs the IME really hidden: some releases (API
+            // 26) show it on their own when the input takes the initial focus.
+            instrumentation.runOnMainSync {
+                input.clearFocus()
+                input.context.getSystemService(InputMethodManager::class.java)
+                    .hideSoftInputFromWindow(input.windowToken, 0)
+            }
+            waitUntil("IME hidden and the composer at rest") {
+                lastGeometry = "ty=${composer.translationY} ime=${activity.host.imeBottomInset} " +
+                    "host=${activity.host.height}"
+                activity.host.imeBottomInset == 0 && composer.translationY == 0f
+            }
             SystemClock.sleep(300)
+            instrumentation.waitForIdleSync()
             val closed = gestures(activity, false)
 
             instrumentation.runOnMainSync {
@@ -271,6 +291,15 @@ class PamTranslatedGestureParityInstrumentedTest {
             view.getLocationOnScreen(location)
             x = location[0] + view.width / 2f
             y = location[1] + view.height / 2f
+            val host = requireNotNull(rootHost)
+            val hostLocation = IntArray(2)
+            host.getLocationOnScreen(hostLocation)
+            val covered = maxOf(host.imeBottomInset, systemBarBottom(host))
+            assertTrue(
+                "touch ($x, $y) inside the app window above the IME/system bar " +
+                    "(host bottom ${hostLocation[1] + host.height}, covered $covered) $lastGeometry",
+                y < hostLocation[1] + host.height - covered,
+            )
         }
         val downAt = SystemClock.uptimeMillis()
         inject(MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0))
@@ -296,6 +325,10 @@ class PamTranslatedGestureParityInstrumentedTest {
         }
         inject(MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x + slideByPx, y, 0))
     }
+
+    private fun systemBarBottom(host: View): Int =
+        androidx.core.view.ViewCompat.getRootWindowInsets(host)
+            ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())?.bottom ?: 0
 
     private fun inject(event: MotionEvent) {
         event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
