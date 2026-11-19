@@ -379,6 +379,7 @@ public final class PamRenderer: @unchecked Sendable {
             applyLayout(id)
         }
         dirtyLists.forEach { syncVirtualList($0) }
+        if !pendingScrollAnchors.isEmpty { restorePendingScrollAnchors(layoutsChanged: !dirtyLayouts.isEmpty) }
         flushPendingImageLoads()
         if !residentImages.isEmpty {
             PamImageResidency.requestSweep()
@@ -530,6 +531,216 @@ public final class PamRenderer: @unchecked Sendable {
         for view in views.values {
             (view as? PamMediaView)?.onHostBackground()
         }
+    }
+
+    // MARK: Scroll anchors across re-measures and remounts
+
+    /// Anchors waiting for the commit that re-measures or rebuilds their
+    /// rows: a Dynamic Type change (`refreshTextScale`, re-applied on each
+    /// commit with layouts until the deadline) or a remount on this new
+    /// renderer (`adoptScrollAnchors`, applied once by its first commit).
+    private var pendingScrollAnchors: [Int64: PamScrollRemountAnchor] = [:]
+    private var pendingScrollAnchorsDeadline: CFTimeInterval = 0
+    private var pendingScrollAnchorsOnce = false
+    private static let textScaleAnchorWindow: CFTimeInterval = 1
+    private static let remountAnchorWindow: CFTimeInterval = 5
+
+    /// Where every mounted ScrollView and virtual list rests, by anchor row
+    /// (main thread). Android `PamRenderer.captureRemountViewState`.
+    func captureScrollAnchors() -> [Int64: PamScrollRemountAnchor] {
+        dispatchPrecondition(condition: .onQueue(.main))
+        var anchors: [Int64: PamScrollRemountAnchor] = [:]
+        for (id, view) in views {
+            if let list = view as? PamVirtualListView {
+                anchors[id] = captureListAnchor(id, list: list)
+            } else if let scroll = view as? PamAnchoredScrollView {
+                anchors[id] = captureScrollViewAnchor(id, scroll: scroll)
+            }
+        }
+        return anchors
+    }
+
+    /// The remount this new renderer receives next puts every ScrollView and
+    /// list back on these rows (empty: nothing to restore, a cold start).
+    func adoptScrollAnchors(_ anchors: [Int64: PamScrollRemountAnchor]) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        pendingScrollAnchors = anchors
+        pendingScrollAnchorsOnce = !anchors.isEmpty
+        pendingScrollAnchorsDeadline = CACurrentMediaTime() + Self.remountAnchorWindow
+    }
+
+    /// Cells along the list axis in content coordinates (id, start, extent).
+    private func listAnchorRows(_ id: Int64, list: PamVirtualListView) -> [(id: Int64, start: CGFloat, extent: CGFloat)] {
+        guard let listFrame = frames[id] else { return [] }
+        let horizontal = list.horizontal
+        let padding = list.pamContentPadding
+        return (children[id] ?? []).compactMap { cellId -> (id: Int64, start: CGFloat, extent: CGFloat)? in
+            guard !parkedCells.contains(cellId), let frame = frames[cellId] else { return nil }
+            if horizontal {
+                return (id: cellId, start: CGFloat(frame.x - listFrame.x) - padding.left, extent: CGFloat(frame.width))
+            }
+            return (id: cellId, start: CGFloat(frame.y - listFrame.y) - padding.top, extent: CGFloat(frame.height))
+        }
+    }
+
+    /// Children of `parent` along a ScrollView's axis in its content coordinates.
+    private func scrollAnchorRows(_ parent: Int64, scroll: PamAnchoredScrollView, scrollFrame: Frame) -> [(id: Int64, start: CGFloat, extent: CGFloat)] {
+        let horizontal = scroll.horizontal
+        let padding = scroll.pamContentPadding
+        return (children[parent] ?? []).compactMap { child -> (id: Int64, start: CGFloat, extent: CGFloat)? in
+            guard let frame = frames[child], views[child]?.isHidden != true else { return nil }
+            if horizontal {
+                return (id: child, start: CGFloat(frame.x - scrollFrame.x) - padding.left, extent: CGFloat(frame.width))
+            }
+            return (id: child, start: CGFloat(frame.y - scrollFrame.y) - padding.top, extent: CGFloat(frame.height))
+        }
+    }
+
+    private func captureListAnchor(_ id: Int64, list: PamVirtualListView) -> PamScrollRemountAnchor? {
+        guard list.bounds.width > 0, list.bounds.height > 0 else { return nil }
+        let horizontal = list.horizontal
+        let offset = horizontal ? list.contentOffset.x : list.contentOffset.y
+        let minimum = horizontal ? -list.adjustedContentInset.left : -list.adjustedContentInset.top
+        if let end = PamScrollRemountAnchor.end(
+            offset: offset, minimum: minimum, maximum: list.primaryMaximumOffset,
+            horizontal: horizontal, reversed: list.pamInverted
+        ) {
+            return end
+        }
+        let viewport = horizontal ? list.bounds.width : list.bounds.height
+        let edge = PamScrollRemountAnchor.edge(offset: offset, viewport: viewport, reversed: list.pamInverted)
+        guard let row = PamScrollRemountAnchor.hit(listAnchorRows(id, list: list), edge: edge, reversed: list.pamInverted) else {
+            return nil
+        }
+        return PamScrollRemountAnchor(
+            rowId: row.id,
+            fraction: PamScrollRemountAnchor.fraction(of: row, edge: edge, reversed: list.pamInverted),
+            atStart: false,
+            atEnd: false,
+            horizontal: horizontal,
+            reversed: list.pamInverted
+        )
+    }
+
+    /// The node under the leading edge, descending through wrappers at least
+    /// a viewport long (a content column) to the row the reader sees; a
+    /// pager's page is the anchor.
+    private func captureScrollViewAnchor(_ id: Int64, scroll: PamAnchoredScrollView) -> PamScrollRemountAnchor? {
+        guard scroll.bounds.width > 0, scroll.bounds.height > 0, let scrollFrame = frames[id] else { return nil }
+        let horizontal = scroll.horizontal
+        let offset = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
+        let minimum = horizontal ? -scroll.adjustedContentInset.left : -scroll.adjustedContentInset.top
+        if let end = PamScrollRemountAnchor.end(
+            offset: offset, minimum: minimum, maximum: scroll.primaryMaxOffset,
+            horizontal: horizontal, reversed: false
+        ) {
+            return end
+        }
+        let viewport = horizontal ? scroll.bounds.width : scroll.bounds.height
+        var parent = id
+        var anchor: (id: Int64, start: CGFloat, extent: CGFloat)?
+        for _ in 0..<Self.scrollAnchorDepth {
+            guard let hit = PamScrollRemountAnchor.hit(
+                scrollAnchorRows(parent, scroll: scroll, scrollFrame: scrollFrame), edge: offset, reversed: false
+            ) else { break }
+            anchor = hit
+            // A pager's page (one viewport long) is the anchor; the content
+            // row holding the pages is descended like a content column.
+            if hit.extent < viewport || (scroll.pamPagingEnabled && hit.extent <= viewport + 0.5) { break }
+            parent = hit.id
+        }
+        guard let anchor else { return nil }
+        return PamScrollRemountAnchor(
+            rowId: anchor.id,
+            fraction: PamScrollRemountAnchor.fraction(of: anchor, edge: offset, reversed: false),
+            atStart: false,
+            atEnd: false,
+            horizontal: horizontal,
+            reversed: false
+        )
+    }
+
+    private static let scrollAnchorDepth = 16
+
+    private func restorePendingScrollAnchors(layoutsChanged: Bool) {
+        guard CACurrentMediaTime() <= pendingScrollAnchorsDeadline else {
+            pendingScrollAnchors.removeAll()
+            pendingScrollAnchorsOnce = false
+            return
+        }
+        guard layoutsChanged else { return }
+        let remount = pendingScrollAnchorsOnce
+        for (id, anchor) in pendingScrollAnchors {
+            if let list = views[id] as? PamVirtualListView {
+                // The reader took over (a drag): their position wins.
+                if list.isTracking || list.isDragging {
+                    pendingScrollAnchors[id] = nil
+                    continue
+                }
+                restoreListAnchor(id, list: list, anchor: anchor)
+            } else if let scroll = views[id] as? PamAnchoredScrollView {
+                if scroll.isTracking || scroll.isDragging {
+                    pendingScrollAnchors[id] = nil
+                    continue
+                }
+                restoreScrollViewAnchor(id, scroll: scroll, anchor: anchor, remount: remount)
+            }
+        }
+        if remount {
+            pendingScrollAnchors.removeAll()
+            pendingScrollAnchorsOnce = false
+        }
+    }
+
+    private func restoreListAnchor(_ id: Int64, list: PamVirtualListView, anchor: PamScrollRemountAnchor) {
+        guard list.horizontal == anchor.horizontal, list.pamInverted == anchor.reversed,
+              list.bounds.width > 0, list.bounds.height > 0 else { return }
+        let horizontal = anchor.horizontal
+        let row = anchor.rowId == 0 ? nil : listAnchorRows(id, list: list)
+            .first { $0.id == anchor.rowId }
+            .map { (start: $0.start, extent: $0.extent) }
+        guard let offset = anchor.restoredOffset(
+            row: row,
+            viewport: horizontal ? list.bounds.width : list.bounds.height,
+            minimum: horizontal ? -list.adjustedContentInset.left : -list.adjustedContentInset.top,
+            maximum: list.primaryMaximumOffset
+        ) else { return }
+        // A retained `initialScrollIndex` no longer applies: the reader had left it.
+        list.pamInitialScrollIndexApplied = true
+        let current = horizontal ? list.contentOffset.x : list.contentOffset.y
+        guard abs(current - offset) >= 0.5 else { return }
+        list.pamStopDeceleration()
+        if horizontal {
+            list.contentOffset.x = offset
+        } else {
+            list.contentOffset.y = offset
+        }
+        // Mount the rows now on screen and anchor the next sync on them.
+        listKeyAnchors[id] = nil
+        syncVirtualList(id)
+    }
+
+    private func restoreScrollViewAnchor(_ id: Int64, scroll: PamAnchoredScrollView, anchor: PamScrollRemountAnchor, remount: Bool) {
+        guard scroll.horizontal == anchor.horizontal, let scrollFrame = frames[id],
+              scroll.bounds.width > 0, scroll.bounds.height > 0 else { return }
+        let horizontal = anchor.horizontal
+        var row: (start: CGFloat, extent: CGFloat)?
+        if anchor.rowId != 0 {
+            guard let frame = frames[anchor.rowId] else { return }
+            if horizontal {
+                row = (start: CGFloat(frame.x - scrollFrame.x) - scroll.pamContentPadding.left, extent: CGFloat(frame.width))
+            } else {
+                row = (start: CGFloat(frame.y - scrollFrame.y) - scroll.pamContentPadding.top, extent: CGFloat(frame.height))
+            }
+        }
+        guard let offset = anchor.restoredOffset(
+            row: row,
+            viewport: horizontal ? scroll.bounds.width : scroll.bounds.height,
+            minimum: horizontal ? -scroll.adjustedContentInset.left : -scroll.adjustedContentInset.top,
+            maximum: scroll.primaryMaxOffset,
+            paging: scroll.pamPagingEnabled
+        ) else { return }
+        scroll.pamRestoreAnchoredOffset(offset, remount: remount)
     }
 
     public func close() {
@@ -4556,6 +4767,18 @@ public final class PamRenderer: @unchecked Sendable {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.refreshTextScale() }
             return
+        }
+        // The relayout that follows re-measures every row: each ScrollView
+        // and list keeps the row under its leading edge (a pixel offset would
+        // move the reader as the rows above it grow). Re-applied after each
+        // commit with layouts for a moment (the relayout and PHP's re-render
+        // with the new fontScale arrive separately).
+        if !pendingScrollAnchorsOnce {
+            let anchors = captureScrollAnchors()
+            if !anchors.isEmpty {
+                pendingScrollAnchors = anchors
+                pendingScrollAnchorsDeadline = CACurrentMediaTime() + Self.textScaleAnchorWindow
+            }
         }
         for (id, view) in views where view is PamTextView {
             applyTextContent(view: view, nodeId: id)

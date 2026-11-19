@@ -1897,7 +1897,14 @@ class PamRenderer(
             "Native mutations must be mounted on the Android UI thread"
         }
         cancelPendingMounts()
-        remountViewState = if (preserveViewState && nodes.size() > 0) captureRemountViewState() else null
+        // An empty renderer (a recreated Activity's) takes the state the
+        // previous surface left (see [adoptRetainedViewState]).
+        remountViewState = when {
+            preserveViewState && nodes.size() > 0 -> captureRemountViewState()
+            preserveViewState -> adoptedViewState
+            else -> null
+        }
+        adoptedViewState = null
         remountViewState?.takeIf { it.silent && it.focusedInput != 0L }?.let { remountFocusHandoff = it.focusedInput }
         if (remountViewState?.focusedInput?.let { it != 0L } == true) {
             // Removing the focused editor drops the IME's served view, so the
@@ -1947,7 +1954,7 @@ class PamRenderer(
     }
 
     /** A scroll container's resting place by anchor node (see [captureScrollAnchor]). */
-    private class ScrollRemountAnchor(
+    internal class ScrollRemountAnchor(
         val anchorId: Long,
         val fraction: Float,
         val atStart: Boolean,
@@ -1956,7 +1963,7 @@ class PamRenderer(
     )
 
     /** View state PHP does not own, carried across a remount (see [resetTree]). */
-    private class RemountViewState(
+    internal class RemountViewState(
         val scrolls: MutableMap<Long, ScrollRemountAnchor>,
         val lists: MutableMap<Long, PamRecyclerList.ConfigurationAnchor>,
         val focusedInput: Long,
@@ -1968,6 +1975,28 @@ class PamRenderer(
     )
 
     private var remountViewState: RemountViewState? = null
+    /** Scroll anchors a previous surface handed over, for this renderer's first remount. */
+    private var adoptedViewState: RemountViewState? = null
+
+    /**
+     * The surface is going away while PHP lives on (an Activity recreation):
+     * where every ScrollView and list rests, by anchor row, for the next
+     * surface's renderer ([adoptRetainedViewState]). Focus is not carried:
+     * the old window's editor and keyboard go with it.
+     */
+    internal fun captureRetainedViewState(): RemountViewState? {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (nodes.size() == 0) return null
+        val captured = captureRemountViewState()
+        if (captured.scrolls.isEmpty() && captured.lists.isEmpty()) return null
+        return RemountViewState(captured.scrolls, captured.lists, 0L, -1, -1, imeVisible = false)
+    }
+
+    /** Applied by the first remount commit after [resetTree] (null drops any pending one). */
+    internal fun adoptRetainedViewState(state: RemountViewState?) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        adoptedViewState = state
+    }
     /** The focused input as the configuration change found it (see [prepareConfigurationRemount]). */
     private var configurationFocus: RemountViewState? = null
     private val releaseConfigurationFocus = Runnable { endConfigurationFocusHold() }
@@ -2110,7 +2139,10 @@ class PamRenderer(
             if (hit == 0L) break
             anchor = hit
             fraction = (edge - hitStart) / hitExtent
-            if (hitExtent < viewport) break
+            // A pager's page (one viewport long) is the anchor: the reader is
+            // on a page, not a row in it. The content row holding the pages
+            // is longer and is descended like any content column.
+            if (hitExtent < viewport || (scroll.isPagingEnabled() && hitExtent <= viewport + 0.5f)) break
             parent = hit
         }
         if (anchor == 0L && !atEnd) return null
@@ -2150,7 +2182,9 @@ class PamRenderer(
             val start = if (horizontal) frame.x - scrollFrame.x else frame.y - scrollFrame.y
             val extent = if (horizontal) frame.width else frame.height
             val inset = if (horizontal) scroll.contentInsetLeft else scroll.contentInsetTop
-            scroll.restoreRemountOffset(((start + anchor.fraction * extent) * density).roundToInt() + inset, toEnd = false)
+            // A pager rests on a page boundary: the page more than half shown.
+            val into = if (scroll.isPagingEnabled()) (if (anchor.fraction >= 0.5f) extent else 0f) else anchor.fraction * extent
+            scroll.restoreRemountOffset(((start + into) * density).roundToInt() + inset, toEnd = false)
         }
     }
 
@@ -2229,6 +2263,7 @@ class PamRenderer(
     override fun close() {
         onPropertyError = null
         remountViewState = null
+        adoptedViewState = null
         remountFocusHandoff = 0L
         endConfigurationFocusHold()
         if (remountFocusBlocked) {

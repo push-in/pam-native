@@ -85,8 +85,35 @@ the rebuilt ones:
   the IME hid before the change reached the Activity, PHP saw that blur and then
   sees the refocus.
 
+- **Pagers.** A paging `ScrollView` anchors on its page (not a row inside it)
+  and is put back on a page boundary; a paging list keeps its item like any
+  other list.
+
 Not kept: a fling in progress (it stops) and state inside views that are not
 mounted when the remount runs (a nested list in an off-screen cell).
+
+### Recreated Activity
+
+When the Activity is still recreated (an undeclared change below, or the
+system reclaiming a stopped Activity while the process lives),
+`PamActivity.onDestroy` detaches with `keepViewState`: PamRuntime captures the
+same scroll anchors from the old renderer and hands them to the renderer of
+the next Activity, whose first remount restores them with the rows measured
+for the new configuration. Focus is not carried (the old window's editor and
+keyboard go with it). An Activity the user finished (back out of the app)
+keeps nothing: the next launch opens like a new screen.
+
+### `App::reload()`
+
+`App::reload()` relaunches PHP like a cold start, and the surface follows: the
+new request's first frame is not applied as a diff against the old tree (node
+ids are derived from the tree position, so a ScrollView or list at the same
+place would have kept its views and their offsets). The runtime replaces it
+with a remount on a cleared renderer that carries no view state: every
+ScrollView and list starts at its `contentOffset`/`initialScrollIndex`, the
+same as on a cold start. The old screen stays up until that remount replaces
+it. The development hot reload and the error overlay's Reload still patch the
+mounted views in place (Fast Refresh).
 
 ## Not declared (the Activity is still recreated)
 

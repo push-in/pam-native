@@ -212,6 +212,17 @@ void pam_native_runtime_reload_prepared(
     void* context
 );
 
+/* App::reload() (like pam_native_runtime_reload_fresh), and `prepare(context)`
+ * runs once on the PHP worker between the old request and the new one: the
+ * host learns which batches belong to the relaunched request (it mounts that
+ * tree from scratch, keeping no view state of the old surface). */
+void pam_native_runtime_reload_fresh_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+);
+
 /*
  * Asks the runtime worker to publish the retained tree as a full mount for a
  * recreated host view. The batch arrives through `on_remount`, in order with

@@ -76,6 +76,24 @@ class PamRuntime(
      */
     private var awaitingRemount = false
     private var attachedSurface = true
+
+    /**
+     * Where the detached surface's ScrollViews and lists rested (by anchor
+     * row), handed to the next [attach]'s renderer so a recreated Activity
+     * opens at the reader's place. Main thread.
+     */
+    private var retainedViewState: dev.pam.nativeapp.render.PamRenderer.RemountViewState? = null
+
+    /**
+     * `App::reload()`: set until the old request is released (worker), then
+     * [freshRequestStarted] until the new request's first batch, which is
+     * replaced by a remount without view state (see [onNativeBatch]).
+     */
+    private val freshReloadPending = AtomicBoolean()
+    private val freshRequestStarted = AtomicBoolean()
+
+    /** The next remount batch mounts like a cold start: no scroll anchor or focus is carried. */
+    private var freshRemountPending = false
     private val textTypefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(context)
     private val closed = AtomicBoolean()
     private val handleLock = Any()
@@ -238,11 +256,19 @@ class PamRuntime(
             previousRenderer.onSurfaceKeyboardInset = null
             previousRenderer.onKeyboardVisibility = null
             previousRenderer.onKeyboardHeight = null
-            if (attachedSurface) runCatching { previousRenderer.close() }
+            if (attachedSurface) {
+                // Attached over a surface that never detached: its rows are still there.
+                retainedViewState = runCatching { previousRenderer.captureRetainedViewState() }.getOrNull()
+                runCatching { previousRenderer.close() }
+            }
             renderer.engineManagedSafeArea = previousRenderer.engineManagedSafeArea
             this.renderer = renderer
             bindRenderer(renderer)
         }
+        // The remount below puts the reader back on the rows the previous
+        // surface showed (a fresh relaunch since then cleared them).
+        renderer.adoptRetainedViewState(if (freshRemountPending) null else retainedViewState)
+        retainedViewState = null
         if (previousModules == null) {
             installModules()
         } else if (previousModules.boundContext !== context) {
@@ -258,11 +284,18 @@ class PamRuntime(
     /**
      * The host surface is going away while the process (and PHP) stays alive.
      * Views are released; PHP keeps running and its later frames are folded
-     * into the remount performed by the next [attach].
+     * into the remount performed by the next [attach]. With [keepViewState]
+     * (the Activity is recreated, not finished) the next surface opens with
+     * every ScrollView and list on the row the reader saw.
      */
-    fun detach(context: Context) {
+    fun detach(context: Context, keepViewState: Boolean = false) {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (surfaceContext.get() !== context || !attachedSurface) return
+        retainedViewState = if (keepViewState && !freshRemountPending) {
+            runCatching { renderer.captureRetainedViewState() }.getOrNull()
+        } else {
+            null
+        }
         keyboardVisibility.setActive(false)
         renderer.setKeyboardVisibilityActive(false)
         attachedSurface = false
@@ -599,9 +632,16 @@ class PamRuntime(
         beforeNextRequest: (() -> Unit)? = null,
         fresh: Boolean = false,
     ) {
+        if (fresh) {
+            // A cold start keeps nothing of the old surface: not even the
+            // views whose node ids the new request happens to reuse.
+            retainedViewState = null
+            renderer.adoptRetainedViewState(null)
+        }
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
+                freshReloadPending.set(fresh)
                 if (confirmedAtNanos != null) {
                     hotReloadLatency.begin(confirmedAtNanos, transferredBytes)
                 }
@@ -621,6 +661,8 @@ class PamRuntime(
      */
     @Suppress("unused")
     private fun onNativeRequestReleased(entryPath: String) {
+        // Batches after this point belong to the relaunched request.
+        if (freshReloadPending.getAndSet(false)) freshRequestStarted.set(true)
         reloadPreparations.remove(entryPath)?.let { prepare ->
             runCatching(prepare).onFailure { error ->
                 onNativeError("Hot reload could not apply the edited files: ${error.message}")
@@ -711,7 +753,21 @@ class PamRuntime(
         // next traversal draws it without waiting for a frame callback.
         // Delivery itself must never overtake an earlier dependent batch.
         val interactive = SystemClock.uptimeMillis() - lastInteractionUptime <= INTERACTION_COMMIT_WINDOW_MS
+        val freshMount = freshRequestStarted.getAndSet(false)
         val deliver = Runnable {
+            if (freshMount) {
+                // App::reload(): the new request's first frame is a diff
+                // against the old tree, so views with the same node id (and
+                // their scroll offsets) would survive. Mount the new tree from
+                // scratch instead, like a cold start; the old screen stays up
+                // until the remount replaces it. A detached surface remounts
+                // on its next attach and keeps nothing either.
+                releaseBatch(batchHandle)
+                freshRemountPending = true
+                retainedViewState = null
+                if (!closed.get() && attachedSurface) requestRemount()
+                return@Runnable
+            }
             if (closed.get() || awaitingRemount || !attachedSurface) {
                 releaseBatch(batchHandle)
                 return@Runnable
@@ -763,9 +819,12 @@ class PamRuntime(
             while (pendingBatches.isNotEmpty()) {
                 releaseBatch(pendingBatches.removeFirst().handle)
             }
+            val fresh = freshRemountPending
+            freshRemountPending = false
+            if (fresh) renderer.adoptRetainedViewState(null)
             if (mutations != null) {
                 pendingBatches.addLast(
-                    PendingBatch(mutations, batchHandle, decodeNanos, remount = true),
+                    PendingBatch(mutations, batchHandle, decodeNanos, remount = true, keepViewState = !fresh),
                 )
             }
             markReadyForEvents()
@@ -1132,8 +1191,9 @@ class PamRuntime(
                 Trace.endSection()
             }
             runCatching {
-                // Scroll positions, focus and the keyboard survive the replay.
-                if (remount) renderer.resetTree(preserveViewState = true)
+                // Scroll positions, focus and the keyboard survive the replay
+                // (not the one after App::reload(): that is a cold start).
+                if (remount) renderer.resetTree(preserveViewState = current.none { it.remount && !it.keepViewState })
                 try {
                     renderer.commit(current.map(PendingBatch::mutations))
                 } finally {
@@ -1315,6 +1375,8 @@ private data class PendingBatch(
     val decodeNanos: Long,
     /** The engine's full mount of its retained tree (see [PamRuntime.onNativeRemount]). */
     val remount: Boolean = false,
+    /** A remount that carries scroll anchors and focus (all but the one after `App::reload()`). */
+    val keepViewState: Boolean = true,
 )
 
 /** Process-wide owner of the embedded PHP runtime (see [PamRuntime.attach]). */
