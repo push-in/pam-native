@@ -53,12 +53,17 @@ their actual on-screen bounds.
   in its own coordinates, so a `Pressable` behaves as anywhere else: a tap
   yields `pressIn`, `pressOut` and `press`; a hold yields `longPress` and
   `pressOut`, never `press` as well; sliding off releases without either.
-  The gesture enters through the outermost `Pressable` or `GestureDetector`
-  enclosing the touched control inside the panning container, so Android's
-  regular dispatch and interception run from there: a `GestureDetector` pan
-  around a `Pressable` (slide to cancel a voice recording) gets
-  `gestureUpdate`/`gestureEnd` while the inner `Pressable` keeps its own
-  press, long press and `pressOut`, exactly as with the keyboard closed.
+  The gesture enters through the highest ancestor of the touched control
+  whose own hit test still reaches it (each view below it contains the
+  pointer, and no sibling drawn above the branch would take the down), so
+  Android's regular dispatch and interception run from there, inside or
+  around the panning container: a `GestureDetector` pan around a `Pressable`
+  (slide to cancel a voice recording) or around the whole panned container
+  gets `gestureUpdate`/`gestureEnd`, and a horizontal `ScrollView` scrolls
+  when the drag starts on a `Pressable` in it, while the `Pressable` keeps its
+  own press, long press and `pressOut`, exactly as with the keyboard closed.
+  Only ancestors whose bounds no longer contain the translated pointer (and
+  whose regular hit test therefore could not reach it) miss the stream.
 
 ## Platform matrix
 
@@ -187,7 +192,10 @@ Before releasing an Android host change, exercise:
    `PamKeyboardAvoidanceTest` and Android instrumentation tests
    (`PamTranslatedPressableInstrumentedTest` covers press and long press on a
    translated composer, `PamTranslatedGestureAncestorInstrumentedTest` a pan
-   `GestureDetector` around that button, on API 24 and 36).
+   `GestureDetector` around that button, on API 24 and 36;
+   `PamTranslatedGestureParityInstrumentedTest` compares the events with the
+   IME closed and open for a pan around the panned container and a
+   horizontal `ScrollView` in it).
 
 ## Engine-managed SafeAreaView (1.3)
 
