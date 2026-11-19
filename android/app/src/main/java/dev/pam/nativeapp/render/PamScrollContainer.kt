@@ -238,6 +238,9 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun isHorizontal(): Boolean = horizontal
 
+    /** RN `pagingEnabled`: the remount anchor is the page, not a row inside it. */
+    fun isPagingEnabled(): Boolean = pagingEnabled
+
     fun setScrollEnabled(value: Boolean) {
         scrollEnabled = value
         activeScroll.isEnabled = value

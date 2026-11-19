@@ -694,8 +694,10 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         if ((runtimeStarted || launched) && PamRuntimeHost.runtime === runtime) {
             // Keep PHP (and its state) alive for the next Activity; only this
             // surface goes away. Shutting embedded PHP down in a live process
-            // is not restartable and crashed or hung the relaunch.
-            runtime.detach(this)
+            // is not restartable and crashed or hung the relaunch. A
+            // recreated Activity (not one the user finished) opens with its
+            // lists and ScrollViews on the rows this one showed.
+            runtime.detach(this, keepViewState = isChangingConfigurations || !isFinishing)
         } else {
             runtime.close()
         }

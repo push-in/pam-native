@@ -136,6 +136,68 @@ class PamConfigurationRemountStateInstrumentedTest {
         }
 
     @Test
+    fun aPagingScrollViewKeepsItsPageWhenTheFontScaleGrows() = withSurface(::pagerTree) { surface ->
+        val pager = { surface.renderer.viewForNode(SCROLLER_ID) as PamScrollContainer }
+        val pageWidth = main { pager().primaryViewportPixels() }
+        main { pager().getChildAt(0).scrollBy(pageWidth * 3, 0) }
+        waitFrames(6)
+        assertEquals("on page 3", pageWidth * 3, main { pager().snapshotOffsetPixels().first })
+        surface.remount(fontScale = 1.3f)
+        waitFrames(8)
+        assertEquals("still on page 3", pageWidth * 3, main { pager().snapshotOffsetPixels().first })
+    }
+
+    /*
+     * An Activity that is still recreated (an undeclared configuration
+     * change, the system reclaiming it) builds a new renderer: PamRuntime
+     * hands it the old surface's anchors (detach -> attach), and its first
+     * remount puts the reader back on the same row, re-measured.
+     */
+
+    @Test
+    fun aVirtualizedListKeepsItsTopRowAcrossAnActivityRecreation() = withSurface(::listTree) { surface ->
+        surface.scrollBy(rowsTop(40, 1f) + rowHeight(40, 1f) * 0.3f)
+        val before = surface.topRow()
+        surface.recreate(fontScale = 1.3f)
+        surface.assertTopRow(before)
+    }
+
+    @Test
+    fun anInvertedListScrolledUpKeepsItsTopRowAcrossAnActivityRecreation() =
+        withSurface({ scale, locale -> anyListTree(scale, locale, inverted = true) }) { surface ->
+            surface.scrollBy(-(rowsTop(30, 1f) + rowHeight(30, 1f) * 0.4f))
+            val before = surface.topRow()
+            assertTrue("scrolled into the history ($before)", before.id >= ROW_BASE + 20)
+            surface.recreate(fontScale = 1.3f)
+            surface.assertTopRow(before)
+            main { assertTrue("not pulled back to the newest row", surface.scroller().canScrollVertically(1)) }
+        }
+
+    @Test
+    fun aScrollViewKeepsItsTopRowAcrossAnActivityRecreation() = withSurface(::scrollTree) { surface ->
+        surface.scrollBy(rowsTop(33, 1f) + rowHeight(33, 1f) * 0.6f)
+        val before = surface.topRow()
+        surface.recreate(fontScale = 1.3f)
+        surface.assertTopRow(before)
+    }
+
+    @Test
+    fun aRemountWithoutViewStateStartsAtTheTop() = withSurface(::listTree) { surface ->
+        // What PamRuntime does after App::reload(): a cold start's mount.
+        surface.scrollBy(rowsTop(40, 1f))
+        main {
+            surface.renderer.resetTree(preserveViewState = false)
+            try {
+                surface.renderer.commit(listOf(listTree(1f, false)))
+            } finally {
+                surface.renderer.finishRemount()
+            }
+        }
+        waitFrames(6)
+        main { assertFalse("back at the top", surface.scroller().canScrollVertically(-1)) }
+    }
+
+    @Test
     fun aFocusedInputKeepsFocusSelectionAndKeyboardWithoutBlurEvents() {
         val events = Collections.synchronizedList(ArrayList<Pair<Long, Int>>())
         withSurface(::inputTree, events) { surface ->
@@ -190,8 +252,8 @@ class PamConfigurationRemountStateInstrumentedTest {
     }
 
     private inner class Surface(
-        val activity: PamTestActivity,
-        val renderer: PamRenderer,
+        var activity: PamTestActivity,
+        var renderer: PamRenderer,
         val tree: (Float, Boolean) -> List<Mutation>,
     ) {
         /** The view that scrolls (main thread). */
@@ -241,20 +303,53 @@ class PamConfigurationRemountStateInstrumentedTest {
             }
         }
 
+        /**
+         * As PamRuntime.detach/attach around a recreated Activity: the old
+         * renderer's anchors go to a new renderer in a new Activity, built
+         * for [fontScale], whose first remount replays the re-measured tree.
+         */
+        fun recreate(fontScale: Float) {
+            val state = main { renderer.captureRetainedViewState() }
+            assertTrue("the old surface had a place to keep", state != null)
+            applyFontScale(fontScale)
+            main {
+                renderer.close()
+                activity.finish()
+            }
+            activity = instrumentation.startActivitySync(
+                Intent(context, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ) as PamTestActivity
+            assertEquals(fontScale, activity.resources.configuration.fontScale)
+            main {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.adoptRetainedViewState(state)
+                renderer.resetTree(preserveViewState = true)
+                try {
+                    renderer.commit(listOf(tree(fontScale, false)))
+                } finally {
+                    renderer.finishRemount()
+                }
+            }
+            instrumentation.waitForIdleSync()
+            waitFrames(4)
+        }
+
+        private fun applyFontScale(fontScale: Float) {
+            // Raised once for the whole class (each change restarts the
+            // IME); a later test finds it applied and remounts by hand.
+            if (originalFontScale == null) originalFontScale = shell("settings get system font_scale").trim()
+            if (activity.resources.configuration.fontScale != fontScale) {
+                shell("settings put system font_scale $fontScale")
+            }
+            assertTrue(
+                "font scale $fontScale never reached the activity",
+                waitFor { activity.resources.configuration.fontScale == fontScale },
+            )
+        }
+
         /** Applies a real configuration change, then replays the tree the engine emits for it. */
         fun remount(fontScale: Float? = null, locale: Boolean = false) {
-            if (fontScale != null) {
-                // Raised once for the whole class (each change restarts the
-                // IME); a later test finds it applied and remounts by hand.
-                if (originalFontScale == null) originalFontScale = shell("settings get system font_scale").trim()
-                if (activity.resources.configuration.fontScale != fontScale) {
-                    shell("settings put system font_scale $fontScale")
-                }
-                assertTrue(
-                    "font scale $fontScale never reached the activity",
-                    waitFor { activity.resources.configuration.fontScale == fontScale },
-                )
-            }
+            if (fontScale != null) applyFontScale(fontScale)
             if (locale && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 localeChanged = true
                 context.getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.forLanguageTags("de")
@@ -286,6 +381,7 @@ class PamConfigurationRemountStateInstrumentedTest {
             Intent(context, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         ) as PamTestActivity
         lateinit var renderer: PamRenderer
+        var surface: Surface? = null
         try {
             main {
                 renderer = PamRenderer(activity, activity.host) { id, kind, _ -> events?.add(id to kind) }
@@ -295,12 +391,17 @@ class PamConfigurationRemountStateInstrumentedTest {
             }
             instrumentation.waitForIdleSync()
             waitFrames(6)
-            body(Surface(activity, renderer, tree))
+            surface = Surface(activity, renderer, tree)
+            body(surface)
         } finally {
             main {
                 activity.onConfigurationApplied = null
                 renderer.close()
                 activity.finish()
+                surface?.takeIf { it.activity !== activity }?.let {
+                    it.renderer.close()
+                    it.activity.finish()
+                }
             }
         }
     }
@@ -354,6 +455,43 @@ class PamConfigurationRemountStateInstrumentedTest {
     }
 
     private fun listTree(scale: Float, locale: Boolean): List<Mutation> = anyListTree(scale, locale, inverted = false)
+
+    /** A horizontal paging ScrollView: page-wide pages, each a column of text rows. */
+    private fun pagerTree(scale: Float, locale: Boolean): List<Mutation> {
+        val mutations = ArrayList<Mutation>()
+        mutations += Mutation.Create(spec(SCREEN_ID, 0, 0, NodeKind.SCREEN))
+        mutations += Mutation.Create(
+            spec(
+                SCROLLER_ID,
+                SCREEN_ID,
+                0,
+                NodeKind.SCROLL,
+                mapOf(PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true), PropKey.SCROLL_PAGING_ENABLED to PropValue.Flag(true)),
+            ),
+        )
+        mutations += Mutation.Create(spec(CONTENT_ID, SCROLLER_ID, 0, NodeKind.ROW))
+        repeat(PAGES) { page ->
+            val id = ROW_BASE + page
+            val x = page * VIEWPORT_WIDTH
+            mutations += Mutation.Create(
+                spec(id, CONTENT_ID, page, NodeKind.VIEW, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(if (page % 2 == 0) 0xFFEFEFEFL else 0xFFDADADAL))),
+            )
+            mutations += Mutation.Layout(id, Frame(x, 0f, VIEWPORT_WIDTH, VIEWPORT_HEIGHT))
+            repeat(4) { line ->
+                val text = TEXT_BASE + page * 10 + line
+                val height = 40f * scale
+                mutations += Mutation.Create(
+                    spec(text, id, line, NodeKind.TEXT, mapOf(PropKey.TEXT to PropValue.Text(if (locale) "Seite $page" else "Page $page"))),
+                )
+                mutations += Mutation.Layout(text, Frame(x, line * height, VIEWPORT_WIDTH, height))
+            }
+        }
+        mutations += Mutation.Layout(SCREEN_ID, Frame(0f, 0f, VIEWPORT_WIDTH, VIEWPORT_HEIGHT))
+        mutations += Mutation.Layout(SCROLLER_ID, Frame(0f, 0f, VIEWPORT_WIDTH, VIEWPORT_HEIGHT))
+        mutations += Mutation.Layout(CONTENT_ID, Frame(0f, 0f, VIEWPORT_WIDTH * PAGES, VIEWPORT_HEIGHT))
+        mutations += Mutation.SetRoot(SCREEN_ID)
+        return mutations
+    }
 
     private fun anyListTree(scale: Float, locale: Boolean, inverted: Boolean): List<Mutation> {
         val properties = if (inverted) mapOf(PropKey.LIST_INVERTED to PropValue.Flag(true)) else emptyMap()
@@ -490,6 +628,7 @@ class PamConfigurationRemountStateInstrumentedTest {
         private const val ROW_BASE = 100L
         private const val TEXT_BASE = 1_000L
         private const val ROWS = 80
+        private const val PAGES = 6
         private const val VIEWPORT_WIDTH = 320f
         private const val VIEWPORT_HEIGHT = 420f
         private const val TOLERANCE_PX = 3f
