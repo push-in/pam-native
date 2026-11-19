@@ -16,6 +16,7 @@ void pam_native_runtime_dispatch_event(void) {}
 void pam_native_runtime_dispatch_module_result(void) {}
 
 void pam_native_runtime_reload(void) {}
+void pam_native_runtime_reload_fresh(void) {}
 
 typedef void (*PamNativeReloadPrepareCallback)(void* context);
 

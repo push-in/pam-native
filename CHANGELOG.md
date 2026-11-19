@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.54.1 - 2026-11-19
+
+- Fixed: `App::reload()` relaunches PHP like a cold start in the same window:
+  the old request no longer records hot reload state, so no `#[State]` from
+  the previous run is restored between `setup()` and `mount()` (release
+  builds restored it, e.g. translated date labels stayed in the previous
+  language after a language change). The `pam dev` hot reload and the error
+  overlay's Reload still preserve component state. Android
+  `PamRuntime.reload()` gains `fresh`; iOS adds
+  `pam_native_runtime_reload_fresh`.
+- Fixed: Android — `android.orientations` also declares the portrait and
+  landscape screen features as optional, so locking the orientation no longer
+  makes Google Play drop devices without that screen feature.
+
 ## 1.54.0 - 2026-11-18
 
 App-declared Android capabilities (queries, orientation, picture-in-picture, URL schemes), media and notification-permission fixes, link navigation that stacks, and localized formatting.

@@ -124,6 +124,9 @@ private func pam_native_runtime_dispatch_module_result(
 @_silgen_name("pam_native_runtime_reload")
 private func pam_native_runtime_reload(_ handle: UInt64, _ entry: UnsafePointer<CChar>)
 
+@_silgen_name("pam_native_runtime_reload_fresh")
+private func pam_native_runtime_reload_fresh(_ handle: UInt64, _ entry: UnsafePointer<CChar>)
+
 @_silgen_name("pam_native_runtime_reload_prepared")
 private func pam_native_runtime_reload_prepared(
     _ handle: UInt64,
@@ -414,7 +417,7 @@ public final class PamRuntime {
         self.renderer = makeRenderer(hostView: hostView)
 
         errorOverlay.onReload = { [weak self] in self?.reloadAfterError() }
-        modules.setReloadHandler { [weak self] in self?.reloadAfterError() }
+        modules.setReloadHandler { [weak self] in self?.relaunchFresh() }
         observeKeyboard()
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
@@ -1041,6 +1044,8 @@ public final class PamRuntime {
 
     /// `betweenRequests` runs on the PHP worker after the previous request
     /// shut down and before the next one starts (hot reload file swaps).
+    /// The old request records hot reload state, so components at the same
+    /// tree position get their `#[State]` back (development hot reload).
     func reload(entry: String, betweenRequests: (() -> Void)?) {
         let currentHandle = currentHandle()
         guard !entry.isEmpty, currentHandle != 0 else {
@@ -1059,6 +1064,19 @@ public final class PamRuntime {
                 pam_native_runtime_reload(currentHandle, buffer)
             }
         }
+        didRequestReload(entry: entry)
+    }
+
+    /// `App::reload()`: relaunches like a cold start. The old request records
+    /// no hot reload state, so no `#[State]` comes back.
+    private func reloadFresh(entry: String) {
+        let currentHandle = currentHandle()
+        guard !entry.isEmpty, currentHandle != 0 else { return }
+        entry.withCString { pam_native_runtime_reload_fresh(currentHandle, $0) }
+        didRequestReload(entry: entry)
+    }
+
+    private func didRequestReload(entry: String) {
         runtimeEntry = entry
         DispatchQueue.main.async { [weak self] in self?.errorOverlay.onRuntimeReload() }
 
@@ -1503,12 +1521,27 @@ public final class PamRuntime {
     }
 
     /// Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry.
+    /// A live request records hot reload state first (development overlay).
     private func reloadAfterError() {
+        relaunch(fresh: false)
+    }
+
+    /// `App::reload()`: a cold start on the active entry inside the same
+    /// window. No hot reload checkpoint, so no `#[State]` is restored.
+    private func relaunchFresh() {
+        relaunch(fresh: true)
+    }
+
+    private func relaunch(fresh: Bool) {
         recoveryWorkItem?.cancel()
         recoveryWorkItem = nil
         recoveryAttempts = 0
         guard let entry = runtimeEntry else { return }
-        reload(entry: entry)
+        if fresh {
+            reloadFresh(entry: entry)
+        } else {
+            reload(entry: entry)
+        }
     }
 
     fileprivate func dispatchEvent(_ nodeId: Int64, kind: Int, payload: Data = Data()) {

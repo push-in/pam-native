@@ -268,12 +268,14 @@ final class App
      * @param Closure(Throwable, RuntimeError): void $listener
      */
     /**
-     * Relaunches the app's PHP on the active entry: a fresh runtime, as the
-     * error overlay's "Reload" does, with the native window kept. Use it after
-     * a change only boot applies, such as a new app language
-     * (`AppLanguage::choose()`). In-memory state is lost; persist what must
-     * survive first. Asynchronous: the current code keeps running until the
-     * host swaps the runtime on the next main-thread turn.
+     * Relaunches the app's PHP on the active entry like a cold start, with
+     * the native window kept. Use it after a change only boot applies, such
+     * as a new app language (`AppLanguage::choose()`). In-memory state is
+     * lost: unlike the development hot reload, no `#[State]` is recorded or
+     * restored, so text already built (translated labels, dates) is built
+     * again. Persist what must survive first. Asynchronous: the current code
+     * keeps running until the host swaps the runtime on the next main-thread
+     * turn.
      *
      * @param null|Closure(string): void $failure The host cannot reload (an older host); keep a fallback such as "reopen the app".
      */

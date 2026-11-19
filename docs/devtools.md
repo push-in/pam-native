@@ -125,6 +125,8 @@ How it works:
    it start fresh. A screen whose `mount()` resets its fields starts with
    `mount()`'s values. Snapshots are consumed by the next request and expire
    after 5 s, so a cold start never restores development state.
+   `App::reload()` never records a snapshot either: it relaunches the PHP
+   like a cold start, in every build mode.
 
 The terminal reports every step:
 
