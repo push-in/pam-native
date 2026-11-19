@@ -42,9 +42,12 @@ final class DependencyTracker
         $last = array_key_last(self::$stack);
         $parent = $last === null ? null : self::$stack[$last];
         $parents = self::$parents ??= new WeakMap();
+        // Rendered outside any render (nothing on the stack): keep the parent
+        // it was last rendered under, as ComponentLifecycle keeps the child,
+        // so its later changes still lead that parent to it.
         if ($parent instanceof Component && $parent !== $component) {
             $parents[$component] = $parent;
-        } else {
+        } elseif ($parent === $component) {
             unset($parents[$component]);
         }
         self::$stack[] = $component;
