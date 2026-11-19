@@ -404,31 +404,66 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * Where a translated gesture enters the view tree: the outermost Pressable
-     * (a GestureDetector is one) that encloses [target] at the pointer inside
-     * its panned container, or [target] itself. From there Android's own
-     * dispatch runs as without a keyboard: every enclosing detector sees the
-     * stream before its children and intercepts by its usual rules, and the
-     * hit test reaches the innermost Pressable. Routing straight to the
-     * innermost target hid the stream from an enclosing pan (slide to cancel
-     * a recording never got gestureUpdate while the IME was up).
+     * Where a translated gesture enters the view tree: the highest ancestor of
+     * [target] whose own hit test still reaches it, or [target] itself. From
+     * there Android's own dispatch runs as without a keyboard: every enclosing
+     * view sees the stream before its children and intercepts by its usual
+     * rules (a GestureDetector pan inside or around the panned container, a
+     * horizontal ScrollView, a pager), and the hit test reaches the innermost
+     * Pressable. Routing straight to the innermost target, or only through
+     * the Pressables inside the panned container, hid the stream from those
+     * ancestors (slide to cancel a recording never got gestureUpdate while the
+     * IME was up).
+     *
+     * A ViewGroup hit-tests its children, not itself, so the walk goes up
+     * from [target] while the current view contains the pointer: its parent's
+     * dispatch then reaches it, even when the parent's own pre-translation
+     * bounds (a wrapper around the panned container) do not. It stops below
+     * a parent where a sibling drawn above the branch would take the down
+     * (the translated route never lets such an overlay steal the touch) and
+     * below this host. Inputs keep the direct route (focus and IME handling).
      */
     private fun translatedDispatchRoot(target: View, x: Float, y: Float): View {
         if (target !is PamPressable) return target
         var root: View = target
-        var ancestor = target.parent as? View
-        while (ancestor != null && ancestor !== this) {
-            if (translatedTouchContainers.containsKey(ancestor)) break
-            if (
-                ancestor is PamPressable &&
-                ancestor in translatedTouchTargets &&
-                containsScreenPoint(ancestor, x, y)
-            ) {
-                root = ancestor
-            }
-            ancestor = ancestor.parent as? View
+        while (true) {
+            val parent = root.parent as? ViewGroup ?: return target
+            if (parent === this) return root
+            if (!containsScreenPoint(root, x, y)) return root
+            if (hasCapturingSiblingAbove(parent, root, x, y)) return root
+            root = parent
         }
-        return root
+    }
+
+    /** Whether a child of [parent] drawn above [branch] would take a down at the screen point. */
+    private fun hasCapturingSiblingAbove(parent: ViewGroup, branch: View, x: Float, y: Float): Boolean {
+        val branchIndex = parent.indexOfChild(branch)
+        for (index in 0 until parent.childCount) {
+            val sibling = parent.getChildAt(index)
+            if (
+                sibling !== branch &&
+                isPamViewDrawnAbove(sibling.z, index, branch.z, branchIndex) &&
+                capturesTouchAt(sibling, x, y)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun capturesTouchAt(view: View, x: Float, y: Float): Boolean {
+        if (!containsScreenPoint(view, x, y)) return false
+        if (
+            view is PamPressable || view is PamEditText || view is PamScrollContainer ||
+            view is PamRecyclerList || view.isClickable || view.isLongClickable
+        ) {
+            return true
+        }
+        if (view !is ViewGroup) return false
+        for (index in view.childCount - 1 downTo 0) {
+            if (capturesTouchAt(view.getChildAt(index), x, y)) return true
+        }
+        return false
     }
 
     private fun refreshTranslatedTouchTargets() {
