@@ -28,6 +28,60 @@ App-declared Android capabilities (queries, orientation, picture-in-picture, URL
 - Changed: `Support\Format` formats Spanish and French, and without `useLocale()` follows the active `I18n` locale when catalogs are registered (pt-BR otherwise).
 - Changed: Android IME tests re-request the keyboard while waiting and the configuration-remount test restarts the IME once per class.
 
+### Upgrading from the 1.46 aliases
+
+No published PAM Native plugin or `pam init` template uses these names. Replace each import and require the plugin:
+
+| Removed name | Use | Package |
+|---|---|---|
+| `Pam\Native\AudioRecording` | `Pam\Native\Audio\AudioRecording` | `pushinbr/pam-native-audio` |
+| `Pam\Native\AudioRecordingProgress` | `Pam\Native\Audio\AudioRecordingProgress` | `pushinbr/pam-native-audio` |
+| `Pam\Native\BiometricError` | `Pam\Native\Auth\BiometricError` | `pushinbr/pam-native-auth` |
+| `Pam\Native\BiometricKind` | `Pam\Native\Auth\BiometricKind` | `pushinbr/pam-native-auth` |
+| `Pam\Native\CapturedImage` | `Pam\Native\Media\CapturedImage` | `pushinbr/pam-native-media` |
+| `Pam\Native\CaptureType` | `Pam\Native\Media\CaptureType` | `pushinbr/pam-native-media` |
+| `Pam\Native\Contact` | `Pam\Native\Contacts\Contact` | `pushinbr/pam-native-contacts` |
+| `Pam\Native\ImageCaptureFormat` | `Pam\Native\Media\ImageCaptureFormat` | `pushinbr/pam-native-media` |
+| `Pam\Native\ImageCropRatio` | `Pam\Native\MediaEditor\ImageCropRatio` | `pushinbr/pam-native-media-editor` |
+| `Pam\Native\ImageFilterType` | `Pam\Native\MediaEditor\ImageFilterType` | `pushinbr/pam-native-media-editor` |
+| `Pam\Native\ImageTextLayerStyle` | `Pam\Native\MediaEditor\ImageTextLayerStyle` | `pushinbr/pam-native-media-editor` |
+| `Pam\Native\IncomingShare` | `Pam\Native\ShareExtension\IncomingShare` | `pushinbr/pam-native-share-extension` |
+| `Pam\Native\LocationError` | `Pam\Native\Location\LocationError` | `pushinbr/pam-native-location` |
+| `Pam\Native\LocationPosition` | `Pam\Native\Location\LocationPosition` | `pushinbr/pam-native-location` |
+| `Pam\Native\LocationServicesResult` | `Pam\Native\Location\LocationServicesResult` | `pushinbr/pam-native-location` |
+| `Pam\Native\MediaAlbum` | `Pam\Native\Media\MediaAlbum` | `pushinbr/pam-native-media` |
+| `Pam\Native\MediaAssetPage` | `Pam\Native\Media\MediaAssetPage` | `pushinbr/pam-native-media` |
+| `Pam\Native\MediaAsset` | `Pam\Native\Media\MediaAsset` | `pushinbr/pam-native-media` |
+| `Pam\Native\NotificationImportance` | `Pam\Native\Notifications\NotificationImportance` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\ActionEndpoint` | `Pam\Native\Notifications\Contracts\ActionEndpoint` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\ConversationNotification` | `Pam\Native\Notifications\Contracts\ConversationNotification` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\NotificationAction` | `Pam\Native\Notifications\Contracts\NotificationAction` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\NotificationActionType` | `Pam\Native\Notifications\Contracts\NotificationActionType` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\NotificationCredentials` | `Pam\Native\Notifications\Contracts\NotificationCredentials` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\Person` | `Pam\Native\Notifications\Contracts\Person` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\PushRendering` | `Pam\Native\Notifications\Contracts\PushRendering` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\PushRenderingRule` | `Pam\Native\Notifications\Contracts\PushRenderingRule` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\Notifications\ReplyFailures` | `Pam\Native\Notifications\Contracts\ReplyFailures` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\PushEventType` | `Pam\Native\Notifications\PushEventType` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\PushMessage` | `Pam\Native\Notifications\PushMessage` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\PushProvider` | `Pam\Native\Notifications\PushProvider` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\PushToken` | `Pam\Native\Notifications\PushToken` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\SensorReading` | `Pam\Native\Sensors\SensorReading` | `pushinbr/pam-native-sensors` |
+| `Pam\Native\SensorType` | `Pam\Native\Sensors\SensorType` | `pushinbr/pam-native-sensors` |
+| `Pam\Native\System\AudioRecorder` | `Pam\Native\Audio\AudioRecorder` | `pushinbr/pam-native-audio` |
+| `Pam\Native\System\Biometrics` | `Pam\Native\Auth\LegacyBiometrics` | `pushinbr/pam-native-auth` |
+| `Pam\Native\System\Contacts` | `Pam\Native\Contacts\Contacts` | `pushinbr/pam-native-contacts` |
+| `Pam\Native\System\ImageEditor` | `Pam\Native\MediaEditor\ImageEditor` | `pushinbr/pam-native-media-editor` |
+| `Pam\Native\System\IncomingShares` | `Pam\Native\ShareExtension\IncomingShares` | `pushinbr/pam-native-share-extension` |
+| `Pam\Native\System\Location` | `Pam\Native\Location\Location` | `pushinbr/pam-native-location` |
+| `Pam\Native\System\MediaCapture` | `Pam\Native\Media\MediaCapture` | `pushinbr/pam-native-media` |
+| `Pam\Native\System\MediaLibrary` | `Pam\Native\Media\MediaLibrary` | `pushinbr/pam-native-media` |
+| `Pam\Native\System\Notifications` | `Pam\Native\Notifications\Notifications` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\System\PushNotifications` | `Pam\Native\Notifications\PushNotifications` | `pushinbr/pam-native-notifications` |
+| `Pam\Native\System\Sensors` | `Pam\Native\Sensors\Sensors` | `pushinbr/pam-native-sensors` |
+| `Pam\Native\System\Sms` | `Pam\Native\Contacts\Sms` | `pushinbr/pam-native-contacts` |
+| `Pam\Native\System\ViewCapture` | `Pam\Native\Media\ViewCapture` | `pushinbr/pam-native-media` |
+
 ## 1.53.9 - 2026-11-18
 
 - Added: app theme tokens. `pam-native.json` `"theme": {"tokens":
