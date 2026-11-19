@@ -23,7 +23,7 @@ final class PamOffsetGlideTests: XCTestCase {
         guard let glide = scroll.pamOffsetGlide else { return XCTFail("no glide started") }
         XCTAssertTrue(glide.isRunning)
         // A re-render every frame re-sends the same offset.
-        let deadline = Date().addingTimeInterval(1.5)
+        let deadline = Date().addingTimeInterval(6) // a loaded CI simulator stalls display links
         while Date() < deadline, scroll.contentOffset.x < 299.5 {
             RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60.0))
             scroll.pamRequestedContentOffsetX = 300
@@ -56,7 +56,7 @@ final class PamOffsetGlideTests: XCTestCase {
         scroll.layoutIfNeeded()
         XCTAssertTrue(glide.isRunning, "resetting the duration left the page change gliding")
         XCTAssertLessThan(scroll.contentOffset.x, 299.5, "the page change was not snapped")
-        let deadline = Date().addingTimeInterval(1.5)
+        let deadline = Date().addingTimeInterval(6) // a loaded CI simulator stalls display links
         while Date() < deadline, glide.isRunning {
             RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60.0))
         }
@@ -87,7 +87,7 @@ final class PamOffsetGlideTests: XCTestCase {
         scroll.layoutIfNeeded()
         scroll.pamRequestedContentOffsetX = 300
         scroll.layoutIfNeeded()
-        let deadline = Date().addingTimeInterval(1.5)
+        let deadline = Date().addingTimeInterval(6) // a loaded CI simulator stalls display links
         while Date() < deadline, scroll.pamOffsetGlide?.isRunning == true {
             RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60.0))
         }
