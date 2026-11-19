@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.54.3 - 2026-11-19
+
+- Added: the `#[Transient]` property attribute keeps bookkeeping fields
+  (caches, counters, handles, timestamps) out of the render snapshot, so
+  writing them from hooks, timers or callbacks no longer re-renders the
+  component. Fields without it behave as before.
+- Fixed: a child component rendered outside a render pass keeps its tracked
+  parent, so its later changes still re-render through a memoized parent.
+- Fixed: iOS — animated GIF/WebP images move on to the current frame when a
+  slow frame decode lands, instead of standing still until the next tick
+  changes the target; frames decode at user-initiated QoS.
+- Tests: CI contracts wait for the state they assert (route installed, first
+  clock tick, IME shown, synthetic insets applied, recycled row mounted)
+  instead of fixed sleeps; the sliced-mount budget compares view building
+  instead of whole commits.
+- CI: instrumented-test emulators hide error dialogs, so a System UI ANR no
+  longer takes window focus for the rest of the run.
+
 ## 1.54.2 - 2026-11-19
 
 - Fixed: Android — while a panning KeyboardAvoidingView is translated by the
