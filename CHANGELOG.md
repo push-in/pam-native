@@ -27,6 +27,7 @@ App-declared Android capabilities (queries, orientation, picture-in-picture, URL
 - Added: `App::reload()` relaunches PHP on the active entry (e.g. after a language change); older hosts report to `failure`.
 - Changed: `Support\Format` formats Spanish and French, and without `useLocale()` follows the active `I18n` locale when catalogs are registered (pt-BR otherwise).
 - Changed: Android IME tests re-request the keyboard while waiting and the configuration-remount test restarts the IME once per class.
+- Fixed: Android — a remount that rebuilds a focused input (not only one caused by a configuration change) keeps it focused; the keyboard hiding when the old editor goes no longer blurs it.
 
 ### Upgrading from the 1.46 aliases
 
