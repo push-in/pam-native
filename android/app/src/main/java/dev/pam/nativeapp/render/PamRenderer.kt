@@ -1899,6 +1899,16 @@ class PamRenderer(
         cancelPendingMounts()
         remountViewState = if (preserveViewState && nodes.size() > 0) captureRemountViewState() else null
         remountViewState?.takeIf { it.silent && it.focusedInput != 0L }?.let { remountFocusHandoff = it.focusedInput }
+        if (remountViewState?.focusedInput?.let { it != 0L } == true) {
+            // Removing the focused editor drops the IME's served view, so the
+            // keyboard hides: that is not the user closing it. Without a
+            // configuration change (a resynchronizing remount) nothing held
+            // the root host's blur on a hidden IME, and it took the focus
+            // from the rebuilt input. Held until after the remount.
+            (host as? PamRootHost)?.holdInputFocus = true
+            main.removeCallbacks(releaseConfigurationFocus)
+            main.postDelayed(releaseConfigurationFocus, CONFIGURATION_FOCUS_HOLD_MS)
+        }
         if (preserveViewState && !remountFocusBlocked && host.hasFocus()) {
             // Removing the focused editor hands focus to the first focusable
             // view still mounted (another input, which would report focus to
