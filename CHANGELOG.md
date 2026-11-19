@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.54.2 - 2026-11-19
+
+- Fixed: Android — while a panning KeyboardAvoidingView is translated by the
+  keyboard, a gesture enters through the highest ancestor whose hit test still
+  reaches the touched control, so a GestureDetector (or pager/ScrollView)
+  around the panned container receives the drag as with the keyboard closed,
+  not only the Pressables inside it.
+- Fixed: Android — a recreated Activity (an undeclared configuration change,
+  the system reclaiming it) reopens with every ScrollView and
+  FlatList/VirtualizedList/SectionList (inverted included) on the row the
+  reader saw, by item identity and re-measured; an Activity the user finished
+  keeps nothing.
+- Fixed: `App::reload()` mounts the relaunched request's tree from scratch on
+  Android and iOS: a ScrollView or list at the same tree position no longer
+  keeps its views and scroll offset; lists start where a cold start puts them.
+  The development hot reload still patches in place.
+- Fixed: Android — a paging ScrollView keeps its page across a configuration
+  remount.
+- Fixed: iOS — a Dynamic Type change and a remount on a new renderer
+  (re-attached host, resynchronization) keep every ScrollView and virtual list
+  (inverted included) on the row under its leading edge instead of the pixel
+  offset; containers at either end stay there; a paging ScrollView rests on
+  its page. The iOS bridge adds `pam_native_runtime_reload_fresh_prepared`.
+
 ## 1.54.1 - 2026-11-19
 
 - Fixed: `App::reload()` relaunches PHP like a cold start in the same window:
