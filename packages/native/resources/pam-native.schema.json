@@ -455,6 +455,17 @@
                 }
             }
         },
+        "theme": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Compile-time theme. `tokens` names a project-relative .css file of `:root { --token: value; }` declarations that component libraries such as PAM Native UI (and the app's own components) resolve their tokens from.",
+            "properties": {
+                "tokens": {
+                    "type": "string",
+                    "pattern": "^[^/].*\\.css$"
+                }
+            }
+        },
         "modules": {
             "$ref": "#/$defs/nativeBindings"
         },

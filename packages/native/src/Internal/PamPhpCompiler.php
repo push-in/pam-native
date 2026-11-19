@@ -116,6 +116,7 @@ final class PamPhpCompiler
 
         self::$dependencyFingerprints = [];
         self::$appStylePaths = [];
+        self::$themePaths = [];
         self::$directoryPass = true;
         try {
             return array_map(
@@ -126,6 +127,7 @@ final class PamPhpCompiler
         } finally {
             self::$dependencyFingerprints = [];
             self::$appStylePaths = [];
+            self::$themePaths = [];
             self::$directoryPass = false;
         }
     }
@@ -181,6 +183,7 @@ final class PamPhpCompiler
 
         self::$dependencyFingerprints = [];
         self::$appStylePaths = [];
+        self::$themePaths = [];
         self::$directoryPass = true;
         try {
             return array_map(
@@ -191,6 +194,7 @@ final class PamPhpCompiler
         } finally {
             self::$dependencyFingerprints = [];
             self::$appStylePaths = [];
+            self::$themePaths = [];
             self::$directoryPass = false;
         }
     }
@@ -322,6 +326,7 @@ final class PamPhpCompiler
         $fingerprint = [
             'sourceFingerprint' => $sourceFingerprint,
             'appStyle' => $appStyle,
+            'theme' => self::themeTokensPath($source),
             'dependencies' => $dependencies,
         ];
 
@@ -369,7 +374,7 @@ final class PamPhpCompiler
     }
 
     /**
-     * @param array{sourceFingerprint: string, appStyle: ?string, dependencies: array<string, ?string>} $fingerprint
+     * @param array{sourceFingerprint: string, appStyle: ?string, theme: ?string, dependencies: array<string, ?string>} $fingerprint
      */
     private static function writeMetadata(
         string $metadataFile,
@@ -432,6 +437,7 @@ final class PamPhpCompiler
             || !is_array($metadata['dependencies'] ?? null)
             || !array_key_exists('appStyle', $metadata)
             || $metadata['appStyle'] !== self::appStylePath($source)
+            || ($metadata['theme'] ?? null) !== self::themeTokensPath($source)
         ) {
             return null;
         }
@@ -601,6 +607,14 @@ final class PamPhpCompiler
                 $relativeAppStyle = str_replace(DIRECTORY_SEPARATOR, '/', $relativeAppStyle);
             }
             if ($metadata['appStyle'] !== $relativeAppStyle) {
+                return null;
+            }
+            $theme = self::themeTokensPath($source);
+            $relativeTheme = $theme === null ? null : self::relativeTo($root, $theme);
+            if ($relativeTheme !== null) {
+                $relativeTheme = str_replace(DIRECTORY_SEPARATOR, '/', $relativeTheme);
+            }
+            if (($metadata['theme'] ?? null) !== $relativeTheme) {
                 return null;
             }
         }
@@ -930,6 +944,15 @@ final class PamPhpCompiler
                     $appStyle = str_replace(DIRECTORY_SEPARATOR, '/', $appStyle);
                 }
                 $metadata['appStyle'] = $appStyle;
+                $theme = $metadata['theme'] ?? null;
+                if (is_string($theme)) {
+                    $theme = self::relativeTo($root, $theme);
+                    if ($theme === null) {
+                        continue;
+                    }
+                    $theme = str_replace(DIRECTORY_SEPARATOR, '/', $theme);
+                }
+                $metadata['theme'] = $theme;
                 $metadata['dependencies'] = $dependencies;
                 $metadata['relocatable'] = true;
                 $template = self::bundleTemplate(
@@ -1090,6 +1113,15 @@ final class PamPhpCompiler
             $sources[] = ScopedStyleCompiler::sourceMarker(self::displayPath($appStyle, $component), 1)
                 .ScopedStyleCompiler::resolveImports($contents, $appStyle);
         }
+        // The application's theme tokens (pam-native.json "theme.tokens")
+        // come after every package sheet: a component library's `:root`
+        // custom properties take the app's values, resolved at compile time.
+        $theme = self::themeTokensPath($component);
+        if ($theme !== null) {
+            $sources[] = ScopedStyleCompiler::sourceMarker(self::displayPath($theme, $component), 1)
+                .self::themeTokens($theme);
+            ScopedStyleCompiler::recordImport($theme);
+        }
         if ($localStyle !== '') {
             $styleOffset = $componentSource === '' ? false : strpos($componentSource, $localStyle);
             $styleLine = $styleOffset === false
@@ -1119,6 +1151,82 @@ final class PamPhpCompiler
             }
             $directory = $parent;
         }
+    }
+
+    /** @var array<string, ?string> theme tokens location per component directory */
+    private static array $themePaths = [];
+
+    /**
+     * `theme.tokens` of the nearest pam-native.json above the component (the
+     * application, also for components of installed packages), or null.
+     * Projects without it pay one cached lookup per directory.
+     */
+    private static function themeTokensPath(string $component): ?string
+    {
+        $directory = dirname((string) (realpath($component) ?: $component));
+        if (array_key_exists($directory, self::$themePaths)) {
+            return self::$themePaths[$directory];
+        }
+        $path = null;
+        $current = $directory;
+        while (true) {
+            $manifest = $current.DIRECTORY_SEPARATOR.'pam-native.json';
+            if (is_file($manifest)) {
+                $decoded = json_decode((string) file_get_contents($manifest), true);
+                $tokens = is_array($decoded) && is_array($decoded['theme'] ?? null)
+                    ? ($decoded['theme']['tokens'] ?? null)
+                    : null;
+                if (is_string($tokens) && $tokens !== '') {
+                    if (str_contains($tokens, "\0") || str_starts_with($tokens, '/') || !str_ends_with(strtolower($tokens), '.css')) {
+                        throw new RuntimeException("pam-native.json theme.tokens must be a project-relative .css file, got {$tokens}.");
+                    }
+                    $candidate = realpath($current.DIRECTORY_SEPARATOR.$tokens);
+                    $root = realpath($current);
+                    if (!is_string($candidate) || !is_file($candidate) || !is_string($root)
+                        || !str_starts_with($candidate, rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR)) {
+                        throw new RuntimeException("pam-native.json theme.tokens {$tokens} is missing or outside the project.");
+                    }
+                    $path = $candidate;
+                }
+                break;
+            }
+            $parent = dirname($current);
+            if ($parent === $current) {
+                break;
+            }
+            $current = $parent;
+        }
+        if (self::$directoryPass) {
+            self::$themePaths[$directory] = $path;
+        }
+
+        return $path;
+    }
+
+    /**
+     * The theme file holds only `:root { --name: value; }` blocks: tokens,
+     * never selectors, so overriding a library's palette cannot restyle its
+     * components' structure (or leak rules into the application's own).
+     */
+    private static function themeTokens(string $path): string
+    {
+        $contents = file_get_contents($path);
+        if ($contents === false || strlen($contents) > 65_536) {
+            throw new RuntimeException("Cannot read the theme tokens {$path} (64 KiB at most).");
+        }
+        $plain = preg_replace('/\/\*[\s\S]*?\*\//', '', $contents) ?? '';
+        $block = '/\G\s*:root\s*\{(?:\s*--[A-Za-z0-9_-]+\s*:\s*[^;{}]+;)*\s*\}/';
+        $offset = 0;
+        while (preg_match($block, $plain, $match, 0, $offset) === 1) {
+            $offset += strlen($match[0]);
+        }
+        if (trim(substr($plain, $offset)) !== '') {
+            throw new RuntimeException(
+                "Theme tokens {$path} may only declare `:root { --token: value; }` custom properties.",
+            );
+        }
+
+        return $contents;
     }
 
     private static function appStylePath(string $component): ?string

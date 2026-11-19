@@ -384,6 +384,14 @@ final class ScopedStyleCompiler
         return $previous;
     }
 
+    /** Records a stylesheet read outside resolveImports() (the app theme tokens). */
+    public static function recordImport(string $path): void
+    {
+        if (self::$importedFiles !== null) {
+            self::$importedFiles[$path] = true;
+        }
+    }
+
     /**
      * @param ?array<string, true> $previous
      * @return list<string> files read since collectImports()
