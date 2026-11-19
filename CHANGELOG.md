@@ -10,6 +10,9 @@
   overlay's Reload still preserve component state. Android
   `PamRuntime.reload()` gains `fresh`; iOS adds
   `pam_native_runtime_reload_fresh`.
+- Fixed: Android — `android.orientations` also declares the portrait and
+  landscape screen features as optional, so locking the orientation no longer
+  makes Google Play drop devices without that screen feature.
 
 ## 1.54.0 - 2026-11-18
 

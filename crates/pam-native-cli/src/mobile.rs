@@ -7250,8 +7250,26 @@ fn add_queries(manifest: &Path, queries: &AndroidQueries) -> Result<(), String> 
 }
 
 /// Sets (or clears) `android:screenOrientation` on the PamActivity element.
+/// Optional screen features a locked orientation would otherwise make Google
+/// Play require (a `screenOrientation` implies `android.hardware.screen.*`).
+const OPTIONAL_SCREEN_FEATURES: &str = "    <uses-feature android:name=\"android.hardware.screen.portrait\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.screen.landscape\" android:required=\"false\" />\n";
+
 fn set_screen_orientation(manifest: &Path, orientation: Option<&str>) -> Result<(), String> {
-    set_pam_activity_attribute(manifest, "screenOrientation", orientation)
+    set_pam_activity_attribute(manifest, "screenOrientation", orientation)?;
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    let declared = contents.contains(OPTIONAL_SCREEN_FEATURES);
+    if orientation.is_some() && !declared {
+        let application = contents
+            .find("    <application")
+            .ok_or_else(|| "Android manifest has no application element".to_owned())?;
+        contents.insert_str(application, OPTIONAL_SCREEN_FEATURES);
+    } else if orientation.is_none() && declared {
+        contents = contents.replacen(OPTIONAL_SCREEN_FEATURES, "", 1);
+    } else {
+        return Ok(());
+    }
+    write_atomic(manifest, contents.as_bytes())
 }
 
 /// Sets (or clears, with `None`) one `android:` attribute of PamActivity.
@@ -13102,6 +13120,15 @@ mod tests {
         set_screen_orientation(&manifest, Some("sensorPortrait")).expect("relock");
         let generated = fs::read_to_string(&manifest).expect("manifest");
         assert_eq!(generated.matches("android:screenOrientation=").count(), 1);
+        assert_eq!(
+            generated
+                .matches("android.hardware.screen.portrait\" android:required=\"false\"")
+                .count(),
+            1
+        );
+        assert!(
+            generated.contains("android.hardware.screen.landscape\" android:required=\"false\"")
+        );
         let activity = generated
             .find("android:name=\".PamActivity\"")
             .expect("activity");
