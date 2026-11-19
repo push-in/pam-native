@@ -757,6 +757,13 @@ Settings) and `PhoneState` (9, `READ_PHONE_STATE`). `PermissionStatus::Unavailab
 `PhoneState` on iOS). Declare the Android permissions in `pam-native.json`
 `android.permissions`; generation adds only declared permissions.
 
+`PermissionKind::Notifications` on Android follows the app's notification
+switch in system settings (`NotificationManagerCompat.areNotificationsEnabled()`).
+Below Android 13 there is no runtime permission: the status is `Granted` while
+notifications are on and `Blocked` (`canAskAgain` false, send the user to
+`Permissions::openSettings()`) while they are off. On 13+ a granted
+`POST_NOTIFICATIONS` with the switch turned off is `Blocked` too.
+
 `Permissions::status()` and `requestKind()` accept an optional
 `failure: fn (string $error) => ...`; with it a native failure is delivered
 there instead of thrown (without it they keep throwing).
