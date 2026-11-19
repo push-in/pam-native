@@ -128,6 +128,76 @@ also behind the SDK's payload wrappers. Writes to *another* component's
 public properties are not detected from a pure handler; use a store/signal or
 `markForRender()` for those.
 
+### State snapshot and `#[Transient]` fields
+
+After each render Pam takes a snapshot of every property the component
+declares: public, protected and private, from traits and parent classes too.
+Plain objects are captured two levels deep. On the next pass a component whose
+snapshot differs renders again. Writes made outside a template handler are
+caught this way, whether they come from a lifecycle hook (`rendered()`,
+`attached()`, `resumed()`, `paused()`), a timer, a subscription or a promise
+callback. `#[State]` has no part in this: it only marks what hot reload
+preserves.
+
+The snapshot can't tell which fields the template reads. PHP gives no hook on
+reads of declared properties, and `render()` may reach any field through
+methods and closures. A field used only for bookkeeping still costs a full
+render each time it is written. Examples are a cache, a counter, a
+subscription id, a timer handle, a "last synced at" timestamp or an "already
+done" flag. A hook that writes one on every resume, socket event or player
+callback re-renders a large screen for nothing.
+
+Mark such fields `#[Transient]` to leave them out of the snapshot:
+
+```php
+use Pam\Native\Attributes\Transient;
+
+final class ChatScreen extends Component
+{
+    #[Transient]
+    private ?int $networkSubscription = null;
+
+    #[Transient]
+    private int $lastResumeSyncAt = 0;
+
+    #[Transient]
+    private ?ComponentTimer $announcementTimer = null;
+
+    public function resumed(): void
+    {
+        $this->lastResumeSyncAt = Clock::millis(); // no render
+    }
+}
+```
+
+How the attribute behaves:
+
+- **Writes alone.** Writing a transient field never renders the component. The
+  new value appears on the next render that something else causes.
+- **Other render triggers.** Template event handlers that are not pure,
+  `markForRender()`, `requestRender()`, prop updates from the parent, tracked
+  signals and stores, and writes to any other field all render exactly as
+  before.
+- **Pure handlers.** A `#[PureHandler]` (or inferred-pure) handler that writes
+  only transient fields renders nothing.
+- **Objects.** Transient fields that hold objects, such as timers,
+  subscriptions or debouncers, no longer stop pure-handler inference. That
+  inference needs a snapshot made only of scalars, arrays and enums.
+- **Where it applies.** The attribute works on any visibility, on promoted
+  constructor properties and on trait properties. It combines with `#[State]`,
+  which still preserves the field across hot reloads.
+
+Only mark fields that `render()` and the template never read, directly or
+through a method or computed value they call. A transient field that the
+template does read shows a stale value until some other change renders the
+component. Pam can't detect this case.
+
+Without the attribute nothing changes. Every field written outside a handler
+still renders the component, so existing apps keep their behavior. Pam doesn't
+default to tracking only `#[State]` and props, because many screens keep
+template-read data in plain private fields that callbacks and timers update.
+Those screens would stop updating with no error.
+
 ## Effects and watchers
 
 ```php

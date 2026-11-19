@@ -90,6 +90,14 @@ abstract class Component implements Renderable
     /** @var array<class-string, array{0: int, 1: list<string>}> */
     private static array $pamObjectKeys = [];
 
+    /**
+     * Mangled keys left out of the state snapshot, by class: framework
+     * bookkeeping plus the class's #[Transient] properties.
+     *
+     * @var array<class-string, array<string, true>>
+     */
+    private static array $pamSnapshotSkipped = [];
+
     /** @var array<class-string, bool> */
     private static array $pamHasEffects = [];
 
@@ -625,8 +633,9 @@ abstract class Component implements Renderable
      */
     final public function __pamPlainState(): bool
     {
+        $skipped = self::$pamSnapshotSkipped[static::class] ??= self::pamSnapshotSkippedKeys(static::class);
         foreach ((array) $this as $key => $value) {
-            if (str_starts_with($key, "\0".self::class."\0")) {
+            if (str_starts_with($key, "\0".self::class."\0") || isset($skipped[$key])) {
                 continue;
             }
             if ((is_object($value) || is_array($value)) && !Internal\HandlerPurity::plainValue($value)) {
@@ -697,20 +706,17 @@ abstract class Component implements Renderable
 
     /**
      * Shallow copy of every property (public, protected and private, including
-     * subclasses) except render bookkeeping. Arrays compare by value and
-     * objects by identity.
+     * subclasses) except render bookkeeping and #[Transient] properties.
+     * Arrays compare by value and objects by identity.
      *
      * @return array<string, mixed>
      */
     private function pamOwnState(): array
     {
-        $values = array_diff_key((array) $this, self::$pamSnapshotExcludedKeys ??= array_fill_keys(
-            array_map(
-                static fn (string $name): string => "\0".self::class."\0".$name,
-                self::PAM_SNAPSHOT_EXCLUDED,
-            ),
-            true,
-        ));
+        $values = array_diff_key(
+            (array) $this,
+            self::$pamSnapshotSkipped[static::class] ??= self::pamSnapshotSkippedKeys(static::class),
+        );
         $plan = self::$pamObjectKeys[static::class] ??= self::pamObjectKeys(static::class);
         if (count($values) > $plan[0]) {
             // Dynamic properties: any value may hold an object.
@@ -753,11 +759,7 @@ abstract class Component implements Renderable
                 if ($property->isStatic() || $property->getDeclaringClass()->getName() !== $name) {
                     continue;
                 }
-                $key = match (true) {
-                    $property->isPrivate() => "\0".$name."\0".$property->getName(),
-                    $property->isProtected() => "\0*\0".$property->getName(),
-                    default => $property->getName(),
-                };
+                $key = self::pamPropertyKey($property);
                 if (isset($declared[$key])) {
                     continue;
                 }
@@ -768,7 +770,7 @@ abstract class Component implements Renderable
             }
         }
 
-        $excluded = self::$pamSnapshotExcludedKeys ?? [];
+        $excluded = self::$pamSnapshotSkipped[$class] ??= self::pamSnapshotSkippedKeys($class);
         // Framework references compared by identity: the parent component and
         // the local state (whose every change bumps pamRevision).
         $identity = ["\0".self::class."\0pamParent" => true, "\0".self::class."\0pamState" => true];
@@ -776,6 +778,49 @@ abstract class Component implements Renderable
         $objects = array_values(array_filter($objects, static fn (string $key): bool => !isset($excluded[$key])));
 
         return [count(array_diff_key($declared, $excluded)), $objects];
+    }
+
+    /**
+     * Framework bookkeeping keys plus the mangled keys of the #[Transient]
+     * properties $class declares or inherits (traits included).
+     *
+     * @param class-string $class
+     * @return array<string, true>
+     */
+    private static function pamSnapshotSkippedKeys(string $class): array
+    {
+        $keys = self::$pamSnapshotExcludedKeys ??= array_fill_keys(
+            array_map(
+                static fn (string $name): string => "\0".self::class."\0".$name,
+                self::PAM_SNAPSHOT_EXCLUDED,
+            ),
+            true,
+        );
+        for ($reflection = new \ReflectionClass($class); $reflection !== false; $reflection = $reflection->getParentClass()) {
+            if ($reflection->getName() === self::class) {
+                break;
+            }
+            foreach ($reflection->getProperties() as $property) {
+                if (
+                    !$property->isStatic()
+                    && $property->getDeclaringClass()->getName() === $reflection->getName()
+                    && $property->getAttributes(Attributes\Transient::class) !== []
+                ) {
+                    $keys[self::pamPropertyKey($property)] = true;
+                }
+            }
+        }
+
+        return $keys;
+    }
+
+    private static function pamPropertyKey(\ReflectionProperty $property): string
+    {
+        return match (true) {
+            $property->isPrivate() => "\0".$property->getDeclaringClass()->getName()."\0".$property->getName(),
+            $property->isProtected() => "\0*\0".$property->getName(),
+            default => $property->getName(),
+        };
     }
 
     private static function pamTypeAdmitsObject(?\ReflectionType $type): bool

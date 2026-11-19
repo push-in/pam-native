@@ -133,6 +133,11 @@ renders it again).
 
 The profiler records a granular update as a `component.patch` span (with
 `component` metadata) instead of `component.render`.
+
+Fields written outside handlers (hooks, timers, callbacks) count as the
+component's own inputs. Fields `render()` never reads can opt out with
+`#[Transient]` (see
+[component runtime](component-runtime.md#state-snapshot-and-transient-fields)).
 `Pam\Native\Internal\GranularRender::enabled(false)` turns it off (every
 ancestor renders again), e.g. to compare.
 
