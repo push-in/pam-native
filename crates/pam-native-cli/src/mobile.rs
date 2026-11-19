@@ -2058,9 +2058,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
 
 fn validate_android_queries(queries: &AndroidQueries) -> Result<(), String> {
     if queries.packages.len() > 64 || queries.intents.len() > 32 {
-        return Err(
-            "android.queries is limited to 64 packages and 32 intents".to_owned(),
-        );
+        return Err("android.queries is limited to 64 packages and 32 intents".to_owned());
     }
     for package in &queries.packages {
         if !valid_class_name(package) {
@@ -6918,7 +6916,11 @@ fn configure_android(
     set_pam_activity_attribute(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         "supportsPictureInPicture",
-        project.manifest.android.picture_in_picture.then_some("true"),
+        project
+            .manifest
+            .android
+            .picture_in_picture
+            .then_some("true"),
     )?;
     add_open_scheme_queries(
         &workspace.join("app/src/main/AndroidManifest.xml"),
@@ -7219,9 +7221,7 @@ fn add_share_targets(
 fn add_queries(manifest: &Path, queries: &AndroidQueries) -> Result<(), String> {
     let mut body = String::new();
     for package in &queries.packages {
-        body.push_str(&format!(
-            "        <package android:name=\"{package}\" />\n"
-        ));
+        body.push_str(&format!("        <package android:name=\"{package}\" />\n"));
     }
     for intent in &queries.intents {
         body.push_str("        <intent>\n");
@@ -13106,9 +13106,7 @@ mod tests {
             .find("android:name=\".PamActivity\"")
             .expect("activity");
         let open = activity + generated[activity..].find('>').expect("open tag");
-        assert!(
-            generated[activity..open].contains("android:screenOrientation=\"sensorPortrait\"")
-        );
+        assert!(generated[activity..open].contains("android:screenOrientation=\"sensorPortrait\""));
         assert!(!generated.contains("PamWebActivity\"\n            android:screenOrientation"));
         assert_eq!(pam_activity_config_changes(&generated).len(), 14);
         set_pam_activity_attribute(&manifest, "supportsPictureInPicture", Some("true"))
@@ -13143,7 +13141,8 @@ mod tests {
                 "device_sharedpref",
             ] {
                 assert!(
-                    rules[start..end].contains(&format!("<exclude domain=\"{domain}\" path=\".\" />")),
+                    rules[start..end]
+                        .contains(&format!("<exclude domain=\"{domain}\" path=\".\" />")),
                     "{section} keeps {domain}"
                 );
             }
@@ -13154,7 +13153,10 @@ mod tests {
     fn android_queries_come_from_the_app_not_the_host_manifest() {
         let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
         for app_specific in ["com.instagram.android", "com.whatsapp", "smsto"] {
-            assert!(!template.contains(app_specific), "host declares {app_specific}");
+            assert!(
+                !template.contains(app_specific),
+                "host declares {app_specific}"
+            );
         }
         let manifest: NativeManifest = serde_json::from_str(
             r#"{
@@ -13204,7 +13206,12 @@ mod tests {
         let start = generated.find("<queries>").expect("queries start");
         let end = generated.find("</queries>").expect("queries end");
         let queries = &generated[start..end];
-        assert_eq!(queries.matches("<package android:name=\"com.whatsapp\" />").count(), 1);
+        assert_eq!(
+            queries
+                .matches("<package android:name=\"com.whatsapp\" />")
+                .count(),
+            1
+        );
         assert!(queries.contains("<package android:name=\"com.instagram.android\" />"));
         assert!(queries.contains(
             "<action android:name=\"android.intent.action.SENDTO\" />\n            <data android:scheme=\"smsto\" />"
@@ -13687,7 +13694,9 @@ mod bundle_exclusion_tests {
             let options: LinkingOptions = serde_json::from_value(bad.clone()).unwrap();
             assert!(options.validate().is_err(), "{bad}");
         }
-        assert!(serde_json::from_value::<LinkingOptions>(serde_json::json!({"schemes": []})).is_err());
+        assert!(
+            serde_json::from_value::<LinkingOptions>(serde_json::json!({"schemes": []})).is_err()
+        );
 
         let root = std::env::temp_dir().join(format!(
             "pam-open-schemes-{}",
@@ -13703,8 +13712,13 @@ mod bundle_exclusion_tests {
         add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries");
         add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries again");
         let generated = fs::read_to_string(&manifest).expect("generated");
-        let queries = &generated[generated.find("<queries>").unwrap()..generated.find("</queries>").unwrap()];
-        assert_eq!(queries.matches("android:scheme=\"otpauth\"").count(), 1, "idempotent");
+        let queries =
+            &generated[generated.find("<queries>").unwrap()..generated.find("</queries>").unwrap()];
+        assert_eq!(
+            queries.matches("android:scheme=\"otpauth\"").count(),
+            1,
+            "idempotent"
+        );
         assert_eq!(queries.matches("android:scheme=\"whatsapp\"").count(), 1);
         add_open_scheme_queries(&manifest, &[]).expect("queries removed");
         assert_eq!(fs::read_to_string(&manifest).expect("manifest"), template);
@@ -13712,7 +13726,10 @@ mod bundle_exclusion_tests {
 
         let resources = linking_resources(&linking.open_schemes);
         assert!(resources.contains("<string-array name=\"pam_open_url_schemes\""));
-        assert!(resources.contains("<item>otpauth</item>") && resources.contains("<item>whatsapp</item>"));
+        assert!(
+            resources.contains("<item>otpauth</item>")
+                && resources.contains("<item>whatsapp</item>")
+        );
         assert_eq!(
             linking_resources(&[]),
             include_str!("../../../android/app/src/main/res/values/pam_linking.xml"),
@@ -13726,7 +13743,10 @@ mod bundle_exclusion_tests {
             info["LSApplicationQueriesSchemes"],
             serde_json::json!(["instagram", "otpauth", "whatsapp"])
         );
-        assert_eq!(info["PamOpenURLSchemes"], serde_json::json!(["otpauth", "whatsapp"]));
+        assert_eq!(
+            info["PamOpenURLSchemes"],
+            serde_json::json!(["otpauth", "whatsapp"])
+        );
         let mut empty = serde_json::json!({});
         merge_ios_open_schemes(&LinkingOptions::default(), &mut empty).unwrap();
         assert_eq!(empty, serde_json::json!({"PamOpenURLSchemes": []}));
