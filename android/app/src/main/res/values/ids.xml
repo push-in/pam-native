@@ -18,4 +18,5 @@
     <item name="pam_stacking_elevated" type="id" />
     <item name="pam_blocks_navigation_gesture" type="id" />
     <item name="pam_plain_fill" type="id" />
+    <item name="pam_system_bar_bands" type="id" />
 </resources>

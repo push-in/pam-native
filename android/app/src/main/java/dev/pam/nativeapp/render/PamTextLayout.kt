@@ -20,6 +20,7 @@ import android.text.style.StrikethroughSpan
 import android.text.style.UnderlineSpan
 import android.content.res.Resources
 import android.util.TypedValue
+import dev.pam.nativeapp.text.PamTextProcessors
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -250,7 +251,8 @@ internal object PamTextLayout {
     ): CharSequence {
         val specs = PamTextSpanSpec.parse(spansWire)
         if (specs.isEmpty() && style.lineHeight <= 0f) {
-            return pamTransformText(raw, style.textTransform)
+            // A plugin's processor (EmojiCompat spans) applies to measure and draw alike.
+            return PamTextProcessors.process(pamTransformText(raw, style.textTransform))
         }
         val builder = SpannableStringBuilder()
         val offsets = transformedSegments(raw, specs, style.textTransform, builder)
@@ -298,7 +300,7 @@ internal object PamTextLayout {
             }
             spec.press?.let { set(PamSpanPress(it)) }
         }
-        return builder
+        return PamTextProcessors.process(builder)
     }
 
     /**

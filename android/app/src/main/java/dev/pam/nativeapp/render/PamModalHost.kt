@@ -626,7 +626,7 @@ internal class PamModalHost @JvmOverloads constructor(
     /**
      * The StatusBar a modal's content declares. It is kept, not only applied:
      * the StatusBar node commits before the Dialog exists, and every window
-     * configuration (WindowCompat.enableEdgeToEdge) resets the bar icons to
+     * configuration (setDecorFitsSystemWindows) resets the bar icons to
      * the app theme's, so it is re-applied after each one.
      */
     private var statusBarConfig: ModalStatusBar? = null
@@ -688,7 +688,9 @@ internal class PamModalHost @JvmOverloads constructor(
             sheet = presentation == PRESENTATION_SHEET,
             authoredColor = navigationBarColor,
         )
-        window.navigationBarColor = style.color
+        // Painted over the content where the bar is (Android 7-14), not with
+        // the deprecated Window.setNavigationBarColor.
+        PamSystemBarBands.of(window)?.navigationColor = style.color
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = style.contrastEnforced
         }
@@ -710,9 +712,8 @@ internal class PamModalHost @JvmOverloads constructor(
         // A statusBarTranslucent modal or a bottom sheet keeps its
         // transparent bar (its backdrop/content draws under it); only the
         // icons follow the StatusBar.
-        if (!config.translucent && !edgeToEdgeWindow()) {
-            window.statusBarColor = config.color
-        }
+        PamSystemBarBands.of(window)?.statusColor =
+            if (!config.translucent && !edgeToEdgeWindow()) config.color else Color.TRANSPARENT
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = config.useDarkIcons
         if (config.hidden) {
@@ -1322,10 +1323,11 @@ internal class PamModalHost @JvmOverloads constructor(
             }
             val edgeToEdge = edgeToEdgeWindow()
             if (edgeToEdge) {
-                WindowCompat.enableEdgeToEdge(this)
+                // WindowCompat.enableEdgeToEdge without its deprecated colour
+                // setters: Theme.PamNative.Modal keeps both bars transparent
+                // and PamSystemBarBands paints what a modal asks for.
                 WindowCompat.setDecorFitsSystemWindows(this, false)
-                statusBarColor = Color.TRANSPARENT
-                navigationBarColor = Color.TRANSPARENT
+                PamSystemBarBands.of(this)?.statusColor = Color.TRANSPARENT
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     isStatusBarContrastEnforced = false
                     isNavigationBarContrastEnforced = false

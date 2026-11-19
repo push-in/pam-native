@@ -1145,6 +1145,9 @@ class PamRenderer(
     private var nextMountOrder = 1L
     private var statusBarDefaults: StatusBarConfig? = null
     private var statusBarColorAnimator: ValueAnimator? = null
+
+    /** Colour of the status bar band (the window's own bar stays transparent). */
+    private var statusBarBandColor = Color.TRANSPARENT
     private var lastFocusedInput: EditText? = null
     private val deferredViewportLayouts = HashMap<Long, Pair<View, View.OnLayoutChangeListener>>()
 
@@ -5683,10 +5686,10 @@ class PamRenderer(
             }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(value.flag())
-            PropKey.SCROLL_FADING_EDGE_LENGTH ->
-                (view as? PamScrollContainer)?.setFadingEdgeLength(
-                    value.decimal().toFloat(),
-                )
+            PropKey.SCROLL_FADING_EDGE_LENGTH -> when (view) {
+                is PamScrollContainer -> view.setFadingEdgeLength(value.decimal().toFloat())
+                is PamRecyclerList -> view.setFadingEdgeLengthDp(value.decimal().toFloat())
+            }
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
             PropKey.SCROLL_INDICATOR_STYLE ->
@@ -6420,8 +6423,10 @@ class PamRenderer(
             }
             PropKey.SCROLL_NESTED_ENABLED ->
                 (view as? PamScrollContainer)?.setNestedScrollEnabled(true)
-            PropKey.SCROLL_FADING_EDGE_LENGTH ->
-                (view as? PamScrollContainer)?.setFadingEdgeLength(0f)
+            PropKey.SCROLL_FADING_EDGE_LENGTH -> when (view) {
+                is PamScrollContainer -> view.setFadingEdgeLength(0f)
+                is PamRecyclerList -> view.setFadingEdgeLengthDp(0f)
+            }
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(false)
             PropKey.SCROLL_INDICATOR_STYLE ->
@@ -11337,7 +11342,7 @@ class PamRenderer(
             decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN != 0
 
         return StatusBarConfig(
-            color = window.statusBarColor,
+            color = statusBarBandColor,
             appearance = if (lightIcons) STATUS_BAR_LIGHT else STATUS_BAR_DARK,
             hidden = hidden,
             animated = false,
@@ -11455,29 +11460,30 @@ class PamRenderer(
         }
     }
 
-    @Suppress("DEPRECATION")
+    /**
+     * The status bar colour is the root host's band over the content (the
+     * window's bar stays transparent: no deprecated Window.setStatusBarColor).
+     * `animated` fades the band like the system bar colour did.
+     */
     private fun applyStatusBarColor(color: Int, animated: Boolean, bandVisible: Boolean = true) {
         val window = activity()?.window ?: return
+        val rootHost = host as? PamRootHost
         // A hidden status bar (immersive screens drawn into the display
         // cutout) never leaves a painted band over the content.
-        (host as? PamRootHost)?.setStatusBarSurfaceColor(if (bandVisible) color else Color.TRANSPARENT)
-        if (Build.VERSION.SDK_INT >= 35) {
-            window.decorView.setBackgroundColor(color)
-            return
-        }
+        val band = if (bandVisible) color else Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 35) window.decorView.setBackgroundColor(color)
         statusBarColorAnimator?.cancel()
-        if (!animated || window.statusBarColor == color) {
-            window.statusBarColor = color
+        statusBarColorAnimator = null
+        val from = statusBarBandColor
+        statusBarBandColor = color
+        if (!animated || from == color || !bandVisible || Build.VERSION.SDK_INT >= 35) {
+            rootHost?.setStatusBarSurfaceColor(band)
             return
         }
-        statusBarColorAnimator = ValueAnimator.ofObject(
-            ArgbEvaluator(),
-            window.statusBarColor,
-            color,
-        ).apply {
+        statusBarColorAnimator = ValueAnimator.ofObject(ArgbEvaluator(), from, color).apply {
             duration = STATUS_BAR_ANIMATION_DURATION_MS
             addUpdateListener { animation ->
-                window.statusBarColor = animation.animatedValue as Int
+                rootHost?.setStatusBarSurfaceColor(animation.animatedValue as Int)
             }
             start()
         }

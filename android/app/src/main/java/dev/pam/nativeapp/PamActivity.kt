@@ -12,7 +12,6 @@ import android.content.Intent
 import android.content.IntentSender
 import android.content.IntentFilter
 import android.content.res.Configuration
-import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.util.DisplayMetrics
 import android.os.Build
@@ -110,6 +109,17 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private var appliedConfiguration: Configuration? = null
     private var configurationRemountPending = false
 
+    /**
+     * A plugin's text processor changed its results (e.g. the EmojiCompat
+     * font loaded): every text is measured again and the views rebuilt once,
+     * the same path as a font-scale change.
+     */
+    private val textProcessorChanged = Runnable {
+        if (!runtimeStarted || isDestroyed) return@Runnable
+        configurationRemountPending = true
+        updateViewportFromWindow(force = true)
+    }
+
     /** Surface remounts caused by a handled font scale, density or locale change. */
     internal var configurationRemounts = 0
         private set
@@ -159,7 +169,12 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         // they overlap the native view setup below.
         val retainedAtCreate = PamRuntimeHost.runtime?.takeIf(PamRuntime::isRunning)
         if (retainedAtCreate == null) PamStartup.prepare(applicationContext)
+        // The manifest theme colours the starting window's bars; the running
+        // Activity is edge to edge with transparent bars (theme attributes,
+        // not the deprecated Window bar-colour setters).
+        setTheme(R.style.Theme_PamNative_Content)
         super.onCreate(savedInstanceState)
+        dev.pam.nativeapp.text.PamTextProcessors.addListener(textProcessorChanged)
         appliedConfiguration = Configuration(resources.configuration)
         PamAppearance.applyPlatformNightMode(this)
         // Export the effective scheme to PHP before its first frame.
@@ -247,7 +262,9 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         // Android version. Insets are consumed by PAM views, never implicitly
         // by the decor view or an OEM-specific compatibility path. Neither
         // this nor the bar colours change the metrics PHP booted with.
-        WindowCompat.enableEdgeToEdge(window)
+        // Bars are transparent from Theme.PamNative.Content: this is
+        // WindowCompat.enableEdgeToEdge without its deprecated colour setters.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes = window.attributes.apply {
                 layoutInDisplayCutoutMode =
@@ -449,8 +466,12 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         }
     }
 
+    /** onPause happened in Picture-in-Picture: the runtime was not paused. */
+    private var pauseSkippedForPictureInPicture = false
+
     override fun onResume() {
         super.onResume()
+        pauseSkippedForPictureInPicture = false
         hiddenTrimHandler.removeCallbacks(hiddenTrim)
         if (firstFrameUptimeMillis > 0L) DeferredBundleAssets.resume()
         HostEvents.foreground(true)
@@ -470,7 +491,11 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     override fun onPause() {
         DeferredBundleAssets.pause()
         HostEvents.foreground(false)
-        if (runtimeStarted) {
+        // Picture-in-Picture (android.pictureInPicture): the activity is
+        // paused but still on screen, so its video keeps playing and PHP
+        // stays active; closing the PiP window stops it (onStop).
+        pauseSkippedForPictureInPicture = runtimeStarted && isInPictureInPictureMode
+        if (runtimeStarted && !pauseSkippedForPictureInPicture) {
             runtime.onHostPause()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_INACTIVE.toString().toByteArray())
         }
@@ -478,6 +503,12 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onStop() {
+        if (runtimeStarted && pauseSkippedForPictureInPicture) {
+            // The PiP window was closed: the pause it skipped comes first.
+            runtime.onHostPause()
+            runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_INACTIVE.toString().toByteArray())
+        }
+        pauseSkippedForPictureInPicture = false
         if (runtimeStarted) {
             runtime.onHostBackground()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_BACKGROUND.toString().toByteArray())
@@ -641,6 +672,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             return
         }
         hiddenTrimHandler.removeCallbacks(hiddenTrim)
+        dev.pam.nativeapp.text.PamTextProcessors.removeListener(textProcessorChanged)
         dev.pam.nativeapp.render.PamSafeAreaInspector.detach(window)
         releaseSplash()
         recoveryRunnable?.let(window.decorView::removeCallbacks)
@@ -1221,8 +1253,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         window.setBackgroundDrawable(
             ColorDrawable(PamAppearance.color(this, R.color.pam_window_background, dark)),
         )
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
+        // Bars stay transparent (Theme.PamNative.Content); PAM views paint them.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isStatusBarContrastEnforced = false
             window.isNavigationBarContrastEnforced = false

@@ -2208,8 +2208,8 @@ class PamRendererInstrumentedTest {
                     if (Build.VERSION.SDK_INT >= 35) {
                         (activity.window.decorView.background as ColorDrawable).color
                     } else {
-                        @Suppress("DEPRECATION")
-                        activity.window.statusBarColor
+                        // The window's own bar stays transparent: the band paints it.
+                        activity.host.statusBarSurfaceColor
                     },
                 )
                 assertStatusBarUsesDarkIcons(activity, false)
@@ -2238,8 +2238,8 @@ class PamRendererInstrumentedTest {
                     if (Build.VERSION.SDK_INT >= 35) {
                         (activity.window.decorView.background as ColorDrawable).color
                     } else {
-                        @Suppress("DEPRECATION")
-                        activity.window.statusBarColor
+                        // The window's own bar stays transparent: the band paints it.
+                        activity.host.statusBarSurfaceColor
                     },
                 )
                 assertStatusBarUsesDarkIcons(activity, true)
@@ -2309,7 +2309,7 @@ class PamRendererInstrumentedTest {
                     if (Build.VERSION.SDK_INT >= 35) {
                         (activity.window.decorView.background as ColorDrawable).color
                     } else {
-                        activity.window.statusBarColor
+                        activity.host.statusBarSurfaceColor
                     },
                 )
                 assertEquals(Color.BLACK, activity.host.statusBarSurfaceColor)
