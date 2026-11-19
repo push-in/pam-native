@@ -188,7 +188,9 @@ final class PamScrollRemountAnchorTests: XCTestCase {
         renderer.adoptScrollAnchors([:])
         renderer.commit([tree(kind: .virtualList, scale: 1)])
         host.layoutIfNeeded()
-        XCTAssertEqual(try scroller(host).contentOffset.y, 0, accuracy: 0.5)
+        // The top rests above the adjusted inset (the window's safe area).
+        let fresh = try scroller(host)
+        XCTAssertEqual(fresh.contentOffset.y, -fresh.adjustedContentInset.top, accuracy: 0.5)
         renderer.close()
     }
 }
