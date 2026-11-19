@@ -1056,8 +1056,13 @@ class PamNavigationHostInstrumentedTest {
         } finally { activity.finish() }
     }
 
-    private fun awaitCondition(instrumentation: Instrumentation, message: String, condition: () -> Boolean) {
-        val deadline = android.os.SystemClock.uptimeMillis() + 5_000L
+    private fun awaitCondition(
+        instrumentation: Instrumentation,
+        message: String,
+        timeoutMs: Long = 5_000L,
+        condition: () -> Boolean,
+    ) {
+        val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
         while (android.os.SystemClock.uptimeMillis() < deadline) {
             var matches = false
             onMain(instrumentation) { matches = condition() }
@@ -1133,8 +1138,19 @@ class PamNavigationHostInstrumentedTest {
                     .showSoftInput(next, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                awaitCondition(instrumentation, "Destination IME is shown") {
-                    next.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+                // A cold or restarting IME on a loaded CI emulator can drop a
+                // request: ask again every few seconds instead of failing after one.
+                var asked = android.os.SystemClock.uptimeMillis()
+                awaitCondition(instrumentation, "Destination IME is shown", timeoutMs = 20_000L) {
+                    val shown = next.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+                    if (!shown && android.os.SystemClock.uptimeMillis() - asked > 4_000L) {
+                        asked = android.os.SystemClock.uptimeMillis()
+                        if (!next.hasFocus()) next.requestFocus()
+                        (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                            .showSoftInput(next, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                        next.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
+                    }
+                    shown
                 }
             }
             onMain(instrumentation) {

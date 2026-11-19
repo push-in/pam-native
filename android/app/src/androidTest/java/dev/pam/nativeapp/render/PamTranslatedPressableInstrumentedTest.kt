@@ -106,7 +106,7 @@ class PamTranslatedPressableInstrumentedTest {
                 button = requireNotNull(activity.host.findTagged("tp-send")) as PamPressable
             }
             waitUntil("input has window focus") { input.isShown && input.hasWindowFocus() }
-            instrumentation.runOnMainSync {
+            fun askForIme() {
                 input.requestFocus()
                 input.context.getSystemService(InputMethodManager::class.java)
                     .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
@@ -114,7 +114,15 @@ class PamTranslatedPressableInstrumentedTest {
                     input.windowInsetsController?.show(android.view.WindowInsets.Type.ime())
                 }
             }
-            waitUntil("composer panned above the IME and the button routed as a translated target") {
+            instrumentation.runOnMainSync(::askForIme)
+            // A cold or restarting IME on a loaded CI emulator can drop a
+            // request: ask again every few seconds instead of failing after one.
+            var asked = SystemClock.uptimeMillis()
+            waitUntil("composer panned above the IME and the button routed as a translated target", timeoutMs = 20_000) {
+                if (activity.host.imeBottomInset == 0 && SystemClock.uptimeMillis() - asked > 4_000) {
+                    asked = SystemClock.uptimeMillis()
+                    askForIme()
+                }
                 lastGeometry = "ty=${composer.translationY} ime=${activity.host.imeBottomInset} " +
                     "legacy=${activity.host.legacyImeInsets.bottom} " +
                     "routed=${activity.host.isTranslatedTouchTarget(button)} " +

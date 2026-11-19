@@ -21,6 +21,7 @@ import dev.pam.nativeapp.protocol.NodeSpec
 import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import org.junit.After
+import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
@@ -48,31 +49,15 @@ import kotlin.math.abs
 class PamConfigurationRemountStateInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
-    private var originalFontScale: String? = null
     private var localeChanged = false
 
-    /**
-     * Leaves the device as found before the next test class runs: the font
-     * scale and locale are restored and applied (the IME restarts for each
-     * change), and the keyboard is down. A keyboard contract running next
-     * must not meet an IME still restarting or left open.
-     */
     @After
-    fun restoreConfiguration() {
-        originalFontScale?.let { original ->
-            val unset = original == "null" || original.isBlank()
-            shell(if (unset) "settings delete system font_scale" else "settings put system font_scale $original")
-            val expected = if (unset) 1f else original.toFloatOrNull() ?: 1f
-            waitFor { context.applicationContext.resources.configuration.fontScale == expected }
-        }
+    fun restoreLocaleAndKeyboard() {
         if (localeChanged && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.getEmptyLocaleList()
         }
         instrumentation.waitForIdleSync()
-        val until = SystemClock.uptimeMillis() + 5_000
-        while (SystemClock.uptimeMillis() < until && shell("dumpsys input_method").contains("mInputShown=true")) {
-            SystemClock.sleep(100)
-        }
+        awaitKeyboardDown()
     }
 
     @Test
@@ -259,8 +244,12 @@ class PamConfigurationRemountStateInstrumentedTest {
         /** Applies a real configuration change, then replays the tree the engine emits for it. */
         fun remount(fontScale: Float? = null, locale: Boolean = false) {
             if (fontScale != null) {
+                // Raised once for the whole class (each change restarts the
+                // IME); a later test finds it applied and remounts by hand.
                 if (originalFontScale == null) originalFontScale = shell("settings get system font_scale").trim()
-                shell("settings put system font_scale $fontScale")
+                if (activity.resources.configuration.fontScale != fontScale) {
+                    shell("settings put system font_scale $fontScale")
+                }
                 assertTrue(
                     "font scale $fontScale never reached the activity",
                     waitFor { activity.resources.configuration.fontScale == fontScale },
@@ -441,21 +430,68 @@ class PamConfigurationRemountStateInstrumentedTest {
         instrumentation.waitForIdleSync()
     }
 
-    private fun shell(command: String): String =
-        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
-            .bufferedReader()
-            .use { it.readText() }
+    private fun shell(command: String): String = shell(instrumentation, command)
 
-    private companion object {
-        const val SCREEN_ID = 1L
-        const val SCROLLER_ID = 2L
-        const val CONTENT_ID = 3L
-        const val INPUT_ID = 4L
-        const val ROW_BASE = 100L
-        const val TEXT_BASE = 1_000L
-        const val ROWS = 80
-        const val VIEWPORT_WIDTH = 320f
-        const val VIEWPORT_HEIGHT = 420f
-        const val TOLERANCE_PX = 3f
+    private fun awaitKeyboardDown() = awaitKeyboardDown(instrumentation)
+
+    companion object {
+        /** The system font scale before the class raised it ("null" when unset). */
+        private var originalFontScale: String? = null
+
+        /**
+         * Leaves the device as found before the next test class runs: the
+         * font scale is restored and applied, the IME (restarted by that
+         * change) has settled and the keyboard is down. Keyboard contracts
+         * that run later met an IME still restarting and dropped their first
+         * show request.
+         */
+        @JvmStatic
+        @AfterClass
+        fun restoreFontScale() {
+            val original = originalFontScale ?: return
+            originalFontScale = null
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val unset = original == "null" || original.isBlank()
+            shell(instrumentation, if (unset) "settings delete system font_scale" else "settings put system font_scale $original")
+            val expected = if (unset) 1f else original.toFloatOrNull() ?: 1f
+            val until = SystemClock.uptimeMillis() + 10_000
+            while (
+                SystemClock.uptimeMillis() < until &&
+                instrumentation.targetContext.applicationContext.resources.configuration.fontScale != expected
+            ) {
+                SystemClock.sleep(50)
+            }
+            // The IME process restarts for the change: give it time to bind
+            // again before the next class asks for the keyboard.
+            SystemClock.sleep(IME_RESTART_SETTLE_MS)
+            awaitKeyboardDown(instrumentation)
+        }
+
+        private fun awaitKeyboardDown(instrumentation: android.app.Instrumentation) {
+            val until = SystemClock.uptimeMillis() + 5_000
+            while (
+                SystemClock.uptimeMillis() < until &&
+                shell(instrumentation, "dumpsys input_method").contains("mInputShown=true")
+            ) {
+                SystemClock.sleep(100)
+            }
+        }
+
+        private fun shell(instrumentation: android.app.Instrumentation, command: String): String =
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+                .bufferedReader()
+                .use { it.readText() }
+
+        private const val IME_RESTART_SETTLE_MS = 1_500L
+        private const val SCREEN_ID = 1L
+        private const val SCROLLER_ID = 2L
+        private const val CONTENT_ID = 3L
+        private const val INPUT_ID = 4L
+        private const val ROW_BASE = 100L
+        private const val TEXT_BASE = 1_000L
+        private const val ROWS = 80
+        private const val VIEWPORT_WIDTH = 320f
+        private const val VIEWPORT_HEIGHT = 420f
+        private const val TOLERANCE_PX = 3f
     }
 }
