@@ -583,12 +583,21 @@ class PamRuntime(
 
     fun consumePresentedModalBack(): Boolean = renderer.consumePresentedModalBack()
 
+    /**
+     * Restarts PHP on [entryPath] in this runtime. By default the old request
+     * records hot reload state first (`Runtime::checkpointHotReload`), so the
+     * new request restores the `#[State]` of components at the same tree
+     * position (development hot reload, the error overlay's Reload). [fresh]
+     * (`App::reload()`) relaunches like a cold start: nothing is recorded or
+     * restored.
+     */
     fun reload(
         entryPath: String,
         confirmedAtNanos: Long? = null,
         transferredBytes: Long = 0,
         previousRequestReleased: (() -> Unit)? = null,
         beforeNextRequest: (() -> Unit)? = null,
+        fresh: Boolean = false,
     ) {
         synchronized(handleLock) {
             val active = handle
@@ -600,7 +609,7 @@ class PamRuntime(
                 if (beforeNextRequest != null) reloadPreparations[entryPath] = beforeNextRequest
                 readyForEvents = false
                 modules.prepareReload()
-                nativeReload(active, entryPath)
+                nativeReload(active, entryPath, fresh)
             }
         }
     }
@@ -1012,7 +1021,7 @@ class PamRuntime(
         payload: ByteArray,
     )
 
-    private external fun nativeReload(handle: Long, entry: String)
+    private external fun nativeReload(handle: Long, entry: String, fresh: Boolean)
     private external fun nativeRemount(handle: Long)
     private external fun nativeInvalidateTextMeasurements(handle: Long)
     private external fun nativeStats(handle: Long): LongArray

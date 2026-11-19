@@ -193,6 +193,11 @@ void pam_native_runtime_dispatch_module_result(
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry);
 
+/* App::reload(): relaunches PHP on `entry` like a cold start inside the same
+ * window. Unlike pam_native_runtime_reload, the old request records no hot
+ * reload state, so no `#[State]` is restored into the new one. */
+void pam_native_runtime_reload_fresh(uint64_t handle, const char* entry);
+
 /* Development hot reload into a stable tree. Like pam_native_runtime_reload,
  * and `prepare(context)` runs once on the PHP worker after the previous
  * request shut down (including lazy autoloads) and before the next request

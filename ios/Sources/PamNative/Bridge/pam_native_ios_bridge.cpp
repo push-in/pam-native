@@ -53,11 +53,16 @@ constexpr std::size_t kMaxQueuedEvents = 1024;
 enum class EventType : std::uint8_t {
     Ui = 1,
     ModuleResult = 2,
+    // `first` is kReloadFresh for App::reload() (no hot reload checkpoint).
     Reload = 3,
     // A recreated host view attached to the live runtime: publish the
     // retained tree as a full mount, in order with other batches.
     Remount = 5,
 };
+
+// Reload event `first`: a fresh relaunch (App::reload()) skips the hot
+// reload state checkpoint; 0 (hot reload, overlay reload) records it.
+constexpr std::int64_t kReloadFresh = 1;
 
 struct Event {
     EventType type;
@@ -1032,6 +1037,7 @@ RequestOutcome run_php_request(RuntimeState* state) {
         return RequestOutcome::Failed;
     }
     bool reload = false;
+    bool preserve_state = false;
     bool draining = false;
     int events_since_gc = 0;
     auto drain_started = std::chrono::steady_clock::now();
@@ -1057,6 +1063,7 @@ RequestOutcome run_php_request(RuntimeState* state) {
                 state->entry = event.payload;
             }
             reload = true;
+            preserve_state = event.first != kReloadFresh;
             break;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -1129,9 +1136,10 @@ RequestOutcome run_php_request(RuntimeState* state) {
 
     // Older SDKs and test entries may lack these methods: calling a missing
     // method from the worker is an uncaught Error, i.e. a bailout.
-    if (reload) {
+    if (reload && preserve_state) {
         // Hot reload: let PHP record component state (Fast Refresh style)
         // while the old components are still mounted. Best effort only.
+        // App::reload() relaunches fresh, like a cold start: no checkpoint.
         if (!run_guarded(state, "Runtime::checkpointHotReload", [&] {
                 if (runtime_has_method("checkpointhotreload")) {
                     call_runtime("checkpointHotReload", 0, nullptr);
@@ -1681,6 +1689,14 @@ void pam_native_runtime_reload(uint64_t handle, const char* entry) {
         },
         false
     );
+}
+
+void pam_native_runtime_reload_fresh(uint64_t handle, const char* entry) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || entry == nullptr) {
+        return;
+    }
+    enqueue(state, Event{EventType::Reload, kReloadFresh, 0, std::string(entry)}, false);
 }
 
 void pam_native_runtime_stats(uint64_t handle, uint64_t values[PAM_NATIVE_MAX_STAT_VALUES]) {

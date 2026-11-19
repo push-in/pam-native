@@ -61,6 +61,7 @@ constexpr std::size_t kIdleHeapSlackBytes = 8 * 1024 * 1024;
 enum class EventType : std::uint8_t {
     Ui = 1,
     ModuleResult = 2,
+    // `first` is kReloadFresh for App::reload() (no hot reload checkpoint).
     Reload = 3,
     // Engine-only work (no PHP): applied on the worker so the UI thread never
     // waits on the engine lock or decodes a batch synchronously.
@@ -69,6 +70,10 @@ enum class EventType : std::uint8_t {
     // publish the retained tree as a full mount, in order with other batches.
     Remount = 5,
 };
+
+// Reload event `first`: a fresh relaunch (App::reload()) skips the hot
+// reload state checkpoint; 0 (hot reload, overlay reload) records it.
+constexpr std::int64_t kReloadFresh = 1;
 
 struct Event {
     EventType type;
@@ -1111,6 +1116,7 @@ RequestOutcome run_php_request(RuntimeState* state) {
         return RequestOutcome::Failed;
     }
     bool reload = false;
+    bool preserve_state = false;
     bool draining = false;
     int events_since_gc = 0;
     auto drain_started = std::chrono::steady_clock::now();
@@ -1136,6 +1142,7 @@ RequestOutcome run_php_request(RuntimeState* state) {
                 state->entry = event.payload;
             }
             reload = true;
+            preserve_state = event.first != kReloadFresh;
             break;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -1211,9 +1218,10 @@ RequestOutcome run_php_request(RuntimeState* state) {
 
     // Older SDKs and test entries may lack these methods: calling a missing
     // method from the worker is an uncaught Error, i.e. a bailout.
-    if (reload) {
+    if (reload && preserve_state) {
         // Hot reload: let PHP record component state (Fast Refresh style)
         // while the old components are still mounted. Best effort only.
+        // App::reload() relaunches fresh, like a cold start: no checkpoint.
         if (!run_guarded(state, "Runtime::checkpointHotReload", [&] {
                 if (runtime_has_method("checkpointhotreload")) {
                     call_runtime("checkpointHotReload", 0, nullptr);
@@ -1850,7 +1858,8 @@ Java_dev_pam_nativeapp_PamRuntime_nativeReload(
     JNIEnv* env,
     jobject,
     jlong handle,
-    jstring entry
+    jstring entry,
+    jboolean fresh
 ) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || entry == nullptr) {
@@ -1860,7 +1869,8 @@ Java_dev_pam_nativeapp_PamRuntime_nativeReload(
     if (entry_chars != nullptr) {
         std::string next_entry(entry_chars);
         env->ReleaseStringUTFChars(entry, entry_chars);
-        enqueue(state, Event{EventType::Reload, 0, 0, std::move(next_entry)}, false);
+        const std::int64_t mode = fresh == JNI_TRUE ? kReloadFresh : 0;
+        enqueue(state, Event{EventType::Reload, mode, 0, std::move(next_entry)}, false);
     }
 }
 

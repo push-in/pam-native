@@ -752,13 +752,22 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         }
     }
 
-    /** App::reload(): the overlay's reload, posted so the calling PHP request finishes first. */
+    /**
+     * App::reload(): a cold start on the active entry inside this window,
+     * posted so the calling PHP request finishes first. Unlike the hot reload,
+     * no `#[State]` is recorded or restored.
+     */
     internal fun requestRuntimeReload() {
-        window.decorView.post { reloadAfterError() }
+        window.decorView.post { relaunchRuntime(fresh = true) }
     }
 
-    /** Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry. */
-    private fun reloadAfterError() {
+    /**
+     * Reload / "Try again" from the error overlay: a fresh PHP runtime on the
+     * active entry. A live request records hot reload state first.
+     */
+    private fun reloadAfterError() = relaunchRuntime(fresh = false)
+
+    private fun relaunchRuntime(fresh: Boolean) {
         recoveryRunnable?.let(window.decorView::removeCallbacks)
         recoveryRunnable = null
         recoveryAttempts = 0
@@ -767,7 +776,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
             recreate()
             return
         }
-        runCatching { runtime.reload(entry) }
+        runCatching { runtime.reload(entry, fresh = fresh) }
             .onFailure { handleRuntimeError(it.message ?: "Pam Native reload failed") }
     }
 
