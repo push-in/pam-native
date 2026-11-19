@@ -33,8 +33,8 @@ class PamKeyboardDismissInstrumentedTest {
         var created = false
         fun onMain(action: () -> Unit) = instrumentation.runOnMainSync(action)
         fun visible(): Boolean = activity.host.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
-        fun await(label: String, condition: () -> Boolean) {
-            val deadline = SystemClock.uptimeMillis() + 6_000
+        fun await(label: String, timeoutMs: Long = 6_000, condition: () -> Boolean) {
+            val deadline = SystemClock.uptimeMillis() + timeoutMs
             var passed = false
             while (!passed && SystemClock.uptimeMillis() < deadline) {
                 onMain { passed = condition() }
@@ -71,12 +71,28 @@ class PamKeyboardDismissInstrumentedTest {
                 input.setText("bounded fixture draft")
             }
             await("Input window ready") { input.isAttachedToWindow && input.hasWindowFocus() }
-            onMain {
+            // Like a tap on the field. The IME can drop a show request that
+            // arrives while it is still binding to the newly focused editor
+            // (a cold keyboard on a loaded CI emulator): ask again until it
+            // shows, as a user taps the field again.
+            fun requestIme() {
                 input.requestFocus()
                 activity.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT).also { if (android.os.Build.VERSION.SDK_INT >= 30) input.windowInsetsController?.show(android.view.WindowInsets.Type.ime()) }
+                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    input.windowInsetsController?.show(WindowInsets.Type.ime())
+                }
             }
-            await("IME initially visible") { visible() }
+            onMain { requestIme() }
+            var asked = SystemClock.uptimeMillis()
+            await("IME initially visible", timeoutMs = 20_000) {
+                val shown = visible()
+                if (!shown && SystemClock.uptimeMillis() - asked > 2_000) {
+                    asked = SystemClock.uptimeMillis()
+                    requestIme()
+                }
+                shown
+            }
             SystemClock.sleep(500)
             // Inject through the system input path so Android 16's predictive
             // back/IME dispatcher sees the same event as a physical device.

@@ -83,16 +83,26 @@ final class PamNativeTimeTests: XCTestCase {
         XCTAssertTrue(label.pamTimeBinding?.isTicking == true)
         // The label ticks on its own. A loaded CI simulator may fire the next
         // tick late (or skip a second), so assert that it advanced.
-        let deadline = Date().addingTimeInterval(4)
-        while label.text == "00:05", Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        pamSpin(until: { label.text != "00:05" }, timeout: 6)
+        if label.text == "00:05", window.windowScene?.activationState == .background {
+            // The host scene went to the background mid-test: the binding
+            // (correctly) stopped and waits for the screen; it cannot tick.
+            PamTimeBinding.clear(label)
+            throw XCTSkip("host scene went to the background before the first tick")
         }
-        XCTAssertTrue(["00:06", "00:07", "00:08", "00:09"].contains(label.text ?? ""), "clock stayed at \(label.text ?? "nil")")
-        // A covered route: the next tick finds it hidden and stops.
+        XCTAssertTrue(
+            ["00:06", "00:07", "00:08", "00:09", "00:10", "00:11"].contains(label.text ?? ""),
+            "clock stayed at \(label.text ?? "nil") (scene: \(pamSceneState(window)), "
+                + "ticking: \(label.pamTimeBinding?.isTicking == true), waiting: \(label.pamTimeBinding?.isWaiting == true))"
+        )
+        // A covered route: the next tick (at most a second away, later on a
+        // loaded simulator) finds it hidden and stops.
         route.isHidden = true
-        RunLoop.main.run(until: Date().addingTimeInterval(1.1))
+        let shown = label.text
+        pamSpin(until: { label.pamTimeBinding?.isTicking != true }, timeout: 4)
         XCTAssertFalse(label.pamTimeBinding?.isTicking == true)
         XCTAssertTrue(label.pamTimeBinding?.isWaiting == true)
+        XCTAssertEqual(label.text, shown, "a covered clock does not redraw")
         route.isHidden = false
         label.pamTimeBinding?.wake()
         XCTAssertTrue(label.pamTimeBinding?.isTicking == true)
@@ -113,8 +123,9 @@ final class PamNativeTimeTests: XCTestCase {
         controller.view.addSubview(label)
         PamTimeBinding.sync(label, clock: nil, progress: nil, reveal: PamRevealSpec(charMs: 40, durationMs: 0, key: "a"))
         XCTAssertEqual(label.revealEnd, 0)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-        XCTAssertEqual(label.revealEnd, -1)
+        // 5 characters at 40 ms: done after 200 ms, later on a loaded simulator.
+        pamSpin(until: { label.revealEnd == -1 }, timeout: 4)
+        XCTAssertEqual(label.revealEnd, -1, "reveal stopped at \(label.revealEnd) (scene: \(pamSceneState(window)))")
         XCTAssertFalse(label.pamTimeBinding?.isTicking == true)
     }
 }

@@ -111,7 +111,8 @@ final class PamAnimatedImageTests: XCTestCase {
         PamAnimatedImageClock.shared.step(by: 0.15)
         waitUntil(timeout: 10) { view.animationFrameIndex != 0 && view.image?.cgImage !== first }
         let state = "visible=\(view.isAnimationVisible) covered=\(PamRouteCoverage.isCovered(view)) "
-            + "running=\(PamAnimatedImageClock.shared.isRunning) elapsed=\(view.animationElapsed)"
+            + "running=\(PamAnimatedImageClock.shared.isRunning) elapsed=\(view.animationElapsed) "
+            + "decoding=\(view.isDecodingAnimationFrame) scene=\(pamSceneState(window))"
         XCTAssertNotEqual(view.animationFrameIndex, 0, state)
         XCTAssertFalse(view.image?.cgImage === first, "the displayed bitmap changed; \(state)")
 
@@ -121,10 +122,14 @@ final class PamAnimatedImageTests: XCTestCase {
         host.addSubview(view)
         host.isHidden = true
         XCTAssertFalse(view.isAnimationVisible)
+        // A frame decoded before the view was hidden may still land (it shows
+        // time that passed while visible); freeze after it.
+        XCTAssertTrue(pamSpin(until: { !view.isDecodingAnimationFrame }, timeout: 10), "a frame decode never landed")
         let frozen = view.animationFrameIndex
         let frozenElapsed = view.animationElapsed
         PamAnimatedImageClock.shared.step(by: 0.1)
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertFalse(view.isDecodingAnimationFrame, "a hidden animation decodes nothing")
         XCTAssertEqual(view.animationFrameIndex, frozen)
         XCTAssertEqual(view.animationElapsed, frozenElapsed, "no time passes while hidden")
 
@@ -139,7 +144,10 @@ final class PamAnimatedImageTests: XCTestCase {
         view.removeFromSuperview()
         XCTAssertFalse(view.isAnimatingImage)
         PamAnimatedImageClock.shared.step(by: 0)
-        XCTAssertFalse(PamAnimatedImageClock.shared.isRunning)
+        XCTAssertFalse(
+            PamAnimatedImageClock.shared.isRunning,
+            "\(PamAnimatedImageClock.shared.registeredCount) animated views still registered"
+        )
     }
 
     @MainActor

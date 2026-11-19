@@ -42,6 +42,13 @@ class PamKeyboardAwareScrollInstrumentedTest {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         fixture { f ->
             f.onMain { f.first.showSoftInputOnFocus = false; f.first.requestFocus() }
+            // Let the system finish its own insets passes for the new focus
+            // (window focus, IME binding) before synthetic ones are dispatched.
+            f.waitFor("focused input bound to the IME") {
+                f.activity.hasWindowFocus() && f.first.hasFocus() &&
+                    f.activity.getSystemService(InputMethodManager::class.java).isActive(f.first)
+            }
+            f.instrumentation.waitForIdleSync()
             f.insets(240)
             f.waitFor("initial focused target") { f.visible(f.first, 240, 180) }
             f.onMain { assertEquals(f.initialHeight, f.scroll.height) }
@@ -271,9 +278,30 @@ class PamKeyboardAwareScrollInstrumentedTest {
             val location = IntArray(2).also(root::getLocationOnScreen)
             return (location[1] + root.height - bounds.top).coerceAtLeast(0)
         }
+        /** The synthetic IME height last dispatched (null: none; the real IME drives the scroll). */
+        var syntheticImeDp: Int? = null
+        /** Real insets passes that replaced a synthetic IME (diagnostics). */
+        var syntheticImeReplaced = 0
+
         fun insets(heightDp: Int, animated: Boolean = false) {
+            syntheticImeDp = heightDp
             onMain { dispatchInsets(heightDp, animated) }
             instrumentation.waitForIdleSync()
+        }
+
+        /**
+         * The synthetic IME competes with the system's own insets passes: a
+         * late real pass (window focus, IME binding, a layout) carries the
+         * real, hidden IME and correctly clears the inset. Dispatch the
+         * synthetic insets again when that happened, so the assertion is
+         * about the scroll's response to them, not about pass ordering.
+         */
+        private fun keepSyntheticIme() {
+            val ime = syntheticImeDp ?: return
+            if (ime <= 0 || scroll.keyboardAvoidanceInsetPixels() > 0) return
+            if (imePixels() > 0) return
+            syntheticImeReplaced++
+            dispatchInsets(ime)
         }
         fun dispatchInsets(heightDp: Int, animated: Boolean = false) {
             val insets = WindowInsets.Builder()
@@ -297,7 +325,10 @@ class PamKeyboardAwareScrollInstrumentedTest {
             val deadline = SystemClock.uptimeMillis() + 8_000
             while (SystemClock.uptimeMillis() < deadline) {
                 var ready = false
-                onMain { ready = condition() }
+                onMain {
+                    keepSyntheticIme()
+                    ready = condition()
+                }
                 if (ready) return
                 Thread.sleep(50)
             }
@@ -313,7 +344,7 @@ class PamKeyboardAwareScrollInstrumentedTest {
                 bitmap.recycle()
             }
             val imm = activity.getSystemService(InputMethodManager::class.java)
-            throw AssertionError("$label: windowFocus=${activity.hasWindowFocus()} showAccepted=$imeShowAccepted activeInput=${imm.isActive(first)} acceptingText=${imm.isAcceptingText} screenshot=$screenshot visibleFrame=$visibleFrame root=${scroll.rootView.height} scroll=${scroll.height} inset=${scroll.keyboardAvoidanceInsetPixels()} ime=${imePixels()} offset=${scroll.snapshotOffsetPixels()} remaining=${scroll.remainingPrimaryPixels()} inputs=[$bounds]")
+            throw AssertionError("$label: syntheticIme=$syntheticImeDp replaced=$syntheticImeReplaced windowFocus=${activity.hasWindowFocus()} showAccepted=$imeShowAccepted activeInput=${imm.isActive(first)} acceptingText=${imm.isAcceptingText} screenshot=$screenshot visibleFrame=$visibleFrame root=${scroll.rootView.height} scroll=${scroll.height} inset=${scroll.keyboardAvoidanceInsetPixels()} ime=${imePixels()} offset=${scroll.snapshotOffsetPixels()} remaining=${scroll.remainingPrimaryPixels()} inputs=[$bounds]")
         }
         private fun node(id: Long, parent: Long, kind: NodeKind, properties: Map<PropKey, PropValue> = emptyMap(), index: Int = 0) =
             NodeSpec(id, parent, index, kind, properties)

@@ -39,7 +39,15 @@ final class PamCoveredRouteTests: XCTestCase {
         let route = UIView(frame: window.bounds)
         route.addSubview(leaf)
         host.insert(route, index: 0)
-        drainMainQueue()
+        // The host's UINavigationController installs the route's view in its
+        // own layout pass, not inside insert(): until then the leaf has no
+        // window and counts as covered. A loaded CI simulator can take longer
+        // than one 50 ms drain to run it, so wait for the route to be on screen.
+        window.layoutIfNeeded()
+        XCTAssertTrue(
+            pamSpin(until: { leaf.window != nil }),
+            "the navigation controller never installed the route (scene: \(pamSceneState(window)))"
+        )
         XCTAssertFalse(PamRouteCoverage.isCovered(leaf))
         tabs.selectForTesting(2)
         drainMainQueue()
@@ -74,12 +82,12 @@ final class PamCoveredRouteTests: XCTestCase {
         XCTAssertFalse(media.releasedForCover)
         host.insert(UIView(frame: window.bounds), index: 1)
         host.navigate(1)
-        drainMainQueue()
+        pamSpin(until: { media.releasedForCover })
         XCTAssertTrue(media.releasedForCover, "A covered route releases its player")
         XCTAssertFalse(kept.releasedForCover, "keepAliveWhenCovered opts out")
         host.operation = 3
         host.navigate(2)
-        drainMainQueue()
+        pamSpin(until: { !media.releasedForCover })
         XCTAssertFalse(media.releasedForCover, "The route visible again recreates the player")
     }
 

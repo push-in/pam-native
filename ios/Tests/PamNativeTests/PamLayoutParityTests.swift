@@ -307,7 +307,15 @@ final class PamLayoutParityTests: XCTestCase {
         list.contentOffset = CGPoint(x: 0, y: 1_500)
         list.layoutIfNeeded()
         XCTAssertNil(host.viewWithTag(10), "scrolled-out cells are dematerialized")
-        let reused = try XCTUnwrap(host.viewWithTag(40))
+        // A window the scene does not show yet makes the list "nobody sees":
+        // it then mounts cells a few per frame (hiddenCellMountBudget), and a
+        // loaded CI simulator spends that budget before row 30. Wait for the
+        // row; the reuse checks below are the same either way.
+        pamSpin(until: { host.viewWithTag(40) != nil })
+        let reused = try XCTUnwrap(
+            host.viewWithTag(40),
+            "row 30 never mounted (shown: \(list.pamIsShown), scene: \(pamSceneState(window)))"
+        )
         XCTAssertEqual(reused.backgroundColor, UIColor(argb: 0xFF00_FF00))
         XCTAssertEqual(reused.transform, .identity)
         XCTAssertEqual(reused.alpha, 1)

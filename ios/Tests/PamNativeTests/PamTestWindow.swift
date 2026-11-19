@@ -17,3 +17,32 @@ func pamTestWindow(frame: CGRect) -> UIWindow {
     }
     return window
 }
+
+/// Runs the main run loop until `condition` holds or `timeout` passes and
+/// returns the condition's last value. Tests wait for the state they assert
+/// (UIKit installing a controller's view, a timer or decode landing) instead
+/// of a fixed sleep: a loaded CI simulator can take far longer than a frame.
+@MainActor
+@discardableResult
+func pamSpin(until condition: () -> Bool, timeout: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() {
+        if Date() >= deadline { return false }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+    }
+    return true
+}
+
+/// Scene state for failure messages: a host scene in the background stops
+/// display links and timers that only run on screen.
+@MainActor
+func pamSceneState(_ window: UIWindow?) -> String {
+    guard let state = window?.windowScene?.activationState else { return "no scene" }
+    switch state {
+    case .foregroundActive: return "foregroundActive"
+    case .foregroundInactive: return "foregroundInactive"
+    case .background: return "background"
+    case .unattached: return "unattached"
+    @unknown default: return "unknown"
+    }
+}

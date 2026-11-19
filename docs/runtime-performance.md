@@ -223,7 +223,11 @@ no longer re-lays out the children that the same pass lays out right after.
 build there is ~1.6x slower than a release build on the S10), every slice
 frame within 16 ms, and the worst frame under half that of building
 everything at once; the final views, geometry, texts and order must equal
-the full mount's.
+the full mount's. On any host (software GL included) the commit's own view
+building must be under half the full mount's and the rest of the commit
+(node state for every node, layout of what was built) no more than 1.5x the
+full mount's plus 2 ms: the per-node bookkeeping both paths share is a
+large part of a fast host's full mount, so whole commits are not compared.
 
 Perfetto/systrace sections: `PamCommit.slicedMount`, `PamMount.slice`, and,
 only while a trace is recording, `PamMount.create.<KIND>`,

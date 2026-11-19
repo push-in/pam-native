@@ -256,6 +256,8 @@ final class PamImageView: UIImageView, PamPointerEventsHost {
     var isAnimatingImage: Bool { animationPlayer != nil && window != nil }
     var animationFrameIndex: Int { animationPlayer?.frameIndex ?? 0 }
     var animationElapsed: TimeInterval { animationPlayer?.elapsed ?? 0 }
+    /// A frame decode is in flight (tests, diagnostics).
+    var isDecodingAnimationFrame: Bool { animationPlayer?.isDecoding ?? false }
 
     private func setAnimation(_ animation: PamAnimatedImage?) {
         guard animation !== animationPlayer?.animation else { return }
