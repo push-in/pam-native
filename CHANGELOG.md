@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.54.0 - 2026-11-18
+
+App-declared Android capabilities (queries, orientation, picture-in-picture, URL schemes), media and notification-permission fixes, link navigation that stacks, and localized formatting.
+
+- Added: Android — apps declare package visibility in `android.queries` (`packages`, `intents`); the host manifest no longer queries Instagram, WhatsApp or `smsto`.
+- Added: Android — `android.orientations` locks PamActivity's `screenOrientation` (same values as `ios.orientations`).
+- Added: Android — `android.pictureInPicture` declares `supportsPictureInPicture`; in PiP the host keeps media playing and PHP active.
+- Changed: Android data extraction rules exclude every domain from cloud backup and device transfer.
+- Fixed: media — a streamed or while-playing cache copy is cancelled with its player; a download no other player needs stops.
+- Fixed: media — a playing `MediaPlayer` keeps the screen on; with sound it holds audio focus (pauses on loss or unplugged headphones).
+- Fixed: Android `Notifications` permission follows `areNotificationsEnabled()` below Android 13 (Blocked when off).
+- Added: `DeviceStatus::watch()` accepts `DeviceStatusField` filters; `useNetwork()` watches only the network.
+- Fixed: Android uses no deprecated `Window` bar colour setters (Play edge-to-edge warning); modal bar colours are painted by the host.
+- Added: plugin-api `PamTextProcessors` lets a plugin rewrite text spans before measure and draw (e.g. EmojiCompat).
+- Added: `fadingEdgeLength` on `VirtualizedList`, `FlatList` and `SectionList` (Android).
+- Added: `Route::open()`/`Route::openInitial()` accept a `mode`; `'push'` opens the link over the current screen and reuses the focused screen only for the same route with the same path params. Default stays `navigate`.
+- Fixed: `OfflineMutationQueue::online(true)` after `online(false)` makes every waiting retry due now before draining.
+- Added: `pam-native.json` `linking.openSchemes` (e.g. `["otpauth"]`): extra schemes for `Linking::open()`/`canOpen()`, with Android `<queries>` and iOS `LSApplicationQueriesSchemes` generated; file/content/intent/javascript/data-like schemes are rejected.
+- Fixed: Android `Linking::open()`/`canOpen()` match URL schemes case-insensitively; `Linking::open()` hands the URL to the system directly on Android and iOS.
+- Changed (breaking): removed the 1.46 `MovedToPlugin` aliases due in 1.47 (location, contacts, sensors, audio, media, media editor, auth, notifications, share extension); import the plugin classes. Drawer, Toast and `UI\WebView` aliases remain.
+- Changed: device bundles no longer ship `packages/native/benchmarks` or the SDK build-time audits.
+- Changed: `Files::delete()` accepts an optional `failure` closure and treats a missing file as deleted (Android, iOS).
+- Added: `Files::cachePath()` / `Files::CACHE_DIRECTORY` (a sandbox cache folder `Caches::clear()` empties) and `CacheUsage::$importBytes`; `Caches::clear(imports: true)` removes picker/import copies.
+- Added: `useSafeAreaInsets()->cutoutTop/Right/Bottom/Left` and `WindowMetrics::$cutout*`: the display cutout alone, for immersive screens.
+- Added: `App::reload()` relaunches PHP on the active entry (e.g. after a language change); older hosts report to `failure`.
+- Changed: `Support\Format` formats Spanish and French, and without `useLocale()` follows the active `I18n` locale when catalogs are registered (pt-BR otherwise).
+- Changed: Android IME tests re-request the keyboard while waiting and the configuration-remount test restarts the IME once per class.
+
 ## 1.53.9 - 2026-11-18
 
 - Added: app theme tokens. `pam-native.json` `"theme": {"tokens":
