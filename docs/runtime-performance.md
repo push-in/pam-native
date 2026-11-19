@@ -133,6 +133,17 @@ renders it again).
 
 The profiler records a granular update as a `component.patch` span (with
 `component` metadata) instead of `component.render`.
+
+A child component can render outside a render pass, for example when a test
+or a callback calls `toElement()` directly. It then keeps the parent it was
+last rendered under, so its later changes still lead that parent to it. Earlier
+releases dropped the link. After that, a memoized parent reused its stale
+element and the child's next changes never reached the screen.
+
+Fields written outside handlers (hooks, timers, callbacks) count as the
+component's own inputs. Fields `render()` never reads can opt out with
+`#[Transient]` (see
+[component runtime](component-runtime.md#state-snapshot-and-transient-fields)).
 `Pam\Native\Internal\GranularRender::enabled(false)` turns it off (every
 ancestor renders again), e.g. to compare.
 

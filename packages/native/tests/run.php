@@ -7806,6 +7806,8 @@ require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
 require __DIR__.'/memoization.php';
+require __DIR__.'/transient_state.php';
+require __DIR__.'/tracker_parent_link.php';
 require __DIR__.'/hot_reload_state.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/keyboard_visibility.php';
