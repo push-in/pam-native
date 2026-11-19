@@ -22,6 +22,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -426,6 +427,65 @@ class PamMediaPlaybackInstrumentedTest {
     private fun isEmulator(): Boolean =
         android.os.Build.HARDWARE in setOf("ranchu", "goldfish") ||
             android.os.Build.PRODUCT.startsWith("sdk_gphone")
+
+    @Test fun playingKeepsTheScreenOnAndSoundHoldsTheAudioFocus() = withMedia { media, _, source ->
+        assertPlayingEffects(media, source)
+    }
+
+    @Test fun exoPlaybackKeepsTheScreenOnAndSoundHoldsTheAudioFocus() = withMedia(forwardBufferSeconds = 4) { media, _, source ->
+        assertPlayingEffects(media, source)
+    }
+
+    private fun assertPlayingEffects(media: PamMediaView, source: String) {
+        val ready = CountDownLatch(1)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setLoop(true)
+            media.setAutoPlay(true)
+            media.setSource(source)
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        awaitPlaying(media, true)
+        main {
+            assertTrue("a playing loop keeps the screen on", media.keepScreenOn)
+            assertFalse("a muted player never takes the audio focus", media.holdsAudioFocus)
+            media.setMuted(false)
+            assertTrue("with sound it holds the focus", media.holdsAudioFocus)
+        }
+        // Another app takes the audio for good: the player pauses and lets go.
+        val audio = InstrumentationRegistry.getInstrumentation().targetContext
+            .getSystemService(android.media.AudioManager::class.java)
+        val other = android.media.AudioManager.OnAudioFocusChangeListener { }
+        @Suppress("DEPRECATION")
+        val granted = audio.requestAudioFocus(
+            other,
+            android.media.AudioManager.STREAM_MUSIC,
+            android.media.AudioManager.AUDIOFOCUS_GAIN,
+        )
+        try {
+            assumeTrue(granted == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+            awaitPlaying(media, false)
+            main {
+                assertFalse(media.holdsAudioFocus)
+                assertFalse("a paused player lets the screen sleep", media.keepScreenOn)
+            }
+        } finally {
+            @Suppress("DEPRECATION")
+            audio.abandonAudioFocus(other)
+        }
+        main {
+            media.start()
+            assertTrue("play asks for the focus again", media.holdsAudioFocus)
+        }
+        awaitPlaying(media, true)
+        main {
+            assertTrue(media.keepScreenOn)
+            media.setMuted(true)
+            assertFalse("muting gives the focus back", media.holdsAudioFocus)
+            media.pause()
+            assertFalse(media.keepScreenOn)
+        }
+    }
 
     private fun field(media: PamMediaView, name: String): Any? =
         PamMediaView::class.java.getDeclaredField(name).apply { isAccessible = true }.get(media)

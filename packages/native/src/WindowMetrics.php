@@ -26,6 +26,11 @@ final readonly class WindowMetrics
         public string $foldPosture = 'flat',
         public float $memoryClass = 0.0,
         public float $performanceTier = 1.0,
+        /** The display cutout alone (notch, punch hole), without the system bars. */
+        public float $cutoutTop = 0.0,
+        public float $cutoutRight = 0.0,
+        public float $cutoutBottom = 0.0,
+        public float $cutoutLeft = 0.0,
     ) {
     }
 }

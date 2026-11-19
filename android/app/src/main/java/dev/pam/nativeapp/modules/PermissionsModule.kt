@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -107,6 +108,15 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         val asked = permission != null && history.getBoolean(permission, false)
         val canAskAgain = permission != null &&
             (!asked || activity.shouldShowRequestPermissionRationale(permission))
+        if (kind == KIND_NOTIFICATIONS) {
+            val (status, again) = notificationPermissionDecision(
+                runtimeGranted = granted,
+                enabled = NotificationManagerCompat.from(activity).areNotificationsEnabled(),
+                canAskAgain = canAskAgain,
+            )
+            completion.decision(status, again)
+            return
+        }
         val status = when {
             granted -> STATUS_GRANTED
             canAskAgain -> STATUS_DENIED
@@ -234,7 +244,25 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         )
     }
 
-    private companion object {
+    internal companion object {
+        /**
+         * Notifications are granted only while the app's notifications are on
+         * in system settings. Below Android 13 there is no runtime permission
+         * ([runtimeGranted] is true) and the switch lives only in Settings, so
+         * "off" is BLOCKED with nothing to ask; on 13+ a granted
+         * POST_NOTIFICATIONS with the switch turned off is BLOCKED too.
+         */
+        internal fun notificationPermissionDecision(
+            runtimeGranted: Boolean,
+            enabled: Boolean,
+            canAskAgain: Boolean,
+        ): Pair<Int, Boolean> = when {
+            runtimeGranted && enabled -> STATUS_GRANTED to canAskAgain
+            runtimeGranted -> STATUS_BLOCKED to false
+            canAskAgain -> STATUS_DENIED to true
+            else -> STATUS_BLOCKED to false
+        }
+
         const val KIND_CAMERA = 1
         const val KIND_MICROPHONE = 2
         const val KIND_PHOTOS = 3

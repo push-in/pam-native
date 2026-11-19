@@ -537,6 +537,53 @@ $assert(
         && Format::relative($october - 7 * 86_400, $october + 9 * 86_400, RelativeTimeStyle::Tiny, maxWeeks: 0, timeZone: 'UTC', dateStyle: DateStyle::Medium, padDay: true, withYear: false) === '05 de out.',
     'Short-year dates, dateTime() and the relative date fallback options must work.',
 );
+// Spanish and French: grouping, compact units, relative times, dates and 24 h clocks.
+$nbsp = "\u{202F}";
+$assert(
+    Format::count(1234, 'es') === '1234' && Format::count(12_345, 'es-419') === '12.345' && Format::count(-1_234_567, 'es') === '-1.234.567'
+        && Format::count(1234, 'fr') === "1{$nbsp}234" && Format::count(1_234_567, 'fr-CA') === "1{$nbsp}234{$nbsp}567"
+        && Format::compact(1234, 'es') === '1,2 mil' && Format::compact(3_400_000, 'es') === '3,4 M'
+        && Format::compact(1234, 'fr') === '1,2 k' && Format::compact(2_000_000_000, 'fr') === '2 Md'
+        && Format::bytes(1_536, 'es') === '1,5 KB' && Format::bytes(1_536, 'fr') === '1,5 Ko' && Format::bytes(512, 'fr') === '512 o'
+        && Format::bytes(1_000 * 1_024, 'pt') === '1.000 KB',
+    'Format must group and abbreviate Spanish and French numbers.',
+);
+$assert(
+    Format::relative($base, $base + 30, locale: 'es') === 'ahora' && Format::relative($base, $base + 300, locale: 'es') === 'hace 5 min'
+        && Format::relative($base, $base + 3 * 86_400, locale: 'es') === 'hace 3 d' && Format::relative($base, $base + 14 * 86_400, locale: 'es') === 'hace 2 sem'
+        && Format::relative($base, $base + 7_200, RelativeTimeStyle::Long, 'es') === 'hace 2 horas'
+        && Format::relative($base, $base + 86_400, RelativeTimeStyle::Long, 'es') === 'hace 1 día'
+        && Format::relative($base, $base + 30, locale: 'fr') === "à l'instant" && Format::relative($base, $base + 300, locale: 'fr') === 'il y a 5 min'
+        && Format::relative($base, $base + 3 * 86_400, locale: 'fr') === 'il y a 3 j' && Format::relative($base, $base + 14 * 86_400, locale: 'fr') === 'il y a 2 sem.'
+        && Format::relative($base, $base + 60, RelativeTimeStyle::Long, 'fr') === 'il y a 1 minute'
+        && Format::relative($base, $base + 3 * 86_400, RelativeTimeStyle::Narrow, 'fr') === '3 j'
+        && Format::relative($base, $base + 3 * 86_400, RelativeTimeStyle::Tiny, 'fr') === '3j',
+    'Format::relative must speak Spanish and French.',
+);
+$assert(
+    Format::date($october, DateStyle::Medium, 'UTC', 'es', now: $october) === '12 de oct'
+        && Format::date($october, DateStyle::Long, 'UTC', 'es', withYear: true) === '12 de octubre de 2025'
+        && Format::date($october, DateStyle::Numeric, 'UTC', 'es') === '12/10'
+        && Format::date($october, DateStyle::Short, 'UTC', 'fr', now: $october) === '12 oct.'
+        && Format::date($october, DateStyle::Long, 'UTC', 'fr', withYear: true) === '12 octobre 2025'
+        && Format::date($october, DateStyle::NumericWithYear, 'UTC', 'fr') === '12/10/2025'
+        && Format::time('2026-10-14T17:05:00Z', 'UTC', 'es') === '17:05' && Format::time('2026-10-14T17:05:00Z', 'UTC', 'fr-FR') === '17:05',
+    'Format dates and clocks in Spanish and French: day/month, 24 h.',
+);
+// Without useLocale(), Format follows the active I18n locale once the app registers catalogs.
+Format::useLocale(null);
+\Pam\Native\I18n\I18n::reset();
+$assert(Format::locale() === 'pt-BR' && Format::count(1234) === '1.234', 'Without catalogs the default stays pt-BR.');
+\Pam\Native\I18n\I18n::catalog('pt', []);
+\Pam\Native\I18n\I18n::catalog('es', []);
+\Pam\Native\I18n\I18n::source('pt');
+\Pam\Native\I18n\I18n::use('es-MX');
+$assert(Format::locale() === 'es' && Format::relative($base, $base + 300) === 'hace 5 min' && Format::count(12_345) === '12.345', 'Format follows I18n::use().');
+Format::useLocale('fr');
+$assert(Format::relative($base, $base + 300) === 'il y a 5 min', 'useLocale() still wins over I18n.');
+\Pam\Native\I18n\I18n::reset();
+Format::useLocale('pt-BR');
+
 Format::useLocale('en-US');
 $assert(Format::compact(1234) === '1.2K' && Format::locale() === 'en-US', 'useLocale() must change the default locale.');
 Format::useLocale('pt-BR');
@@ -663,6 +710,34 @@ $assert($drains === [1, 1, 1, 1] && !$triggered->drain(), 'Nothing ready means n
 $drainSubscription->cancel();
 $triggered->enqueue('msg:2', 'message.send', ['body' => 'tchau']);
 $assert($drains === [1, 1, 1, 1] && $triggered->prune() === 1, 'A cancelled drain subscription must stop draining.');
+
+// Coming back online makes waiting retries due now (the backoff grown offline does not hold the queue).
+$backlog = [];
+$backoffQueue = new OfflineMutationQueue(backoff: new BackoffPolicy(baseMs: 2_000, maxMs: 1_024_000), clock: $queueClock);
+$backoffSubscription = $backoffQueue->drainOn(static function (OfflineMutationQueue $q) use (&$backlog): void { $backlog[] = count($q->ready()); }, DrainTrigger::Connectivity);
+$liked = $backoffQueue->enqueue('like:1', 'post.like', ['id' => 1]);
+$saved = $backoffQueue->enqueue('save:1', 'post.save', ['id' => 1]);
+$applied = $backoffQueue->enqueue('like:2', 'post.like', ['id' => 2]);
+foreach (range(1, 8) as $attempt) {
+    $backoffQueue->sending($liked->id);
+    $backoffQueue->retry($liked->id, $queueNow, 'offline');
+}
+$backoffQueue->sending($saved->id);
+$backoffQueue->retry($saved->id, $queueNow, 'offline');
+$backoffQueue->sending($applied->id);
+$backoffQueue->applied($applied->id);
+$assert($backoffQueue->ready() === [] && $backoffQueue->nextRetryAtMs() > $queueNow + 1_000, 'Both retries wait on their backoff.');
+$backoffQueue->online(false);
+$assert($backlog === [] && $backoffQueue->ready() === [], 'Going offline moves nothing.');
+$backoffQueue->online(true);
+$assert(
+    $backlog === [2] && count($backoffQueue->ready()) === 2 && $backoffQueue->nextRetryAtMs() === $queueNow
+        && $backoffQueue->get($liked->id)?->attempts === 8 && $backoffQueue->get($applied->id)?->status === MutationStatus::Applied,
+    'Connectivity coming back makes every waiting retry due now and drains them, keeping attempts and other statuses: '.json_encode($backlog),
+);
+$backoffQueue->online(true);
+$assert($backlog === [2], 'Staying online does not drain again.');
+$backoffSubscription->cancel();
 
 // 1.40 hardening: timer hooks, restart/ensure, failures, long delays, list windows.
 final class UtilitiesTimerHooksFixture extends Component

@@ -10,8 +10,19 @@ import UIKit
 /// snapshot never shows protected content (Android's recents thumbnail
 /// behaviour). Reports `supported: true`, `screenshotsBlocked: false`.
 final class WindowModule: NativeModule {
+    /// Set by PamRuntime: the error overlay's reload (`App::reload()`).
+    var onReload: (() -> Void)?
+
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         switch method {
+        case "reload":
+            guard let onReload else {
+                completion(.failure, Data("This host cannot reload the app".utf8))
+                return
+            }
+            // Answered first; the runtime is swapped on the next main-queue turn.
+            completion(.success, Data())
+            DispatchQueue.main.async { onReload() }
         case "secure":
             guard let values = try? WireMap.decode(payload), case let .flag(enabled)? = values["enabled"] else {
                 completion(.failure, Data("Secure flag is required".utf8))

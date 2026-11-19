@@ -258,10 +258,19 @@ final class Route
         return self::navigator()->refresh();
     }
 
-    /** Handles an incoming link (`myapp://chat/5`, `https://host/chat/5`). */
-    public static function open(string $uri): bool
+    /**
+     * Handles an incoming link (`myapp://chat/5`, `https://host/chat/5`).
+     * The default mode, navigate, goes back to the route's screen already in
+     * the stack and gives it the link's params; `mode: 'push'` opens the
+     * link over the current screen (a profile link from a chat stacks a new
+     * profile instead of replacing the one under it), reusing the focused
+     * screen only when it is the same route with the same path params.
+     *
+     * @param RedirectMode|'navigate'|'push'|'replace'|'reset' $mode
+     */
+    public static function open(string $uri, RedirectMode|string $mode = RedirectMode::Navigate): bool
     {
-        return self::navigator()->open($uri);
+        return self::navigator()->open($uri, $mode);
     }
 
     /**
@@ -271,10 +280,12 @@ final class Route
      * Navigation's initial state from a deep link. Same matching and
      * middleware as open(), with or without Route::linking(); false when no
      * route matches or middleware refuses it.
+     *
+     * @param RedirectMode|'navigate'|'push'|'replace'|'reset' $mode as in open()
      */
-    public static function openInitial(string $uri): bool
+    public static function openInitial(string $uri, RedirectMode|string $mode = RedirectMode::Navigate): bool
     {
-        return self::navigator()->openInitial($uri);
+        return self::navigator()->openInitial($uri, $mode);
     }
 
     /** @internal Starts a fresh registry (tests, hot reload). */

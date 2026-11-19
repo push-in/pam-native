@@ -75,6 +75,7 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
     private func start(_ payload: Data, _ completion: @escaping ModuleCompletion) throws {
         let values = try WireMap.decode(payload)
         let interval = min(max(values["intervalMs"]?.deviceInteger ?? 1_000, 250), 60_000)
+        let fields = DeviceStatusFields.of(values["fields"]?.deviceInteger)
         let channel = WatchChannel()
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         lock.lock()
@@ -88,7 +89,12 @@ final class DeviceModule: NativeModule, ClosableNativeModule {
         let changes = DeviceStatusChanges()
         timer.setEventHandler { [weak self, weak channel] in
             self?.snapshot { status, data in
-                if status == .success, changes.accept(data) { channel?.offer(data) }
+                // Only the watched fields count as a change; the delivery carries all.
+                guard status == .success,
+                      let values = try? WireMap.decode(data),
+                      let key = try? WireMap.encode(DeviceStatusFields.select(values, fields))
+                else { return }
+                if changes.accept(key) { channel?.offer(data) }
             }
         }
         timer.resume()
@@ -138,6 +144,33 @@ final class DeviceStatusChanges {
         if last == status { return false }
         last = status
         return true
+    }
+}
+
+/// `DeviceStatusField` bitmask of a watch (PHP `DeviceStatusField`).
+enum DeviceStatusFields {
+    static let battery = 1
+    static let network = 2
+    static let powerSave = 4
+    static let all = battery | network | powerSave
+
+    /// Absent or empty asks for every field (watches from older SDKs).
+    static func of(_ value: Int64?) -> Int {
+        let mask = Int(truncatingIfNeeded: value ?? 0) & all
+        return mask == 0 ? all : mask
+    }
+
+    private static let keys: [String: Int] = [
+        "batteryLevel": battery,
+        "charging": battery,
+        "networkType": network,
+        "expensiveNetwork": network,
+        "lowPowerMode": powerSave,
+    ]
+
+    /// The entries of `status` a watch of `fields` compares.
+    static func select<V>(_ status: [String: V], _ fields: Int) -> [String: V] {
+        status.filter { (keys[$0.key] ?? all) & fields != 0 }
     }
 }
 

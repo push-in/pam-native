@@ -346,6 +346,43 @@ $assert(
 );
 Authenticate::$signedIn = true;
 
+// --- Route::open(mode: push): a link stacks its screen instead of rewriting the one under it
+$pushRouter = $boot(__DIR__.'/Fixtures/RoutesApp/routes.php');
+$pushStack = $pushRouter->root();
+$names = static fn (): array => array_column($pushStack->getState()['routes'], 'name');
+$ids = static fn (): array => array_map(static fn (array $entry): mixed => $entry['params']['id'] ?? null, $pushStack->getState()['routes']);
+$assert(navigate('chat', ['id' => '1']) && navigate('settings') && $names() === ['tabs', 'chat', 'settings'], 'Push links start from tabs > chat 1 > settings.');
+$assert(
+    Route::open('app://chat/2') && $names() === ['tabs', 'chat'] && $ids() === [null, '2'],
+    'The default (navigate) still goes back to the chat in the stack and rewrites it: '.json_encode($pushStack->getState()['routes']),
+);
+$assert(navigate('settings') && $names() === ['tabs', 'chat', 'settings'], 'Settings over chat 2 again.');
+$assert(
+    Route::open('app://chat/3', 'push') && $names() === ['tabs', 'chat', 'settings', 'chat'] && $ids() === [null, '2', null, '3'],
+    'mode: push opens the link over the current screen and keeps the chat under it: '.json_encode($pushStack->getState()['routes']),
+);
+$assert(
+    Route::open('app://chat/3?unread=4', RedirectMode::Push) && $names() === ['tabs', 'chat', 'settings', 'chat']
+        && Route::current()?->params() === ['id' => '3', 'unread' => 4],
+    'The focused screen with the same link identity is reused and gets the new params: '.json_encode($pushStack->getState()['routes']),
+);
+$assert(
+    Route::open('app://chat/4', 'push') && $names() === ['tabs', 'chat', 'settings', 'chat', 'chat'] && $ids() === [null, '2', null, '3', '4'],
+    'The same route with another identity is pushed.',
+);
+$assert(
+    Route::open('app://feed', 'push') && $names() === ['tabs'] && Route::current()?->routeName() === 'feed',
+    'A tab link selects its tab, never pushes a second tabs host: '.json_encode($names()),
+);
+Route::flush();
+$pushRouter = $boot(__DIR__.'/Fixtures/RoutesApp/routes.php');
+$assert(
+    Route::openInitial('app://chat/8', 'push') && $pushRouter->root()->currentRoute() === 'chat'
+        && array_column($pushRouter->root()->getState()['routes'], 'name') === ['tabs', 'chat'],
+    'openInitial() takes the same mode.',
+);
+$expectError(static fn () => Route::open('app://chat/1', 'jump'), "Navigation mode must be");
+
 Route::flush();
 MiddlewareRegistry::reset();
 echo "Architecture v2 routing tests passed.\n";

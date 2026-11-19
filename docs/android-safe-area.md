@@ -9,6 +9,16 @@ their actual on-screen bounds.
 
 - The activity and full-screen modal windows opt into edge-to-edge before PAM
   mounts content.
+- No window calls the deprecated `Window.setStatusBarColor`,
+  `setNavigationBarColor` or `WindowCompat.enableEdgeToEdge` (they trigger
+  Play's edge-to-edge warning). The bars are transparent from the theme
+  (`Theme.PamNative.Content` for the running activity, `Theme.PamNative.Modal`
+  for modal dialogs); `setDecorFitsSystemWindows(false)` and the cutout mode
+  are applied at runtime. A `StatusBar` colour is the root host's band over
+  the content (fading when `animated`); a modal's status and navigation bar
+  colours are painted by a drawable in the dialog's decor overlay where the
+  bars are (Android 7–14; Android 15+ draws no bar colours for edge-to-edge
+  apps, as before).
 - Stable safe-area values combine system bars and display cutouts. A transient
   hidden navigation bar never turns a previously known safe bottom into zero.
 - `SafeAreaView` intersects those stable insets with its own window bounds.

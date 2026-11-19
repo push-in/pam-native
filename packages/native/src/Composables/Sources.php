@@ -9,6 +9,7 @@ use Pam\Native\Appearance;
 use Pam\Native\AppearanceMode;
 use Pam\Native\AppState;
 use Pam\Native\DeviceStatus;
+use Pam\Native\DeviceStatusField;
 use Pam\Native\I18n\I18n;
 use Pam\Native\System\DeviceInfo;
 use Pam\Native\Internal\ComponentLifecycle;
@@ -98,11 +99,12 @@ final class Sources
             'network',
             static fn (): ?DeviceStatus => self::$lastStatus,
             static function (\Closure $push): \Closure {
-                // The host pushes only changes (network, metered, battery...).
+                // The host pushes only network changes (type, metered): battery
+                // steps and the charger never wake PHP for this source.
                 $id = DeviceStatusModule::watch(static function (DeviceStatus $status) use ($push): void {
                     self::$lastStatus = $status;
                     $push($status);
-                }, 2_000);
+                }, 2_000, [DeviceStatusField::Network]);
 
                 return static fn () => DeviceStatusModule::unwatch($id);
             },

@@ -95,6 +95,22 @@ internal class PamMediaView(
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
     private val playback = MediaPlaybackLifecycle()
+    private val audioFocus = PamMediaAudioFocus(
+        context,
+        object : PamMediaAudioFocus.Listener {
+            override fun pause() {
+                // Another app's audio or unplugged headphones: like a native pause.
+                playback.request(false)
+                playback.focusGate(true)
+                syncPlayback()
+            }
+
+            override fun hold(held: Boolean) {
+                playback.focusGate(held)
+                syncPlayback()
+            }
+        },
+    )
     private var viewLifecycle: Lifecycle? = null
     private val viewLifecycleObserver = LifecycleEventObserver { _, _ -> syncViewLifecycle() }
     private var controls = true
@@ -184,6 +200,20 @@ internal class PamMediaView(
     private var cacheRequest = MediaCacheRequest("", MEDIA_CACHE_NONE, null, 0, 0, null, false, false, false)
     private var sourceGeneration = 0L
 
+    /** The cache work of the current source; cancelled with every new generation. */
+    private var cacheHandle: MediaCacheHandle = MediaCacheHandle.NONE
+
+    /**
+     * A new source generation: callbacks of the previous one are ignored and
+     * its cache work (a pending streamed copy, a download no other player
+     * waits for) is cancelled, e.g. a viewer closed before the copy started.
+     */
+    private fun nextSourceGeneration() {
+        sourceGeneration++
+        cacheHandle.cancel()
+        cacheHandle = MediaCacheHandle.NONE
+    }
+
     /** Natural video size, cached from the prepared/size callbacks (no player query per layout). */
     private var videoWidthPx = 0
     private var videoHeightPx = 0
@@ -270,7 +300,7 @@ internal class PamMediaView(
             resumeAtSeconds = 0.0
         }
         showPoster()
-        sourceGeneration++
+        nextSourceGeneration()
         pendingRestore = false
         if (value.isNotEmpty() && appInBackground && !keepAliveWhenCovered) suspended = true
         if (value.isEmpty() || covered || suspended || hiddenRelease || idleSurface) {
@@ -309,7 +339,7 @@ internal class PamMediaView(
                 return
             }
             val generation = sourceGeneration
-            mediaCache.resolve(
+            cacheHandle = mediaCache.resolve(
                 cacheRequest.copy(source = value),
                 MediaCacheCallbacks(
                     hit = { onCacheHit?.invoke(it) },
@@ -538,6 +568,7 @@ internal class PamMediaView(
         val actual = audioLevel()
         exo?.setVolume(actual)
         command { it.setVolume(actual, actual) }
+        syncAudioFocus()
     }
 
     fun setVolume(value: Float) {
@@ -545,6 +576,7 @@ internal class PamMediaView(
         val actual = audioLevel()
         exo?.setVolume(actual)
         command { it.setVolume(actual, actual) }
+        syncAudioFocus()
     }
     fun seek(seconds: Double) {
         currentTime = seconds.coerceAtLeast(0.0)
@@ -672,7 +704,7 @@ internal class PamMediaView(
             // An idle cell starts over when it plays again (no resume point).
             resumeSource = ""
             resumeAtSeconds = 0.0
-            sourceGeneration++
+            nextSourceGeneration()
             releasePlayer()
             pendingRestore = false
             return
@@ -798,7 +830,7 @@ internal class PamMediaView(
             resumeSource = source
             resumeAtSeconds = currentPosition / 1_000.0
         }
-        sourceGeneration++
+        nextSourceGeneration()
         releasePlayer()
         // Detaching the TextureView destroys its SurfaceTexture (GPU buffers).
         if (video.parent === this) removeViewInLayout(video)
@@ -889,6 +921,7 @@ internal class PamMediaView(
     }
 
     private fun syncPlayback() {
+        syncPlayingEffects()
         if (!prepared) return
         val exoPlayer = exo
         if (exoPlayer != null) {
@@ -897,6 +930,34 @@ internal class PamMediaView(
         }
         command(::applyPlayback)
     }
+
+    /**
+     * What a playing video holds beyond its decoder: the screen stays on
+     * while it plays (loops, a viewer) and, with sound, the audio focus, so
+     * it does not play over other apps and pauses when they take the audio.
+     * A paused, muted, finished, hidden or released player holds neither.
+     */
+    private fun syncPlayingEffects() {
+        val active = prepared && isAttachedToWindow
+        if (active && playback.wantsFocus && audioLevel() > 0f) {
+            if (!audioFocus.requested) playback.focusGate(audioFocus.acquire())
+        } else {
+            audioFocus.abandon()
+            playback.focusGate(true)
+        }
+        val screenOn = active && playback.mayPlay
+        if (keepScreenOn != screenOn) keepScreenOn = screenOn
+    }
+
+    /** Muting releases the focus, unmuting a playing player asks for it. */
+    private fun syncAudioFocus() {
+        val before = playback.mayPlay
+        syncPlayingEffects()
+        if (playback.mayPlay != before) syncPlayback()
+    }
+
+    /** True while this player holds the audio focus (tests, diagnostics). */
+    internal val holdsAudioFocus: Boolean get() = audioFocus.requested
 
     /** The only start path, evaluated on the worker immediately before playback. */
     private fun applyPlayback(player: MediaPlayer) {
@@ -1052,6 +1113,7 @@ internal class PamMediaView(
             val level = audioLevel()
             val startAt = startPositionSeconds()
             refreshBindings(startAt, it.duration.coerceAtLeast(0) / 1_000.0)
+            syncPlayingEffects()
             mediaExecutor.execute {
                 if (generation != playerGeneration || preparedPlayer !== it) return@execute
                 runCatching {
@@ -1136,6 +1198,7 @@ internal class PamMediaView(
         preparedPlayer = null
         exo?.release()
         exo = null
+        syncPlayingEffects()
     }
 
     /** Stops and frees a player off the UI thread (release() waits for mediaserver). */
@@ -1425,7 +1488,7 @@ internal class PamMediaView(
         viewLifecycle?.removeObserver(viewLifecycleObserver)
         viewLifecycle = null
         main.removeCallbacks(progress)
-        sourceGeneration++
+        nextSourceGeneration()
         val surface = videoSurface
         videoSurface = null
         val player = exo

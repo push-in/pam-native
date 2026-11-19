@@ -18,7 +18,6 @@ use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
 use Pam\Native\AsyncResource;
 use Pam\Native\Component;
-use Pam\Native\CaptureType;
 use Pam\Native\DrawingMode;
 use Pam\Native\EventKind;
 use Pam\Native\FileReference;
@@ -30,9 +29,6 @@ use Pam\Native\GestureEvent;
 use Pam\Native\GestureState;
 use Pam\Native\GestureType;
 use Pam\Native\MediaType;
-use Pam\Native\MediaAlbum;
-use Pam\Native\MediaAsset;
-use Pam\Native\MediaAssetPage;
 use Pam\Native\MediaPickerType;
 use Pam\Native\MediaCachePolicy;
 use Pam\Native\MediaPriority;
@@ -40,8 +36,6 @@ use Pam\Native\NativeMenuItem;
 use Pam\Native\PermissionDecision;
 use Pam\Native\PermissionKind;
 use Pam\Native\PermissionStatus;
-use Pam\Native\PushEventType;
-use Pam\Native\PushProvider;
 use Pam\Native\ImageCachePolicy;
 use Pam\Native\ImageErrorEvent;
 use Pam\Native\ImageFit;
@@ -59,7 +53,6 @@ use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardType;
 use Pam\Native\Jobs\BackgroundJobs;
-use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Internal\PamPhpCompiler;
@@ -145,7 +138,6 @@ use Pam\Native\Restorable;
 use Pam\Native\State;
 use Pam\Native\Store\Attributes\Computed as StoreComputed;
 use Pam\Native\Store\ActionPolicy;
-use Pam\Native\System\MediaCapture;
 use Pam\Native\Store\Store;
 use Pam\Native\Store\StoreChangeKind;
 use Pam\Native\Store\StoreMiddleware;
@@ -154,13 +146,10 @@ use Pam\Native\Sync\MutationStatus;
 use Pam\Native\Sync\OfflineMutationQueue;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
-use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Caches;
 use Pam\Native\System\Clipboard;
 use Pam\Native\System\DeviceInfo;
-use Pam\Native\System\PushNotifications;
 use Pam\Native\System\Files;
-use Pam\Native\System\MediaLibrary;
 use Pam\Native\Storage\Storage;
 use Pam\Native\Modules\NativeModuleException;
 use Pam\Native\Style;
@@ -6934,8 +6923,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.53.9',
-    'The runtime SDK contract must match the 1.53.9 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.54.0',
+    'The runtime SDK contract must match the 1.54.0 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

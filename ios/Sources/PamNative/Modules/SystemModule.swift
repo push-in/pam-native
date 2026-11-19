@@ -52,10 +52,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                     completion(.failure, "Invalid URL".data(using: .utf8) ?? Data())
                     return
                 }
-                guard UIApplication.shared.canOpenURL(url) else {
-                    completion(.failure, "Cannot open URL".data(using: .utf8) ?? Data())
-                    return
-                }
+                // Opened directly, like React Native: canOpenURL answers false
+                // for schemes missing from LSApplicationQueriesSchemes, while
+                // open(_:) still reaches the app that handles them.
                 DispatchQueue.main.async {
                     UIApplication.shared.open(url, options: [:]) { success in
                         if success { completion(.success, Data()) }
@@ -382,12 +381,28 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         return controller
     }
 
+    /// https, http, mailto, tel and geo, plus pam-native.json
+    /// `linking.openSchemes` (Info.plist `PamOpenURLSchemes`, e.g. otpauth).
+    /// Schemes that reach local files, app components or script never pass.
+    static func openSchemes(declared: [String]) -> Set<String> {
+        let blocked: Set<String> = [
+            "file", "content", "intent", "android-app", "javascript", "vbscript", "data", "blob", "about", "jar",
+        ]
+        let extra = declared
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty && !blocked.contains($0) }
+        return Set(["https", "http", "mailto", "tel", "geo"]).union(extra)
+    }
+
+    private static let declaredOpenSchemes: Set<String> = openSchemes(
+        declared: Bundle.main.object(forInfoDictionaryKey: "PamOpenURLSchemes") as? [String] ?? []
+    )
+
     private func safeURL(from raw: String) -> URL? {
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased() else {
             return nil
         }
-        let allowed = Set(["https", "http", "mailto", "tel", "geo"])
-        guard allowed.contains(scheme) else {
+        guard Self.declaredOpenSchemes.contains(scheme) else {
             return nil
         }
         return url

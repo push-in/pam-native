@@ -28,10 +28,38 @@ Generic hooks for plugin modules (Android `:plugin-api`, iOS `PamNative`):
 - Android `ActivityResultHost`: the PAM activity implements it; a module
   created with that activity as its context starts a system screen
   (`launchForResult`, `launchIntentSenderForResult`) and receives the result.
+- Android `dev.pam.nativeapp.text.PamTextProcessors`: one processor rewrites
+  the spans of every `Text` before it is measured and drawn (the same
+  `CharSequence` for both). A plugin installs it, e.g. EmojiCompat spans so
+  emoji newer than the system font render on Android 7–12 instead of tofu,
+  and calls `PamTextProcessors.changed()` when its results change (the emoji
+  font finished loading): the host measures every text again and rebuilds the
+  views once, like a font-scale change. The processor runs on the layout
+  thread and must keep the characters (spans only); a failure or a changed
+  length falls back to the plain text. The core ships no emoji font.
+- Picture-in-Picture: `"android": { "pictureInPicture": true }` in the app's
+  `pam-native.json` declares `android:supportsPictureInPicture` on the PAM
+  activity. While the activity is in PiP, the host does not report it
+  inactive: video keeps playing, PHP stays `Active` and the window resize
+  reaches PHP as a `dimensions` change (lay out a PiP-sized screen there);
+  closing the PiP window stops the activity as usual. Entering PiP is the
+  feature's job (the calls plugin for a video call): the activity is an
+  androidx `ComponentActivity`, so a module created with it calls
+  `setPictureInPictureParams()` (`setAutoEnterEnabled(true)` on Android 12+)
+  or `enterPictureInPictureMode()`, and listens with
+  `addOnUserLeaveHintListener` (Android 8–11 manual entry) and
+  `addOnPictureInPictureModeChangedListener` (to tell PHP to hide controls);
+  it removes its listeners when the module closes. iOS PiP for calls is the
+  calls plugin's (`AVPictureInPictureController`).
 
-Moved out of the core in 1.46 (the old class names are deprecated aliases
-for 1.46 only and throw `PluginException` naming the package when it is not
-installed):
+Moved out of the core in 1.46. The deprecated aliases under the old class
+names are removed: import the plugin classes (the new names below). Only the
+Drawer (`Navigation\Drawer*`, `UI\DrawerLayoutAndroid`,
+`Routing\DrawerRegistrar`), Toast (`System\Toast*`) and `UI\WebView` aliases
+remain, because `Route::drawer()` and the `<WebView>` template tag go through
+them and throw `PluginException` naming the package when it is not installed.
+The same applies to the notifications, media, auth and share-extension
+classes listed in the 1.46.0 CHANGELOG.
 
 | Old core class | Plugin | New class |
 | --- | --- | --- |

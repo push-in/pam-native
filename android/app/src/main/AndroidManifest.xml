@@ -19,10 +19,11 @@
     <!-- pam-native:tv-features:end -->
 
     <queries>
-        <!-- Explicit visibility for optional social share targets; no broad installed-app access. -->
-        <package android:name="com.instagram.android" />
-        <package android:name="com.whatsapp" />
-        <package android:name="com.whatsapp.w4b" />
+        <!-- Only the generic link schemes Linking opens. Apps declare the
+             packages and intents they query in pam-native.json
+             (android.queries); plugins in their own manifest. -->
+        <!-- pam-native:queries:start -->
+        <!-- pam-native:queries:end -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
@@ -42,10 +43,6 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SENDTO" />
-            <data android:scheme="smsto" />
         </intent>
     </queries>
 

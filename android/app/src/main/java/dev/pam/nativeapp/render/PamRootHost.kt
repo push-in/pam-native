@@ -40,6 +40,24 @@ private const val IME_RECONCILE_DELAY_MS = 350L
  * reaches 0 only once and blur/visibility observers fire once.
  */
 /** See [PamRootHost.publishedImeInset]: hidden at once when closing, previous value while opening. */
+/**
+ * The display cutout alone (notch, punch hole), in pixels, without the system
+ * bars: what immersive content (bars hidden) still has to avoid. Zero when the
+ * window is not laid out into the cutout area.
+ */
+internal fun displayCutoutInsets(view: View): androidx.core.graphics.Insets =
+    androidx.core.view.ViewCompat.getRootWindowInsets(view)
+        ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+        ?: androidx.core.graphics.Insets.NONE
+
+/** WindowMetrics cutout fields (dp) shared by the dimensions event and the boot metrics. */
+internal fun cutoutMetrics(cutout: androidx.core.graphics.Insets, density: Float): Map<String, Double> = mapOf(
+    "cutoutTop" to (cutout.top / density).toDouble(),
+    "cutoutRight" to (cutout.right / density).toDouble(),
+    "cutoutBottom" to (cutout.bottom / density).toDouble(),
+    "cutoutLeft" to (cutout.left / density).toDouble(),
+)
+
 internal fun publishedImeDuringAnimation(target: Int, previous: Int): Int = if (target <= 0) 0 else previous
 
 internal fun imeAnimationFrameInset(frameInset: Int, current: Int): Int =

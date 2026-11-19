@@ -186,6 +186,63 @@ struct NativeManifest {
     /// Route compiler options (routes file, generated namespace/output).
     #[serde(default)]
     routes: Option<crate::routes::RoutesOptions>,
+    /// Outgoing links (`Linking::open()`/`canOpen()`).
+    #[serde(default)]
+    linking: LinkingOptions,
+}
+
+/// `linking` in pam-native.json: what `Linking::open()` may hand to other apps.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LinkingOptions {
+    /// URI schemes opened besides https, http, mailto, tel and geo (for
+    /// example `otpauth` for authenticator apps). Android gets a matching
+    /// `<queries>` entry and iOS `LSApplicationQueriesSchemes`, so
+    /// `Linking::canOpen()` sees the apps that handle them.
+    #[serde(default)]
+    open_schemes: Vec<String>,
+}
+
+/// Schemes `Linking::open()` always accepts.
+const DEFAULT_OPEN_SCHEMES: &[&str] = &["https", "http", "mailto", "tel", "geo"];
+
+/// Schemes that reach local files, other apps' private components or script
+/// and never become openable through `linking.openSchemes`.
+const BLOCKED_OPEN_SCHEMES: &[&str] = &[
+    "file",
+    "content",
+    "intent",
+    "android-app",
+    "javascript",
+    "vbscript",
+    "data",
+    "blob",
+    "about",
+    "jar",
+];
+
+impl LinkingOptions {
+    fn validate(&self) -> Result<(), String> {
+        let mut seen = BTreeSet::new();
+        for scheme in &self.open_schemes {
+            if !valid_uri_scheme(scheme) || scheme.to_ascii_lowercase() != *scheme {
+                return Err(format!(
+                    "invalid linking.openSchemes entry {scheme:?}; expected a lower-case URI scheme such as otpauth"
+                ));
+            }
+            if BLOCKED_OPEN_SCHEMES.contains(&scheme.as_str()) {
+                return Err(format!(
+                    "linking.openSchemes cannot include {scheme:?}: it reaches local files, app components or script"
+                ));
+            }
+            if DEFAULT_OPEN_SCHEMES.contains(&scheme.as_str()) || !seen.insert(scheme.as_str()) {
+                return Err(format!(
+                    "linking.openSchemes entry {scheme:?} is a default or repeated scheme"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -383,6 +440,20 @@ struct AndroidOptions {
     deep_links: Vec<AndroidDeepLink>,
     #[serde(default)]
     share_targets: Vec<String>,
+    /// Orientations the main activity may take on phones. Empty keeps the
+    /// platform default (follow the sensor and the user's rotation lock).
+    /// Android 16+ ignores the lock on large screens (sw >= 600dp).
+    #[serde(default)]
+    orientations: Vec<IosOrientation>,
+    /// Package visibility (`<queries>`, Android 11+) the application needs,
+    /// e.g. to ask whether a share target app is installed.
+    #[serde(default)]
+    queries: AndroidQueries,
+    /// `android:supportsPictureInPicture` on the main activity. The core keeps
+    /// rendering and playing while in PiP; entering it (and the PiP params)
+    /// belongs to the feature that wants it (e.g. the calls plugin).
+    #[serde(default)]
+    picture_in_picture: bool,
     /// Bottom safe-area inset (dp) used when Android reports none, like React
     /// Native apps' `getBottomSafeInset()` fallback. 0 disables it.
     #[serde(default)]
@@ -499,6 +570,9 @@ impl Default for AndroidOptions {
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
+            orientations: Vec::new(),
+            queries: AndroidQueries::default(),
+            picture_in_picture: false,
             safe_area_bottom_fallback: 0,
             icon: None,
             tv: AndroidTvOptions::default(),
@@ -605,6 +679,47 @@ impl NativeManifest {
             .bundle_identifier
             .as_deref()
             .unwrap_or(&self.application_id)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidQueries {
+    /// Application ids queried by name (`<package>`).
+    #[serde(default)]
+    packages: Vec<String>,
+    /// Intents whose handlers the application resolves (`<intent>`).
+    #[serde(default)]
+    intents: Vec<AndroidQueryIntent>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidQueryIntent {
+    action: String,
+    #[serde(default)]
+    scheme: Option<String>,
+    #[serde(default)]
+    mime_type: Option<String>,
+}
+
+/// `android:screenOrientation` for the main activity, or `None` when the
+/// declared set mixes portrait and landscape (no lock).
+fn android_screen_orientation(orientations: &[IosOrientation]) -> Option<&'static str> {
+    use IosOrientation::*;
+    let has = |value| orientations.contains(&value);
+    let portrait = (has(Portrait), has(PortraitUpsideDown));
+    // iOS landscapeRight (home button on the right) is Android's natural
+    // landscape (ROTATION_90); landscapeLeft is the reverse one.
+    let landscape = (has(LandscapeRight), has(LandscapeLeft));
+    match (portrait, landscape) {
+        ((true, false), (false, false)) => Some("portrait"),
+        ((false, true), (false, false)) => Some("reversePortrait"),
+        ((true, true), (false, false)) => Some("sensorPortrait"),
+        ((false, false), (true, false)) => Some("landscape"),
+        ((false, false), (false, true)) => Some("reverseLandscape"),
+        ((false, false), (true, true)) => Some("sensorLandscape"),
+        _ => None,
     }
 }
 
@@ -1755,6 +1870,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         ));
     }
     validate_ios_app_options(&manifest.ios)?;
+    manifest.linking.validate()?;
     if !matches!(manifest.runtime.php.as_str(), "8.4" | "8.5") {
         return Err("runtime.php must be 8.4 or 8.5".to_owned());
     }
@@ -1925,6 +2041,47 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         if !valid_mime_type(mime_type) {
             return Err(format!(
                 "invalid Android share-target MIME type {mime_type:?}"
+            ));
+        }
+    }
+    let mut seen = HashSet::new();
+    if manifest
+        .android
+        .orientations
+        .iter()
+        .any(|orientation| !seen.insert(*orientation))
+    {
+        return Err("android.orientations must not repeat an orientation".to_owned());
+    }
+    validate_android_queries(&manifest.android.queries)
+}
+
+fn validate_android_queries(queries: &AndroidQueries) -> Result<(), String> {
+    if queries.packages.len() > 64 || queries.intents.len() > 32 {
+        return Err("android.queries is limited to 64 packages and 32 intents".to_owned());
+    }
+    for package in &queries.packages {
+        if !valid_class_name(package) {
+            return Err(format!("invalid android.queries package {package:?}"));
+        }
+    }
+    for intent in &queries.intents {
+        if !valid_class_name(&intent.action) {
+            return Err(format!(
+                "invalid android.queries intent action {:?}",
+                intent.action
+            ));
+        }
+        if let Some(scheme) = &intent.scheme
+            && !valid_uri_scheme(scheme)
+        {
+            return Err(format!("invalid android.queries intent scheme {scheme:?}"));
+        }
+        if let Some(mime_type) = &intent.mime_type
+            && !valid_mime_type(mime_type)
+        {
+            return Err(format!(
+                "invalid android.queries intent MIME type {mime_type:?}"
             ));
         }
     }
@@ -2180,6 +2337,30 @@ fn merge_ios_links(
         )?;
     }
     Ok(!ios.associated_domains.is_empty())
+}
+
+/// `linking.openSchemes` on iOS: `LSApplicationQueriesSchemes` for
+/// `canOpenURL` and `PamOpenURLSchemes`, the list SystemModule accepts.
+fn merge_ios_open_schemes(
+    linking: &LinkingOptions,
+    info: &mut serde_json::Value,
+) -> Result<(), String> {
+    linking.validate()?;
+    let object = info
+        .as_object_mut()
+        .ok_or_else(|| "App/Info.plist must contain a top-level dictionary".to_owned())?;
+    object.insert(
+        "PamOpenURLSchemes".to_owned(),
+        serde_json::json!(linking.open_schemes),
+    );
+    if !linking.open_schemes.is_empty() {
+        merge_plist_value(
+            info,
+            serde_json::json!({"LSApplicationQueriesSchemes": linking.open_schemes}),
+            "linking.openSchemes",
+        )?;
+    }
+    Ok(())
 }
 
 fn valid_uri_scheme(value: &str) -> bool {
@@ -4609,6 +4790,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
     }
 
     has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
+    merge_ios_open_schemes(&project.manifest.linking, &mut info)?;
     merge_ios_app_info(&project.manifest.ios, &mut info)?;
     let firebase = ios_firebase_config(&project.root);
     has_entitlements |= apply_ios_push_entitlement(&mut entitlements, firebase.is_some());
@@ -6723,7 +6905,75 @@ fn configure_android(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         &android_share_types(project)?,
     )?;
+    add_queries(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        &project.manifest.android.queries,
+    )?;
+    set_screen_orientation(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        android_screen_orientation(&project.manifest.android.orientations),
+    )?;
+    set_pam_activity_attribute(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        "supportsPictureInPicture",
+        project
+            .manifest
+            .android
+            .picture_in_picture
+            .then_some("true"),
+    )?;
+    add_open_scheme_queries(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        &project.manifest.linking.open_schemes,
+    )?;
+    write_atomic(
+        &workspace.join("app/src/main/res/values/pam_linking.xml"),
+        linking_resources(&project.manifest.linking.open_schemes).as_bytes(),
+    )?;
     configure_android_tv(project, workspace)
+}
+
+/// `linking.openSchemes` as the string array SystemModule accepts.
+fn linking_resources(schemes: &[String]) -> String {
+    let mut items = String::new();
+    for scheme in schemes {
+        items.push_str(&format!("        <item>{scheme}</item>\n"));
+    }
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Generated from pam-native.json \"linking.openSchemes\" by the PAM Native CLI. -->\n<resources>\n    <string-array name=\"pam_open_url_schemes\" translatable=\"false\">\n{items}    </string-array>\n</resources>\n"
+    )
+}
+
+/// One `<queries>` VIEW intent per `linking.openSchemes` entry, so
+/// `Linking::canOpen()` sees the apps that handle it on Android 11+.
+fn add_open_scheme_queries(manifest: &Path, schemes: &[String]) -> Result<(), String> {
+    const START: &str = "        <!-- pam-native:open-schemes:start -->";
+    const END: &str = "        <!-- pam-native:open-schemes:end -->";
+
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    if let Some(start) = contents.find(START)
+        && let Some(end_offset) = contents[start..].find(END)
+    {
+        let end = start + end_offset + END.len();
+        let trailing = usize::from(contents.as_bytes().get(end) == Some(&b'\n'));
+        contents.replace_range(start..end + trailing, "");
+    }
+    if !schemes.is_empty() {
+        let close = contents
+            .find("    </queries>")
+            .ok_or_else(|| "Android manifest has no queries element".to_owned())?;
+        let mut block = format!("{START}\n");
+        for scheme in schemes {
+            block.push_str(&format!(
+                "        <intent>\n            <action android:name=\"android.intent.action.VIEW\" />\n            <data android:scheme=\"{scheme}\" />\n        </intent>\n"
+            ));
+        }
+        block.push_str(END);
+        block.push('\n');
+        contents.insert_str(close, &block);
+    }
+    write_atomic(manifest, contents.as_bytes())
 }
 
 /// `targets: ["android-tv"]`: the TV launcher entry (LEANBACK_LAUNCHER), a
@@ -6964,6 +7214,75 @@ fn add_share_targets(
     ));
     filters.push_str(END);
     contents.replace_range(start..end, &filters);
+    write_atomic(manifest, contents.as_bytes())
+}
+
+/// `android.queries` between the `<queries>` markers of the manifest.
+fn add_queries(manifest: &Path, queries: &AndroidQueries) -> Result<(), String> {
+    let mut body = String::new();
+    for package in &queries.packages {
+        body.push_str(&format!("        <package android:name=\"{package}\" />\n"));
+    }
+    for intent in &queries.intents {
+        body.push_str("        <intent>\n");
+        body.push_str(&format!(
+            "            <action android:name=\"{}\" />\n",
+            intent.action
+        ));
+        if intent.scheme.is_some() || intent.mime_type.is_some() {
+            body.push_str("            <data");
+            if let Some(scheme) = &intent.scheme {
+                body.push_str(&format!(" android:scheme=\"{scheme}\""));
+            }
+            if let Some(mime_type) = &intent.mime_type {
+                body.push_str(&format!(" android:mimeType=\"{mime_type}\""));
+            }
+            body.push_str(" />\n");
+        }
+        body.push_str("        </intent>\n");
+    }
+    replace_between_markers(
+        manifest,
+        "        <!-- pam-native:queries:start -->",
+        "        <!-- pam-native:queries:end -->",
+        &body,
+    )
+}
+
+/// Sets (or clears) `android:screenOrientation` on the PamActivity element.
+fn set_screen_orientation(manifest: &Path, orientation: Option<&str>) -> Result<(), String> {
+    set_pam_activity_attribute(manifest, "screenOrientation", orientation)
+}
+
+/// Sets (or clears, with `None`) one `android:` attribute of PamActivity.
+fn set_pam_activity_attribute(
+    manifest: &Path,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), String> {
+    const NAME: &str = "<activity\n            android:name=\".PamActivity\"\n";
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    let activity = contents
+        .find(NAME)
+        .ok_or_else(|| "Android manifest has no PamActivity element".to_owned())?
+        + NAME.len();
+    let open_end = contents[activity..]
+        .find('>')
+        .map(|offset| activity + offset)
+        .ok_or_else(|| "PamActivity element is not closed".to_owned())?;
+    let prefix = format!("            android:{name}=\"");
+    if let Some(offset) = contents[activity..open_end].find(&prefix) {
+        let start = activity + offset;
+        let end = contents[start..]
+            .find('\n')
+            .map(|offset| start + offset + 1)
+            .ok_or_else(|| "PamActivity element is not closed".to_owned())?;
+        contents.replace_range(start..end, "");
+    }
+    if let Some(value) = value {
+        contents.insert_str(activity, &format!("{prefix}{value}\"\n"));
+    }
     write_atomic(manifest, contents.as_bytes())
 }
 
@@ -8106,6 +8425,7 @@ fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> 
             audit_tv_reachability(destination);
         }
     }
+    prune_build_tooling(destination)?;
     let version = directory_digest(destination)?;
     write_atomic(
         &destination.join("manifest.sha256"),
@@ -8213,6 +8533,17 @@ fn parse_bundle_exclusions(source: &str) -> Result<Vec<PathBuf>, String> {
             Ok(path)
         })
         .collect()
+}
+
+/// The SDK's build-time audits (`Pam\Native\Tooling`) run from the staged
+/// tree above; no device process loads them, so they leave the bundle.
+fn prune_build_tooling(destination: &Path) -> Result<(), String> {
+    let tooling = destination.join("vendor/pushinbr/pam-native/packages/native/src/Tooling");
+    if tooling.is_dir() {
+        fs::remove_dir_all(&tooling)
+            .map_err(|error| format!("cannot remove {}: {error}", tooling.display()))?;
+    }
+    Ok(())
 }
 
 fn ignored_project_path(path: &Path) -> bool {
@@ -12733,6 +13064,165 @@ mod tests {
     }
 
     #[test]
+    fn android_orientations_lock_the_pam_activity() {
+        use IosOrientation::*;
+        assert_eq!(android_screen_orientation(&[]), None);
+        assert_eq!(android_screen_orientation(&[Portrait]), Some("portrait"));
+        assert_eq!(
+            android_screen_orientation(&[PortraitUpsideDown, Portrait]),
+            Some("sensorPortrait")
+        );
+        assert_eq!(
+            android_screen_orientation(&[LandscapeRight]),
+            Some("landscape")
+        );
+        assert_eq!(
+            android_screen_orientation(&[LandscapeLeft]),
+            Some("reverseLandscape")
+        );
+        assert_eq!(
+            android_screen_orientation(&[LandscapeLeft, LandscapeRight]),
+            Some("sensorLandscape")
+        );
+        assert_eq!(android_screen_orientation(&[Portrait, LandscapeLeft]), None);
+
+        let root = std::env::temp_dir().join(format!(
+            "pam-orientation-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        assert!(!template.contains("screenOrientation"));
+        fs::write(&manifest, template).expect("manifest");
+        set_screen_orientation(&manifest, Some("portrait")).expect("portrait");
+        set_screen_orientation(&manifest, Some("sensorPortrait")).expect("relock");
+        let generated = fs::read_to_string(&manifest).expect("manifest");
+        assert_eq!(generated.matches("android:screenOrientation=").count(), 1);
+        let activity = generated
+            .find("android:name=\".PamActivity\"")
+            .expect("activity");
+        let open = activity + generated[activity..].find('>').expect("open tag");
+        assert!(generated[activity..open].contains("android:screenOrientation=\"sensorPortrait\""));
+        assert!(!generated.contains("PamWebActivity\"\n            android:screenOrientation"));
+        assert_eq!(pam_activity_config_changes(&generated).len(), 14);
+        set_pam_activity_attribute(&manifest, "supportsPictureInPicture", Some("true"))
+            .expect("picture in picture");
+        let generated = fs::read_to_string(&manifest).expect("manifest");
+        assert!(generated.contains(
+            "android:name=\".PamActivity\"\n            android:supportsPictureInPicture=\"true\"\n            android:screenOrientation=\"sensorPortrait\"\n"
+        ));
+        set_screen_orientation(&manifest, None).expect("unlock");
+        set_pam_activity_attribute(&manifest, "supportsPictureInPicture", None).expect("no pip");
+        assert_eq!(fs::read_to_string(&manifest).expect("manifest"), template);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn host_data_extraction_rules_exclude_every_domain() {
+        // allowBackup="false" does not stop Android 12+ device transfer;
+        // "root" alone leaves files/, databases/ and shared_prefs/ in it.
+        let rules = include_str!("../../../android/app/src/main/res/xml/data_extraction_rules.xml");
+        for section in ["cloud-backup", "device-transfer"] {
+            let start = rules.find(&format!("<{section}")).expect(section);
+            let end = rules.find(&format!("</{section}>")).expect(section);
+            for domain in [
+                "root",
+                "file",
+                "database",
+                "sharedpref",
+                "external",
+                "device_root",
+                "device_file",
+                "device_database",
+                "device_sharedpref",
+            ] {
+                assert!(
+                    rules[start..end]
+                        .contains(&format!("<exclude domain=\"{domain}\" path=\".\" />")),
+                    "{section} keeps {domain}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn android_queries_come_from_the_app_not_the_host_manifest() {
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        for app_specific in ["com.instagram.android", "com.whatsapp", "smsto"] {
+            assert!(
+                !template.contains(app_specific),
+                "host declares {app_specific}"
+            );
+        }
+        let manifest: NativeManifest = serde_json::from_str(
+            r#"{
+                "version": 1,
+                "applicationId": "app.pam.queries",
+                "name": "Queries",
+                "entry": "index.php",
+                "android": {
+                    "orientations": ["portrait"],
+                    "pictureInPicture": true,
+                    "queries": {
+                        "packages": ["com.whatsapp", "com.instagram.android"],
+                        "intents": [
+                            { "action": "android.intent.action.SENDTO", "scheme": "smsto" },
+                            { "action": "android.intent.action.SEND", "mimeType": "image/*" }
+                        ]
+                    }
+                }
+            }"#,
+        )
+        .expect("manifest");
+        validate_android_queries(&manifest.android.queries).expect("valid queries");
+        for invalid in [
+            r#"{ "packages": ["whatsapp"] }"#,
+            r#"{ "packages": ["com.x\" />"] }"#,
+            r#"{ "intents": [{ "action": "SENDTO" }] }"#,
+            r#"{ "intents": [{ "action": "a.B", "scheme": "1x" }] }"#,
+            r#"{ "intents": [{ "action": "a.B", "mimeType": "image" }] }"#,
+        ] {
+            let queries: AndroidQueries = serde_json::from_str(invalid).expect("shape");
+            assert!(validate_android_queries(&queries).is_err(), "{invalid}");
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "pam-queries-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let path = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(&path, template).expect("manifest");
+        add_queries(&path, &manifest.android.queries).expect("queries");
+        add_queries(&path, &manifest.android.queries).expect("idempotent queries");
+        let generated = fs::read_to_string(&path).expect("manifest");
+        let start = generated.find("<queries>").expect("queries start");
+        let end = generated.find("</queries>").expect("queries end");
+        let queries = &generated[start..end];
+        assert_eq!(
+            queries
+                .matches("<package android:name=\"com.whatsapp\" />")
+                .count(),
+            1
+        );
+        assert!(queries.contains("<package android:name=\"com.instagram.android\" />"));
+        assert!(queries.contains(
+            "<action android:name=\"android.intent.action.SENDTO\" />\n            <data android:scheme=\"smsto\" />"
+        ));
+        assert!(queries.contains("<data android:mimeType=\"image/*\" />"));
+        add_queries(&path, &AndroidQueries::default()).expect("no queries");
+        assert_eq!(fs::read_to_string(&path).expect("manifest"), template);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn share_targets_render_send_multiple_only_where_allowed() {
         let root = std::env::temp_dir().join(format!(
             "pam-share-targets-{}",
@@ -13166,6 +13656,102 @@ mod bundle_exclusion_tests {
             assert!(parse_bundle_exclusions(input).is_err(), "{input}");
         }
     }
+    #[test]
+    fn staged_bundles_drop_the_sdk_build_tooling() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-prune-tooling-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let sdk = root.join("vendor/pushinbr/pam-native/packages/native/src");
+        fs::create_dir_all(sdk.join("Tooling")).expect("tooling");
+        fs::write(sdk.join("Tooling/TvAudit.php"), "<?php").expect("audit");
+        fs::write(sdk.join("App.php"), "<?php").expect("app");
+        prune_build_tooling(&root).expect("prune");
+        prune_build_tooling(&root).expect("prune again");
+        assert!(!sdk.join("Tooling").exists());
+        assert!(sdk.join("App.php").is_file());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn linking_open_schemes_reach_queries_resources_and_info_plist() {
+        let linking: LinkingOptions =
+            serde_json::from_value(serde_json::json!({"openSchemes": ["otpauth", "whatsapp"]}))
+                .unwrap();
+        linking.validate().unwrap();
+        for bad in [
+            serde_json::json!({"openSchemes": ["file"]}),
+            serde_json::json!({"openSchemes": ["intent"]}),
+            serde_json::json!({"openSchemes": ["javascript"]}),
+            serde_json::json!({"openSchemes": ["OTPAUTH"]}),
+            serde_json::json!({"openSchemes": ["https"]}),
+            serde_json::json!({"openSchemes": ["otpauth", "otpauth"]}),
+            serde_json::json!({"openSchemes": ["bad scheme"]}),
+        ] {
+            let options: LinkingOptions = serde_json::from_value(bad.clone()).unwrap();
+            assert!(options.validate().is_err(), "{bad}");
+        }
+        assert!(
+            serde_json::from_value::<LinkingOptions>(serde_json::json!({"schemes": []})).is_err()
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "pam-open-schemes-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        let template = include_str!("../../../android/app/src/main/AndroidManifest.xml");
+        fs::write(&manifest, template).expect("manifest");
+        add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries");
+        add_open_scheme_queries(&manifest, &linking.open_schemes).expect("queries again");
+        let generated = fs::read_to_string(&manifest).expect("generated");
+        let queries =
+            &generated[generated.find("<queries>").unwrap()..generated.find("</queries>").unwrap()];
+        assert_eq!(
+            queries.matches("android:scheme=\"otpauth\"").count(),
+            1,
+            "idempotent"
+        );
+        assert_eq!(queries.matches("android:scheme=\"whatsapp\"").count(), 1);
+        add_open_scheme_queries(&manifest, &[]).expect("queries removed");
+        assert_eq!(fs::read_to_string(&manifest).expect("manifest"), template);
+        fs::remove_dir_all(root).expect("cleanup");
+
+        let resources = linking_resources(&linking.open_schemes);
+        assert!(resources.contains("<string-array name=\"pam_open_url_schemes\""));
+        assert!(
+            resources.contains("<item>otpauth</item>")
+                && resources.contains("<item>whatsapp</item>")
+        );
+        assert_eq!(
+            linking_resources(&[]),
+            include_str!("../../../android/app/src/main/res/values/pam_linking.xml"),
+            "the checked-in default is the generated empty list"
+        );
+
+        let mut info = serde_json::json!({"LSApplicationQueriesSchemes": ["instagram", "otpauth"]});
+        merge_ios_open_schemes(&linking, &mut info).unwrap();
+        merge_ios_open_schemes(&linking, &mut info).unwrap();
+        assert_eq!(
+            info["LSApplicationQueriesSchemes"],
+            serde_json::json!(["instagram", "otpauth", "whatsapp"])
+        );
+        assert_eq!(
+            info["PamOpenURLSchemes"],
+            serde_json::json!(["otpauth", "whatsapp"])
+        );
+        let mut empty = serde_json::json!({});
+        merge_ios_open_schemes(&LinkingOptions::default(), &mut empty).unwrap();
+        assert_eq!(empty, serde_json::json!({"PamOpenURLSchemes": []}));
+    }
+
     #[test]
     fn ios_links_merge_preserves_plugin_entitlements_and_diagnostics() {
         let ios: IosOptions = serde_json::from_value(serde_json::json!({

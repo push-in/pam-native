@@ -14,6 +14,32 @@ place is declared in the `PamActivity` manifest entry
 (`android/app/src/main/AndroidManifest.xml`, copied into every generated
 `.pam-native/android` workspace by `pam`).
 
+## Locking the orientation
+
+`android.orientations` in `pam-native.json` (same values as
+`ios.orientations`) becomes `android:screenOrientation` on `PamActivity`:
+
+| `android.orientations` | `screenOrientation` |
+| --- | --- |
+| `["portrait"]` | `portrait` |
+| `["portraitUpsideDown"]` | `reversePortrait` |
+| `["portrait", "portraitUpsideDown"]` | `sensorPortrait` |
+| `["landscapeRight"]` | `landscape` (natural landscape, home side on the right) |
+| `["landscapeLeft"]` | `reverseLandscape` |
+| `["landscapeLeft", "landscapeRight"]` | `sensorLandscape` |
+| omitted, or portrait and landscape mixed | not set: follows the sensor and the user's rotation lock |
+
+A route's `NavigationOrientation::PlatformDefault` returns to this value, so
+a portrait app stays portrait after a route that freed rotation. With
+`targetSdk` 36, Android 16 ignores the lock on large screens
+(`smallestScreenWidthDp` >= 600), so tablets and unfolded foldables still
+rotate. `orientation` stays in `configChanges`: rotations that do happen are
+applied in place.
+
+```json
+{ "android": { "orientations": ["portrait"] } }
+```
+
 ## Declared `configChanges`
 
 | Value | What PamActivity does in `onConfigurationChanged` |
@@ -53,7 +79,9 @@ the rebuilt ones:
   before the old editor goes, as on any blur. The input is captured when the
   configuration change arrives: the IME restarts for the new font scale or
   locale and hides for a moment, which does not count as the user closing it
-  (the usual blur on a hidden keyboard is held until 2 s after the remount). If
+  (the usual blur on a hidden keyboard is held until 2 s after the remount; any
+  remount that rebuilds a focused input holds it, since dropping the old editor
+  hides the keyboard too). If
   the IME hid before the change reached the Activity, PHP saw that blur and then
   sees the refocus.
 

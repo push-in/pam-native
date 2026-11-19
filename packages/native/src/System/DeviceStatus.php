@@ -6,6 +6,7 @@ namespace Pam\Native\System;
 
 use Closure;
 use Pam\Native\DeviceStatus as DeviceStatusValue;
+use Pam\Native\DeviceStatusField;
 use Pam\Native\Internal\Wire;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
@@ -43,16 +44,22 @@ final class DeviceStatus
      * samples are never delivered; changes closer together than
      * `$intervalMs` arrive as one callback.
      *
+     * `$fields` narrows what counts as a change (empty: everything). A
+     * network-only watch is not woken by battery steps or the charger, and
+     * the host does not even listen to the battery while no watch asks.
+     *
      * @param Closure(DeviceStatusValue): void $callback
+     * @param list<DeviceStatusField> $fields
      */
-    public static function watch(Closure $callback, int $intervalMs = 1_000): int
+    public static function watch(Closure $callback, int $intervalMs = 1_000, array $fields = []): int
     {
+        $mask = DeviceStatusField::mask($fields);
         $subscription = self::$nextSubscription++;
         self::$subscriptions[$subscription] = ['callback' => $callback, 'native' => null];
         NativeModules::call(
             'device',
             'watch',
-            ['intervalMs' => max(250, min(60_000, $intervalMs))],
+            ['intervalMs' => max(250, min(60_000, $intervalMs)), 'fields' => $mask],
             static function ($result) use ($subscription): void {
                 if ($result->status === ModuleResultStatus::Failure) {
                     unset(self::$subscriptions[$subscription]);

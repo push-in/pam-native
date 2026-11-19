@@ -8,6 +8,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -33,28 +34,73 @@ internal data class MediaCacheCallbacks(
     val error: (String) -> Unit = {},
 )
 
-internal class NativeMediaFileCache(context: Context) : AutoCloseable {
+/**
+ * One player's interest in a [NativeMediaFileCache.resolve]. Cancelling it
+ * (the player released, its source changed, the view detached) drops a
+ * cache copy that has not started yet and stops a download nobody else
+ * waits for. Main thread.
+ */
+internal fun interface MediaCacheHandle {
+    fun cancel()
+
+    companion object {
+        val NONE = MediaCacheHandle {}
+    }
+}
+
+internal class NativeMediaFileCache(
+    context: Context,
+    /** How long a streaming player gets the bandwidth before the cache copy starts. */
+    private val streamedDownloadDelayMs: Long = STREAMED_DOWNLOAD_DELAY_MS,
+) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
     private val root = File(context.cacheDir, "pam-media-v1")
     private val executor = Executors.newFixedThreadPool(2) { runnable ->
         Thread(runnable, "pam-media-cache").apply { isDaemon = true }
     }
-    private val inFlight = ConcurrentHashMap<String, CompletableFuture<File>>()
+    private val inFlight = ConcurrentHashMap<String, Download>()
     private val closed = AtomicBoolean()
 
+    /** A download shared by every resolve of the same identity. */
+    private class Download(val identity: String) {
+        val cancelled = AtomicBoolean()
+        /** Live subscriptions (main thread). */
+        var subscribers = 0
+        lateinit var future: CompletableFuture<File>
+    }
+
+    private inner class Subscription : MediaCacheHandle {
+        var cancelled = false
+        var pending: Runnable? = null
+        var download: Download? = null
+
+        override fun cancel() {
+            if (cancelled) return
+            cancelled = true
+            pending?.let(main::removeCallbacks)
+            pending = null
+            download?.let(::unsubscribe)
+            download = null
+        }
+    }
+
+    /** Number of downloads running or queued (tests, diagnostics). */
+    internal val downloadsInFlight: Int get() = inFlight.size
+
+    /** Main thread. Cancel the returned handle when the player no longer needs the source. */
     fun resolve(
         request: MediaCacheRequest,
         callbacks: MediaCacheCallbacks,
         completion: (Uri) -> Unit,
-    ) {
+    ): MediaCacheHandle {
         val uri = runCatching { Uri.parse(request.source) }.getOrNull()
         if (uri == null || uri.scheme !in setOf("http", "https")) {
             completion(uri ?: Uri.EMPTY)
-            return
+            return MediaCacheHandle.NONE
         }
         if (request.policy == MEDIA_CACHE_NONE || request.policy == MEDIA_CACHE_MEMORY) {
             completion(uri)
-            return
+            return MediaCacheHandle.NONE
         }
         val identity = request.key ?: sha256(request.source.toByteArray())
         val fileKey = sha256(identity.toByteArray())
@@ -66,7 +112,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
             target.setLastModified(System.currentTimeMillis())
             callbacks.hit(identity)
             completion(Uri.fromFile(target))
-            return
+            return MediaCacheHandle.NONE
         }
         val staleAvailable = target.isFile && target.length() in 1..effectiveMax(request)
         val servedStale =
@@ -79,25 +125,34 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         callbacks.miss(identity)
         if (request.policy == MEDIA_CACHE_CACHE_ONLY) {
             callbacks.error("Media is not available in the local cache.")
-            return
+            return MediaCacheHandle.NONE
         }
+        val subscription = Subscription()
         val streamed = request.streaming || request.downloadWhilePlaying
         if (streamed) {
             completion(uri)
             // The player streams the start now: the copy for the cache waits
             // until it buffered, or both requests split the bandwidth and the
-            // first frame took twice as long on a mobile network.
+            // first frame took twice as long on a mobile network. A player
+            // released before then (viewer closed) never starts it.
             if (!inFlight.containsKey(identity)) {
-                main.postDelayed({
-                    if (!closed.get()) startDownload(request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
-                }, STREAMED_DOWNLOAD_DELAY_MS)
-                return
+                val pending = Runnable {
+                    subscription.pending = null
+                    if (!closed.get() && !subscription.cancelled) {
+                        startDownload(subscription, request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
+                    }
+                }
+                subscription.pending = pending
+                main.postDelayed(pending, streamedDownloadDelayMs)
+                return subscription
             }
         }
-        startDownload(request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
+        startDownload(subscription, request, identity, fileKey, target, callbacks, staleAvailable, servedStale, completion, streamed)
+        return subscription
     }
 
     private fun startDownload(
+        subscription: Subscription,
         request: MediaCacheRequest,
         identity: String,
         fileKey: String,
@@ -113,14 +168,21 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
             callbacks.ready(identity, target.length())
             return
         }
-        val future = inFlight.computeIfAbsent(identity) {
-            CompletableFuture.supplyAsync(
-                { download(request, identity, fileKey, target, callbacks) },
-                executor,
-            ).whenComplete { _, _ -> inFlight.remove(identity) }
+        val download = inFlight.computeIfAbsent(identity) {
+            Download(identity).also { created ->
+                created.future = CompletableFuture.supplyAsync(
+                    { download(created, request, identity, fileKey, target, callbacks) },
+                    executor,
+                ).whenComplete { _, _ -> inFlight.remove(identity, created) }
+            }
         }
-        future.whenComplete { file, error ->
+        download.subscribers++
+        subscription.download = download
+        download.future.whenComplete { file, error ->
             main.post {
+                if (subscription.cancelled) return@post
+                subscription.download = null
+                download.subscribers--
                 if (error != null || file == null) {
                     if (request.policy == MEDIA_CACHE_NETWORK_FIRST && staleAvailable) {
                         target.setLastModified(System.currentTimeMillis())
@@ -145,6 +207,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
      * times; 4xx and size/checksum failures fail at once.
      */
     private fun download(
+        download: Download,
         request: MediaCacheRequest,
         identity: String,
         fileKey: String,
@@ -154,9 +217,9 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         var attempt = 0
         while (true) {
             try {
-                return downloadOnce(request, identity, fileKey, target, callbacks)
+                return downloadOnce(download, request, identity, fileKey, target, callbacks)
             } catch (error: Throwable) {
-                if (closed.get() || attempt >= DOWNLOAD_RETRIES) throw error
+                if (closed.get() || download.cancelled.get() || attempt >= DOWNLOAD_RETRIES) throw error
                 val delay = mediaRetryDelayMs(error, attempt, kotlin.random.Random.nextDouble()) ?: throw error
                 attempt++
                 Thread.sleep(delay)
@@ -164,7 +227,17 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         }
     }
 
+    /** The last subscriber left: the download stops at its next buffer (main thread). */
+    private fun unsubscribe(download: Download) {
+        download.subscribers--
+        if (download.subscribers > 0) return
+        download.cancelled.set(true)
+        inFlight.remove(download.identity, download)
+        download.future.cancel(false)
+    }
+
     private fun downloadOnce(
+        download: Download,
         request: MediaCacheRequest,
         identity: String,
         fileKey: String,
@@ -172,6 +245,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
         callbacks: MediaCacheCallbacks,
     ): File {
         check(!closed.get()) { "Media cache is closed." }
+        if (download.cancelled.get()) throw CancellationException("Media download cancelled.")
         val host = URL(request.source).host
         PamMediaHostGate.remainingMs(host).takeIf { it > 0 }?.let { throw MediaHostPausedException(host, it) }
         root.mkdirs()
@@ -198,6 +272,9 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
                 temporary.outputStream().buffered().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
+                        if (download.cancelled.get() || closed.get()) {
+                            throw CancellationException("Media download cancelled.")
+                        }
                         val read = input.read(buffer)
                         if (read < 0) break
                         total += read
@@ -247,7 +324,10 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        inFlight.values.forEach { it.cancel(true) }
+        inFlight.values.forEach {
+            it.cancelled.set(true)
+            it.future.cancel(true)
+        }
         inFlight.clear()
         executor.shutdownNow()
     }
@@ -259,7 +339,6 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
 
     private companion object {
         const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
-        /** How long a streaming player gets the bandwidth before the cache copy starts. */
         const val STREAMED_DOWNLOAD_DELAY_MS = 4_000L
         const val DOWNLOAD_RETRIES = 4
         // `cacheMaxBytes` also bounds one file (up to 2 GB); the directory

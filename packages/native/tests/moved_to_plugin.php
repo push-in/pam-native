@@ -5,32 +5,25 @@ declare(strict_types=1);
 use Pam\Native\Plugin\MovedToPlugin;
 use Pam\Native\Plugin\PluginException;
 
-// 1.46: features moved out of the core keep a deprecated alias for one minor.
-// Without the plugin, the old name fails with the exact composer require.
+// The 1.46 aliases promised for removal in 1.47 are gone; the old
+// names are plain unknown classes (no core shim, no PluginException).
 foreach ([
-    'Pam\\Native\\System\\Location' => 'pushinbr/pam-native-location',
-    'Pam\\Native\\LocationPosition' => 'pushinbr/pam-native-location',
-    'Pam\\Native\\System\\Contacts' => 'pushinbr/pam-native-contacts',
-    'Pam\\Native\\System\\Sms' => 'pushinbr/pam-native-contacts',
-    'Pam\\Native\\System\\Sensors' => 'pushinbr/pam-native-sensors',
-    'Pam\\Native\\SensorType' => 'pushinbr/pam-native-sensors',
-    'Pam\\Native\\System\\AudioRecorder' => 'pushinbr/pam-native-audio',
-    'Pam\\Native\\System\\ImageEditor' => 'pushinbr/pam-native-media-editor',
-    'Pam\\Native\\ImageCropRatio' => 'pushinbr/pam-native-media-editor',
-] as $legacy => $package) {
-    $message = '';
-    try {
-        class_exists($legacy);
-    } catch (PluginException $error) {
-        $message = $error->getMessage();
-    }
-    $assert(
-        str_contains($message, $legacy.' moved out of the PAM Native core into '.$package)
-            && str_contains($message, 'composer require '.$package),
-        "{$legacy} must point to {$package} when the plugin is missing.",
-    );
+    'Pam\\Native\\System\\Location', 'Pam\\Native\\LocationPosition', 'Pam\\Native\\System\\Contacts',
+    'Pam\\Native\\System\\Sms', 'Pam\\Native\\System\\Sensors', 'Pam\\Native\\SensorType',
+    'Pam\\Native\\System\\AudioRecorder', 'Pam\\Native\\System\\ImageEditor', 'Pam\\Native\\ImageCropRatio',
+    'Pam\\Native\\System\\Notifications', 'Pam\\Native\\System\\MediaLibrary', 'Pam\\Native\\System\\IncomingShares',
+    'Pam\\Native\\System\\Biometrics', 'Pam\\Native\\MediaAsset', 'Pam\\Native\\PushMessage',
+    'Pam\\Native\\Notifications\\Person', 'Pam\\Native\\NotificationImportance',
+] as $legacy) {
+    $assert(!class_exists($legacy) && !enum_exists($legacy), "{$legacy} must no longer be shipped by the core.");
 }
+$assert(
+    !is_file(__DIR__.'/../src/MediaAsset.php') && !is_file(__DIR__.'/../src/System/Location.php'),
+    'The removed shims must not ship in the core package.',
+);
 
+// Still kept: the core routes <WebView> and Route::drawer() through these
+// names, and pam-native-toast's compat test asserts the toast aliases.
 foreach ([
     'Pam\\Native\\System\\Toast' => 'pushinbr/pam-native-toast',
     'Pam\\Native\\System\\ToastType' => 'pushinbr/pam-native-toast',
@@ -45,10 +38,6 @@ foreach ([
     'Pam\\Native\\Navigation\\DrawerKeyboardDismissMode' => 'pushinbr/pam-native-drawer',
     'Pam\\Native\\Navigation\\DrawerStatusBarAnimation' => 'pushinbr/pam-native-drawer',
     'Pam\\Native\\Routing\\DrawerRegistrar' => 'pushinbr/pam-native-drawer',
-    'Pam\\Native\\System\\Notifications' => 'pushinbr/pam-native-notifications',
-    'Pam\\Native\\System\\MediaLibrary' => 'pushinbr/pam-native-media',
-    'Pam\\Native\\System\\IncomingShares' => 'pushinbr/pam-native-share-extension',
-    'Pam\\Native\\System\\Biometrics' => 'pushinbr/pam-native-auth',
     'Pam\\Native\\UI\\WebView' => 'pushinbr/pam-native-webview',
 ] as $legacy => $package) {
     if ($testPluginRoots !== []) continue;

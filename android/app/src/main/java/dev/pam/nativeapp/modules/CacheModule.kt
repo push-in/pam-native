@@ -13,6 +13,8 @@ internal class CacheModule(context: Context) : NativeModule, AutoCloseable {
         images = File(context.cacheDir, "pam-images-v1"),
         media = File(context.cacheDir, "pam-media-v1"),
         temporary = File(context.cacheDir, "pam-incoming-shares"),
+        downloads = File(context.filesDir, "pam-files/cache"),
+        imports = File(context.filesDir, "pam-files/imports"),
     )
     private val closed = AtomicBoolean()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -33,8 +35,9 @@ internal class CacheModule(context: Context) : NativeModule, AutoCloseable {
                             val values = WireMap.decode(payload)
                             val preserveOffline =
                                 (values["preserveOffline"] as? WireValue.Flag)?.value ?: true
+                            val imports = (values["imports"] as? WireValue.Flag)?.value ?: false
                             val before = roots.usage()
-                            roots.clear(preserveOffline)
+                            roots.clear(preserveOffline, imports)
                             val after = roots.usage()
                             usagePayload(after, (before.totalBytes - after.totalBytes).coerceAtLeast(0))
                         }
@@ -61,6 +64,7 @@ internal class CacheModule(context: Context) : NativeModule, AutoCloseable {
                 "fileCount" to WireValue.Integer(usage.fileCount),
                 "freedBytes" to WireValue.Integer(freedBytes),
                 "imageBytes" to WireValue.Integer(usage.imageBytes),
+                "importBytes" to WireValue.Integer(usage.importBytes),
                 "mediaBytes" to WireValue.Integer(usage.mediaBytes),
                 "temporaryBytes" to WireValue.Integer(usage.temporaryBytes),
                 "totalBytes" to WireValue.Integer(usage.totalBytes),
@@ -76,22 +80,32 @@ internal data class CacheRoots(
     val images: File,
     val media: File,
     val temporary: File,
+    /** Sandbox cache folder (`Files::CACHE_DIRECTORY`): counted as temporary, always cleared. */
+    val downloads: File? = null,
+    /** Picker/import copies (pam-files/imports): counted, cleared only on request. */
+    val imports: File? = null,
 ) {
     fun usage(): CacheUsage {
         val imageUsage = images.usage()
         val mediaUsage = media.usage()
         val temporaryUsage = temporary.usage()
+        val downloadUsage = downloads?.usage() ?: (0L to 0L)
+        val importUsage = imports?.usage() ?: (0L to 0L)
         return CacheUsage(
-            fileCount = imageUsage.second + mediaUsage.second + temporaryUsage.second,
+            fileCount = imageUsage.second + mediaUsage.second + temporaryUsage.second +
+                downloadUsage.second + importUsage.second,
             imageBytes = imageUsage.first,
             mediaBytes = mediaUsage.first,
-            temporaryBytes = temporaryUsage.first,
+            temporaryBytes = temporaryUsage.first + downloadUsage.first,
+            importBytes = importUsage.first,
         )
     }
 
-    fun clear(preserveOffline: Boolean) {
+    fun clear(preserveOffline: Boolean, imports: Boolean = false) {
         images.deleteContents()
         temporary.deleteContents()
+        downloads?.deleteContents()
+        if (imports) this.imports?.deleteContents()
         val pinnedNames = media.listFiles().orEmpty()
             .asSequence()
             .filter { it.extension == "media" }
@@ -113,9 +127,10 @@ internal data class CacheUsage(
     val imageBytes: Long,
     val mediaBytes: Long,
     val temporaryBytes: Long,
+    val importBytes: Long = 0,
 ) {
     val totalBytes: Long
-        get() = imageBytes + mediaBytes + temporaryBytes
+        get() = imageBytes + mediaBytes + temporaryBytes + importBytes
 }
 
 private fun File.usage(): Pair<Long, Long> {

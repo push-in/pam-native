@@ -263,6 +263,87 @@ class PamMediaNetworkResilienceInstrumentedTest {
         assertTrue("It prepares again and plays", ready.await(20, TimeUnit.SECONDS))
     }
 
+    @Test
+    fun streamedCacheCopyIsDroppedWhenItsPlayerLeaves() {
+        server = TestServer { Response(200, mapOf("Content-Type" to "video/mp4"), ByteArray(64 * 1024)) }
+        File(context.cacheDir, "pam-media-v1").deleteRecursively()
+        val cache = NativeMediaFileCache(activity, streamedDownloadDelayMs = 300).also { mediaCaches += it }
+        val ready = AtomicInteger()
+        var handle: MediaCacheHandle = MediaCacheHandle.NONE
+        main {
+            handle = cache.resolve(
+                cacheRequest(server.url("/viewer.mp4"), streaming = true),
+                MediaCacheCallbacks(ready = { _, _ -> ready.incrementAndGet() }),
+            ) {}
+        }
+        // The viewer closed before the copy started.
+        main { handle.cancel() }
+        SystemClock.sleep(1_000)
+        assertEquals("no second download for a closed viewer", 0, server.hits("/viewer.mp4"))
+        assertEquals(0, ready.get())
+
+        // A player that stays gets its copy after the delay.
+        val copied = CountDownLatch(1)
+        main {
+            cache.resolve(
+                cacheRequest(server.url("/viewer.mp4"), streaming = true),
+                MediaCacheCallbacks(ready = { _, _ -> copied.countDown() }),
+            ) {}
+        }
+        assertTrue(copied.await(10, TimeUnit.SECONDS))
+        assertEquals(1, server.hits("/viewer.mp4"))
+    }
+
+    @Test
+    fun sharedDownloadOutlivesOneSubscriberAndStopsWithTheLast() {
+        server = TestServer { Response(200, mapOf("Content-Type" to "video/mp4"), ByteArray(256 * 1024), holdMs = 600) }
+        val directory = File(context.cacheDir, "pam-media-v1").apply { deleteRecursively() }
+        val cache = NativeMediaFileCache(activity).also { mediaCaches += it }
+        var first: MediaCacheHandle = MediaCacheHandle.NONE
+        val resolved = CountDownLatch(1)
+        main {
+            first = cache.resolve(cacheRequest(server.url("/shared.mp4")), MediaCacheCallbacks()) {}
+            cache.resolve(cacheRequest(server.url("/shared.mp4")), MediaCacheCallbacks()) { uri ->
+                if (uri.scheme == "file") resolved.countDown()
+            }
+            first.cancel()
+            assertEquals("the other player still waits for it", 1, cache.downloadsInFlight)
+        }
+        assertTrue(resolved.await(10, TimeUnit.SECONDS))
+        assertEquals(1, server.hits("/shared.mp4"))
+
+        val ready = AtomicInteger()
+        val failed = AtomicInteger()
+        main {
+            val handle = cache.resolve(
+                cacheRequest(server.url("/left.mp4")),
+                MediaCacheCallbacks(ready = { _, _ -> ready.incrementAndGet() }, error = { failed.incrementAndGet() }),
+            ) {}
+            handle.cancel()
+            assertEquals("nobody waits: the download stops", 0, cache.downloadsInFlight)
+        }
+        SystemClock.sleep(1_500)
+        assertEquals(0, ready.get())
+        assertEquals("a cancelled download reports nothing", 0, failed.get())
+        assertEquals(
+            "only the shared file was cached",
+            1,
+            directory.listFiles { file -> file.extension == "media" }?.size ?: 0,
+        )
+    }
+
+    private fun cacheRequest(source: String, streaming: Boolean = false) = MediaCacheRequest(
+        source = source,
+        policy = MEDIA_CACHE_CACHE_FIRST,
+        key = null,
+        maxAgeMs = 0,
+        maxBytes = 0,
+        checksum = null,
+        pinOffline = false,
+        streaming = streaming,
+        downloadWhilePlaying = false,
+    )
+
     private class Probe(val view: PamImageView) {
         val loaded = CountDownLatch(1)
         val failed = CountDownLatch(1)

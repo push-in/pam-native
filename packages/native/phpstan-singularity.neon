@@ -52,6 +52,7 @@ parameters:
         - src/Modules/NativeModules.php
         - src/Modules/NativeModuleResult.php
         - src/WindowMetrics.php
+        - src/I18n/I18n.php
         - src/Plugin/PluginException.php
         - src/Scheduling/CancellationToken.php
         - src/Scheduling/Scheduler.php

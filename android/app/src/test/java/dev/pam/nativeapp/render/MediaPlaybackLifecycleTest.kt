@@ -108,4 +108,19 @@ class MediaPlaybackLifecycleTest {
         lifecycle.request(false)
         assertFalse("a paused player is restored only on demand", lifecycle.wantsPlay)
     }
+
+    @Test fun aTransientFocusLossHoldsPlaybackButKeepsTheFocusRequest() {
+        val lifecycle = playing()
+        assertTrue(lifecycle.wantsFocus)
+        lifecycle.focusGate(false)
+        assertFalse("a call holds the player", lifecycle.mayPlay)
+        assertTrue("the player still wants the focus back", lifecycle.wantsFocus)
+        lifecycle.focusGate(true)
+        assertTrue(lifecycle.mayPlay)
+        lifecycle.hostActive(false)
+        assertFalse("a backgrounded player does not hold focus", lifecycle.wantsFocus)
+        lifecycle.hostActive(true)
+        lifecycle.request(false)
+        assertFalse("a paused player does not hold focus", lifecycle.wantsFocus)
+    }
 }

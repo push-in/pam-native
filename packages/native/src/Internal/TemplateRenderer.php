@@ -4755,7 +4755,6 @@ final class TemplateRenderer
             PropKey::ScrollAutoScrollToEndThreshold,
             PropKey::ScrollFillViewport,
             PropKey::ScrollNestedEnabled,
-            PropKey::ScrollFadingEdgeLength,
             PropKey::ScrollPersistentScrollbar,
             PropKey::ScrollSnapInterval,
             PropKey::ScrollDecelerationRate,
@@ -4763,7 +4762,8 @@ final class TemplateRenderer
             PropKey::ScrollOffsetAnimationMs,
             => $kind === NodeKind::Scroll,
             // Lists scroll natively too (React Native FlatList inherits it).
-            PropKey::ScrollKeyboardDismissMode => $kind === NodeKind::Scroll
+            PropKey::ScrollKeyboardDismissMode,
+            PropKey::ScrollFadingEdgeLength => $kind === NodeKind::Scroll
                 || $kind === NodeKind::VirtualList
                 || $kind === NodeKind::List
                 || $kind === NodeKind::SectionList,

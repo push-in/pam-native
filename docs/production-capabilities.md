@@ -304,6 +304,22 @@ samples are discarded in favor of recent state instead of growing memory.
 the interval is the shortest spacing between two callbacks, not a polling
 period (Android listens to system network, battery and power-save changes).
 
+Pass the fields a watch reads to keep it from waking PHP for the rest:
+
+```php
+use Pam\Native\DeviceStatusField;
+
+// Data saver: only connectivity matters, battery steps never call back.
+$network = DeviceStatus::watch($onNetwork, 5_000, [DeviceStatusField::Network]);
+```
+
+`DeviceStatusField::Battery` (`batteryLevel`, `charging`), `Network`
+(`networkType`, `expensiveNetwork`) and `PowerSave` (`lowPowerMode`); an empty
+list watches everything. Android registers the battery and power-save
+broadcasts and the network callback only while some watch asks for them; the
+callback still receives a full `DeviceStatus` with current values.
+`useNetwork()` watches `Network` only.
+
 ## Lifecycle and recovery
 
 Android pauses WebView timers and active media from `Activity.onPause()` and

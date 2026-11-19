@@ -180,11 +180,11 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule {
         do {
             let file = try requiredPath(payload)
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else {
-                throw FileModuleError("File does not exist")
+            // Idempotent: a file that is already gone counts as deleted.
+            if FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory) {
+                guard !isDirectory.boolValue else { throw FileModuleError("Path is a directory") }
+                try FileManager.default.removeItem(at: file)
             }
-            try FileManager.default.removeItem(at: file)
             completion(.success, Data())
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }

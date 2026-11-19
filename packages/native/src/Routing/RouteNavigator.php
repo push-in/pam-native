@@ -391,9 +391,15 @@ final class RouteNavigator implements NavigationLinkHandler
         return $name === null ? null : ($this->screens[$name] ?? null)?->get();
     }
 
-    public function open(string $uri): bool
+    /**
+     * @param RedirectMode|'navigate'|'push'|'replace'|'reset' $mode Navigate (default) goes back to the
+     *   route's entry already in the stack; Push opens the link over the current screen, reusing the
+     *   focused screen only when it is the same route with the same link params (React Navigation's
+     *   deep-link push). Tab links always select their tab.
+     */
+    public function open(string $uri, RedirectMode|string $mode = RedirectMode::Navigate): bool
     {
-        return $this->openLink($uri);
+        return $this->openLink($uri, RedirectMode::parse($mode));
     }
 
     /**
@@ -404,16 +410,20 @@ final class RouteNavigator implements NavigationLinkHandler
      * Route::linking(false): the links are this router's, not the native
      * stack's, and no screen is built to look for a nested link handler.
      */
-    public function openInitial(string $uri): bool
+    public function openInitial(string $uri, RedirectMode|string $mode = RedirectMode::Navigate): bool
     {
-        if (!$this->openLink($uri, NavigationTransition::None, 0)) return false;
+        if (!$this->openLink($uri, RedirectMode::parse($mode), NavigationTransition::None, 0)) return false;
         $this->stack->settle();
 
         return true;
     }
 
-    private function openLink(string $uri, ?NavigationTransition $transition = null, ?int $durationMs = null): bool
-    {
+    private function openLink(
+        string $uri,
+        RedirectMode $mode = RedirectMode::Navigate,
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+    ): bool {
         if ($uri === '' || strlen($uri) > 8_192) return false;
         $parts = parse_url($uri);
         if ($parts === false) return false;
@@ -430,6 +440,7 @@ final class RouteNavigator implements NavigationLinkHandler
             foreach ($this->links as [$link, $route]) {
                 $params = $link->match($candidate);
                 if ($params === null) continue;
+                $linkMode = $this->linkMode($route, $params, $mode);
                 $accepted = $this->acceptedNames($route);
                 foreach ($query as $key => $value) {
                     if (is_string($key) && is_scalar($value) && !array_key_exists($key, $params) && ($accepted === null || in_array($key, $accepted, true))) {
@@ -437,7 +448,7 @@ final class RouteNavigator implements NavigationLinkHandler
                     }
                 }
                 try {
-                    return $this->navigate($route->routeName(), $params, transition: $transition, durationMs: $durationMs);
+                    return $this->navigate($route->routeName(), $params, $linkMode, transition: $transition, durationMs: $durationMs);
                 } catch (InvalidArgumentException) {
                     return false;
                 }
@@ -445,6 +456,28 @@ final class RouteNavigator implements NavigationLinkHandler
         }
 
         return false;
+    }
+
+    /**
+     * Push opens a new entry unless the focused screen already is this route
+     * with the same path params (the link's identity): then its params are
+     * updated in place, like React Navigation's SET_PARAMS on the focused
+     * route. Tabs and tab hosts are selected, never pushed.
+     *
+     * @param array<string, string> $identity params matched from the link's path
+     */
+    private function linkMode(Route $route, array $identity, RedirectMode $mode): RedirectMode
+    {
+        if ($mode !== RedirectMode::Push) return $mode;
+        if ($route->kind === RouteKind::Tab || $route->kind === RouteKind::Tabs) return RedirectMode::Navigate;
+        $focused = $this->stack->current();
+        if ($focused->name !== $route->routeName()) return RedirectMode::Push;
+        $params = $focused->all();
+        foreach ($identity as $key => $value) {
+            if (!array_key_exists($key, $params) || (string) $params[$key] !== $value) return RedirectMode::Push;
+        }
+
+        return RedirectMode::Navigate;
     }
 
     public function currentPath(): ?string

@@ -28,6 +28,7 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Debug-only per-frame motion trace of virtual lists (see PamRecyclerList.traceMotion). */
 private const val MOTION_TRACE_TAG = "PamListTrace"
@@ -887,7 +888,33 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         horizontal = value
         if (value) columns = 1
         updateLayoutManager()
+        applyFadingEdge()
     }
+
+    private var fadingEdgeLengthPx = 0
+
+    /**
+     * `fadingEdgeLength` (dp, Android only, like React Native's FlatList):
+     * the edges along the scroll axis fade over that length where more
+     * content lies beyond them (a list resting at its end does not fade that
+     * end). 0 turns it off.
+     */
+    fun setFadingEdgeLengthDp(value: Float) {
+        val px = (value.coerceAtLeast(0f) * resources.displayMetrics.density).roundToInt()
+        if (px == fadingEdgeLengthPx) return
+        fadingEdgeLengthPx = px
+        applyFadingEdge()
+    }
+
+    private fun applyFadingEdge() {
+        val enabled = fadingEdgeLengthPx > 0
+        isHorizontalFadingEdgeEnabled = enabled && horizontal
+        isVerticalFadingEdgeEnabled = enabled && !horizontal
+        if (enabled) setFadingEdgeLength(fadingEdgeLengthPx)
+    }
+
+    /** Fading edge length in px (tests, diagnostics). */
+    internal val fadingEdgePx: Int get() = fadingEdgeLengthPx
 
     fun setColumns(value: Int) {
         val next = if (horizontal) 1 else value.coerceAtLeast(1)

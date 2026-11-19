@@ -69,6 +69,21 @@ Linking::open(
 callback as their final argument. Omitting it preserves the original exception
 behavior for compatibility.
 
+`Linking::open()` accepts `https`, `http`, `mailto`, `tel` and `geo` URLs, in
+any letter case (`Https://` opens like `https://`). Other schemes are declared
+by the app in `pam-native.json`:
+
+```json
+"linking": { "openSchemes": ["otpauth"] }
+```
+
+The URL is handed to the system directly, as React Native does, so it opens
+whenever an installed app handles it and fails (the failure callback) when
+none does. The CLI also adds an Android `<queries>` entry and the iOS
+`LSApplicationQueriesSchemes` for each scheme, so `Linking::canOpen()` sees
+the apps that handle them. `file`, `content`, `intent`, `android-app`,
+`javascript`, `data` and similar schemes are rejected.
+
 ## Voice recording
 
 `AudioRecorder` records AAC/M4A voice media and exposes bounded amplitude
@@ -190,8 +205,10 @@ form (`?FileReference`), and `Files::exists($path, fn (bool $exists) => ...)`
 answers on the file worker (directories report false; only paths outside the
 sandbox fail).
 `Files::list()` inventories regular files in a sandbox directory, and
-`Files::delete()` removes a single sandbox file. Directory deletion and paths
-escaping the application sandbox are rejected.
+`Files::delete($path, $done, $failure)` removes a single sandbox file. A file
+that is already gone counts as deleted (`$done` runs), so cleanup can repeat
+safely. Directory deletion and paths escaping the application sandbox are
+rejected; with `$failure` the error arrives there instead of being thrown.
 
 `Files::copyAsset()` copies a project-relative packaged asset directly into a
 sandbox-relative destination on the native file worker and returns its typed
@@ -206,6 +223,12 @@ editing, upload or durable app-owned use. Downloads run off the UI thread,
 reject embedded credentials and non-HTTPS URLs, enforce a caller-controlled
 size limit (64 MiB by default, 256 MiB maximum), and replace the destination
 atomically only after a successful transfer.
+
+For files the app can fetch again (React Native's `cacheDirectory`), download
+into the sandbox cache folder: `Files::download($url, Files::cachePath('pdf/terms.pdf'), ...)`.
+`Caches::clear()` ("clear cache") empties it and `Caches::usage()` counts it
+in `temporaryBytes`. The system does not evict it on low storage; keep
+durable files outside `Files::CACHE_DIRECTORY`.
 
 `Files::sha256($file->path, $callback, $failure)` computes a lowercase SHA-256
 digest on the native file worker. Only the private path and 64-character digest
@@ -756,6 +779,13 @@ Settings) and `PhoneState` (9, `READ_PHONE_STATE`). `PermissionStatus::Unavailab
 (5) marks permissions that do not exist on the platform (`FullScreenIntent` and
 `PhoneState` on iOS). Declare the Android permissions in `pam-native.json`
 `android.permissions`; generation adds only declared permissions.
+
+`PermissionKind::Notifications` on Android follows the app's notification
+switch in system settings (`NotificationManagerCompat.areNotificationsEnabled()`).
+Below Android 13 there is no runtime permission: the status is `Granted` while
+notifications are on and `Blocked` (`canAskAgain` false, send the user to
+`Permissions::openSettings()`) while they are off. On 13+ a granted
+`POST_NOTIFICATIONS` with the switch turned off is `Blocked` too.
 
 `Permissions::status()` and `requestKind()` accept an optional
 `failure: fn (string $error) => ...`; with it a native failure is delivered

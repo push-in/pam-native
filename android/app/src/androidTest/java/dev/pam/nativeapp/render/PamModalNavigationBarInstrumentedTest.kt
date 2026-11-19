@@ -54,7 +54,7 @@ class PamModalNavigationBarInstrumentedTest {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
         val window = present(translucent = true).window!!
         instrumentation.runOnMainSync {
-            assertEquals(Color.TRANSPARENT, window.navigationBarColor)
+            assertEquals(Color.TRANSPARENT, navigationBand(window))
             assertTrue(window.isNavigationBarContrastEnforced)
             assertEquals(
                 expectedLightIcons(),
@@ -74,7 +74,7 @@ class PamModalNavigationBarInstrumentedTest {
             val forcedEdgeToEdge = Build.VERSION.SDK_INT >= 35 && activity.applicationInfo.targetSdkVersion >= 35
             assertEquals(
                 if (forcedEdgeToEdge) Color.TRANSPARENT else PamAppearance.color(activity, R.color.pam_window_background, dark),
-                window.navigationBarColor,
+                navigationBand(window),
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // The requested fitted policy still opts out of contrast;
@@ -87,6 +87,47 @@ class PamModalNavigationBarInstrumentedTest {
             )
         }
     }
+
+    @Test
+    fun barColoursArePaintedWithoutTheDeprecatedWindowSetters() {
+        val window = present(translucent = false).window!!
+        instrumentation.runOnMainSync {
+            @Suppress("DEPRECATION")
+            assertEquals("the Dialog bar stays transparent", Color.TRANSPARENT, window.navigationBarColor)
+            @Suppress("DEPRECATION")
+            assertEquals(Color.TRANSPARENT, window.statusBarColor)
+            modal!!.applyStatusBar(color = Color.BLUE, useDarkIcons = false, hidden = false, translucent = false)
+            val bands = PamSystemBarBands.of(window)
+            if (Build.VERSION.SDK_INT >= 35) {
+                assertEquals("Android 15+ draws no bar colours", null, bands)
+            } else {
+                assertEquals(Color.BLUE, bands!!.statusColor)
+                assertEquals(
+                    PamAppearance.color(activity, R.color.pam_window_background, PamAppearance.isDark(activity)),
+                    bands.navigationColor,
+                )
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 35) return
+        // The bands sit in the decor overlay, above the content, where the bars are.
+        val deadline = SystemClock.uptimeMillis() + 2_000
+        var insets = listOf(0, 0, 0, 0)
+        while (SystemClock.uptimeMillis() < deadline && insets[0] == 0) {
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync { insets = PamSystemBarBands.of(window)!!.barInsets }
+        }
+        assertTrue("status bar band height $insets", insets[0] > 0)
+        instrumentation.runOnMainSync {
+            val decor = window.decorView
+            val bitmap = android.graphics.Bitmap.createBitmap(decor.width, decor.height, android.graphics.Bitmap.Config.ARGB_8888)
+            decor.draw(android.graphics.Canvas(bitmap))
+            assertEquals(Color.BLUE, bitmap.getPixel(decor.width / 2, insets[0] / 2))
+            bitmap.recycle()
+        }
+    }
+
+    private fun navigationBand(window: android.view.Window): Int =
+        PamSystemBarBands.of(window)?.navigationColor ?: Color.TRANSPARENT
 
     private fun expectedLightIcons(): Boolean =
         PamAppearance.bool(activity, R.bool.pam_light_navigation_bar, PamAppearance.isDark(activity))

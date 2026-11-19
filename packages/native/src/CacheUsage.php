@@ -13,6 +13,8 @@ final readonly class CacheUsage
         public int $temporaryBytes,
         public int $totalBytes,
         public int $freedBytes = 0,
+        /** Files copied into the sandbox by pickers and imports (filesDir/pam-files/imports), part of totalBytes. */
+        public int $importBytes = 0,
     ) {
     }
 }

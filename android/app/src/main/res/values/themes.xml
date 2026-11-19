@@ -17,7 +17,21 @@
         <item name="android:windowNoTitle">true</item>
     </style>
 
+    <!-- The Activity once it runs (Theme.PamNative stays the starting
+         window's): edge to edge with transparent bars, set here instead of
+         the deprecated Window.setStatusBarColor/setNavigationBarColor.
+         Coloured bars are painted by PAM views (PamRootHost band). -->
+    <style name="Theme.PamNative.Content" parent="Theme.PamNative">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="29">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+    </style>
+
     <style name="Theme.PamNative.Modal" parent="Theme.PamNative.Base">
+        <!-- Bar colours are painted by PamSystemBarBands (Android 7-14). -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowIsFloating">false</item>
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowNoTitle">true</item>

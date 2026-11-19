@@ -81,6 +81,18 @@ CSS (compiled to bytecode, re-evaluated natively on resize, no PHP render):
 and height/orientation queries. Prefer CSS for geometry: a resize never
 re-renders PHP.
 
+### Display cutout
+
+`useSafeAreaInsets()->cutoutTop/cutoutRight/cutoutBottom/cutoutLeft` is the
+display cutout alone (notch, punch hole, Dynamic Island), without the status
+bar, navigation bar or home indicator. Immersive screens (game, video, camera:
+`StatusBar` hidden and `navigationBarHidden`) pad with these instead of the
+full safe area so content uses the whole screen but never sits under the
+camera. Android reads `WindowInsets.displayCutout` (zero when the window is
+not laid out into the cutout); iOS has no cutout API and reports the top safe
+area on phones with a sensor housing (above the classic 20 pt bar) and the
+side insets in landscape. `toArray()` keeps returning the four safe-area edges.
+
 ### Rebuild granularity
 Every property of `useWindowDimensions()`, `useSafeAreaInsets()` and
 `useFontScale()` is its own signal (`SharedSource::field()`): a component

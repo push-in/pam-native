@@ -151,6 +151,66 @@
                         "pattern": "^[A-Za-z0-9!#$&^_.+*-]+/(?:[A-Za-z0-9!#$&^_.+*-]+|\\*)$"
                     }
                 },
+                "orientations": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "items": {
+                        "enum": [
+                            "portrait",
+                            "portraitUpsideDown",
+                            "landscapeLeft",
+                            "landscapeRight"
+                        ]
+                    },
+                    "description": "Orientations the main activity may take on phones (android:screenOrientation). Same values as ios.orientations; a set that mixes portrait and landscape leaves rotation free. Omit to follow the sensor and the user's rotation lock. Android 16+ ignores the lock on large screens."
+                },
+                "pictureInPicture": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Declares android:supportsPictureInPicture on the main activity. While in Picture-in-Picture the host keeps rendering and playing (no inactive/pause); entering it and its params belong to the feature that asks (e.g. the calls plugin, via the activity's androidx OnUserLeaveHint/OnPictureInPictureModeChanged providers)."
+                },
+                "queries": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Package visibility (Android 11+ <queries>) the application needs, e.g. for Share::isPackageInstalled or resolving an intent. The host manifest only declares the generic VIEW schemes Linking opens.",
+                    "properties": {
+                        "packages": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 64,
+                            "items": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+                            }
+                        },
+                        "intents": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                    "action"
+                                ],
+                                "properties": {
+                                    "action": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+                                    },
+                                    "scheme": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z][A-Za-z0-9+.-]{0,63}$"
+                                    },
+                                    "mimeType": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9!#$&^_.+*-]+/(?:[A-Za-z0-9!#$&^_.+*-]+|\\*)$"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "safeAreaBottomFallback": {
                     "type": "integer",
                     "minimum": 0,
@@ -521,6 +581,25 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Android autoVerify for the https hosts."
+                }
+            }
+        },
+        "linking": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Outgoing links: what Linking::open() and Linking::canOpen() may hand to other apps.",
+            "properties": {
+                "openSchemes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9+.-]{0,63}$",
+                        "not": {
+                            "enum": ["https", "http", "mailto", "tel", "geo", "file", "content", "intent", "android-app", "javascript", "vbscript", "data", "blob", "about", "jar"]
+                        }
+                    },
+                    "description": "URI schemes opened besides https, http, mailto, tel and geo, e.g. otpauth for authenticator apps. Android gets a <queries> entry and iOS LSApplicationQueriesSchemes, so Linking::canOpen() sees the apps that handle them. Schemes that reach local files, app components or script are rejected."
                 }
             }
         },
