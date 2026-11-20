@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.54.4 - 2026-11-20
 
 - Fixed: iOS/tvOS — an application name with accents or other non-ASCII
   characters (e.g. "Zé Chat") no longer breaks the code signature. Xcode's
