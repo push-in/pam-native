@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.54.5 - 2026-11-21
+
+- Performance: production and benchmark builds load `.pam` components on
+  demand. `PamPhpRegistry::discover` used to load every component class,
+  build its contract by reflection and validate every template at boot, even
+  for screens never opened; on an app with ~180 components that kept ~365
+  files and tens of MB of OPcache and heap resident from launch. The boot now
+  only registers the tags; the class and its contract
+  (`TemplateRegistry::tagContract`) are built on first use. Development and
+  tests keep the eager boot; `PAM_NATIVE_EAGER=1` restores it in production for
+  diagnosis. Measured on a Samsung S10 (PushinPay release): home screen
+  177 MB → 117 MB PSS, after opening the store 225 MB → 172 MB.
+- `PamPhpCompiler::prebuild` now runs the full template contract validation
+  on the build host (`PamPhpRegistry::validateIsolated`, plugins before the
+  app, without touching the caller's registry), after writing the pack and
+  with a 512 MB limit for that step only, so an invalid template still fails
+  the release build.
+
 ## 1.54.4 - 2026-11-20
 
 - Fixed: iOS/tvOS — an application name with accents or other non-ASCII
