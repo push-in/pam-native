@@ -7885,6 +7885,7 @@ require __DIR__.'/arch_v2_resource.php';
 require __DIR__.'/arch_v2_resource_production.php';
 require __DIR__.'/arch_v2_resource_options.php';
 require __DIR__.'/arch_v2_component_discovery.php';
+require __DIR__.'/lazy_component_contracts.php';
 require __DIR__.'/arch_v2_routing.php';
 require __DIR__.'/arch_v2_route_compiler.php';
 require __DIR__.'/arch_v2_http.php';
