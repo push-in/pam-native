@@ -70,6 +70,9 @@ final class PamPhpRegistry
     /** @var array<string, class-string<Component>> compiled component class by tag */
     private static array $tagClasses = [];
 
+    /** @var array<string, class-string<Component>> components whose contract is built on first use */
+    private static array $lazyContracts = [];
+
     /** @var array<string, array<string, true>> */
     private static array $tagProps = [];
 
@@ -84,6 +87,44 @@ final class PamPhpRegistry
     {
         $components = PamPhpCompiler::compileDirectory($sourcePath, $cachePath);
 
+        self::register($components);
+
+        self::registerAutoload();
+
+        if (self::lazy()) {
+            // Produção: as classes e os contratos saem na primeira vez que o
+            // componente aparece. Carregar e validar os ~180 componentes de um
+            // app no boot custava dezenas de MB de OPcache e de heap (o build já
+            // validou tudo; ver PamPhpCompiler::prebuild).
+            foreach ($components as $component) {
+                if ($component->language === \Pam\Native\LanguageVersion::Language2
+                    && PamPhpCompiler::variantOf($component->source) === null) {
+                    self::$lazyContracts[$component->tag] = $component->className;
+                }
+            }
+            TemplateRegistry::contractResolver(static function (string $tag): ?\Pam\Native\UI\Contract\TagContract {
+                $className = self::$lazyContracts[$tag] ?? null;
+                if ($className === null) {
+                    return null;
+                }
+                self::autoload($className);
+
+                return ComponentContractFactory::fromClass($className, $tag);
+            });
+
+            return;
+        }
+
+        self::validateAll($components);
+    }
+
+    /**
+     * Registra as tags e as fábricas dos componentes compilados.
+     *
+     * @param list<PamPhpComponent> $components
+     */
+    private static function register(array $components): void
+    {
         foreach ($components as $component) {
             /** @var class-string<Component> $className */
             $className = $component->className;
@@ -119,9 +160,16 @@ final class PamPhpRegistry
                 ),
             );
         }
+    }
 
-        self::registerAutoload();
-
+    /**
+     * Carrega cada componente, registra o contrato e valida o template contra
+     * os contratos (desenvolvimento, testes e o prebuild do build host).
+     *
+     * @param list<PamPhpComponent> $components
+     */
+    public static function validateAll(array $components): void
+    {
         foreach ($components as $component) {
             if ($component->language !== \Pam\Native\LanguageVersion::Language2) {
                 continue;
@@ -145,6 +193,46 @@ final class PamPhpRegistry
             $className = $component->className;
             TemplateContractValidator::validate($className, $component->template);
         }
+    }
+
+    /**
+     * Valida os componentes dos diretórios como o boot de desenvolvimento faz,
+     * sem deixar rastro no registro atual (o prebuild roda dentro do processo
+     * de quem o chama, e outro projeto pode ter componentes com os mesmos nomes).
+     *
+     * @param list<string> $directories em ordem: plugins antes do app
+     */
+    public static function validateIsolated(array $directories, string $cachePath): void
+    {
+        $saved = [self::$components, self::$classFiles, self::$variants, self::$tagClasses, self::$tagProps, self::$lazyContracts];
+        $templates = TemplateRegistry::snapshot();
+        try {
+            self::$components = [];
+            self::$classFiles = [];
+            self::$variants = [];
+            self::$tagClasses = [];
+            self::$tagProps = [];
+            self::$lazyContracts = [];
+            foreach ($directories as $directory) {
+                $components = PamPhpCompiler::compileDirectory($directory, $cachePath);
+                self::register($components);
+                self::validateAll($components);
+            }
+        } finally {
+            [self::$components, self::$classFiles, self::$variants, self::$tagClasses, self::$tagProps, self::$lazyContracts] = $saved;
+            TemplateRegistry::restore($templates);
+        }
+    }
+
+    /**
+     * Contratos sob demanda: só no aparelho em produção ou benchmark, onde o
+     * cache de componentes veio pronto e validado do build. `PAM_NATIVE_EAGER=1`
+     * força o modo antigo (diagnóstico).
+     */
+    private static function lazy(): bool
+    {
+        return \Pam\Native\BuildConfiguration::mode() !== \Pam\Native\BuildMode::Development
+            && getenv('PAM_NATIVE_EAGER') !== '1';
     }
 
     /**
@@ -300,6 +388,7 @@ final class PamPhpRegistry
         self::$variants = [];
         self::$metadata = [];
         self::$propertyParameters = [];
+        self::$lazyContracts = [];
     }
 
     public static function releaseInstances(): void

@@ -38,6 +38,14 @@ final class TemplateRegistry
     /** @var array<string, true> Tags rendered by compiled .pam components. */
     private static array $compiled = [];
 
+    /**
+     * Builds the contract of a compiled component on first use (production
+     * boots without loading every component class; see PamPhpRegistry).
+     *
+     * @var (Closure(string): ?TagContract)|null
+     */
+    private static ?Closure $contractResolver = null;
+
     private function __construct()
     {
     }
@@ -79,7 +87,28 @@ final class TemplateRegistry
 
     public static function tagContract(string $tag): ?TagContract
     {
-        return self::$contracts[$tag] ?? null;
+        if (isset(self::$contracts[$tag])) {
+            return self::$contracts[$tag];
+        }
+        if (self::$contractResolver === null || !isset(self::$compiled[$tag])) {
+            return null;
+        }
+        $contract = (self::$contractResolver)($tag);
+        if ($contract !== null) {
+            self::$contracts[$tag] = $contract;
+        }
+
+        return $contract;
+    }
+
+    /**
+     * @internal Resolves compiled component contracts lazily.
+     *
+     * @param (Closure(string): ?TagContract)|null $resolver
+     */
+    public static function contractResolver(?Closure $resolver): void
+    {
+        self::$contractResolver = $resolver;
     }
 
     /** @return array<string, TagContract> */
@@ -196,6 +225,30 @@ final class TemplateRegistry
         return null;
     }
 
+    /**
+     * @internal Estado do registro, para validar outro projeto sem afetar o atual (prebuild).
+     *
+     * @return array<string, mixed>
+     */
+    public static function snapshot(): array
+    {
+        return ['components' => self::$components, 'compiled' => self::$compiled, 'contracts' => self::$contracts,
+            'resolver' => self::$contractResolver];
+    }
+
+    /**
+     * @internal
+     *
+     * @param array<string, mixed> $state
+     */
+    public static function restore(array $state): void
+    {
+        self::$components = $state['components'];
+        self::$compiled = $state['compiled'];
+        self::$contracts = $state['contracts'];
+        self::$contractResolver = $state['resolver'];
+    }
+
     public static function reset(): void
     {
         self::$components = [];
@@ -204,6 +257,7 @@ final class TemplateRegistry
         self::$classes = [];
         self::$styleResolvers = [];
         self::$contracts = [];
+        self::$contractResolver = null;
     }
 
     /**
