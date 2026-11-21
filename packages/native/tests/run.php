@@ -6923,8 +6923,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.54.4',
-    'The runtime SDK contract must match the 1.54.4 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.54.5',
+    'The runtime SDK contract must match the 1.54.5 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7885,6 +7885,7 @@ require __DIR__.'/arch_v2_resource.php';
 require __DIR__.'/arch_v2_resource_production.php';
 require __DIR__.'/arch_v2_resource_options.php';
 require __DIR__.'/arch_v2_component_discovery.php';
+require __DIR__.'/lazy_component_contracts.php';
 require __DIR__.'/arch_v2_routing.php';
 require __DIR__.'/arch_v2_route_compiler.php';
 require __DIR__.'/arch_v2_http.php';

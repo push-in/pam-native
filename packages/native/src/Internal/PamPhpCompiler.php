@@ -868,6 +868,18 @@ final class PamPhpCompiler
      *
      * @return int number of components written
      */
+    private static function bytes(string $limit): int
+    {
+        $value = (int) $limit;
+
+        return match (strtolower(substr(trim($limit), -1))) {
+            'g' => $value * 1024 * 1024 * 1024,
+            'm' => $value * 1024 * 1024,
+            'k' => $value * 1024,
+            default => $value,
+        };
+    }
+
     public static function prebuild(string $projectRoot, string $sourcePath): int
     {
         $root = realpath($projectRoot);
@@ -883,9 +895,11 @@ final class PamPhpCompiler
             $components = self::compileDirectory($sourcePath, $staging);
             // Component libraries of installed plugins ship inside vendor/:
             // pack them too, so the device compiles none of them either.
-            foreach (\Pam\Native\Plugin\PluginManager::componentDirectories($root) as $directory) {
+            $pluginDirectories = \Pam\Native\Plugin\PluginManager::componentDirectories($root);
+            foreach ($pluginDirectories as $directory) {
                 array_push($components, ...self::compileDirectory($directory, $staging));
             }
+
             if (!is_dir($output) && !mkdir($output, 0o755, true) && !is_dir($output)) {
                 throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
             }
@@ -1000,6 +1014,23 @@ final class PamPhpCompiler
 
             self::$prebuiltDirectories = [];
             self::$prebuiltPacks = [];
+
+            // O aparelho em produção monta os contratos sob demanda e não valida
+            // mais os templates no boot: a validação completa roda aqui, no build,
+            // depois do pacote gravado (os fontes já saíram da memória). Plugins
+            // primeiro, porque os templates do app usam os componentes deles. Carregar
+            // todas as classes de um app grande passa dos 128 MB do CLI.
+            $limit = ini_get('memory_limit');
+            if ($limit !== false && $limit !== '-1' && self::bytes($limit) < 512 * 1024 * 1024) {
+                ini_set('memory_limit', '512M');
+            }
+            try {
+                PamPhpRegistry::validateIsolated([...$pluginDirectories, $sourcePath], $staging);
+            } finally {
+                if ($limit !== false) {
+                    ini_set('memory_limit', $limit);
+                }
+            }
 
             return $count;
         } finally {
