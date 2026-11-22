@@ -89,4 +89,5 @@ enum EventKind: int
 
     // Extension table (Protocol::EXTENSION_BASE and up).
     case KeyDown = 1001;
+    case MediaTracks = 1002;
 }

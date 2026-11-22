@@ -403,6 +403,8 @@ final class TemplateRenderer
         'playbackRate' => PropKey::MediaPlaybackRate,
         'keepAliveWhenCovered' => PropKey::MediaKeepAliveWhenCovered,
         'idleSurface' => PropKey::MediaIdleSurface,
+        'audioTrack' => PropKey::MediaAudioTrack,
+        'textTrack' => PropKey::MediaTextTrack,
         'autoPlayVisible' => PropKey::MediaAutoPlayVisible,
         'autoPlayGroup' => PropKey::MediaAutoPlayGroup,
         'startBufferMs' => PropKey::MediaStartBufferMs,
@@ -797,6 +799,7 @@ final class TemplateRenderer
         'on:contentSizeChange' => EventKind::InputContentSizeChange,
         'on:keyPress' => EventKind::InputKeyPress,
         'on:keyDown' => EventKind::KeyDown,
+        'on:mediaTracks' => EventKind::MediaTracks,
         'on:pressIn' => EventKind::PressIn,
         'on:pressOut' => EventKind::PressOut,
         'on:pressMove' => EventKind::PressMove,
@@ -7922,6 +7925,8 @@ final class TemplateRenderer
             $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
         } elseif ($kind === EventKind::KeyDown && is_string($payload)) {
             $value = \Pam\Native\KeyEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::MediaTracks && is_string($payload)) {
+            $value = \Pam\Native\MediaTracksEvent::fromPayload($payload);
 
         } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
             $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);

@@ -2674,6 +2674,16 @@ public final class PamRenderer: @unchecked Sendable {
                 ])) ?? Data()
                 self?.dispatchEvent(nodeId, EventKind.mediaReady.rawValue, payload)
             } : nil
+            media.onTracks = eventProperties.contains(PamConstants.onMediaTracks) ? {
+                [weak self] tracks in
+                let list = tracks.map { track in [
+                    "id": track.id, "type": track.type, "language": track.language,
+                    "label": track.label, "selected": track.selected,
+                ] as [String: Any] }
+                let json = (try? JSONSerialization.data(withJSONObject: list)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                let payload = (try? WireMap.encode(["tracks": .text(json)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.mediaTracks.rawValue, payload)
+            } : nil
             media.onLoadStart = eventProperties.contains(PamConstants.onMediaLoadStart) ? {
                 [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaLoadStart.rawValue, Data())
             } : nil
@@ -2833,6 +2843,7 @@ public final class PamRenderer: @unchecked Sendable {
             PamConstants.onTextLayout,
             PamConstants.onMediaBuffering,
             PamConstants.onMediaLoadStart,
+            PamConstants.onMediaTracks,
         ].reduce(into: Set<Int>()) { $0.insert($1) }
     }
 
@@ -3703,6 +3714,10 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamMediaView)?.setKeepAliveWhenCovered(value.boolOrNil() ?? false)
         case PamConstants.mediaIdleSurface:
             (view as? PamMediaView)?.setIdleSurface(value.boolOrNil() ?? false)
+        case PamConstants.mediaAudioTrack:
+            (view as? PamMediaView)?.setAudioTrack(value.textOrNil() ?? "")
+        case PamConstants.mediaTextTrack:
+            (view as? PamMediaView)?.setTextTrack(value.textOrNil() ?? "")
         case PamConstants.mediaClock:
             view.pamMediaClockRef = value.textOrNil()
             mediaBoundIds.insert(nodeId)
@@ -4285,6 +4300,10 @@ public final class PamRenderer: @unchecked Sendable {
             (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
         case PamConstants.mediaIdleSurface:
             (view as? PamMediaView)?.setIdleSurface(false)
+        case PamConstants.mediaAudioTrack:
+            (view as? PamMediaView)?.setAudioTrack("")
+        case PamConstants.mediaTextTrack:
+            (view as? PamMediaView)?.setTextTrack("")
         case PamConstants.mediaClock:
             view.pamMediaClockRef = nil
             if state.properties[PamConstants.mediaProgress] == nil { mediaBoundIds.remove(nodeId) }

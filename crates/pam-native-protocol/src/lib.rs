@@ -769,6 +769,9 @@ pub enum PropKey {
     NavigationWarmIntent = 1036,
     NavigationWarmTransition = 1037,
     NavigationWarmDurationMs = 1038,
+    MediaAudioTrack = 1039,
+    MediaTextTrack = 1040,
+    OnMediaTracks = 1041,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1357,6 +1360,9 @@ impl TryFrom<u16> for PropKey {
             1036 => Ok(Self::NavigationWarmIntent),
             1037 => Ok(Self::NavigationWarmTransition),
             1038 => Ok(Self::NavigationWarmDurationMs),
+            1039 => Ok(Self::MediaAudioTrack),
+            1040 => Ok(Self::MediaTextTrack),
+            1041 => Ok(Self::OnMediaTracks),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2302,13 +2308,13 @@ mod tests {
         for value in CORE_PROPERTY_LIMIT + 1..EXTENSION_BASE {
             assert!(PropKey::try_from(value).is_err(), "gap property {value}");
         }
-        for value in EXTENSION_BASE..=1038 {
+        for value in EXTENSION_BASE..=1041 {
             assert!(
                 PropKey::try_from(value).is_ok(),
                 "missing extension {value}"
             );
         }
-        assert!(PropKey::try_from(1039).is_err());
+        assert!(PropKey::try_from(1042).is_err());
     }
 
     #[test]

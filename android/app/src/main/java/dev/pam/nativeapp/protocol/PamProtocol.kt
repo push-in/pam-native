@@ -164,7 +164,8 @@ enum class EventKind(val value: Int) {
     LIST_WINDOW(80),
 
     // Extension table.
-    KEY_DOWN(1001);
+    KEY_DOWN(1001),
+    MEDIA_TRACKS(1002);
 }
 
 enum class PropKey(val value: Int) {
@@ -750,7 +751,10 @@ enum class PropKey(val value: Int) {
     PRESS_NAVIGATION_INTENT(1035),
     NAVIGATION_WARM_INTENT(1036),
     NAVIGATION_WARM_TRANSITION(1037),
-    NAVIGATION_WARM_DURATION_MS(1038);
+    NAVIGATION_WARM_DURATION_MS(1038),
+    MEDIA_AUDIO_TRACK(1039),
+    MEDIA_TEXT_TRACK(1040),
+    ON_MEDIA_TRACKS(1041);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

@@ -6923,8 +6923,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.54.5',
-    'The runtime SDK contract must match the 1.54.5 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.54.6',
+    'The runtime SDK contract must match the 1.54.6 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7872,6 +7872,7 @@ require __DIR__.'/memory_bounds.php';
 passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg(__DIR__.'/navigation_memory.php'), $navigationMemoryStatus);
 $assert($navigationMemoryStatus === 0, 'Navigation memory regression harness must pass.');
 require __DIR__.'/media_idle_surface.php';
+require __DIR__.'/media_tracks.php';
 require __DIR__.'/media_autoplay_visible.php';
 require __DIR__.'/native_time.php';
 require __DIR__.'/arch_v2_signals.php';

@@ -113,9 +113,9 @@ try {
 $local = RendererContract::local();
 $coreMax = max(array_filter(array_map(static fn (PropKey $key): int => $key->value, PropKey::cases()), static fn (int $v): bool => $v < 1001));
 $assert(
-    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::NavigationWarmDurationMs->value
+    $local->propertyCeiling === $coreMax && $local->extensionPropertyCeiling === PropKey::OnMediaTracks->value
         && $local->eventCeiling === max(array_filter(array_map(static fn (EventKind $kind): int => $kind->value, EventKind::cases()), static fn (int $v): bool => $v < 1001))
-        && $local->extensionEventCeiling === EventKind::KeyDown->value,
+        && $local->extensionEventCeiling === EventKind::MediaTracks->value,
     'The local contract declares the highest core and extension identifiers of the SDK tables.',
 );
 
@@ -193,7 +193,7 @@ try {
     // Events: core kinds pass, undeclared extension kinds are refused.
     $assert($legacy->supportsEvent(EventKind::Press->value) && !$legacy->supportsEvent(1001), 'Event ceilings follow the contract.');
     $throws(static fn () => $legacy->requireEvent(1001), 'does not implement event KeyDown (1001)');
-    $throws(static fn () => $legacy->requireEvent(1002), 'does not implement event unknown (1002)');
+    $throws(static fn () => $legacy->requireEvent(1003), 'does not implement event unknown (1003)');
     $assert(
         $parsed->supportsProperty(540) && !$parsed->supportsProperty(541) && !$parsed->supportsProperty(1000)
             && $parsed->supportsProperty(1001) && !$parsed->supportsProperty(1002) && !$parsed->supportsProperty(0),

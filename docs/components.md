@@ -1386,6 +1386,35 @@ The template runtime decodes the native wire map before invoking the handler.
 A single-parameter handler remains available for applications that intentionally
 consume the raw event payload.
 
+## Audio and subtitle tracks
+
+A source with several audio languages or subtitles (HLS, DASH, MKV, MP4)
+reports them through `on:mediaTracks`; `audioTrack` and `textTrack` pick one
+by id. Subtitles are drawn by the player over the video (Android: the cues of
+the selected text track, sized to the view; iOS/tvOS: `AVPlayerLayer`), so
+PHP is not woken per cue. Subtitles stay off, and are not parsed, until a
+text track is chosen; `audioTrack=""` keeps the source's default audio.
+
+```xml
+<MediaPlayer source="$movie" :audioTrack="$audio" :textTrack="$text" on:mediaTracks="tracks" />
+```
+
+```php
+public function tracks(MediaTracksEvent $event): void
+{
+    // $event->audio and $event->text: list of
+    // ['id' => '1:0', 'language' => 'pt', 'label' => 'Dublado', 'selected' => true]
+    $this->audio = $event->audio[0]['id'] ?? '';
+}
+```
+
+Programmatically: `MediaPlayer::make($url)->audioTrack($id)->textTrack($id)->onTracks($handler)`.
+The event fires once the tracks are known and again when they or the
+selection change. Ids are stable while the source stays the same and are
+opaque: keep a language and pick the matching id again for the next source.
+A player that never uses these properties sends none of them (extension
+properties 1039-1041, event 1002), so it keeps working on older renderers.
+
 ## Native clocks, timed progress and text reveal
 
 Call timers, recording bars, countdowns and typewriter text move on the native

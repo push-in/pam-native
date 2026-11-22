@@ -1238,6 +1238,7 @@ abstract class Element implements Renderable
             EventKind::RouteCovered => PropKey::OnRouteCovered,
             EventKind::RouteFocused => PropKey::OnRouteFocused,
             EventKind::KeyDown => PropKey::OnKeyDown,
+            EventKind::MediaTracks => PropKey::OnMediaTracks,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

@@ -10,8 +10,8 @@ class PamProtocolTest {
     @Test
     fun protocolEnumsRemainSequentialAndAppendOnly() {
         assertEquals((1..31).toList(), NodeKind.entries.map(NodeKind::value))
-        assertEquals((1..80).toList() + 1001, EventKind.entries.map(EventKind::value))
-        assertEquals((1..543).toList() + (1001..1038).toList(), PropKey.entries.map(PropKey::value))
+        assertEquals((1..80).toList() + listOf(1001, 1002), EventKind.entries.map(EventKind::value))
+        assertEquals((1..543).toList() + (1001..1041).toList(), PropKey.entries.map(PropKey::value))
         assertEquals(543, PAM_CORE_PROPERTY_LIMIT)
         assertEquals(80, PAM_CORE_EVENT_LIMIT)
         assertEquals(1001, PAM_EXTENSION_BASE)

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.54.6 - 2026-11-22
+
+- `MediaPlayer` audio and subtitle tracks: `on:mediaTracks` (`onTracks()`,
+  `MediaTracksEvent` with the audio and text tracks: id, language, label,
+  selected) and the `audioTrack` / `textTrack` properties pick one by id.
+  Android selects them on Media3 (`TrackSelectionOverride`, the choice is
+  applied again when the tracks change) and draws the cues of the selected
+  text track over the video, sized to the view, deduplicating cues repeated
+  across segmented WebVTT; text tracks stay disabled (not parsed) until one
+  is chosen. iOS/tvOS select the `AVMediaSelectionGroup` options and the
+  player layer draws the subtitles. Extension properties 1039-1041 and
+  extension event 1002; players that do not use them send nothing new.
+
 ## 1.54.5 - 2026-11-21
 
 - Performance: production and benchmark builds load `.pam` components on

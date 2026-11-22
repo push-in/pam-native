@@ -92,6 +92,16 @@ internal class PamMediaView(
     PamRouteCoverage.Aware {
     private val video = TextureView(context)
     private val poster = PamImageView(context)
+    // Subtitles of the selected text track, sized to the view in onLayout.
+    private val captions = TextView(context).apply {
+        visibility = GONE
+        gravity = android.view.Gravity.CENTER
+        setTextColor(android.graphics.Color.WHITE)
+        setBackgroundColor(0xA6000000.toInt())
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private var audioTrack = ""
+    private var textTrack = ""
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
     private val playback = MediaPlaybackLifecycle()
@@ -193,6 +203,7 @@ internal class PamMediaView(
     var onProgress: ((Double, Double) -> Unit)? = null
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onTracks: ((List<PamMediaTrack>) -> Unit)? = null
     var onCacheHit: ((String) -> Unit)? = null
     var onCacheMiss: ((String) -> Unit)? = null
     var onCacheProgress: ((String, Long, Long) -> Unit)? = null
@@ -280,6 +291,12 @@ internal class PamMediaView(
         addView(
             poster,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
+        addView(
+            captions,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            },
         )
         video.surfaceTextureListener = this
         clipChildren = true
@@ -696,6 +713,27 @@ internal class PamMediaView(
         restoreAfterCover()
     }
 
+    /** A track id from onTracks, or "" for the source's default audio. */
+    fun setAudioTrack(value: String) {
+        if (audioTrack == value) return
+        audioTrack = value
+        exo?.selectTracks(audioTrack, textTrack)
+    }
+
+    /** A text track id from onTracks, or "" for no subtitles. */
+    fun setTextTrack(value: String) {
+        if (textTrack == value) return
+        textTrack = value
+        if (value.isEmpty()) showCaptions("")
+        exo?.selectTracks(audioTrack, textTrack)
+    }
+
+    private fun showCaptions(text: String) {
+        val shown = text.isNotEmpty() && textTrack.isNotEmpty()
+        if (shown) captions.text = text
+        captions.visibility = if (shown) VISIBLE else GONE
+    }
+
     fun setIdleSurface(value: Boolean) {
         if (idleSurface == value) return
         idleSurface = value
@@ -1033,6 +1071,7 @@ internal class PamMediaView(
         }
         exo = player
         player.setSurface(videoSurface)
+        if (audioTrack.isNotEmpty() || textTrack.isNotEmpty()) player.selectTracks(audioTrack, textTrack)
     }
 
     private fun exoListener(generation: Long) = object : PamExoPlayback.Listener {
@@ -1079,6 +1118,16 @@ internal class PamMediaView(
             playback.completed(looping)
             onEnd?.invoke()
             syncPlayback()
+        }
+
+        override fun onTracks(tracks: List<PamMediaTrack>) {
+            current() ?: return
+            onTracks?.invoke(tracks)
+        }
+
+        override fun onCues(text: String) {
+            current() ?: return
+            showCaptions(text)
         }
 
         override fun onError(message: String, transient: Boolean) {
@@ -1198,6 +1247,7 @@ internal class PamMediaView(
         preparedPlayer = null
         exo?.release()
         exo = null
+        showCaptions("")
         syncPlayingEffects()
     }
 
@@ -1215,6 +1265,19 @@ internal class PamMediaView(
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         applyVideoTransform()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (h != oldh) layoutCaptions(h)
+    }
+
+    private fun layoutCaptions(height: Int) {
+        val size = height * 0.045f
+        captions.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, size)
+        val pad = (size * 0.35f).toInt()
+        captions.setPadding(pad * 2, pad / 2, pad * 2, pad / 2)
+        (captions.layoutParams as LayoutParams).bottomMargin = (height * 0.07f).toInt()
     }
 
     private fun applyVideoTransform() {
