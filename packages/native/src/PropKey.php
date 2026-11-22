@@ -594,4 +594,8 @@ enum PropKey: int
     case NavigationWarmIntent = 1036;
     case NavigationWarmTransition = 1037;
     case NavigationWarmDurationMs = 1038;
+    // Media track selection and the tracks event.
+    case MediaAudioTrack = 1039;
+    case MediaTextTrack = 1040;
+    case OnMediaTracks = 1041;
 }

@@ -9,6 +9,15 @@ final class PamPlayerLayerView: UIView {
     var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
+/// One audio or text track of the source; `id` stays the same while the source does.
+struct PamMediaTrack {
+    let id: String
+    let type: String
+    let language: String
+    let label: String
+    let selected: Bool
+}
+
 final class PamMediaView: UIView {
     /// A hidden (not covered) player keeps its decoder this long before it is
     /// released, Android `HIDDEN_RELEASE_MS`.
@@ -76,6 +85,13 @@ final class PamMediaView: UIView {
     var onProgress: ((Double, Double) -> Void)?
     var onEnd: (() -> Void)?
     var onError: ((String) -> Void)?
+    var onTracks: (([PamMediaTrack]) -> Void)?
+    // The app's track choice ("" = default audio, no subtitles) and the
+    // current item's selection groups, loaded once it is ready.
+    private var audioTrack = ""
+    private var textTrack = ""
+    private var audioGroup: AVMediaSelectionGroup?
+    private var textGroup: AVMediaSelectionGroup?
     var onCacheHit: ((String) -> Void)?
     var onCacheMiss: ((String) -> Void)?
     var onCacheReady: ((String, Int64) -> Void)?
@@ -261,6 +277,63 @@ final class PamMediaView: UIView {
         } else if !releasedForBackground, !idleSurface {
             restorePlayer()
         }
+    }
+
+    /// A track id from onTracks, or "" for the source's default audio.
+    func setAudioTrack(_ value: String) {
+        guard audioTrack != value else { return }
+        audioTrack = value
+        applyTracks()
+    }
+
+    /// A text track id from onTracks, or "" for no subtitles (the layer draws the selected one).
+    func setTextTrack(_ value: String) {
+        guard textTrack != value else { return }
+        textTrack = value
+        applyTracks()
+    }
+
+    private func loadTracks(_ item: AVPlayerItem) {
+        Task { @MainActor [weak self] in
+            let audio = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+            let text = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+            guard let self, self.player?.currentItem === item else { return }
+            self.audioGroup = audio
+            self.textGroup = text
+            self.applyTracks()
+        }
+    }
+
+    private func applyTracks() {
+        guard let item = player?.currentItem, audioGroup != nil || textGroup != nil else { return }
+        if let group = audioGroup, let option = Self.option(audioTrack, "a", group) ?? group.defaultOption {
+            item.select(option, in: group)
+        }
+        if let group = textGroup {
+            item.select(Self.option(textTrack, "t", group), in: group)
+        }
+        guard let onTracks else { return }
+        var tracks: [PamMediaTrack] = []
+        for (prefix, type, group) in [("a", "audio", audioGroup), ("t", "text", textGroup)] {
+            guard let group else { continue }
+            let selected = item.currentMediaSelection.selectedMediaOption(in: group)
+            for (index, option) in group.options.enumerated() {
+                tracks.append(PamMediaTrack(
+                    id: "\(prefix):\(index)",
+                    type: type,
+                    language: option.extendedLanguageTag ?? option.locale?.identifier ?? "",
+                    label: option.displayName,
+                    selected: option == selected
+                ))
+            }
+        }
+        onTracks(tracks)
+    }
+
+    private static func option(_ id: String, _ prefix: String, _ group: AVMediaSelectionGroup) -> AVMediaSelectionOption? {
+        guard id.hasPrefix(prefix + ":"), let index = Int(id.dropFirst(prefix.count + 1)),
+              group.options.indices.contains(index) else { return nil }
+        return group.options[index]
     }
 
     func setIdleSurface(_ value: Bool) {
@@ -604,6 +677,7 @@ final class PamMediaView: UIView {
                 switch item.status {
                 case .readyToPlay:
                     self.failedSource = nil
+                    if self.audioGroup == nil, self.textGroup == nil { self.loadTracks(item) }
                     self.playbackRecoveries = 0
                     let resuming = !self.resumeSource.isEmpty && self.resumeSource == self.source
                     // A recycled view playing a source again resumes where it
@@ -1109,6 +1183,8 @@ final class PamMediaView: UIView {
 
     private func releasePlayer(restoresPoster: Bool = true) {
         cancelStartBuffer()
+        audioGroup = nil
+        textGroup = nil
         if photoVideoRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(photoVideoRequestId)
             photoVideoRequestId = PHInvalidImageRequestID

@@ -5584,6 +5584,8 @@ class PamRenderer(
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED ->
                 (view as? PamMediaView)?.setKeepAliveWhenCovered(value.flag())
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(value.flag())
+            PropKey.MEDIA_AUDIO_TRACK -> (view as? PamMediaView)?.setAudioTrack(value.text(key))
+            PropKey.MEDIA_TEXT_TRACK -> (view as? PamMediaView)?.setTextTrack(value.text(key))
             PropKey.MEDIA_AUTO_PLAY_VISIBLE ->
                 (view as? PamMediaView)?.setAutoPlayVisible(value.decimal().toFloat())
             PropKey.MEDIA_AUTO_PLAY_GROUP -> (view as? PamMediaView)?.setAutoPlayGroup(value.text(key))
@@ -6105,6 +6107,7 @@ class PamRenderer(
             PropKey.ON_MEDIA_ERROR,
             PropKey.ON_MEDIA_BUFFERING,
             PropKey.ON_MEDIA_LOAD_START,
+            PropKey.ON_MEDIA_TRACKS,
             PropKey.ON_DRAG_START,
             PropKey.ON_DRAG_END,
             PropKey.ON_DROP,
@@ -6659,6 +6662,8 @@ class PamRenderer(
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
             PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED -> (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
             PropKey.MEDIA_IDLE_SURFACE -> (view as? PamMediaView)?.setIdleSurface(false)
+            PropKey.MEDIA_AUDIO_TRACK -> (view as? PamMediaView)?.setAudioTrack("")
+            PropKey.MEDIA_TEXT_TRACK -> (view as? PamMediaView)?.setTextTrack("")
             PropKey.MEDIA_AUTO_PLAY_VISIBLE -> (view as? PamMediaView)?.setAutoPlayVisible(0f)
             PropKey.MEDIA_AUTO_PLAY_GROUP -> (view as? PamMediaView)?.setAutoPlayGroup("")
             PropKey.ON_ROUTE_COVERED,
@@ -7066,6 +7071,26 @@ class PamRenderer(
                                 "duration" to WireValue.Decimal(duration),
                             ),
                         ),
+                    )
+                }
+            } else null
+            view.onTracks = if (state.properties[PropKey.ON_MEDIA_TRACKS] != null) {
+                { tracks ->
+                    val list = org.json.JSONArray()
+                    tracks.forEach { track ->
+                        list.put(
+                            org.json.JSONObject()
+                                .put("id", track.id)
+                                .put("type", track.type)
+                                .put("language", track.language)
+                                .put("label", track.label)
+                                .put("selected", track.selected),
+                        )
+                    }
+                    dispatchBytes(
+                        state.id,
+                        EventKind.MEDIA_TRACKS.value,
+                        WireMap.encode(mapOf("tracks" to WireValue.Text(list.toString()))),
                     )
                 }
             } else null
@@ -13160,6 +13185,7 @@ class PamRenderer(
             PropKey.ON_MEDIA_ERROR,
             PropKey.ON_MEDIA_BUFFERING,
             PropKey.ON_MEDIA_LOAD_START,
+            PropKey.ON_MEDIA_TRACKS,
             PropKey.ON_DRAG_START,
             PropKey.ON_DRAG_END,
             PropKey.ON_DROP,

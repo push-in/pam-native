@@ -11,6 +11,9 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultDataSource
@@ -89,6 +92,15 @@ private const val EXO_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 5_000
  * Commands and release stay ordered on the owner; callbacks return to the UI.
  * Immutable snapshots let the UI read clocks without waiting for that looper.
  */
+/** One audio or text track of the source; [id] stays the same while the source does. */
+internal data class PamMediaTrack(
+    val id: String,
+    val type: String,
+    val language: String,
+    val label: String,
+    val selected: Boolean,
+)
+
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 internal class PamExoPlayback(
     context: Context,
@@ -104,6 +116,12 @@ internal class PamExoPlayback(
 
         /** [transient]: a network or rate-limit failure worth preparing again later; false for 4xx and bad media. */
         fun onError(message: String, transient: Boolean)
+
+        /** The audio and text tracks, again whenever they or their selection change. */
+        fun onTracks(tracks: List<PamMediaTrack>) = Unit
+
+        /** The subtitle lines to show now; empty clears them. */
+        fun onCues(text: String) = Unit
     }
 
     private data class Snapshot(
@@ -131,6 +149,9 @@ internal class PamExoPlayback(
     private var firstFrameRendered = false
     private var preparedAnnounced = false
     private val preparedFallback = Runnable { player?.let(::announcePrepared) }
+    // The app's track choice, applied again when the tracks change ("" = default audio, no subtitles).
+    private var audioChoice = ""
+    private var textChoice = ""
 
     private fun announcePrepared(current: ExoPlayer) {
         if (preparedAnnounced || released.get()) return
@@ -180,6 +201,10 @@ internal class PamExoPlayback(
                     )
                     .build()
                 player = current
+                // Subtitles stay off (and unparsed) until the app picks a text track.
+                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
                 current.addListener(object : Player.Listener {
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (released.get()) return
@@ -224,6 +249,22 @@ internal class PamExoPlayback(
                         if (videoSize.width > 0 && videoSize.height > 0) {
                             dispatch { listener.onVideoSize(videoSize.width, videoSize.height) }
                         }
+                    }
+
+                    override fun onTracksChanged(tracks: Tracks) {
+                        if (released.get()) return
+                        applyChoices(current)
+                        val list = describe(tracks)
+                        dispatch { listener.onTracks(list) }
+                    }
+
+                    override fun onCues(cueGroup: CueGroup) {
+                        val text = cueGroup.cues
+                            .mapNotNull { cue -> cue.text?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+                            // Segmented WebVTT repeats a cue that spans two segments.
+                            .distinct()
+                            .joinToString("\n")
+                        dispatch { listener.onCues(text) }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -271,6 +312,50 @@ internal class PamExoPlayback(
             speed = current.playbackParameters.speed,
             sampledAt = SystemClock.elapsedRealtime(),
         )
+    }
+
+    private fun describe(tracks: Tracks): List<PamMediaTrack> = buildList {
+        tracks.groups.forEachIndexed { index, group ->
+            val type = when (group.type) {
+                C.TRACK_TYPE_AUDIO -> "audio"
+                C.TRACK_TYPE_TEXT -> "text"
+                else -> return@forEachIndexed
+            }
+            for (track in 0 until group.length) {
+                if (!group.isTrackSupported(track)) continue
+                val format = group.getTrackFormat(track)
+                add(PamMediaTrack("$index:$track", type, format.language.orEmpty(), format.label.orEmpty(), group.isTrackSelected(track)))
+            }
+        }
+    }
+
+    private fun applyChoices(current: ExoPlayer) {
+        val groups = current.currentTracks.groups
+        fun override(id: String, type: Int): TrackSelectionOverride? {
+            val parts = id.split(':').mapNotNull(String::toIntOrNull)
+            if (parts.size != 2) return null
+            val group = groups.getOrNull(parts[0])?.takeIf { it.type == type && parts[1] in 0 until it.length } ?: return null
+            return TrackSelectionOverride(group.mediaTrackGroup, parts[1])
+        }
+        val audio = override(audioChoice, C.TRACK_TYPE_AUDIO)
+        val text = override(textChoice, C.TRACK_TYPE_TEXT)
+        val next = current.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, text == null)
+            .apply {
+                audio?.let { setOverrideForType(it) }
+                text?.let { setOverrideForType(it) }
+            }
+            .build()
+        if (next != current.trackSelectionParameters) current.trackSelectionParameters = next
+    }
+
+    /** [audio]/[text]: a [PamMediaTrack.id], or "" for the default audio and no subtitles. */
+    fun selectTracks(audio: String, text: String) = command {
+        audioChoice = audio
+        textChoice = text
+        applyChoices(it)
     }
 
     private fun setBuffering(value: Boolean) {

@@ -228,6 +228,39 @@ final class MediaPlayer extends Element
         return $this->withEvent(EventKind::MediaEnd, $handler);
     }
 
+    /**
+     * Plays the audio track with this id from onTracks(); "" keeps the
+     * source's default. Requires a renderer declaring property 1039.
+     */
+    public function audioTrack(string $id): self
+    {
+        return $this->withProperty(PropKey::MediaAudioTrack, $id);
+    }
+
+    /**
+     * Shows the subtitles of the text track with this id from onTracks(),
+     * drawn by the player over the video; "" (the default) shows none.
+     * Requires a renderer declaring property 1040.
+     */
+    public function textTrack(string $id): self
+    {
+        return $this->withProperty(PropKey::MediaTextTrack, $id);
+    }
+
+    /**
+     * The source's audio and text tracks, once known and again when they or
+     * the selection change. @param Closure(\Pam\Native\MediaTracksEvent): void $handler
+     */
+    public function onTracks(Closure $handler): self
+    {
+        return $this->withEvent(
+            EventKind::MediaTracks,
+            static fn (mixed $payload = ''): mixed => $handler(
+                \Pam\Native\MediaTracksEvent::fromPayload(is_string($payload) ? $payload : ''),
+            ),
+        );
+    }
+
     /** @param Closure(string): void $handler */
     public function onError(Closure $handler): self
     {

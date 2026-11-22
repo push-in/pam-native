@@ -86,5 +86,6 @@ final class EventProperties
         EventKind::RouteCovered->value => PropKey::OnRouteCovered->value,
         EventKind::RouteFocused->value => PropKey::OnRouteFocused->value,
         EventKind::KeyDown->value => PropKey::OnKeyDown->value,
+        EventKind::MediaTracks->value => PropKey::OnMediaTracks->value,
     ];
 }
