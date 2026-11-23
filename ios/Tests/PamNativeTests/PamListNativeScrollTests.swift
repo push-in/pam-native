@@ -138,8 +138,10 @@ final class PamListNativeScrollTests: XCTestCase {
         renderer.commit([mutations])
         list.layoutIfNeeded()
         XCTAssertEqual(list.contentOffset.y, -list.adjustedContentInset.top, accuracy: 0.5)
-        // The kept row moved down by the two new rows instead of staying put.
-        XCTAssertEqual(try XCTUnwrap(screenTop(list, 101)), 300, accuracy: 0.5)
+        // The kept row moved down by the two new rows instead of staying put
+        // (content coordinates; the window's safe area adds a top inset).
+        XCTAssertEqual(try XCTUnwrap(list.viewWithTag(101)).frame.minY, 300, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(screenTop(list, 101)), 300 + list.adjustedContentInset.top, accuracy: 0.5)
     }
 
     func testRowGrowingAboveTheFirstFullyVisibleRowAtRestMovesNothingShown() throws {
