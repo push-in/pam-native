@@ -217,6 +217,12 @@ are cached separately, while all expressions are parsed by PAM's restricted
 expression engine. Templates never use `eval` and cannot call global PHP
 functions.
 
+The cache directory is created only when a component compiles; a release
+bundle served by its prebuilt pack never writes it. A cache path that cannot be
+written (the read-only iOS app bundle) falls back to a per-build directory
+under `$HOME/Library/Caches/pam-native/components` (or `PAM_NATIVE_STATE_DIR`,
+or the system temporary directory).
+
 ## Single-file component
 
 ```php
