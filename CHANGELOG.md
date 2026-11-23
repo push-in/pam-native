@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.54.7 - 2026-11-23
+
+- Fixed: apps no longer crash at launch from a read-only bundle (iOS device:
+  "Cannot create PAM component cache"). The component cache is created only
+  when a component actually compiles; an unwritable cache path falls back to a
+  per-build directory under `$HOME/Library/Caches/pam-native/components` (else
+  `PAM_NATIVE_STATE_DIR`, else the system temp directory). The iOS simulator's
+  writable bundle hid this; every device launch of an app on 1.54.x hit it.
+
 ## 1.54.6 - 2026-11-22
 
 - `MediaPlayer` audio and subtitle tracks: `on:mediaTracks` (`onTracks()`,
