@@ -91,8 +91,11 @@ final class PamNativeTimeTests: XCTestCase {
             PamTimeBinding.clear(label)
             throw XCTSkip("host scene went to the background before the first tick")
         }
+        // It advanced past the start; a stalled CI simulator can deliver the
+        // first tick many seconds late (00:23 was seen), so no upper bound.
+        let shownSeconds = (label.text ?? "").split(separator: ":").compactMap { Int($0) }
         XCTAssertTrue(
-            ["00:06", "00:07", "00:08", "00:09", "00:10", "00:11"].contains(label.text ?? ""),
+            shownSeconds.count == 2 && shownSeconds[0] * 60 + shownSeconds[1] > 5,
             "clock stayed at \(label.text ?? "nil") (scene: \(pamSceneState(window)), "
                 + "ticking: \(label.pamTimeBinding?.isTicking == true), waiting: \(label.pamTimeBinding?.isWaiting == true))"
         )
