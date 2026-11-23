@@ -3594,7 +3594,11 @@ fn flex_shrink(node: &Node) -> f32 {
         // React Native's ScrollView style: `flexShrink: 1`, so a ScrollView
         // measured by its content never pushes its siblings out of a
         // bounded parent.
-        .unwrap_or(if node.kind == NodeKind::Scroll { 1.0 } else { 0.0 })
+        .unwrap_or(if node.kind == NodeKind::Scroll {
+            1.0
+        } else {
+            0.0
+        })
         .max(0.0)
 }
 
@@ -7414,16 +7418,34 @@ mod tests {
             ),
             (
                 4,
-                node(4, 3, 0, NodeKind::View, [(PropKey::Height, PropValue::Float(50.0))]),
+                node(
+                    4,
+                    3,
+                    0,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(50.0))],
+                ),
             ),
             (
                 5,
-                node(5, 3, 1, NodeKind::Scroll, [(PropKey::PaddingVertical, PropValue::Float(4.0))]),
+                node(
+                    5,
+                    3,
+                    1,
+                    NodeKind::Scroll,
+                    [(PropKey::PaddingVertical, PropValue::Float(4.0))],
+                ),
             ),
             (6, node(6, 5, 0, NodeKind::Column, [])),
             (
                 7,
-                node(7, 3, 2, NodeKind::View, [(PropKey::Height, PropValue::Float(60.0))]),
+                node(
+                    7,
+                    3,
+                    2,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(60.0))],
+                ),
             ),
         ]);
         for row in 0..rows {
@@ -7451,14 +7473,26 @@ mod tests {
         for presentation in [2, 3] {
             // Short content: the ScrollView is as tall as its rows.
             let short = calculate(&fitted_scroll_tree(presentation, 2), window).expect("short");
-            assert_eq!(short[&5].height, 208.0, "{presentation} scroll {:?}", short[&5]);
-            assert_eq!(short[&3].height, 20.0 + 50.0 + 208.0 + 60.0, "{presentation}");
+            assert_eq!(
+                short[&5].height, 208.0,
+                "{presentation} scroll {:?}",
+                short[&5]
+            );
+            assert_eq!(
+                short[&3].height,
+                20.0 + 50.0 + 208.0 + 60.0,
+                "{presentation}"
+            );
             assert_eq!(short[&7].y, short[&5].y + 208.0, "{presentation}");
             // Long content: the card stops at its max height, the ScrollView
             // takes what is left and the footer stays inside the card.
             let long = calculate(&fitted_scroll_tree(presentation, 20), window).expect("long");
             assert_eq!(long[&3].height, 600.0, "{presentation} card {:?}", long[&3]);
-            assert_eq!(long[&5].height, 600.0 - 20.0 - 50.0 - 60.0, "{presentation}");
+            assert_eq!(
+                long[&5].height,
+                600.0 - 20.0 - 50.0 - 60.0,
+                "{presentation}"
+            );
             assert_eq!(long[&6].height, 2000.0, "{presentation} content");
             assert_eq!(
                 long[&7].y + long[&7].height,
