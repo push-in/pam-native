@@ -1315,8 +1315,11 @@ public final class PamRenderer: @unchecked Sendable {
         // anchor row (a row that was on screen) at its pixel offset, also
         // mid-fling (Android RecyclerView + head-insert/rebind anchors).
         var keyAnchored = false
+        // A list opened at its start that the reader never scrolled keeps
+        // offset 0, like a React Native FlatList: anchoring a kept row there
+        // opened it scrolled past the rows that landed above (#290).
         if !list.pamInverted, list.pamInitialScrollIndexApplied, let anchor = listKeyAnchors[id],
-           !(anchor.atEnd && list.pamFollowEndOnResize) {
+           !(anchor.atEnd && list.pamFollowEndOnResize), !list.pamRestingAtUntouchedStart {
             var positions: [Int64: CGRect] = [:]
             positions.reserveCapacity(localFrames.count)
             for entry in localFrames { positions[entry.0] = entry.1 }
@@ -3819,6 +3822,7 @@ public final class PamRenderer: @unchecked Sendable {
                 if list.pamInitialScrollIndex != index || !list.pamInitialScrollIndexApplied {
                     list.pamInitialScrollIndex = index
                     list.pamInitialScrollIndexApplied = false
+                    list.pamScrollMoved = false
                 }
             }
         case PamConstants.listPrefetch:
@@ -8071,6 +8075,7 @@ public final class PamRenderer: @unchecked Sendable {
             if let list = scrollView as? PamVirtualListView {
                 scrollGestureStart = list.horizontal ? list.contentOffset.x : list.contentOffset.y
                 list.pamFlingTarget = nil
+                list.pamScrollMoved = true
             }
             guard let scroll = scrollView as? PamAnchoredScrollView else { return }
             scrollGestureStart = scroll.horizontal

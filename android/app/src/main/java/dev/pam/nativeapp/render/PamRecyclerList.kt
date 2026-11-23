@@ -383,14 +383,20 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         if (appended || prepended) {
             (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp(start = prepended, end = appended)
         }
-        val headAnchor = headInsertAnchorCapture(richIds, ids)
-        val idAnchor = if (headAnchor == null && ids != richIds) firstVisibleKeptAnchor(ids) else null
+        // A list opened at its start that the reader never scrolled stays at
+        // offset 0 when rows land above or next to its first rows (the API
+        // page after a cached one) or re-measure, like a React Native
+        // FlatList: anchoring a kept row there opened the list ~70 dp down
+        // with its first header hidden (#290).
+        val keepStart = (ids != richIds || pixelExtents != richExtents) && restingAtUntouchedStart()
+        val headAnchor = if (keepStart) null else headInsertAnchorCapture(richIds, ids)
+        val idAnchor = if (!keepStart && headAnchor == null && ids != richIds) firstVisibleKeptAnchor(ids) else null
         // Rows re-measured at rest (media, a preview or reactions arriving):
         // RecyclerView keeps the partly hidden top row's top, so a height
         // change there pushed every visible row. The first fully visible row
         // keeps its pixel offset instead; a list resting at its end keeps
         // following the end.
-        val resizeAnchor = if (headAnchor == null && !keepEnd && ids == richIds && pixelExtents != richExtents) {
+        val resizeAnchor = if (!keepStart && headAnchor == null && !keepEnd && ids == richIds && pixelExtents != richExtents) {
             firstFullyVisibleAnchor()
         } else {
             null
@@ -432,6 +438,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         configureAdapter()
         updateHeaderSpans()
         applyInitialPosition()
+        // RecyclerView's own anchor keeps the old first row where it was,
+        // pushing rows inserted before it out of view.
+        if (keepStart && ids.isNotEmpty()) (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(0, 0)
         headAnchor?.let(::restoreHeadInsertAnchor)
         resizeAnchor?.let(::restoreHeadInsertAnchor)
         if (sectionSwitch != null && sectionRestore != null) enterSection(sectionSwitch, sectionRestore)
@@ -453,6 +462,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
         val view = manager.findViewByPosition(previous.indexOf(id)) ?: return null
         return id to (if (horizontal) view.left - paddingLeft else view.top - paddingTop)
     }
+
+    /**
+     * Opened at its start (no initial index), never scrolled since, and
+     * resting at offset 0: rows that land or re-measure keep it there.
+     */
+    private fun restingAtUntouchedStart(): Boolean =
+        !inverted && initialPositionApplied && isLaidOut && initialIndex == 0 && !scrollMoved &&
+            !isUserScrolling() && richIds.isNotEmpty() && !canScrollTowardStart()
 
     /** (row id, top px) of the first visible row that [next] keeps. */
     private fun firstVisibleKeptAnchor(next: List<Long>): Pair<Long, Int>? {
