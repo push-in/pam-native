@@ -214,6 +214,32 @@ try {
             && $iconProperties[PropKey::TextAllowFontScaling->value] === false,
         'Icon must render its glyph with the icon font, size and CSS color.',
     );
+    // #291: text styles inherited from a container never replace the icon
+    // face; explicit size/color win, the rest still inherits.
+    $iconCss = '@font-face { font-family: "Geist"; src: url("asset://fonts/Geist-Regular.ttf"); }'
+        .' .screen { font-family: "Geist"; font-size: 30px; font-weight: 700; font-style: italic; color: #FF0000; }';
+    $inheritedIcons = $typographyRender(
+        '<View class="screen"><Icon name="heart" size="22" color="#FFFFFF" /><Icon name="heart" /></View>',
+        $iconCss,
+    );
+    [$explicitIcon, $bareIcon] = array_map(
+        static fn (\Pam\Native\Element $child): array => $child->properties(),
+        $inheritedIcons->children(),
+    );
+    $assert(
+        $explicitIcon[PropKey::FontFamily->value] === 'asset://assets/fonts/Ionicons.ttf'
+            && (float) $explicitIcon[PropKey::FontSize->value] === 22.0
+            && $explicitIcon[PropKey::TextColor->value] === 0xFFFFFFFF
+            && !isset($explicitIcon[PropKey::FontWeight->value])
+            && !isset($explicitIcon[PropKey::FontStyle->value]),
+        'An inherited font-family/size/color/weight must not override the Icon\'s own props: '.json_encode($explicitIcon),
+    );
+    $assert(
+        $bareIcon[PropKey::FontFamily->value] === 'asset://assets/fonts/Ionicons.ttf'
+            && (float) $bareIcon[PropKey::FontSize->value] === 30.0
+            && $bareIcon[PropKey::TextColor->value] === 0xFFFF0000,
+        'An Icon without size/color still inherits them, but never the font face: '.json_encode($bareIcon),
+    );
     $assert(\Pam\Native\UI\Icon::make('missing')->properties()[PropKey::Text->value] === '?', 'Unknown glyphs render "?" like React Native.');
     \Pam\Native\UI\Icon::register('Brand', 'asset://assets/fonts/Brand.ttf', ['logo' => 0xE001]);
     $assert(\Pam\Native\UI\Icon::has('logo', 'Brand') && !\Pam\Native\UI\Icon::has('heart', 'Brand'), 'Registered icon fonts use their own glyph maps.');

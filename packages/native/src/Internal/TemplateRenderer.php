@@ -1668,7 +1668,12 @@ final class TemplateRenderer
             self::$dynamicStyles = false;
             $styleDescriptor = self::styleNodeDescriptor($tag, $resolvedClass, $attributes, $scope, $data);
             $attributes = [
-                ...self::styleAttributes($inheritedStyles, 'inherited styles'),
+                ...self::styleAttributes(
+                    $factory === null && $tag === 'Icon'
+                        ? self::iconInheritedStyles($inheritedStyles, $attributes)
+                        : $inheritedStyles,
+                    'inherited styles',
+                ),
                 ...self::scopedStyleAttributes(
                     $tag,
                     $resolvedClass,
@@ -7722,6 +7727,27 @@ final class TemplateRenderer
      * @param array<string, mixed> $authored the call site's own attributes
      * @return array<string, mixed>
      */
+    /**
+     * Text styles an Icon takes from its container: never the face (family,
+     * weight, style: the icon font is the node's own), and never a size or
+     * color the Icon sets itself. Inheritance only fills what is unset.
+     *
+     * @param array<string, mixed> $inherited
+     * @param array<string, mixed> $attributes
+     * @return array<string, mixed>
+     */
+    private static function iconInheritedStyles(array $inherited, array $attributes): array
+    {
+        unset($inherited['fontFamily'], $inherited['fontWeight'], $inherited['fontStyle']);
+        foreach (['size' => 'fontSize', 'color' => 'textColor'] as $attribute => $style) {
+            if (array_key_exists($attribute, $attributes) || array_key_exists(':'.$attribute, $attributes)) {
+                unset($inherited[$style]);
+            }
+        }
+
+        return $inherited;
+    }
+
     private static function componentRootValues(string $tag, array $values, array $data, array $authored): array
     {
         $values = self::rootValues($tag, $values);
