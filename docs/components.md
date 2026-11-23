@@ -869,6 +869,12 @@ branches render any number of children safely:
 </ScrollView>
 ```
 
+Without a height or `flex`, a vertical `ScrollView` is as tall as its
+content and shrinks (`flexShrink: 1` by default, like React Native) to the
+space its parent has left: in a sheet or dialog that fits its content it ends
+up `min(content, available)`, so a footer below it stays visible. Give it
+`flex: 1` to fill the remaining space instead.
+
 The explicit PHP API remains intentionally lower-level:
 `Scroll::make($content)` receives exactly one content element. Use a `Row` or
 `Column` yourself when authoring an imperative element tree.
