@@ -31,6 +31,13 @@ without one, it is the directory of the entry script. To use other paths,
 call `App::components($path, $cache)` before `App::run()`. That explicit call
 turns the convention off.
 
+The cache directory is created only when a component has to compile. A staged
+release bundle boots from its prebuilt component pack and writes nothing there.
+When the cache path is not writable (an iOS app runs its PHP from the signed,
+read-only bundle), components that do compile go to a per-build directory under
+`$HOME/Library/Caches/pam-native/components`, else under `PAM_NATIVE_STATE_DIR`,
+else under `sys_get_temp_dir()`. Apps do not need to pick a cache path for iOS.
+
 ```php
 use Pam\Native\App;
 use function Pam\Native\{useColorScheme, useSafeAreaInsets, useNetwork};

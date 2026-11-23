@@ -63,16 +63,11 @@ final class PamPhpCompiler
         if (str_contains($cachePath, "\0")) {
             throw new RuntimeException('PAM component cache path is invalid.');
         }
-        if (
-            !is_dir($cachePath)
-            && !mkdir($cachePath, 0o755, true)
-            && !is_dir($cachePath)
-        ) {
-            throw new RuntimeException(
-                "Cannot create PAM component cache {$cachePath}.",
-            );
-        }
 
+        // The cache directory is resolved (and created) only when a component
+        // actually compiles: a bundle whose prebuilt pack serves every
+        // component never touches it, which an iOS app bundle (read-only on
+        // a device) depends on. See cacheDirectory().
         $bundled = self::bundledComponents($sourceRoot, $cachePath);
         if ($bundled !== null) {
             return $bundled;
@@ -117,6 +112,7 @@ final class PamPhpCompiler
         self::$dependencyFingerprints = [];
         self::$appStylePaths = [];
         self::$themePaths = [];
+        self::$cacheDirectories = [];
         self::$directoryPass = true;
         try {
             return array_map(
@@ -128,6 +124,7 @@ final class PamPhpCompiler
             self::$dependencyFingerprints = [];
             self::$appStylePaths = [];
             self::$themePaths = [];
+            self::$cacheDirectories = [];
             self::$directoryPass = false;
         }
     }
@@ -184,6 +181,7 @@ final class PamPhpCompiler
         self::$dependencyFingerprints = [];
         self::$appStylePaths = [];
         self::$themePaths = [];
+        self::$cacheDirectories = [];
         self::$directoryPass = true;
         try {
             return array_map(
@@ -195,8 +193,82 @@ final class PamPhpCompiler
             self::$dependencyFingerprints = [];
             self::$appStylePaths = [];
             self::$themePaths = [];
+            self::$cacheDirectories = [];
             self::$directoryPass = false;
         }
+    }
+
+    /** @var array<string, string> resolved cache directory per requested one, within one directory pass */
+    private static array $cacheDirectories = [];
+
+    /**
+     * Where components that must compile on this device are written:
+     * $cachePath when it is (or can be made) a writable directory; otherwise
+     * (an iOS app runs its PHP from the signed bundle, read-only on a device)
+     * a directory of its own under the app's caches, see fallbackCacheDirectory().
+     */
+    private static function cacheDirectory(string $cachePath): string
+    {
+        if (self::$directoryPass && isset(self::$cacheDirectories[$cachePath])) {
+            return self::$cacheDirectories[$cachePath];
+        }
+        if (!is_dir($cachePath)) {
+            @mkdir($cachePath, 0o755, true);
+        }
+        $directory = is_dir($cachePath) && is_writable($cachePath)
+            ? $cachePath
+            : self::fallbackCacheDirectory($cachePath);
+        if (self::$directoryPass) {
+            self::$cacheDirectories[$cachePath] = $directory;
+        }
+
+        return $directory;
+    }
+
+    /**
+     * A writable stand-in for a cache path inside a read-only bundle:
+     * `$HOME/Library/Caches/pam-native/components/<id>` on iOS (and macOS),
+     * else under PAM_NATIVE_STATE_DIR, else under sys_get_temp_dir(). The id
+     * hashes the requested path (an iOS update installs the bundle at a new
+     * path) and the bundle's content digest (manifest.sha256), so builds never
+     * share compiled files. On a device (PAM_NATIVE_STATE_DIR set: the
+     * directory belongs to this app alone) the first use of an id drops the
+     * directories of earlier builds.
+     */
+    private static function fallbackCacheDirectory(string $cachePath): string
+    {
+        $home = getenv('HOME');
+        $state = getenv('PAM_NATIVE_STATE_DIR');
+        if (!is_string($state) || $state === '' || str_contains($state, "\0")) {
+            $state = null;
+        }
+        $caches = is_string($home) && $home !== '' && !str_contains($home, "\0")
+            ? $home.DIRECTORY_SEPARATOR.'Library'.DIRECTORY_SEPARATOR.'Caches'
+            : null;
+        $base = $caches !== null && is_dir($caches) ? $caches : ($state ?? sys_get_temp_dir());
+        $root = rtrim($base, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'pam-native'
+            .DIRECTORY_SEPARATOR.'components';
+        $projectRoot = self::projectRoot($cachePath);
+        $manifest = $projectRoot === null
+            ? false
+            : @file_get_contents($projectRoot.DIRECTORY_SEPARATOR.self::BUNDLE_MANIFEST, false, null, 0, 128);
+        $directory = $root.DIRECTORY_SEPARATOR
+            .hash('xxh128', $cachePath."\0".(is_string($manifest) ? trim($manifest) : ''));
+        if (is_dir($directory)) {
+            return $directory;
+        }
+        if ($state !== null) {
+            foreach (glob($root.DIRECTORY_SEPARATOR.'*', GLOB_ONLYDIR) ?: [] as $stale) {
+                self::removeTree($stale);
+            }
+        }
+        if (!@mkdir($directory, 0o755, true) && !is_dir($directory)) {
+            throw new RuntimeException(
+                "Cannot create PAM component cache {$cachePath} nor its fallback {$directory}.",
+            );
+        }
+
+        return $directory;
     }
 
     /** Written by the CLI at the root of every staged application bundle. */
@@ -248,13 +320,6 @@ final class PamPhpCompiler
             );
         }
 
-        $cacheKey = hash('sha256', $source);
-        $classFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
-            .DIRECTORY_SEPARATOR.$cacheKey.'.class.php';
-        $templateFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
-            .DIRECTORY_SEPARATOR.$cacheKey.'.template.json';
-        $metadataFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
-            .DIRECTORY_SEPARATOR.$cacheKey.'.json';
         $sourceFingerprint = hash('xxh128', $contents);
 
         // Components compiled into the application bundle at build time
@@ -263,6 +328,12 @@ final class PamPhpCompiler
         if ($prebuilt !== null) {
             return $prebuilt;
         }
+
+        $cacheDirectory = rtrim(self::cacheDirectory($cachePath), DIRECTORY_SEPARATOR);
+        $cacheKey = hash('sha256', $source);
+        $classFile = $cacheDirectory.DIRECTORY_SEPARATOR.$cacheKey.'.class.php';
+        $templateFile = $cacheDirectory.DIRECTORY_SEPARATOR.$cacheKey.'.template.json';
+        $metadataFile = $cacheDirectory.DIRECTORY_SEPARATOR.$cacheKey.'.json';
 
         // Boot fast path: an unchanged source (and unchanged stylesheets it
         // pulled in) reuses its compiled identity without tokenizing the
