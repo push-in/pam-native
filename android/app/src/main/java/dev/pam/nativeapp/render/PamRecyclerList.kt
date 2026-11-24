@@ -86,6 +86,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
     private var touchDownX = 0f
     private var touchDownY = 0f
     private var touchMoved = false
+    private var interceptPointerId = MotionEvent.INVALID_POINTER_ID
+    private var interceptDownX = 0f
+    private var interceptDownY = 0f
+    private var crossAxisDrag = false
     private var viewportChanged: ((Float, Int, Int, Int) -> Unit)? = null
     private var scrollPhase: ((Int, Float, Float, Float, Float) -> Unit)? = null
     private var pagerSnap: PagerSnapHelper? = null
@@ -1351,6 +1355,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = event.x
                 touchDownY = event.y
+                interceptPointerId = event.getPointerId(0)
+                interceptDownX = event.x
+                interceptDownY = event.y
+                crossAxisDrag = false
                 // PamScrollContainer intentionally uses the platform
                 // ScrollView for native parity. It is not a
                 // NestedScrollingParent, so an overflowing RecyclerView must
@@ -1360,11 +1368,22 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
                 PamGestureArbiter.claimForScrollAncestor(this, canConsumeScrollGesture())
             }
             MotionEvent.ACTION_MOVE -> {
-                val delta = if (horizontal) {
-                    event.x - touchDownX
-                } else {
-                    event.y - touchDownY
+                val pointerIndex = event.findPointerIndex(interceptPointerId)
+                if (pointerIndex < 0) return false
+                val dx = event.getX(pointerIndex) - interceptDownX
+                val dy = event.getY(pointerIndex) - interceptDownY
+                val delta = if (horizontal) dx else dy
+                val crossDelta = if (horizontal) dy else dx
+                // RecyclerView checks only its own axis. A diagonal MOVE can
+                // cross both slops before a nested horizontal strip receives
+                // it, so the list must yield when the other axis dominates.
+                // Keep that decision for the gesture, including at strip edges.
+                if (scrollState != SCROLL_STATE_DRAGGING &&
+                    abs(crossDelta) > touchSlop && abs(crossDelta) > abs(delta)
+                ) {
+                    crossAxisDrag = true
                 }
+                if (crossAxisDrag) return false
                 val direction = if (delta < 0f) 1 else -1
                 val canScroll = canScrollInDirection(direction)
                 // At its boundary the list hands the drag to an outer scroll
@@ -1377,8 +1396,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context), PamDra
                     return false
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val index = event.actionIndex
+                interceptPointerId = event.getPointerId(index)
+                interceptDownX = event.getX(index)
+                interceptDownY = event.getY(index)
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                val index = event.actionIndex
+                if (event.getPointerId(index) == interceptPointerId) {
+                    val replacement = if (index == 0) 1 else 0
+                    interceptPointerId = event.getPointerId(replacement)
+                    interceptDownX = event.getX(replacement)
+                    interceptDownY = event.getY(replacement)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                interceptPointerId = MotionEvent.INVALID_POINTER_ID
+                crossAxisDrag = false
                 parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
         return super.onInterceptTouchEvent(event)
     }
