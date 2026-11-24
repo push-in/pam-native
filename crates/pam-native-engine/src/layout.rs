@@ -2600,6 +2600,13 @@ fn intrinsic_extent(
     let horizontal_scroll_height = node.kind == NodeKind::Scroll
         && boolean(node, PropKey::ScrollHorizontal)
         && requested_axis == Axis::Vertical;
+    // Yoga sizes a ScrollView by its content along the scrolling axis; its
+    // default `flexShrink: 1` then fits it to the space left. A fixed list
+    // placeholder made a ScrollView in a fitted sheet or dialog ~240 dp tall
+    // whatever its content (#292).
+    let vertical_scroll_height = node.kind == NodeKind::Scroll
+        && !boolean(node, PropKey::ScrollHorizontal)
+        && requested_axis == Axis::Vertical;
     if node_children.is_empty() && percent_sized_placeholder(node, requested_axis) {
         // Yoga: a percentage of an indefinite (content-measured) parent
         // resolves to auto, and an image or empty view has no measure
@@ -2634,7 +2641,9 @@ fn intrinsic_extent(
         };
         return finite_non_negative(extent);
     }
-    if node_children.is_empty() || (!content_sized(node) && !horizontal_scroll_height) {
+    if node_children.is_empty()
+        || (!content_sized(node) && !horizontal_scroll_height && !vertical_scroll_height)
+    {
         return finite_non_negative(leaf_intrinsic(
             node,
             requested_axis,
@@ -2682,6 +2691,22 @@ fn intrinsic_extent(
     );
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
+    if vertical_scroll_height {
+        let mut height = 0.0_f32;
+        for child in node_children {
+            height = height.max(natural_scroll_extent(
+                children,
+                child,
+                Axis::Vertical,
+                inner_height,
+                inner_width,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?);
+        }
+        return finite_non_negative(height + padding_top + padding_bottom);
+    }
     if horizontal_scroll_height {
         // Measure at the same natural content width used by layout_node, not
         // the viewport width: scrolling content must not wrap to fit the view.
@@ -3566,7 +3591,14 @@ fn flex_grow(node: &Node) -> f32 {
 fn flex_shrink(node: &Node) -> f32 {
     number(node, PropKey::FlexShrink)
         .filter(|value| value.is_finite())
-        .unwrap_or(0.0)
+        // React Native's ScrollView style: `flexShrink: 1`, so a ScrollView
+        // measured by its content never pushes its siblings out of a
+        // bounded parent.
+        .unwrap_or(if node.kind == NodeKind::Scroll {
+            1.0
+        } else {
+            0.0
+        })
         .max(0.0)
 }
 
@@ -7348,6 +7380,127 @@ mod tests {
         assert_eq!(layouts[&4].height, 24.0);
         assert_eq!(layouts[&5].height, 24.0);
         assert!(layouts.values().all(|frame| frame.height <= 640.0));
+    }
+
+    /// #292: a fitted sheet or dialog holding header, ScrollView and footer.
+    /// The ScrollView is min(content, space left), like React Native's
+    /// `flexGrow: 0` ScrollView, instead of a fixed placeholder height.
+    fn fitted_scroll_tree(presentation: i64, rows: u64) -> Tree {
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Column, [])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Modal,
+                    [
+                        (PropKey::ModalPresentation, PropValue::Integer(presentation)),
+                        // No snap points: the sheet fits its content.
+                        (PropKey::BottomSheetSnapPoints, PropValue::Bytes(vec![0, 0])),
+                    ],
+                ),
+            ),
+            (
+                3,
+                node(
+                    3,
+                    2,
+                    0,
+                    NodeKind::Column,
+                    [
+                        (PropKey::Width, PropValue::Float(300.0)),
+                        (PropKey::MaxHeight, PropValue::Float(600.0)),
+                        (PropKey::Padding, PropValue::Float(10.0)),
+                    ],
+                ),
+            ),
+            (
+                4,
+                node(
+                    4,
+                    3,
+                    0,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(50.0))],
+                ),
+            ),
+            (
+                5,
+                node(
+                    5,
+                    3,
+                    1,
+                    NodeKind::Scroll,
+                    [(PropKey::PaddingVertical, PropValue::Float(4.0))],
+                ),
+            ),
+            (6, node(6, 5, 0, NodeKind::Column, [])),
+            (
+                7,
+                node(
+                    7,
+                    3,
+                    2,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(60.0))],
+                ),
+            ),
+        ]);
+        for row in 0..rows {
+            let id = 100 + row;
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    6,
+                    row as u32,
+                    NodeKind::View,
+                    [(PropKey::Height, PropValue::Float(100.0))],
+                ),
+            );
+        }
+        Tree { root: 1, nodes }
+    }
+
+    #[test]
+    fn scroll_in_a_fitted_sheet_or_dialog_is_min_of_content_and_space() {
+        let window = Size {
+            width: 360.0,
+            height: 800.0,
+        };
+        for presentation in [2, 3] {
+            // Short content: the ScrollView is as tall as its rows.
+            let short = calculate(&fitted_scroll_tree(presentation, 2), window).expect("short");
+            assert_eq!(
+                short[&5].height, 208.0,
+                "{presentation} scroll {:?}",
+                short[&5]
+            );
+            assert_eq!(
+                short[&3].height,
+                20.0 + 50.0 + 208.0 + 60.0,
+                "{presentation}"
+            );
+            assert_eq!(short[&7].y, short[&5].y + 208.0, "{presentation}");
+            // Long content: the card stops at its max height, the ScrollView
+            // takes what is left and the footer stays inside the card.
+            let long = calculate(&fitted_scroll_tree(presentation, 20), window).expect("long");
+            assert_eq!(long[&3].height, 600.0, "{presentation} card {:?}", long[&3]);
+            assert_eq!(
+                long[&5].height,
+                600.0 - 20.0 - 50.0 - 60.0,
+                "{presentation}"
+            );
+            assert_eq!(long[&6].height, 2000.0, "{presentation} content");
+            assert_eq!(
+                long[&7].y + long[&7].height,
+                long[&3].y + 600.0 - 10.0,
+                "{presentation} footer {:?}",
+                long[&7]
+            );
+        }
     }
 
     #[test]

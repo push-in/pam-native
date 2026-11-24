@@ -889,6 +889,19 @@ final class PamVirtualListView: PamContentScrollView {
     /// `followEndOnResize` (extension property 1001), on by default.
     var pamFollowEndOnResize = true
     var pamInitialScrollIndexApplied = false
+    /// Dragged by the reader since it opened (Android `scrollMoved`). Until then a list opened at its start stays
+    /// there when rows land or re-measure (#290).
+    var pamScrollMoved = false
+
+    /// Opened at its start, never scrolled since and resting at offset 0
+    /// (Android `restingAtUntouchedStart`).
+    var pamRestingAtUntouchedStart: Bool {
+        guard !pamInverted, pamInitialScrollIndexApplied, pamInitialScrollIndex == 0, !pamScrollMoved,
+              !isTracking, !isDragging, !isDecelerating else { return false }
+        return horizontal
+            ? contentOffset.x <= -adjustedContentInset.left + 0.5
+            : contentOffset.y <= -adjustedContentInset.top + 0.5
+    }
 
     /// RN `windowSize`-like item prefetch (`ListPrefetch`): minimum number of
     /// items kept mounted beyond the viewport on each side. The windowing

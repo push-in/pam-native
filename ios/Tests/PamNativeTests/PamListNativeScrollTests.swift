@@ -108,6 +108,9 @@ final class PamListNativeScrollTests: XCTestCase {
         let ids = (0..<30).map { Int64(100 + $0) }
         let (renderer, list) = try renderList(ids: ids)
         defer { renderer.close() }
+        // The reader scrolled back to the top (a list never scrolled since it
+        // opened at its start keeps offset 0 instead, #290).
+        list.pamScrollMoved = true
         let before = try XCTUnwrap(screenTop(list, 101))
         let older = [Int64(600), 601, 602]
         var mutations: [Mutation] = older.enumerated().map { index, id in
@@ -118,6 +121,27 @@ final class PamListNativeScrollTests: XCTestCase {
         list.layoutIfNeeded()
         XCTAssertEqual(try XCTUnwrap(screenTop(list, 101)), before, accuracy: 0.5,
                        "the content under the header does not move")
+    }
+
+    /// #290: rows landing right under the first row of a list that opened at
+    /// its start and was never scrolled show from the top (offset 0), like
+    /// a React Native FlatList, instead of pushing the list down.
+    func testHeadInsertInAListNeverScrolledKeepsOffsetZero() throws {
+        let ids = (0..<30).map { Int64(100 + $0) }
+        let (renderer, list) = try renderList(ids: ids)
+        defer { renderer.close() }
+        let fresh = [Int64(600), 601]
+        var mutations: [Mutation] = fresh.enumerated().map { index, id in
+            .create(NodeSpec(id: id, parent: 2, index: index + 1, kind: .view, properties: [:]))
+        }
+        mutations += relayout([ids[0]] + fresh + Array(ids.dropFirst()))
+        renderer.commit([mutations])
+        list.layoutIfNeeded()
+        XCTAssertEqual(list.contentOffset.y, -list.adjustedContentInset.top, accuracy: 0.5)
+        // The kept row moved down by the two new rows instead of staying put
+        // (content coordinates; the window's safe area adds a top inset).
+        XCTAssertEqual(try XCTUnwrap(list.viewWithTag(101)).frame.minY, 300, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(screenTop(list, 101)), 300 + list.adjustedContentInset.top, accuracy: 0.5)
     }
 
     func testRowGrowingAboveTheFirstFullyVisibleRowAtRestMovesNothingShown() throws {

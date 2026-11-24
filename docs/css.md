@@ -220,7 +220,10 @@ scrubbed to the CSS radius; its color functions log a diagnostic.
 
 Text properties (`color`, font, `line-height`, `letter-spacing`,
 `text-align`, `text-transform`, `font-feature-settings`, `text-shadow`) inherit
-through containers, like CSS.
+through containers, like CSS. Inheritance only fills what the node leaves
+unset: an `<Icon>` keeps its icon font (an inherited `font-family`,
+`font-weight` or `font-style` never applies to it) and its own `size` and
+`color`; without those props it still inherits the font size and color.
 
 ## Units and functions
 

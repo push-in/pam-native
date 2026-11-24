@@ -198,6 +198,9 @@ class PamListNativeScrollInstrumentedTest {
             instrumentation.waitForIdleSync()
             awaitFrames(instrumentation, 3)
             onMain(instrumentation) {
+                // The reader scrolled there (a list never scrolled since it
+                // opened at its start keeps offset 0 instead, #290).
+                list.scrollBy(0, 1)
                 val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
                 manager.scrollToPositionWithOffset(scrollTo.first, scrollTo.second)
             }

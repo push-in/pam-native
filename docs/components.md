@@ -875,6 +875,12 @@ branches render any number of children safely:
 </ScrollView>
 ```
 
+Without a height or `flex`, a vertical `ScrollView` is as tall as its
+content and shrinks (`flexShrink: 1` by default, like React Native) to the
+space its parent has left: in a sheet or dialog that fits its content it ends
+up `min(content, available)`, so a footer below it stays visible. Give it
+`flex: 1` to fill the remaining space instead.
+
 The explicit PHP API remains intentionally lower-level:
 `Scroll::make($content)` receives exactly one content element. Use a `Row` or
 `Column` yourself when authoring an imperative element tree.
@@ -938,8 +944,12 @@ scrolls natively; no app code is needed for these (Android and iOS):
   preview or reactions arriving) keeps the first fully visible row at its
   offset, even when the partly hidden top row grew (RecyclerView kept that
   row's top and pushed every row on screen); a list resting at its end with
-  `followEndOnResize` keeps following the end. Windowing code must not
-  "anchor" with a scroll request.
+  `followEndOnResize` keeps following the end. A list opened at its start
+  (no `initialScrollIndex`) that the reader has not scrolled yet stays at
+  offset 0 instead, like a React Native FlatList: rows landing above or
+  right under its first rows (the API page after a cached one) or
+  re-measuring show from the top. Windowing code must not "anchor" with a
+  scroll request.
 - **The user's gesture wins.** A `scrollRequest` committed while the user's
   own drag or fling moves the list is dropped, so it neither cuts the fling
   nor snaps the list once it settles. The exception is a request the user
