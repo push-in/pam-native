@@ -141,7 +141,8 @@ releases dropped the link. After that, a memoized parent reused its stale
 element and the child's next changes never reached the screen.
 
 Fields written outside handlers (hooks, timers, callbacks) count as the
-component's own inputs. Fields `render()` never reads can opt out with
+component's own inputs. Disposable handles (timers, subscriptions, players)
+count only by presence, and fields `render()` never reads can opt out with
 `#[Transient]` (see
 [component runtime](component-runtime.md#state-snapshot-and-transient-fields)).
 `Pam\Native\Internal\GranularRender::enabled(false)` turns it off (every

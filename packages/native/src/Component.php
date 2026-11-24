@@ -628,14 +628,15 @@ abstract class Component implements Renderable
     /** @internal True when own properties changed since the last real render. */
     /**
      * @internal True when every property a subclass declares holds scalars,
-     * arrays of them or enums: the state snapshot then compares exactly
+     * arrays of them, enums or Disposable handles (compared by presence): the
+     * state snapshot then compares exactly
      * (see Internal\HandlerPurity).
      */
     final public function __pamPlainState(): bool
     {
         $skipped = self::$pamSnapshotSkipped[static::class] ??= self::pamSnapshotSkippedKeys(static::class);
         foreach ((array) $this as $key => $value) {
-            if (str_starts_with($key, "\0".self::class."\0") || isset($skipped[$key])) {
+            if (str_starts_with($key, "\0".self::class."\0") || isset($skipped[$key]) || self::pamIsHandle($value)) {
                 continue;
             }
             if ((is_object($value) || is_array($value)) && !Internal\HandlerPurity::plainValue($value)) {
@@ -707,7 +708,8 @@ abstract class Component implements Renderable
     /**
      * Shallow copy of every property (public, protected and private, including
      * subclasses) except render bookkeeping and #[Transient] properties.
-     * Arrays compare by value and objects by identity.
+     * Arrays compare by value and objects by identity; Disposable handles
+     * count only by presence (see pamHandle()).
      *
      * @return array<string, mixed>
      */
@@ -733,9 +735,10 @@ abstract class Component implements Renderable
                 && !$value instanceof \UnitEnum
                 && !$value instanceof Element
                 && !$value instanceof ComponentState
-                && !$value instanceof Disposable
             ) {
-                $values[$key] = [$value, self::pamExpandObjects((array) $value, 1)];
+                $values[$key] = $value instanceof Disposable
+                    ? self::pamHandle($value)
+                    : [$value, self::pamExpandObjects((array) $value, 1)];
             }
         }
 
@@ -849,7 +852,8 @@ abstract class Component implements Renderable
      * Plain objects held by a component (services, view models, records) are
      * captured with their own properties, two levels deep, so in-place
      * mutations such as `$this->model->draft = ...` are detected. Components
-     * track themselves; closures, enums and elements compare by identity.
+     * track themselves; closures, enums and elements compare by identity;
+     * Disposable handles count only by presence (see pamHandle()).
      *
      * @param array<array-key, mixed> $values
      * @return array<array-key, mixed>
@@ -863,16 +867,37 @@ abstract class Component implements Renderable
                 && !$value instanceof Closure
                 && !$value instanceof \UnitEnum
                 && !$value instanceof Element
-                && !$value instanceof Disposable
             ) {
-                $values[$key] = [
-                    $value,
-                    $depth < 1 ? self::pamExpandObjects((array) $value, $depth + 1) : (array) $value,
-                ];
+                $values[$key] = $value instanceof Disposable
+                    ? self::pamHandle($value)
+                    : [
+                        $value,
+                        $depth < 1 ? self::pamExpandObjects((array) $value, $depth + 1) : (array) $value,
+                    ];
             }
         }
 
         return $values;
+    }
+
+    /**
+     * Snapshot value of a Disposable handle (component timer, subscription,
+     * debouncer, throttler, watcher, media player): its class only. Neither
+     * the handle's own state (a tick, a timer firing, being disposed) nor
+     * swapping it for another handle of the same class renders the component;
+     * setting the field to or from null still does, so `$this->timer !== null`
+     * in a template stays correct. Reactive objects that are also Disposable
+     * (Resource) hold template data and keep comparing by identity.
+     */
+    private static function pamHandle(Disposable $value): Disposable|string
+    {
+        return $value instanceof Composables\ReactiveObject ? $value : "\0pam-handle\0".$value::class;
+    }
+
+    /** A Disposable handle that pamHandle() reduces to its class. */
+    private static function pamIsHandle(mixed $value): bool
+    {
+        return $value instanceof Disposable && !$value instanceof Composables\ReactiveObject;
     }
 
     final public function __pamNotifyUpdating(string $property, mixed $next, mixed $previous): void
