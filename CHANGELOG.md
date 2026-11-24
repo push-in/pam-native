@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.54.8 - 2026-11-23
+
+- Android/iOS: a VirtualizedList opened at its start that the user has not
+  scrolled yet stays at offset 0 when rows land above or right below its first
+  rows, or are re-measured, like a React Native FlatList; it used to open
+  ~70 dp down when the API page followed a cached one (#290).
+- An `<Icon>` keeps its icon font over an inherited
+  `font-family`/`font-weight`/`font-style`, and its `size`/`color` over
+  inherited ones; without those props it still inherits the size and color
+  (#291).
+- A vertical ScrollView without a height is measured by its content and
+  shrinks by default (`flexShrink: 1`, like React Native): inside a sheet or
+  dialog that fits its content it is min(content, available space) instead of
+  a fixed ~240 dp (#292).
+
 ## 1.54.7 - 2026-11-23
 
 - Fixed: apps no longer crash at launch from a read-only bundle (iOS device:
