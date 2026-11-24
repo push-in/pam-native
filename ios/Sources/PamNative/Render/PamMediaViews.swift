@@ -30,6 +30,8 @@ final class PamMediaView: UIView {
     private var controls = true
     private var gravity: AVLayerVideoGravity = .resizeAspect
     private var readyForDisplayObservation: NSKeyValueObservation?
+    /// Invalidates already queued KVO callbacks when a surface is rebound.
+    private var surfaceGeneration: UInt64 = 0
     private(set) var videoReadyForDisplay = false
     /// `onReady` waits for the first frame on the surface (or a short
     /// fallback): `readyToPlay` lands before that frame, and a reveal (poster
@@ -42,6 +44,9 @@ final class PamMediaView: UIView {
     private var thumbnailLoaded = false
     private var thumbnailGeneration: UInt64 = 0
     private var thumbnailRequestId: PHImageRequestID = PHInvalidImageRequestID
+    private var thumbnailTask: URLSessionDataTask?
+    private var thumbnailFailures = 0
+    private var thumbnailRetryAfter: CFTimeInterval = 0
     /// Decodes local poster sources (asset://, pam-file://, data:), set by the renderer.
     var localImageResolver: ((String, CGSize) -> UIImage?)?
     private var player: AVPlayer?
@@ -187,6 +192,7 @@ final class PamMediaView: UIView {
     }
 
     deinit {
+        thumbnailTask?.cancel()
         if let coverageObserver { NotificationCenter.default.removeObserver(coverageObserver) }
         if thumbnailRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(thumbnailRequestId)
@@ -800,6 +806,8 @@ final class PamMediaView: UIView {
     /// Puts the player on the bare layer (`controls=false`) or on an
     /// `AVPlayerViewController` created only for `controls=true`.
     private func attachSurface() {
+        surfaceGeneration &+= 1
+        let generation = surfaceGeneration
         readyForDisplayObservation?.invalidate()
         readyForDisplayObservation = nil
         videoReadyForDisplay = false
@@ -813,7 +821,10 @@ final class PamMediaView: UIView {
                 \.isReadyForDisplay, options: [.initial, .new]
             ) { [weak self] controller, _ in
                 let ready = controller.isReadyForDisplay
-                DispatchQueue.main.async { self?.setVideoReadyForDisplay(ready) }
+                DispatchQueue.main.async {
+                    guard let self, self.surfaceGeneration == generation else { return }
+                    self.setVideoReadyForDisplay(ready)
+                }
             }
         } else {
             if let controller {
@@ -827,7 +838,10 @@ final class PamMediaView: UIView {
                     \.isReadyForDisplay, options: [.initial, .new]
                 ) { [weak self] layer, _ in
                     let ready = layer.isReadyForDisplay
-                    DispatchQueue.main.async { self?.setVideoReadyForDisplay(ready) }
+                    DispatchQueue.main.async {
+                        guard let self, self.surfaceGeneration == generation else { return }
+                        self.setVideoReadyForDisplay(ready)
+                    }
                 }
             }
         }
@@ -851,6 +865,7 @@ final class PamMediaView: UIView {
     func setVideoReadyForDisplay(_ ready: Bool) {
         guard player != nil else { return }
         videoReadyForDisplay = ready
+        if ready { cancelThumbnailRequests() }
         updatePoster()
         if ready { flushPendingReady() }
     }
@@ -930,11 +945,7 @@ final class PamMediaView: UIView {
         guard next != thumbnail else { return }
         thumbnail = next
         thumbnailLoaded = false
-        thumbnailGeneration &+= 1
-        if thumbnailRequestId != PHInvalidImageRequestID {
-            PHImageManager.default().cancelImageRequest(thumbnailRequestId)
-            thumbnailRequestId = PHInvalidImageRequestID
-        }
+        cancelThumbnailRequests()
         posterView.image = nil
         updatePoster()
         if next != nil, !thumbnailLoaded, bounds.width > 0, bounds.height > 0 {
@@ -942,13 +953,44 @@ final class PamMediaView: UIView {
         }
     }
 
+    private func cancelThumbnailRequests() {
+        thumbnailGeneration &+= 1
+        thumbnailFailures = 0
+        thumbnailRetryAfter = 0
+        thumbnailTask?.cancel()
+        thumbnailTask = nil
+        if thumbnailRequestId != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(thumbnailRequestId)
+            thumbnailRequestId = PHInvalidImageRequestID
+        }
+        if posterView.image == nil { thumbnailLoaded = false }
+    }
+
     private func loadThumbnail() {
-        guard let thumbnail else { return }
+        // A playing surface has already given the covered bitmap back.
+        // Subsequent layouts must not decode it again only to discard it in
+        // updatePoster(), especially local posters decoded on the main thread.
+        guard !(player != nil && videoReadyForDisplay),
+              thumbnailFailures < 3, CACurrentMediaTime() >= thumbnailRetryAfter,
+              let thumbnail else { return }
         thumbnailLoaded = true
         let generation = thumbnailGeneration
         let size = bounds.size
         let deliver: (UIImage?) -> Void = { [weak self] image in
-            guard let self, self.thumbnailGeneration == generation, let image else { return }
+            guard let self, self.thumbnailGeneration == generation else { return }
+            self.thumbnailTask = nil
+            self.thumbnailRequestId = PHInvalidImageRequestID
+            guard let image else {
+                // Retry only on a later layout, with a bounded budget and
+                // backoff. A failed response is not a successfully loaded
+                // poster, but must not trigger a network loop either.
+                self.thumbnailLoaded = false
+                self.thumbnailFailures += 1
+                self.thumbnailRetryAfter = CACurrentMediaTime() + Double(self.thumbnailFailures)
+                return
+            }
+            self.thumbnailFailures = 0
+            self.thumbnailRetryAfter = 0
             self.posterView.image = image
             self.updatePoster()
         }
@@ -980,25 +1022,32 @@ final class PamMediaView: UIView {
             PamImageDownsampling.image(data: data, targetSize: size)
                 ?? UIImage(data: data).map { $0.preparingForDisplay() ?? $0 }
         }
-        let fetch: () -> Void = {
-            URLSession.shared.dataTask(with: url) { data, response, _ in
-                guard let data, !data.isEmpty,
-                      (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else {
-                    return
+        let fetch: () -> Void = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.thumbnailGeneration == generation,
+                      !(self.player != nil && self.videoReadyForDisplay) else { return }
+                let task = URLSession.shared.dataTask(with: url) { data, response, _ in
+                    guard let data, !data.isEmpty,
+                          (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else {
+                        DispatchQueue.main.async { deliver(nil) }
+                        return
+                    }
+                    if thumbnail.policy >= 3 {
+                        PamMediaDiskCache.shared.store(
+                            data,
+                            source: source,
+                            stableKey: thumbnail.cacheKey,
+                            checksum: nil,
+                            limit: 0,
+                            pinned: false
+                        )
+                    }
+                    let image = decode(data)
+                    DispatchQueue.main.async { deliver(image) }
                 }
-                if thumbnail.policy >= 3 {
-                    PamMediaDiskCache.shared.store(
-                        data,
-                        source: source,
-                        stableKey: thumbnail.cacheKey,
-                        checksum: nil,
-                        limit: 0,
-                        pinned: false
-                    )
-                }
-                let image = decode(data)
-                DispatchQueue.main.async { deliver(image) }
-            }.resume()
+                self.thumbnailTask = task
+                task.resume()
+            }
         }
         guard thumbnail.policy >= 3 else {
             fetch()
@@ -1182,6 +1231,7 @@ final class PamMediaView: UIView {
     }
 
     private func releasePlayer(restoresPoster: Bool = true) {
+        surfaceGeneration &+= 1
         cancelStartBuffer()
         audioGroup = nil
         textGroup = nil

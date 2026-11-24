@@ -30,6 +30,20 @@ final class PamMediaParityTests: XCTestCase {
         XCTAssertEqual(media.backgroundColor, .clear)
     }
 
+    func testFailedPosterDoesNotRetryForEveryLayout() {
+        let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 200, height: 120))
+        var attempts = 0
+        media.localImageResolver = { _, _ in attempts += 1; return nil }
+        media.setThumbnail("asset://missing.png", cacheKey: nil, policy: 1, maxAgeMs: 0)
+        for _ in 0..<10 {
+            media.setNeedsLayout()
+            media.layoutIfNeeded()
+        }
+        XCTAssertEqual(attempts, 1, "failed posters back off instead of reloading for every layout")
+        media.setThumbnail("asset://other.png", cacheKey: nil, policy: 1, maxAgeMs: 0)
+        XCTAssertEqual(attempts, 2, "a new source has its own retry budget")
+    }
+
     func testControlsFalseUsesABarePlayerLayer() throws {
         let url = try Self.makeVideo()
         let media = PamMediaView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
@@ -186,10 +200,28 @@ final class PamMediaParityTests: XCTestCase {
         let media = try XCTUnwrap(view as? PamMediaView)
         media.layoutIfNeeded()
         XCTAssertNotNil(media.posterView.image)
+        let resolve = media.localImageResolver
+        var posterDecodes = 0
+        media.localImageResolver = { source, size in
+            posterDecodes += 1
+            return resolve?(source, size)
+        }
         media.setSource(try Self.makeVideo().absoluteString)
         media.setVideoReadyForDisplay(true)
         XCTAssertTrue(media.isPosterReleased, "the painted video covers the poster: its bitmap goes")
+        let beforeLayouts = posterDecodes
+        for _ in 0..<10 {
+            media.setNeedsLayout()
+            media.layoutIfNeeded()
+        }
+        XCTAssertEqual(posterDecodes, beforeLayouts,
+                       "layout while video is visible must not decode a covered poster")
+        media.setThumbnail(poster, cacheKey: "replacement-poster", policy: 1, maxAgeMs: 0)
+        XCTAssertEqual(posterDecodes, beforeLayouts,
+                       "changing a poster while video is visible only updates its source")
         media.setSource("")
+        XCTAssertEqual(posterDecodes, beforeLayouts + 1,
+                       "only releasing the video needs the poster decoded again")
         XCTAssertNotNil(media.posterView.image, "released player: the poster is decoded again")
         XCTAssertTrue(media.isPosterVisible)
     }

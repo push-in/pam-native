@@ -1,7 +1,24 @@
 import XCTest
+import UIKit
 @testable import PamNative
 
 final class PamWorkletProgramTests: XCTestCase {
+    @MainActor
+    func testDisplayLinkDoesNotRetainAnAbandonedWorklet() throws {
+        PamMotionPolicy.reduceMotionOverride = false
+        defer { PamMotionPolicy.reduceMotionOverride = nil }
+        let program = try XCTUnwrap(PamWorkletProgram.decode(Data([0x50, 0x4e, 0x57, 0x31, 1, 0, 1, 0])))
+        let view = UIView()
+        weak var released: PamWorkletAnimator?
+        do {
+            let animator = PamWorkletAnimator(view: view, program: program, target: .opacity,
+                                              durationMs: 1000, iterations: 0, completion: {})
+            released = animator
+            animator.start()
+        }
+        XCTAssertNil(released, "the infinite display link must not keep an unowned worklet ticking")
+    }
+
     func testDecodesAndEvaluatesPHPCompatibleOpacityProgram() throws {
         var bytes = Data([0x50, 0x4e, 0x57, 0x31, 0x03, 0x00])
         bytes.append(contentsOf: [0x01, 0x00])
