@@ -1268,7 +1268,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         if (isDarkAppearance()) APPEARANCE_DARK else APPEARANCE_LIGHT
 
     @Suppress("DEPRECATION")
-    private fun applyDefaultSystemBars() {
+    internal fun applyDefaultSystemBars() {
         val dark = isDarkAppearance()
         window.setBackgroundDrawable(
             ColorDrawable(PamAppearance.color(this, R.color.pam_window_background, dark)),
@@ -1281,6 +1281,10 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
 
         val lightStatus = PamAppearance.bool(this, R.bool.pam_light_status_bar, dark)
         val lightNavigation = PamAppearance.bool(this, R.bool.pam_light_navigation_bar, dark)
+        // This also runs before setContentView during startup/recreation.
+        // PhoneWindow.getInsetsController() dereferences its DecorView, which
+        // edge-to-edge setup alone does not create on newer Android versions.
+        val decor = window.decorView
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val lightStatusMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
             val lightNavigationMask = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
@@ -1290,7 +1294,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                 lightStatusMask or lightNavigationMask,
             )
         } else {
-            var flags = window.decorView.systemUiVisibility
+            var flags = decor.systemUiVisibility
             flags = if (lightStatus) {
                 flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
             } else {
@@ -1303,7 +1307,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                     flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
                 }
             }
-            window.decorView.systemUiVisibility = flags
+            decor.systemUiVisibility = flags
         }
     }
 
