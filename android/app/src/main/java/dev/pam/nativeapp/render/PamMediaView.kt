@@ -140,6 +140,7 @@ internal class PamMediaView(
 
     /** The current Media3 player's first frame reached the surface before it reported ready. */
     private var frameBeforeReady = false
+    private var frameRendered = false
 
     /**
      * Covered-route policy: while the route holding this player is covered
@@ -233,22 +234,24 @@ internal class PamMediaView(
      * Progress polling: the player is queried on [mediaExecutor] (each query
      * is a binder call), the result is delivered on the main thread.
      */
+    private var progressScheduled = false
     private val progress = object : Runnable {
         override fun run() {
-            // A covered, suspended, hidden or idle player has nothing to report; restoring restarts the loop.
-            if (covered || suspended || hiddenRelease || idleSurface) return
-            // Visible autoplay without its grant has no player: the grant restarts the loop.
-            if (autoplayFraction > 0f && !autoplayGrant) return
+            progressScheduled = false
+            if (!shouldPollProgress()) return
             val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
                 if (prepared && (onProgress != null || bindings.isNotEmpty()) && exoPlayer.isPlaying) {
+                    val generation = playerGeneration
                     val position = exoPlayer.positionMs / 1_000.0
                     val duration = exoPlayer.durationMs / 1_000.0
                     onProgress?.invoke(position, duration)
-                    updateBindings(bindings, position, duration, animate = true)
+                    if (generation == playerGeneration && shouldPollProgress()) {
+                        updateBindings(bindings, position, duration, animate = true)
+                    }
                 }
-                main.postDelayed(this, 250)
+                scheduleProgress(250)
                 return
             }
             val player = preparedPlayer
@@ -259,17 +262,38 @@ internal class PamMediaView(
                         if (player.isPlaying) player.currentPosition to player.duration else null
                     }.getOrNull() ?: return@execute
                     main.post {
-                        if (generation == playerGeneration && prepared) {
+                        if (generation == playerGeneration && shouldPollProgress()) {
                             val position = sample.first / 1_000.0
                             val duration = sample.second.coerceAtLeast(0) / 1_000.0
                             onProgress?.invoke(position, duration)
-                            updateBindings(bindingTargets(), position, duration, animate = true)
+                            if (generation == playerGeneration && shouldPollProgress()) {
+                                updateBindings(bindingTargets(), position, duration, animate = true)
+                            }
                         }
                     }
                 }
             }
-            main.postDelayed(this, 250)
+            scheduleProgress(250)
         }
+    }
+
+    private fun shouldPollProgress(): Boolean =
+        prepared && playback.mayPlay && isAttachedToWindow &&
+            !covered && !suspended && !hiddenRelease && !idleSurface
+
+    private fun scheduleProgress(delayMs: Long = 0) {
+        if (progressScheduled || !shouldPollProgress()) return
+        progressScheduled = true
+        main.postDelayed(progress, delayMs)
+    }
+
+    private fun stopProgressPolling() {
+        main.removeCallbacks(progress)
+        progressScheduled = false
+    }
+
+    private fun syncProgressPolling() {
+        if (shouldPollProgress()) scheduleProgress() else stopProgressPolling()
     }
 
     /** Runs a player command off the UI thread, in order with creation and release. */
@@ -301,7 +325,6 @@ internal class PamMediaView(
         video.surfaceTextureListener = this
         clipChildren = true
         clipToPadding = true
-        main.post(progress)
     }
 
     fun setSource(value: String) {
@@ -316,25 +339,20 @@ internal class PamMediaView(
             resumeSource = ""
             resumeAtSeconds = 0.0
         }
-        showPoster()
         nextSourceGeneration()
+        // Resolving the next source may wait on disk/network or fail before
+        // prepareMedia. Stop the previous item and invalidate its listeners now.
+        releasePlayer()
         pendingRestore = false
         if (value.isNotEmpty() && appInBackground && !keepAliveWhenCovered) suspended = true
         if (value.isEmpty() || covered || suspended || hiddenRelease || idleSurface) {
             // A covered (or hidden, or idle) route prepares its player when it is visible again;
             // a suspended app when it is active again.
-            releasePlayer()
             if (suspended && value.isNotEmpty()) pendingRestore = true
         } else if (autoplayFraction > 0f && !autoplayGrant) {
             // Visible autoplay: prepared once the policy grants playback.
             stopScreenWatcher()
-            releasePlayer()
-        } else if (awaitScreen()) {
-            // Bound ahead of the viewport (a list prefetching its next rows):
-            // the player is created and prepared when the view first shows on
-            // screen, after that frame, not inside the frame that bound it.
-            releasePlayer()
-        } else {
+        } else if (!awaitScreen()) {
             val uri = Uri.parse(value)
             val resolved = runCatching {
                 when {
@@ -359,11 +377,13 @@ internal class PamMediaView(
             cacheHandle = mediaCache.resolve(
                 cacheRequest.copy(source = value),
                 MediaCacheCallbacks(
-                    hit = { onCacheHit?.invoke(it) },
-                    miss = { onCacheMiss?.invoke(it) },
-                    progress = { key, loaded, total -> onCacheProgress?.invoke(key, loaded, total) },
-                    ready = { key, bytes -> onCacheReady?.invoke(key, bytes) },
-                    error = { onError?.invoke(it) },
+                    hit = { if (generation == sourceGeneration) onCacheHit?.invoke(it) },
+                    miss = { if (generation == sourceGeneration) onCacheMiss?.invoke(it) },
+                    progress = { key, loaded, total ->
+                        if (generation == sourceGeneration) onCacheProgress?.invoke(key, loaded, total)
+                    },
+                    ready = { key, bytes -> if (generation == sourceGeneration) onCacheReady?.invoke(key, bytes) },
+                    error = { if (generation == sourceGeneration) onError?.invoke(it) },
                 ),
             ) { cached ->
                 if (generation == sourceGeneration && !covered && !suspended && !hiddenRelease && !idleSurface) {
@@ -381,6 +401,13 @@ internal class PamMediaView(
 
     fun setThumbnail(request: NativeImageRequest?) {
         thumbnailRequest = request
+        if (frameRendered) {
+            // A renewed poster must never cover a rendered, paused frame.
+            // Keep only its request; releasePlayer restores it when needed.
+            imageLoader.cancel(poster)
+            poster.visibility = GONE
+            return
+        }
         if (autoplayFraction > 0f && !autoplayGrant) {
             // Visible autoplay: the poster is decoded when playback is granted
             // (it shapes the first frames); until then whatever the
@@ -497,8 +524,7 @@ internal class PamMediaView(
         removeCallbacks(autoplayRelease)
         if (granted) {
             setThumbnail(thumbnailRequest)
-            main.removeCallbacks(progress)
-            main.post(progress)
+            syncProgressPolling()
             prepareIfIdle()
         } else {
             postDelayed(autoplayRelease, AUTOPLAY_RELEASE_MS)
@@ -531,8 +557,7 @@ internal class PamMediaView(
             return
         }
         ensureVideoAttached()
-        main.removeCallbacks(progress)
-        main.post(progress)
+        syncProgressPolling()
         val current = source
         source = ""
         setSource(current)
@@ -738,7 +763,7 @@ internal class PamMediaView(
         if (idleSurface == value) return
         idleSurface = value
         if (value) {
-            main.removeCallbacks(progress)
+            stopProgressPolling()
             // An idle cell starts over when it plays again (no resume point).
             resumeSource = ""
             resumeAtSeconds = 0.0
@@ -863,7 +888,7 @@ internal class PamMediaView(
 
     /** Frees the decoder, player and video surface (covered route, background), keeping its position. */
     private fun releaseDecoder() {
-        main.removeCallbacks(progress)
+        stopProgressPolling()
         if (source.isNotEmpty() && prepared) {
             resumeSource = source
             resumeAtSeconds = currentPosition / 1_000.0
@@ -878,8 +903,7 @@ internal class PamMediaView(
     private fun restoreAfterCover() {
         pendingRestore = false
         ensureVideoAttached()
-        main.removeCallbacks(progress)
-        main.post(progress)
+        syncProgressPolling()
         if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer) {
             val current = source
             source = ""
@@ -985,6 +1009,7 @@ internal class PamMediaView(
         }
         val screenOn = active && playback.mayPlay
         if (keepScreenOn != screenOn) keepScreenOn = screenOn
+        syncProgressPolling()
     }
 
     /** Muting releases the focus, unmuting a playing player asks for it. */
@@ -1019,7 +1044,9 @@ internal class PamMediaView(
      * drops a player whose source changed while it was being created.
      */
     private fun prepareMedia(uri: Uri) {
-        releasePlayer()
+        // setSource already released the old item. Only a resolution that
+        // finds another player installed needs to release anything again.
+        if (holdsPlayer) releasePlayer()
         pamForwardBuffer(forwardBufferSeconds, startBufferMs)?.let { buffer ->
             prepareExo(uri, buffer)
             return
@@ -1095,7 +1122,10 @@ internal class PamMediaView(
             // latched already, the poster goes now, not on a next frame (a
             // paused player draws none; a playing one only after play()).
             // A resume (seek above) waits for the frame at its position.
-            if (frameBeforeReady && startAt <= 0 && poster.visibility != GONE) poster.visibility = GONE
+            if (frameBeforeReady && startAt <= 0) {
+                frameRendered = true
+                poster.visibility = GONE
+            }
             onReady?.invoke()
             onReadyDetails?.invoke(width, height, durationMs / 1_000.0)
         }
@@ -1136,7 +1166,7 @@ internal class PamMediaView(
             showPoster()
             mediaController?.isEnabled = false
             onError?.invoke(message)
-            playerFailed(transient)
+            if (generation == playerGeneration) playerFailed(transient)
         }
     }
 
@@ -1218,18 +1248,19 @@ internal class PamMediaView(
                 mediaController?.isEnabled = false
                 onError?.invoke("Media playback failed ($what/$extra)")
                 // MediaPlayer reports no HTTP status: I/O and timeouts are worth another try.
-                playerFailed(
-                    extra == MediaPlayer.MEDIA_ERROR_IO ||
-                        extra == MediaPlayer.MEDIA_ERROR_TIMED_OUT ||
-                        what == MediaPlayer.MEDIA_ERROR_SERVER_DIED,
-                )
+                if (generation == playerGeneration) {
+                    playerFailed(
+                        extra == MediaPlayer.MEDIA_ERROR_IO ||
+                            extra == MediaPlayer.MEDIA_ERROR_TIMED_OUT ||
+                            what == MediaPlayer.MEDIA_ERROR_SERVER_DIED,
+                    )
+                }
             }
             true
         }
     }
 
     private fun releasePlayer() {
-        showPoster()
         prepared = false
         // An idle surface keeps its last texture. Keep its contain/cover
         // geometry too, otherwise the next layout stretches that texture
@@ -1240,7 +1271,9 @@ internal class PamMediaView(
         }
         creatingPlayer = false
         frameBeforeReady = false
+        frameRendered = false
         playerGeneration++
+        stopProgressPolling()
         bufferedPercentage = 0
         mediaController?.isEnabled = false
         preparedPlayer?.let(::discard)
@@ -1249,6 +1282,7 @@ internal class PamMediaView(
         exo = null
         showCaptions("")
         syncPlayingEffects()
+        showPoster()
     }
 
     /** Stops and frees a player off the UI thread (release() waits for mediaserver). */
@@ -1360,7 +1394,8 @@ internal class PamMediaView(
 
     override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
         if (videoWidthPx <= 0 || videoHeightPx <= 0) applyVideoTransform()
-        if (prepared && poster.visibility != GONE) {
+        if (prepared) {
+            frameRendered = true
             poster.visibility = GONE
         } else if (!prepared && exo != null) {
             frameBeforeReady = true
@@ -1368,7 +1403,14 @@ internal class PamMediaView(
     }
 
     private fun showPoster() {
+        // Only failed/released players call this; their frame is no longer
+        // authoritative. Thumbnail renewal alone does not invalidate it.
+        frameRendered = false
         if (autoplayFraction > 0f && !autoplayGrant) return
+        if (poster.drawable == null && thumbnailRequest != null) {
+            setThumbnail(thumbnailRequest)
+            return
+        }
         if (poster.drawable != null || poster.onImageSizeChanged != null) {
             poster.visibility = VISIBLE
         }
@@ -1441,8 +1483,7 @@ internal class PamMediaView(
         viewLifecycle = (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle
         viewLifecycle?.addObserver(viewLifecycleObserver)
         syncViewLifecycle()
-        main.removeCallbacks(progress)
-        main.post(progress)
+        syncProgressPolling()
         if (autoplayFraction > 0f) PamVisibleAutoplay.join(this)
         if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered && !suspended && !hiddenRelease && !idleSurface) {
             val current = source
@@ -1550,7 +1591,7 @@ internal class PamMediaView(
         removeCallbacks(releaseHidden)
         viewLifecycle?.removeObserver(viewLifecycleObserver)
         viewLifecycle = null
-        main.removeCallbacks(progress)
+        stopProgressPolling()
         nextSourceGeneration()
         val surface = videoSurface
         videoSurface = null
