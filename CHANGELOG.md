@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.54.9 - 2026-11-24
+
+- Component state snapshot: a property holding a `Disposable` handle
+  (`ComponentTimer`, `Subscription`, `Debouncer`, `Throttler`, `Watcher`,
+  plugin media players) now counts only by presence (its class). Handle state
+  and swapping one handle for another no longer re-render the component;
+  setting the field to or from `null` still does. `Resource` keeps comparing
+  by identity. Handle fields no longer disable pure-handler inference.
+
 ## 1.54.8 - 2026-11-23
 
 - Android/iOS: a VirtualizedList opened at its start that the user has not
