@@ -132,8 +132,9 @@ public properties are not detected from a pure handler; use a store/signal or
 
 After each render Pam takes a snapshot of every property the component
 declares: public, protected and private, from traits and parent classes too.
-Plain objects are captured two levels deep. On the next pass a component whose
-snapshot differs renders again. Writes made outside a template handler are
+Plain objects are captured two levels deep. Disposable handles count only by
+presence (see below). On the next pass a component whose snapshot differs
+renders again. Writes made outside a template handler are
 caught this way, whether they come from a lifecycle hook (`rendered()`,
 `attached()`, `resumed()`, `paused()`), a timer, a subscription or a promise
 callback. `#[State]` has no part in this: it only marks what hot reload
@@ -143,11 +144,48 @@ The snapshot can't tell which fields the template reads. PHP gives no hook on
 reads of declared properties, and `render()` may reach any field through
 methods and closures. A field used only for bookkeeping still costs a full
 render each time it is written. Examples are a cache, a counter, a
-subscription id, a timer handle, a "last synced at" timestamp or an "already
-done" flag. A hook that writes one on every resume, socket event or player
+subscription id, a "last synced at" timestamp or an "already done" flag. A hook that writes one on every resume, socket event or player
 callback re-renders a large screen for nothing.
 
-Mark such fields `#[Transient]` to leave them out of the snapshot:
+#### Disposable handles
+
+A field whose value implements `Pam\Native\Disposable` holds a handle: a
+`ComponentTimer`, an event `Subscription`, a `Debouncer` or `Throttler`, a
+signal `Watcher` or `EffectScope`, a plugin's media player (`AudioPlayer` in
+pam-native-audio). The snapshot keeps only the handle's class, never its
+identity or its fields. This holds in a typed or untyped field and one level
+down, in a plain object the component holds.
+
+- **Handle state.** A timer firing, a player's progress tick, a subscription
+  being cancelled: none of it renders the component.
+- **Swapping handles.** Re-arming a timer from its own callback
+  (`$this->timer = $this->timers()->timeout(...)`) or replacing a player with a
+  new one of the same class doesn't render.
+- **Null and back.** Setting the field from a handle to `null`, or from `null`
+  to a handle, still renders, so a template that tests `$this->timer !== null`
+  stays correct.
+- **Reactive objects.** `Resource` is Disposable but holds template data. It
+  keeps comparing by identity, so assigning a new resource renders.
+- **Pure handlers.** Handle fields don't stop pure-handler inference, the same
+  as `#[Transient]` fields.
+- **Arrays of handles** compare by value as any array does: adding, removing
+  or replacing a handle in the array renders. Mark such arrays `#[Transient]`.
+
+A template that shows something a handle knows (a player's position, a
+timer's `active()`) must copy it into a plain field from the handle's callback
+(`->onProgress(fn (PlaybackProgress $p) => $this->position = $p->positionMillis)`)
+or read it from a signal or store. Reading it through the handle shows a stale
+value until something else renders the component.
+
+Pam can't know whether the template reads a field, so this is the narrowest
+rule that still drops handle churn. The stricter rule, leaving handle-typed
+fields out of the snapshot entirely as if they were `#[Transient]`, also
+passes the test suite. It was rejected because a template that tests whether
+a handle field is `null` would then stop updating with no error.
+
+#### `#[Transient]`
+
+Mark other bookkeeping fields `#[Transient]` to leave them out of the snapshot:
 
 ```php
 use Pam\Native\Attributes\Transient;
@@ -160,7 +198,7 @@ final class ChatScreen extends Component
     #[Transient]
     private int $lastResumeSyncAt = 0;
 
-    #[Transient]
+    // No attribute needed: a Disposable handle counts only by presence.
     private ?ComponentTimer $announcementTimer = null;
 
     public function resumed(): void
