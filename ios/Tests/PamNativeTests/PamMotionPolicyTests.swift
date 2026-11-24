@@ -3,6 +3,13 @@ import UIKit
 @testable import PamNative
 
 final class PamMotionPolicyTests: XCTestCase {
+    func testAnimationFrameRateRespectsDisplayAndPowerBudget() {
+        XCTAssertEqual(PamMotionPolicy.animationFrameRate(maximum: 120, lowPower: false), 120)
+        XCTAssertEqual(PamMotionPolicy.animationFrameRate(maximum: 60, lowPower: false), 60)
+        XCTAssertEqual(PamMotionPolicy.animationFrameRate(maximum: 120, lowPower: true), 60)
+        XCTAssertEqual(PamMotionPolicy.animationFrameRate(maximum: 30, lowPower: true), 30)
+    }
+
     override func tearDown() {
         PamMotionPolicy.reduceMotionOverride = nil
         super.tearDown()

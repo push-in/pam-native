@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.54.10 - 2026-11-24
+
+- iOS media: invalidate stale surface callbacks, cancel poster requests when
+  the video frame is ready, and bound failed poster retries with backoff.
+  Layout passes no longer decode a poster behind an already visible video.
+- iOS animations: active worklets and scroll glides request the display's
+  supported refresh rate up to 120 Hz, capped at 60 Hz in Low Power Mode.
+  Glides use the actual frame duration and respect Reduce Motion; weak display
+  link targets prevent abandoned worklets from staying alive. Regression tests
+  account for physical pixel rounding when checking glide timing.
+- Navigation: expose `Navigator::isTransitioning()` so applications can wait for
+  native push, pop and replace completion without mistaking restored stacks or
+  resets for pending animations.
+- Android startup: create the window decor before configuring system bars,
+  avoiding access to an uninitialized window inset controller.
+- Android lists: preserve horizontal swipes in scrollable list headers while
+  retaining vertical list scrolling.
+- Android media replacement: release the previous player as soon as its source
+  changes and reject cache callbacks from older sources, including while the
+  next source is still resolving or fails to load.
+- Android media posters and progress: keep renewed thumbnails behind an already
+  rendered video frame, including while paused. Run at most one progress poll
+  while a prepared, attached player may play; cancel polling when it becomes
+  paused, covered, suspended, hidden, idle or detached.
+
+Migration: no API, protocol or dependency changes are required. Rebuild native
+applications to include these renderer and lifecycle fixes.
+
 ## 1.54.9 - 2026-11-24
 
 - Component state snapshot: a property holding a `Disposable` handle

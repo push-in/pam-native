@@ -358,6 +358,20 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         return $this->navigationKey;
     }
 
+    /**
+     * Whether a route change is waiting for the native transition completion.
+     * Initial/restored stacks and reset() have no outgoing animation; unlike
+     * stack depth, this also distinguishes them from a pending push.
+     */
+    public function isTransitioning(): bool
+    {
+        return match ($this->operation) {
+            NavigationOperation::Push => count($this->stack) > 1,
+            NavigationOperation::Pop, NavigationOperation::Replace => $this->outgoing !== null,
+            NavigationOperation::Idle, NavigationOperation::Reset => false,
+        };
+    }
+
     public function currentOptions(): ScreenOptions
     {
         $entry = $this->currentEntry();

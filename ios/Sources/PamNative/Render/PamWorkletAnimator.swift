@@ -117,7 +117,8 @@ final class PamWorkletAnimator: NSObject {
             if iterations != 0 { completion() }
             return
         }
-        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        let link = CADisplayLink(target: PamWorkletTicker(self), selector: #selector(PamWorkletTicker.tick(_:)))
+        PamMotionPolicy.configureAnimationLink(link, screen: view?.window?.screen)
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
@@ -128,7 +129,7 @@ final class PamWorkletAnimator: NSObject {
         startedAt = 0
     }
 
-    @objc private func tick(_ link: CADisplayLink) {
+    fileprivate func tick(_ link: CADisplayLink) {
         guard view != nil else {
             stop()
             return
@@ -168,5 +169,15 @@ final class PamWorkletAnimator: NSObject {
 
     deinit {
         displayLink?.invalidate()
+    }
+}
+
+/// A forgotten/cancelled worklet must not be retained by its display link.
+private final class PamWorkletTicker: NSObject {
+    weak var animator: PamWorkletAnimator?
+    init(_ animator: PamWorkletAnimator) { self.animator = animator }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let animator else { link.invalidate(); return }
+        animator.tick(link)
     }
 }

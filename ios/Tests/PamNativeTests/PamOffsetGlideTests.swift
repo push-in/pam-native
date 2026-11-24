@@ -6,6 +6,26 @@ import XCTest
 /// there once, even when the same request is committed again mid-glide.
 @MainActor
 final class PamOffsetGlideTests: XCTestCase {
+    func testFirstStepUsesTheActualRefreshInterval() {
+        PamMotionPolicy.reduceMotionOverride = false
+        defer { PamMotionPolicy.reduceMotionOverride = nil }
+        for frameRate in [60.0, 120.0] {
+            let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+            scroll.contentSize = CGSize(width: 900, height: 600)
+            let glide = PamOffsetGlide(scroll: scroll, from: .zero, to: CGPoint(x: 300, y: 0),
+                                      duration: 0.1, completion: { _ in })
+            defer { glide.finish(jump: false) }
+            let frameDuration = 1.0 / frameRate
+            glide.tick(100, frameDuration: frameDuration)
+            let expected = CGFloat(300 * 2 * pow(frameDuration / 0.1, 2))
+            // UIScrollView aligns its offset to physical pixels. Half a pixel
+            // allows rounding, far below the 12.5 pt difference between rates.
+            let halfPixel = 0.5 / UIScreen.main.scale
+            XCTAssertEqual(scroll.contentOffset.x, expected, accuracy: halfPixel + 0.001,
+                           "the first glide step must follow the \(frameRate) Hz interval")
+        }
+    }
+
     func testSameTargetCommittedAgainKeepsTheRunningGlide() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
         let scroll = PamAnchoredScrollView(frame: window.bounds)

@@ -8,6 +8,31 @@ enum PamMotionPolicy {
         reduceMotionOverride ?? UIAccessibility.isReduceMotionEnabled
     }
 
+    /// Only used by an active animation. The display link is invalidated by
+    /// its owner when it finishes; this does not request a permanent refresh.
+    static func animationFrameRate(maximum: Int, lowPower: Bool) -> Int {
+        max(1, min(maximum, lowPower ? 60 : 120))
+    }
+
+    static func configureAnimationLink(_ link: CADisplayLink, screen: UIScreen?) {
+        #if os(tvOS)
+        let lowPower = false
+        #else
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        #endif
+        let rate = animationFrameRate(
+            maximum: (screen ?? UIScreen.main).maximumFramesPerSecond,
+            lowPower: lowPower
+        )
+        if #available(iOS 15.0, *) {
+            link.preferredFrameRateRange = CAFrameRateRange(
+                minimum: Float(min(60, rate)), maximum: Float(rate), preferred: Float(rate)
+            )
+        } else {
+            link.preferredFramesPerSecond = rate
+        }
+    }
+
     static func applyTerminalKeyframe(_ frame: [String: Any], to view: UIView) {
         view.layer.removeAllAnimations()
         view.alpha = CGFloat((frame["opacity"] as? NSNumber)?.doubleValue ?? 1)

@@ -592,7 +592,7 @@ final class PamAnchoredScrollView: PamContentScrollView {
             return
         }
         let glides = pamOffsetAnimationMs > 0 && pamOffsetAppliedOnce && window != nil
-            && !UIAccessibility.isReduceMotionEnabled
+            && !PamMotionPolicy.isReduced
         pamOffsetAppliedOnce = true
         guard target != contentOffset else { return }
         pamStopDeceleration()
@@ -4010,6 +4010,7 @@ final class PamOffsetGlide {
         self.duration = max(duration, 0.016)
         self.completion = completion
         let link = CADisplayLink(target: PamOffsetGlideProxy(self), selector: #selector(PamOffsetGlideProxy.tick(_:)))
+        PamMotionPolicy.configureAnimationLink(link, screen: scroll.window?.screen)
         link.add(to: .main, forMode: .common)
         self.link = link
         start = CACurrentMediaTime()
@@ -4025,7 +4026,7 @@ final class PamOffsetGlide {
     private var lastTick: CFTimeInterval = 0
     #endif
 
-    fileprivate func tick(_ now: CFTimeInterval) {
+    func tick(_ now: CFTimeInterval, frameDuration: TimeInterval = 1.0 / 60.0) {
         #if DEBUG
         if PamListTrace.enabled {
             let gap = lastTick > 0 ? now - lastTick : 0
@@ -4042,7 +4043,7 @@ final class PamOffsetGlide {
         // main thread busy (a page mounting) no longer eats the glide.
         if !started {
             started = true
-            start = now - 1.0 / 60.0
+            start = now - (frameDuration.isFinite && frameDuration > 0 ? frameDuration : 1.0 / 60.0)
         }
         let progress = min(1, (now - start) / duration)
         let eased = CGFloat(pamEaseInOutQuad(progress))
@@ -4080,6 +4081,6 @@ private final class PamOffsetGlideProxy: NSObject {
     init(_ glide: PamOffsetGlide) { self.glide = glide }
     @objc func tick(_ link: CADisplayLink) {
         guard let glide else { link.invalidate(); return }
-        glide.tick(link.targetTimestamp)
+        glide.tick(link.targetTimestamp, frameDuration: link.targetTimestamp - link.timestamp)
     }
 }
