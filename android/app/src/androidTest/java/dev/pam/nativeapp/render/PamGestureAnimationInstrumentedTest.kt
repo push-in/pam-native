@@ -463,11 +463,54 @@ class PamGestureAnimationInstrumentedTest {
             instrumentation.waitForIdleSync()
             val origin = locationOf(instrumentation, activity.host)
             val y = origin.second + 320f.dp(scroll)
-            drag(instrumentation, origin.first + 300f.dp(scroll), y, origin.first + 140f.dp(scroll), y, steps = 6)
+            val decor = activity.window.decorView
+            val decorOrigin = locationOf(instrumentation, decor)
+            val fromX = origin.first + 300f.dp(scroll) - decorOrigin.first
+            val toX = origin.first + 140f.dp(scroll) - decorOrigin.first
+            val localY = y - decorOrigin.second
+            var downTime = 0L
+            fun touch(action: Int, x: Float) {
+                onMain(instrumentation) {
+                    val now = SystemClock.uptimeMillis()
+                    if (action == MotionEvent.ACTION_DOWN) downTime = now
+                    val event = MotionEvent.obtain(downTime, now, action, x, localY, 0).apply {
+                        source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                    }
+                    try {
+                        decor.dispatchTouchEvent(event)
+                    } finally {
+                        event.recycle()
+                    }
+                }
+            }
+            // Use actual delivery times and controlled window dispatch. Other
+            // gesture tests retain OS-level injection through InputDispatcher.
+            // The same 160 dp gesture exceeds the 18% displacement threshold;
+            // this momentum contract must not depend on a synthetic fling speed.
+            touch(MotionEvent.ACTION_DOWN, fromX)
+            repeat(6) { step ->
+                SystemClock.sleep(16)
+                touch(MotionEvent.ACTION_MOVE, fromX + (toX - fromX) * ((step + 1) / 6f))
+            }
+            onMain(instrumentation) {
+                val pager = scroll as PamScrollContainer
+                val offset = pager.snapshotOffsetPixels().first
+                val extent = pager.primaryViewportPixels()
+                assertTrue(
+                    "Paging fixture must cross 18% but stay below half a page before UP: offsetPx=$offset extentPx=$extent",
+                    extent > 0 && offset > extent * 0.18f && offset < extent * 0.5f,
+                )
+            }
+            SystemClock.sleep(16)
+            touch(MotionEvent.ACTION_UP, toX)
             waitUntil(5_000) { events.any { it.kind == EventKind.MOMENTUM_SCROLL_END.value } }
             onMain(instrumentation) {
                 val kinds = events.map { it.kind }
+                val detail = events.joinToString { event ->
+                    "kind=${event.kind} x=${event.payload["x"]} velocityX=${event.payload["velocityX"]} page=${event.payload["page"]}"
+                }
                 assertEquals(
+                    detail,
                     listOf(
                         EventKind.SCROLL_BEGIN_DRAG.value,
                         EventKind.SCROLL_END_DRAG.value,
@@ -476,8 +519,8 @@ class PamGestureAnimationInstrumentedTest {
                     kinds,
                 )
                 val momentum = events.last().payload
-                assertEquals(1L, (momentum["page"] as WireValue.Integer).value)
-                assertEquals(360.0, (momentum["x"] as WireValue.Decimal).value, 1.0)
+                assertEquals(detail, 1L, (momentum["page"] as WireValue.Integer).value)
+                assertEquals(detail, 360.0, (momentum["x"] as WireValue.Decimal).value, 1.0)
             }
         } finally {
             onMain(instrumentation) {
