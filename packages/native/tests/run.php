@@ -7849,6 +7849,7 @@ require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
 require __DIR__.'/navigation_invalidation.php';
+require __DIR__.'/navigation_sheet_close.php';
 require __DIR__.'/optional_navigation.php';
 
 require __DIR__.'/view_ref.php';

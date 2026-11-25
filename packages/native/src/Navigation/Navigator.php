@@ -1659,6 +1659,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             if ($previousInstance instanceof \Pam\Native\Component) {
                 $previousInstance->__pamNavigationFocus(false);
             }
+            // Commit the departing route's final state before freezing it.
+            // A sheet may close in the same scoped event that navigates;
+            // replaying its previous snapshot would retain an open native
+            // modal under the destination until this route is focused again.
+            unset($this->frozenScreens[$this->entryKey($previous)]);
             $this->focusedEntryKey = null;
             $this->emitNavigation(NavigationEventType::Blur, ['route' => $this->contextFor($previous)], false, $this->entryKey($previous));
             $this->emitNavigation(NavigationEventType::Focus, ['route' => $this->contextFor($current)], false, $this->entryKey($current));

@@ -836,6 +836,9 @@ internal class PamModalHost @JvmOverloads constructor(
      * quick Back before its window appeared popped the screen behind it.
      */
     fun consumeActivityBack(): Boolean {
+        // Covered routes retain their attached modal and desired visibility
+        // so it can reopen on return. They do not own the visible route's Back.
+        if (routeCovered) return false
         if (!isPresented() && !(desiredVisible && isAttachedToWindow && removalExit == null)) return false
         if (desiredVisible) requestCloseFromBack()
         return true
@@ -956,7 +959,9 @@ internal class PamModalHost @JvmOverloads constructor(
             }
             modal.setOnKeyListener { _, keyCode, event ->
                 val root = modal.window?.decorView
-                if (root != null && pamActivity()?.dispatchPamKey(root, event) == true) {
+                if (pamActivity()?.consumeModalBackKey(event) == true) {
+                    true
+                } else if (root != null && pamActivity()?.dispatchPamKey(root, event) == true) {
                     true
                 } else if (keyCode != KeyEvent.KEYCODE_BACK) {
                     false
@@ -964,7 +969,7 @@ internal class PamModalHost @JvmOverloads constructor(
                     // Own the whole Back gesture (down and up) so neither half
                     // reaches the activity's navigator below this window.
                     if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
-                        requestCloseFromBack()
+                        requestCloseFromBack(event)
                     }
                     true
                 }
@@ -1241,10 +1246,10 @@ internal class PamModalHost @JvmOverloads constructor(
         dialogBackCallback = null
     }
 
-    private fun requestCloseFromBack() {
+    private fun requestCloseFromBack(event: KeyEvent? = null) {
         if (hideVisibleKeyboard()) return
         onBackConsumed?.invoke()
-        pamActivity()?.suppressNextPamBack()
+        pamActivity()?.suppressNextPamBack(event)
         requestClose()
     }
 

@@ -55,7 +55,8 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private lateinit var runtime: PamRuntime
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
-    private var suppressBackUntil = 0L
+    private val backDispatchGuard = PamBackDispatchGuard()
+    private var dispatchingBackKey: PamBackKey? = null
     /** 32-bit device: this activity only handed off to [PamWebActivity]. */
     private var webFallback = false
     private var errorOverlay: ErrorOverlay? = null
@@ -584,8 +585,27 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     // super is the platform Activity method; lint flags androidx's override.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (dispatchPamKey(window.decorView, event)) return true
-        return super.dispatchKeyEvent(event)
+        if (consumeModalBackKey(event)) return true
+        val previousBackKey = dispatchingBackKey
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            dispatchingBackKey = PamBackKey(event.deviceId, event.downTime)
+        }
+        try {
+            if (dispatchPamKey(window.decorView, event)) return true
+            return super.dispatchKeyEvent(event)
+        } finally {
+            dispatchingBackKey = previousBackKey
+        }
+    }
+
+    /** Shared by the activity and its dialog windows before key dispatch. */
+    internal fun consumeModalBackKey(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
+        return backDispatchGuard.observeKey(
+            PamBackKey(event.deviceId, event.downTime),
+            canBeginInteraction = !event.isCanceled && event.repeatCount == 0,
+        )
     }
 
     /** Keys of a window this activity owns (itself, a Modal's dialog). */
@@ -606,6 +626,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     @SuppressLint("GestureBackNavigation")
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.isCanceled) return true
             if (errorOverlay?.consumeBack() == true) return true
             if (consumeSuppressedBack()) return true
             if (runtime.consumePresentedModalBack()) return true
@@ -908,6 +929,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
                 private var interactive = false
 
                 override fun onBackStarted(backEvent: BackEvent) {
+                    backDispatchGuard.beginInteraction()
                     interactive = if (
                         errorOverlay?.isBlocking == true
                         || runtime.hasPresentedModal()
@@ -975,14 +997,13 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private fun isEdgeSwipe(backEvent: BackEvent): Boolean =
         Build.VERSION.SDK_INT < 36 || backEvent.swipeEdge != BackEvent.EDGE_NONE
 
-    internal fun suppressNextPamBack() {
-        suppressBackUntil = SystemClock.uptimeMillis() + BACK_SUPPRESSION_WINDOW_MS
+    internal fun suppressNextPamBack(event: KeyEvent? = null) {
+        val key = event?.let { PamBackKey(it.deviceId, it.downTime) } ?: dispatchingBackKey
+        backDispatchGuard.modalConsumed(SystemClock.uptimeMillis(), key)
     }
 
-    private fun consumeSuppressedBack(): Boolean {
-        if (SystemClock.uptimeMillis() > suppressBackUntil) return false
-        return true
-    }
+    private fun consumeSuppressedBack(): Boolean =
+        backDispatchGuard.suppressesUnidentifiedCallback(SystemClock.uptimeMillis())
 
 
     private fun isDarkAppearance(): Boolean = PamAppearance.isDark(this)
@@ -1368,7 +1389,6 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
         const val ERROR_TAG = "PamNativeErrors"
-        const val BACK_SUPPRESSION_WINDOW_MS = 1_000L
         const val PERFORMANCE_TAG = "PamNativePerf"
 
         fun processStartUptimeMillis(): Long = Process.getStartUptimeMillis()
