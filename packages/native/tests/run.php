@@ -6923,8 +6923,8 @@ $assert(
 );
 $nestedStateSubscription->unsubscribe();
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.54.10',
-    'The runtime SDK contract must match the 1.54.10 release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.54.11',
+    'The runtime SDK contract must match the 1.54.11 release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7806,6 +7806,7 @@ require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
 require __DIR__.'/memoization.php';
+require __DIR__.'/runtime_scheduler_continuation.php';
 require __DIR__.'/transient_state.php';
 require __DIR__.'/disposable_snapshot.php';
 require __DIR__.'/tracker_parent_link.php';

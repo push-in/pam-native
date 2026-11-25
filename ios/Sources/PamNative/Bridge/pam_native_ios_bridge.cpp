@@ -71,6 +71,53 @@ struct Event {
     std::string payload;
 };
 
+// Finish a burst after an already dispatched discrete interaction. This
+// does not change the event queue order or promote generic native events.
+// Private subset of packages/native/src/EventKind.php; preserve its wire IDs.
+// Contract tests verify parity. This does not introduce a new event protocol.
+enum class InteractiveEventKind : std::int32_t {
+    Press = 1,
+    Change = 2,
+    Back = 3,
+    LongPress = 5,
+    Submit = 8,
+    Refresh = 10,
+    Toggle = 11,
+    InputKeyPress = 27,
+    ModalRequestClose = 31,
+    Drop = 57,
+    MenuAction = 58,
+    NavigationGesturePop = 59,
+    AccessibilityAction = 65,
+    SpanPress = 66,
+    DoubleTap = 70,
+    GestureSettle = 71,
+};
+
+bool is_interactive_event(std::int32_t kind) {
+    switch (static_cast<InteractiveEventKind>(kind)) {
+        case InteractiveEventKind::Press:
+        case InteractiveEventKind::Change:
+        case InteractiveEventKind::Back:
+        case InteractiveEventKind::LongPress:
+        case InteractiveEventKind::Submit:
+        case InteractiveEventKind::Refresh:
+        case InteractiveEventKind::Toggle:
+        case InteractiveEventKind::InputKeyPress:
+        case InteractiveEventKind::ModalRequestClose:
+        case InteractiveEventKind::Drop:
+        case InteractiveEventKind::MenuAction:
+        case InteractiveEventKind::NavigationGesturePop:
+        case InteractiveEventKind::AccessibilityAction:
+        case InteractiveEventKind::SpanPress:
+        case InteractiveEventKind::DoubleTap:
+        case InteractiveEventKind::GestureSettle:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct RuntimeState;
 
 struct PublishedBatch {
@@ -646,7 +693,8 @@ bool register_php_runtime_api(RuntimeState* state) {
 bool call_runtime(
     const char* method,
     std::uint32_t argument_count,
-    zval* arguments
+    zval* arguments,
+    bool* boolean_result = nullptr
 ) {
     zval callable;
     zval result;
@@ -664,6 +712,9 @@ bool call_runtime(
         arguments
     );
     zval_ptr_dtor(&callable);
+    if (boolean_result != nullptr) {
+        *boolean_result = status == SUCCESS && !EG(exception) && Z_TYPE(result) == IS_TRUE;
+    }
     if (!Z_ISUNDEF(result)) {
         zval_ptr_dtor(&result);
     }
@@ -1031,8 +1082,14 @@ RequestOutcome run_php_request(RuntimeState* state) {
     }
 
     bool deferred = false;
+    bool supports_continuation = false;
+    bool pending_work = false;
     if (!run_guarded(state, "Runtime::deferRendering", [&] {
             deferred = enable_deferred_rendering();
+            supports_continuation = deferred && runtime_has_method("haspendingwork");
+            if (supports_continuation && !EG(exception)) {
+                call_runtime("hasPendingWork", 0, nullptr, &pending_work);
+            }
         })) {
         return RequestOutcome::Failed;
     }
@@ -1042,23 +1099,36 @@ RequestOutcome run_php_request(RuntimeState* state) {
     int events_since_gc = 0;
     auto drain_started = std::chrono::steady_clock::now();
     auto last_gc = drain_started;
+    auto next_continuation = drain_started;
     while (!state->stopping.load(std::memory_order_acquire)) {
-        Event event;
+        Event event{};
+        bool has_event = false;
         bool queue_empty = false;
         {
             std::unique_lock<std::mutex> lock(state->queue_mutex);
-            state->queue_ready.wait(lock, [&] {
+            const auto ready = [&] {
                 return state->stopping.load(std::memory_order_acquire)
                     || !state->events.empty();
-            });
+            };
+            if (pending_work) {
+                // A bounded PHP turn left work. Yield briefly before the
+                // next turn; input/reload/shutdown still wakes it at once.
+                // With no work the untimed wait below has zero idle polling.
+                state->queue_ready.wait_until(lock, next_continuation, ready);
+            } else {
+                state->queue_ready.wait(lock, ready);
+            }
             if (state->stopping.load(std::memory_order_acquire)) {
                 break;
             }
-            event = std::move(state->events.front());
-            state->events.pop_front();
+            if (!state->events.empty()) {
+                has_event = true;
+                event = std::move(state->events.front());
+                state->events.pop_front();
+            }
             queue_empty = state->events.empty();
         }
-        if (event.type == EventType::Reload) {
+        if (has_event && event.type == EventType::Reload) {
             if (!event.payload.empty()) {
                 state->entry = event.payload;
             }
@@ -1071,30 +1141,40 @@ RequestOutcome run_php_request(RuntimeState* state) {
             draining = true;
             drain_started = now;
         }
-        if (event.type == EventType::Remount) {
-            publish_remount(state);
-        } else {
-            const Event* current = &event;
-            if (!run_guarded(state, "a Pam Native event", [&] {
-                    dispatch_event(state, *current);
-                })) {
-                return RequestOutcome::Failed;
+        if (has_event) {
+            if (event.type == EventType::Remount) {
+                publish_remount(state);
+            } else {
+                const Event* current = &event;
+                if (!run_guarded(state, "a Pam Native event", [&] {
+                        dispatch_event(state, *current);
+                    })) {
+                    return RequestOutcome::Failed;
+                }
             }
         }
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
             zend_clear_exception();
         }
-        ++events_since_gc;
+        if (has_event) ++events_since_gc;
+        const bool interactive = has_event && event.type == EventType::Ui
+            && is_interactive_event(event.second);
         if (deferred
+            && !interactive
             && !queue_empty
             && std::chrono::steady_clock::now() - drain_started < std::chrono::milliseconds(12)) {
             continue;
         }
         if (deferred) {
-            // One render for everything drained since the last flush.
+            // Preserve queue order, but do not make the response to a
+            // discrete input wait for the remaining progress/result traffic.
             if (!run_guarded(state, "Runtime::flush", [&] {
                     call_runtime("flush", 0, nullptr);
+                    pending_work = false;
+                    if (supports_continuation && !EG(exception)) {
+                        call_runtime("hasPendingWork", 0, nullptr, &pending_work);
+                    }
                 })) {
                 return RequestOutcome::Failed;
             }
@@ -1105,11 +1185,17 @@ RequestOutcome run_php_request(RuntimeState* state) {
         }
         draining = false;
         const auto after = std::chrono::steady_clock::now();
+        next_continuation = after + std::chrono::milliseconds(1);
         if (queue_empty
+            && !pending_work
             && (events_since_gc >= 64 || after - last_gc >= std::chrono::seconds(2))) {
             // Destructors run here: they can fail like any handler.
             if (!run_guarded(state, "PHP cycle collection", [&] {
                     gc_collect_cycles();
+                    // A destructor may itself schedule work.
+                    if (supports_continuation && !EG(exception)) {
+                        call_runtime("hasPendingWork", 0, nullptr, &pending_work);
+                    }
                 })) {
                 return RequestOutcome::Failed;
             }

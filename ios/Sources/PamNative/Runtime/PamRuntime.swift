@@ -360,6 +360,9 @@ public final class PamRuntime {
     private var handle: UInt64 = 0
     private var closed = false
     private var framePump = PamFramePump()
+    private var interactionPriority = PamInteractionPriority()
+    /// Main-thread commits cannot nest through renderer/event callbacks.
+    private var committingBatches = false
     private var readyForEvents = false
     private var ownedBatchHandles: Set<UInt64> = []
     private var pendingBatches: [PendingBatch] = []
@@ -589,7 +592,9 @@ public final class PamRuntime {
     }
 
     private func dropPendingBatches() {
+        cancelDeferredCommit()
         stateLock.lock()
+        interactionPriority.reset()
         let stale = pendingBatches.map { $0.handle }
         pendingBatches.removeAll()
         stateLock.unlock()
@@ -1243,6 +1248,10 @@ public final class PamRuntime {
             return
         }
         closed = true
+        interactionPriority.reset()
+        let deferredCommit = commitAfterFrameObserver
+        commitAfterFrameObserver = nil
+        commitAfterFrameScheduled = false
         let currentHandle = handle
         handle = 0
         framePump.reset()
@@ -1255,6 +1264,7 @@ public final class PamRuntime {
         pendingImmediateEvents.removeAll()
         stateLock.unlock()
 
+        if let deferredCommit { CFRunLoopObserverInvalidate(deferredCommit) }
         if let link = displayLink {
             link.invalidate()
             displayLink = nil
@@ -1371,6 +1381,8 @@ public final class PamRuntime {
             self.markReadyForEvents()
             if self.surfaceAwaitingFirstFrame {
                 self.flushFirstFrame()
+            } else if self.flushInteractiveBatches() {
+                self.schedulePauseIfNeeded()
             } else {
                 self.scheduleFrame()
             }
@@ -1613,6 +1625,9 @@ public final class PamRuntime {
         guard payload.count <= MAX_PAYLOAD_BYTES else {
             return
         }
+        stateLock.lock()
+        if !closed { interactionPriority.record(kind: kind, now: CACurrentMediaTime()) }
+        stateLock.unlock()
         if kind >= 42 {
             reportDiagnostic(RuntimeDiagnostic(kind: .event, label: "node \(nodeId) · event \(kind)"))
         }
@@ -1696,9 +1711,39 @@ public final class PamRuntime {
     /// before the next tick, instead of lengthening the frame that is running.
     /// Small batches (a keystroke echo, a toggle) stay in this frame.
     private var commitAfterFrameScheduled = false
+    private var commitAfterFrameObserver: CFRunLoopObserver?
     private static let heavyCommitMutations = 32
 
+    /// Drain the existing queue as a whole: priority never jumps a newer
+    /// batch ahead of layout/create mutations already waiting in FIFO order.
+    private func flushInteractiveBatches() -> Bool {
+        stateLock.lock()
+        let immediate = !closed && !awaitingRemount && !committingBatches
+            && interactionPriority.isActive(now: CACurrentMediaTime())
+        stateLock.unlock()
+        guard immediate else { return false }
+        cancelDeferredCommit()
+        flushBatches()
+        return true
+    }
+
+    private func cancelDeferredCommit() {
+        stateLock.lock()
+        let observer = commitAfterFrameObserver
+        commitAfterFrameObserver = nil
+        commitAfterFrameScheduled = false
+        stateLock.unlock()
+        if let observer { CFRunLoopObserverInvalidate(observer) }
+    }
+
     private func deferHeavyCommitPastFrame() -> Bool {
+        stateLock.lock()
+        let interactive = interactionPriority.isActive(now: CACurrentMediaTime())
+        stateLock.unlock()
+        if interactive {
+            cancelDeferredCommit()
+            return false
+        }
         stateLock.lock()
         if commitAfterFrameScheduled {
             stateLock.unlock()
@@ -1719,10 +1764,14 @@ public final class PamRuntime {
             guard let self else { return }
             self.stateLock.lock()
             self.commitAfterFrameScheduled = false
+            self.commitAfterFrameObserver = nil
             self.stateLock.unlock()
             self.flushBatches()
             self.schedulePauseIfNeeded()
         }
+        stateLock.lock()
+        commitAfterFrameObserver = observer
+        stateLock.unlock()
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         return true
     }
@@ -1758,6 +1807,10 @@ public final class PamRuntime {
     private func flushBatches() {
         var toProcess: [PendingBatch] = []
         stateLock.lock()
+        guard !committingBatches else {
+            stateLock.unlock()
+            return
+        }
         if closed {
             let toRelease = pendingBatches.map { $0.handle }
             pendingBatches.removeAll()
@@ -1771,13 +1824,20 @@ public final class PamRuntime {
             return
         }
 
+        committingBatches = true
         toProcess = pendingBatches
         pendingBatches.removeAll()
         let currentHandle = handle
         let active = currentHandle != 0
         stateLock.unlock()
 
+        defer {
+            stateLock.lock()
+            committingBatches = false
+            stateLock.unlock()
+        }
         guard active else {
+            toProcess.forEach { releaseBatch($0.handle) }
             return
         }
 
@@ -1881,19 +1941,16 @@ public final class PamRuntime {
     }
 
     private func scheduleFrame() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.stateLock.lock()
-            defer { self.stateLock.unlock() }
-            if self.closed {
-                return
-            }
-            if self.pendingBatches.isEmpty && (self.pendingEvents.isEmpty || !self.readyForEvents) {
-                return
-            }
-            if self.framePump.request() {
-                self.displayLink?.isPaused = false
-            }
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.scheduleFrame() }
+            return
+        }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed,
+              !pendingBatches.isEmpty || (!pendingEvents.isEmpty && readyForEvents) else { return }
+        if framePump.request() {
+            displayLink?.isPaused = false
         }
     }
 

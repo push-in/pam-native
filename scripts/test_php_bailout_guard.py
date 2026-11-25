@@ -98,6 +98,44 @@ class PhpBailoutGuardTests(unittest.TestCase):
         body = '{\n    run_guarded(state, "x", [&] {\n        call_runtime("flush", 0, nullptr);\n    });\n    gc_collect_cycles();\n}'
         self.assertEqual(["gc_collect_cycles( at line 5 of run_php_request"], unguarded_php_calls(body))
 
+    def test_budgeted_php_work_can_resume_without_a_native_event(self):
+        for platform, path in BRIDGES.items():
+            with self.subTest(platform=platform):
+                body = function_body(path.read_text(encoding="utf-8"), "RequestOutcome run_php_request(")
+                self.assertIn('call_runtime("hasPendingWork", 0, nullptr, &pending_work);', body)
+                self.assertIn('runtime_has_method("haspendingwork")', body)
+                self.assertIn('state->queue_ready.wait_until(', body)
+                self.assertIn('if (!state->events.empty())', body)
+                self.assertIn('if (has_event)', body)
+                self.assertIn('&& !pending_work', body)
+                self.assertNotIn('std::this_thread::sleep', body,
+                    'A continuation wait must be interruptible by input, reload and shutdown.')
+
+    def test_discrete_input_flushes_before_draining_more_traffic(self):
+        for platform, path in BRIDGES.items():
+            with self.subTest(platform=platform):
+                text = path.read_text(encoding="utf-8")
+                body = function_body(text, "RequestOutcome run_php_request(")
+                self.assertIn('const bool interactive = has_event', body)
+                self.assertIn('&& is_interactive_event(event.second)', body)
+                self.assertIn('&& !interactive', body)
+                self.assertLess(body.index('dispatch_event(state, *current)'), body.index('call_runtime("flush"'))
+                classifier = function_body(text, 'bool is_interactive_event(')
+                expected = {
+                    "Press", "Change", "Back", "LongPress", "Submit", "Toggle",
+                    "InputKeyPress", "ModalRequestClose", "MenuAction",
+                    "NavigationGesturePop", "SpanPress", "Refresh", "Drop",
+                    "AccessibilityAction", "DoubleTap", "GestureSettle",
+                }
+                cases = set(re.findall(r'case InteractiveEventKind::(\w+):', classifier))
+                self.assertEqual(expected, cases)
+                enum = function_body(text, 'enum class InteractiveEventKind')
+                native_ids = dict(re.findall(r'(\w+)\s*=\s*(\d+)', enum))
+                php_ids = dict(re.findall(r'case (\w+) = (\d+);',
+                    (ROOT / 'packages/native/src/EventKind.php').read_text()))
+                self.assertEqual({name: php_ids[name] for name in expected}, native_ids)
+
+
 
 if __name__ == "__main__":
     unittest.main()

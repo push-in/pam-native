@@ -972,6 +972,7 @@ class PamRenderer(
     private val parkedCells = HashSet<Long>()
     private val localModalIds = LinkedHashSet<Long>()
     private val pressableIds = LinkedHashSet<Long>()
+    /** Input nodes, including recycled editors whose debounced value is still pending. */
     private val inputIds = LinkedHashSet<Long>()
     private val statusBarIds = LinkedHashSet<Long>()
     /** Nodes with `on:routeCovered`/`on:routeFocused` and their last reported coverage. */
@@ -1257,7 +1258,6 @@ class PamRenderer(
         views[id]?.let(PamTimeBinding::clear)
         scrollContainers.remove(id)
         pressableIds.remove(id)
-        inputIds.remove(id)
         views.remove(id)
     }
 
@@ -2296,6 +2296,8 @@ class PamRenderer(
             state.workletAnimator?.cancel()
             state.cancelMotion()
             state.loadingDrawable?.stop()
+            state.pendingChange?.let(main::removeCallbacks)
+            state.pendingChange = null
             state.outsidePointerObserver?.let { observer ->
                 (host as? PamRootHost)?.removePointerObserver(observer)
             }
@@ -2341,6 +2343,7 @@ class PamRenderer(
             virtual = isLayoutOnly(spec),
         )
         nodes.put(spec.id, state)
+        if (state.kind == NodeKind.INPUT) inputIds.add(spec.id)
         if (state.kind == NodeKind.VIRTUAL_LIST) virtualListIds.add(spec.id)
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
         if (state.kind == NodeKind.STATUS_BAR) statusBarIds.add(spec.id)
@@ -3254,6 +3257,7 @@ class PamRenderer(
         removeChild(state.parent, id)
         children.remove(id)
         removeView(id)
+        inputIds.remove(id)
         virtualListIds.remove(id)
         parkedCells.remove(id)
         localModalIds.remove(id)
@@ -4205,6 +4209,7 @@ class PamRenderer(
      * clicks under this node's id.
      */
     private fun releaseNodeViewBindings(view: View, state: NodeState) {
+        if (view is EditText) state.textWatcherInstalled = false
         state.textLayoutListener?.let { listener ->
             view.removeOnLayoutChangeListener(listener)
             state.textLayoutListener = null
@@ -8441,7 +8446,7 @@ class PamRenderer(
                 ) = Unit
 
                 override fun afterTextChanged(editable: Editable?) {
-                    if (state.updating) return
+                    if (state.updating || views[state.id] !== input) return
                     var current = editable?.toString().orEmpty()
                     val selection = input.selectionStart.coerceAtLeast(0)
                     // Masked/currency inputs: deleting a literal (separator)
@@ -8870,6 +8875,7 @@ class PamRenderer(
     private fun dispatchInput(state: NodeState) {
         state.pendingChange?.let(main::removeCallbacks)
         state.pendingChange = null
+        if (destroyed || nodes[state.id] !== state) return
         if (state.properties[PropKey.ON_CHANGE] != null) {
             recordInputInFlight(state.inputInFlight, state.nativeValue, SystemClock.uptimeMillis())
             dispatch(state.id, EVENT_CHANGE, state.nativeValue)
@@ -8883,9 +8889,10 @@ class PamRenderer(
      * visible in the editor.
      */
     private fun flushFocusedNativeInputs() {
+        if (inputIds.isEmpty()) return
         val pending = buildList {
-            for (index in 0 until nodes.size()) {
-                val state = nodes.valueAt(index)
+            for (id in inputIds) {
+                val state = nodes[id] ?: continue
                 if (
                     state.properties[PropKey.ON_CHANGE] != null &&
                     (
@@ -8898,7 +8905,10 @@ class PamRenderer(
                 }
             }
         }
-        pending.forEach { state ->
+        // Preserve the former node-map traversal order (O(1) indexed lookup)
+        // without scanning unrelated nodes. Snapshot before dispatch: a
+        // change handler may remove another input reentrantly.
+        pending.sortedBy { nodes.indexOfKey(it.id) }.forEach { state ->
             if (nodes[state.id] === state) dispatchInput(state)
         }
     }

@@ -464,7 +464,7 @@ final class PamSharedElementFlights {
         // neighbour whose unclipped frame also covers the point).
         var found: (String, UIView)?
         var foundArea = CGFloat.greatestFiniteMagnitude
-        for (tag, views) in taggedViews(in: route) {
+        for (tag, views) in taggedViews(in: route, visibleOnly: true) {
             for view in views where Self.config(for: view)?.launch == true
                 && onScreen(view, route: route, minimumShare: 0.5) {
                 let rect = visibleRect(view)
@@ -737,11 +737,14 @@ final class PamSharedElementFlights {
         return found
     }
 
-    private func taggedViews(in root: UIView) -> [String: [UIView]] {
+    /// Source tap lookup can prune hidden branches. Destination lookup must
+    /// still see hidden pre-mounted routes before the transition reveals them.
+    func taggedViews(in root: UIView, visibleOnly: Bool = false) -> [String: [UIView]] {
         var result: [String: [UIView]] = [:]
         let excluded = self.excluded
         func visit(_ view: UIView) {
             if let excluded, view === excluded { return }
+            if visibleOnly && (view.isHidden || view.alpha <= 0.01) { return }
             if let tag = view.layer.value(forKey: "pamSharedTransitionTag") as? String, !tag.isEmpty {
                 result[tag, default: []].append(view)
             }

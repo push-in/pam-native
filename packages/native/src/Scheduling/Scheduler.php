@@ -68,6 +68,9 @@ final class Scheduler
                 $entry = $queue->extract();
                 $task = $entry['task'];
                 if ($task->token->cancelled()) {
+                    if ((hrtime(true) - $started) / 1_000_000 >= $budgetMs) {
+                        break;
+                    }
                     continue;
                 }
                 $coalesce = $entry['coalesce'];
