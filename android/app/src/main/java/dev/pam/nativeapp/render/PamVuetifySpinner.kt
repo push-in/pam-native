@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.Drawable
@@ -74,7 +75,7 @@ internal class PamVuetifySpinnerDrawable(
         color = Color.BLACK
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.BUTT
-        strokeWidth = 4f * density
+        strokeWidth = MIN_STROKE_DP * density
     }
     private val arcBounds = RectF()
     private var phase = 0f
@@ -90,6 +91,13 @@ internal class PamVuetifySpinnerDrawable(
         }
     }
     private val loop: PamHostedLoop = PamHostedLoop(this, animator)
+
+    override fun onBoundsChange(bounds: Rect) {
+        super.onBoundsChange(bounds)
+        // The ring follows the diameter (1/10, like a native ring) instead of a fixed 4 dp that read heavy at 20 dp.
+        val diameter = minOf(bounds.width(), bounds.height()).toFloat()
+        paint.strokeWidth = maxOf(MIN_STROKE_DP * density, diameter * STROKE_RATIO)
+    }
 
     override fun draw(canvas: Canvas) {
         // Drawn means shown: a host that came back on screen resumes the loop.
@@ -156,3 +164,6 @@ internal class PamVuetifySpinnerDrawable(
     /** Test seam: whether the animator drives frames right now. */
     val isTicking: Boolean get() = loop.isTicking
 }
+
+private const val MIN_STROKE_DP = 1.5f
+private const val STROKE_RATIO = 0.1f
