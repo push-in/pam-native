@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.54.16 - 2026-11-25
+
+- Android: forward Firebase token creation and rotation to a package-restricted
+  native plugin event, including when the PHP runtime is suspended.
+- The event rejects blank or oversized tokens without truncating opaque values.
+- Regression coverage exercises the Firebase callback and the plugin contract.
+
+Migration: existing APIs and protocol remain compatible. Plugins consuming the
+new token event require SDK 1.54.16. Rebuild native applications.
+
 ## 1.54.15 - 2026-11-25
 
 - Navigation: commit the departing screen state before freezing it, so closing

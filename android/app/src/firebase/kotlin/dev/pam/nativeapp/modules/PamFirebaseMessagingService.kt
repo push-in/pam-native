@@ -10,6 +10,11 @@ import org.json.JSONObject
  * project root contains .pam/google-services.json or google-services.json.
  */
 public class PamFirebaseMessagingService : FirebaseMessagingService() {
+    override fun onNewToken(token: String) {
+        val intent = BackgroundPush.tokenRefreshedIntent(applicationContext, token) ?: return
+        sendBroadcast(intent)
+    }
+
     override fun onMessageReceived(message: RemoteMessage) {
         val data = JSONObject()
         message.data.forEach { (key, value) -> data.put(key, value) }

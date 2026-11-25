@@ -512,6 +512,26 @@ delegate longer work to WorkManager. PAM persists the same event for normal
 PHP `PushNotifications` delivery, so the native hook complements rather than
 replaces application routing.
 
+### FCM registration token refresh
+
+The optional Firebase service also forwards `onNewToken` through
+`BackgroundPush.ACTION_TOKEN_REFRESHED`
+(`dev.pam.nativeapp.action.PUSH_TOKEN_REFRESHED`). Add that action to a plugin's
+manifest receiver with `android:exported="false"`, and read the opaque token from
+`BackgroundPush.EXTRA_TOKEN` (`dev.pam.nativeapp.push.TOKEN`). The receiver does
+not depend on PHP or dynamic plugin registration, so it can accept a refresh
+before the plugin has been loaded by the runtime.
+
+`BackgroundPush.tokenRefreshedIntent(context, token)` returns a package-restricted
+intent, or `null` for a blank token or one longer than 8,192 characters. Accepted
+tokens are preserved exactly, never truncated. The SDK does not log the token,
+store account credentials, contact application endpoints or poll for changes.
+The receiving plugin owns durable storage, authenticated registration and any
+bounded retry work; it must not log token contents or perform network requests
+inside `onReceive`. This event does not imply that a user is signed in. Declare
+the manifest receiver rather than relying only on a receiver registered after
+the UI starts.
+
 ## Compatibility policy
 
 - Descriptor version, wire protocol, statuses, and operation kinds are
