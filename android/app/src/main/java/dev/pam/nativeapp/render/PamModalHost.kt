@@ -830,14 +830,18 @@ internal class PamModalHost @JvmOverloads constructor(
 
     /**
      * Activity-level fallback for synthetic/OEM Back dispatch that reaches
-     * both the dialog and its host activity. A visible modal always owns Back;
+     * both the dialog and its host activity. An open modal owns Back;
      * the activity must never pop its navigator or finish underneath it. A
      * modal the app has asked to present owns it too, from the commit: a
      * quick Back before its window appeared popped the screen behind it.
+     * Once close was requested, a new Back may navigate during the exit.
      */
     fun consumeActivityBack(): Boolean {
-        if (!isPresented() && !(desiredVisible && isAttachedToWindow && removalExit == null)) return false
-        if (desiredVisible) requestCloseFromBack()
+        // Covered routes retain their attached modal and desired visibility
+        // so it can reopen on return. They do not own the visible route's Back.
+        if (routeCovered || !desiredVisible) return false
+        if (!isPresented() && !(isAttachedToWindow && removalExit == null)) return false
+        requestCloseFromBack()
         return true
     }
 
@@ -956,7 +960,16 @@ internal class PamModalHost @JvmOverloads constructor(
             }
             modal.setOnKeyListener { _, keyCode, event ->
                 val root = modal.window?.decorView
-                if (root != null && pamActivity()?.dispatchPamKey(root, event) == true) {
+                if (pamActivity()?.consumeModalBackKey(event) == true) {
+                    true
+                } else if (keyCode == KeyEvent.KEYCODE_BACK && !desiredVisible) {
+                    // The old dialog may still own window focus during its
+                    // exit. A new Back belongs to the screen underneath it.
+                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                        requestCloseFromBack(event)
+                    }
+                    true
+                } else if (root != null && pamActivity()?.dispatchPamKey(root, event) == true) {
                     true
                 } else if (keyCode != KeyEvent.KEYCODE_BACK) {
                     false
@@ -964,7 +977,7 @@ internal class PamModalHost @JvmOverloads constructor(
                     // Own the whole Back gesture (down and up) so neither half
                     // reaches the activity's navigator below this window.
                     if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
-                        requestCloseFromBack()
+                        requestCloseFromBack(event)
                     }
                     true
                 }
@@ -1241,10 +1254,15 @@ internal class PamModalHost @JvmOverloads constructor(
         dialogBackCallback = null
     }
 
-    private fun requestCloseFromBack() {
+    private fun requestCloseFromBack(event: KeyEvent? = null) {
+        if (routeCovered) return
+        if (!desiredVisible) {
+            pamActivity()?.dispatchBackFromClosingModal(event)
+            return
+        }
         if (hideVisibleKeyboard()) return
         onBackConsumed?.invoke()
-        pamActivity()?.suppressNextPamBack()
+        pamActivity()?.suppressNextPamBack(event)
         requestClose()
     }
 

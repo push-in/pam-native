@@ -2751,7 +2751,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        guard currentlyVisible else { return nil }
+        guard acceptsKeyboardDismissal else { return nil }
         return [
             UIKeyCommand(
                 input: UIKeyCommand.inputEscape,
@@ -2759,6 +2759,13 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
                 action: #selector(onEscape)
             ),
         ]
+    }
+
+    private var acceptsKeyboardDismissal: Bool {
+        // Lifted sheets stay mounted while their logical route is covered.
+        // They must not claim Escape from the destination's responder chain.
+        currentlyVisible && desiredVisible && isUserInteractionEnabled
+            && !PamRouteCoverage.isCovered(self)
     }
 
     override init(frame: CGRect) {
@@ -3635,6 +3642,8 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func onEscape() {
+        // UIKit may still dispatch a command captured before coverage changed.
+        guard acceptsKeyboardDismissal else { return }
         requestClose()
     }
 

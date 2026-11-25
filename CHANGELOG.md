@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.54.15 - 2026-11-25
+
+- Navigation: commit the departing screen state before freezing it, so closing
+  a sheet and navigating in the same event cannot retain an open native modal.
+- Android: covered modals no longer consume Back; distinguish new Back key
+  interactions from duplicate delivery instead of suppressing both.
+- iOS: covered sheets cannot claim Escape or act on an earlier keyboard command.
+- Regression coverage includes retained sheets, pending presentation, repeated
+  Back keys, canceled input, programmatic dismissal and covered autofocus.
+
+Migration: no public API, protocol or dependency changes. Rebuild native apps.
+
 ## 1.54.13 - 2026-11-25
 
 - Android spinner: the `ActivityIndicator` ring follows its diameter (1/10,

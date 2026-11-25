@@ -18,6 +18,7 @@ import dev.pam.nativeapp.CapabilityTestActivity
 import dev.pam.nativeapp.PamTestActivity
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -63,6 +64,79 @@ class PamModalHiddenWindowInputInstrumentedTest {
         instrumentation.runOnMainSync {
             modal?.close()
             activity.finish()
+        }
+    }
+
+    @Test
+    fun closingSheetReleasesBackBeforeItsWindowFinishesExiting() {
+        present()
+        var closeRequests = 0
+        instrumentation.runOnMainSync {
+            modal!!.setCallbacks(
+                onRequestClose = { closeRequests++ },
+                onShow = null,
+                onDismiss = null,
+                onOrientationChange = null,
+            )
+            assertTrue("the open sheet owns the first Back", modal!!.consumeActivityBack())
+            assertEquals(1, closeRequests)
+            assertTrue("the old window remains until its exit runs", modal!!.isPresented())
+            assertFalse("a closing sheet cannot discard a new Back", modal!!.consumeActivityBack())
+            assertEquals("the sheet close request is not repeated", 1, closeRequests)
+        }
+    }
+
+    @Test
+    fun coveredSheetDoesNotConsumeBackAndRetainsItsPresentationOnReturn() {
+        present()
+        var closeRequests = 0
+        instrumentation.runOnMainSync {
+            modal!!.setCallbacks(
+                onRequestClose = { closeRequests++ },
+                onShow = null,
+                onDismiss = null,
+                onOrientationChange = null,
+            )
+            modal!!.setRouteCovered(true)
+            assertTrue("a covered route keeps its modal mounted", modal!!.isAttachedToWindow)
+            assertFalse("the covered sheet has no presented window", modal!!.isPresented())
+            repeat(3) {
+                assertFalse("Back belongs to the covering route", modal!!.consumeActivityBack())
+            }
+            assertEquals("Back must not dismiss a sheet on another route", 0, closeRequests)
+            modal!!.setRouteCovered(false)
+        }
+        waitUntil("the retained sheet shows when its route returns") { modal!!.isPresented() }
+        instrumentation.runOnMainSync {
+            assertTrue("the visible sheet owns Back again", modal!!.consumeActivityBack())
+            assertEquals(1, closeRequests)
+        }
+        waitUntil("the requested close hides the sheet") { !modal!!.isPresented() }
+        instrumentation.runOnMainSync {
+            assertFalse("a closed sheet no longer owns Back", modal!!.consumeActivityBack())
+        }
+    }
+
+    @Test
+    fun attachedSheetOwnsBackBeforeItsWindowAppearsUnlessItsRouteIsCovered() {
+        instrumentation.runOnMainSync {
+            val host = PamModalHost(activity)
+            modal = host
+            host.setPresentation(3)
+            activity.host.addView(host)
+            assertFalse("the scheduled presentation has not run", host.isPresented())
+            host.setRouteCovered(true)
+            assertFalse("a pending sheet on a covered route cannot own Back", host.consumeActivityBack())
+            // A separate pending visible sheet must still protect its route
+            // from a Back arriving between the mount and window presentation.
+            host.close()
+            activity.host.removeView(host)
+            val pending = PamModalHost(activity)
+            modal = pending
+            pending.setPresentation(3)
+            activity.host.addView(pending)
+            assertFalse(pending.isPresented())
+            assertTrue("the active route's pending sheet owns Back", pending.consumeActivityBack())
         }
     }
 
