@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.54.13 - 2026-11-25
+
+- Android spinner: the `ActivityIndicator` ring follows its diameter (1/10,
+  at least 1.5 dp) instead of a fixed 4 dp stroke that read heavy at the
+  default 20 dp size. iOS already uses the system indicator.
+
+Migration: no public API, protocol or dependency changes are required. Rebuild
+native applications to include the renderer fix.
+
 ## 1.54.12 - 2026-11-25
 
 - Runtime: commit discrete user interactions before draining queued progress
