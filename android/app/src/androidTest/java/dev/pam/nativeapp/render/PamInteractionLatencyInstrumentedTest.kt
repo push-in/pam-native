@@ -7,8 +7,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputType
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -25,6 +27,7 @@ import dev.pam.nativeapp.protocol.PropValue
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,13 +82,22 @@ class PamInteractionLatencyInstrumentedTest {
                 val inputs = ArrayList<EditText>()
                 try {
                     main {
+                        // This benchmark measures touch dispatch and pending edits,
+                        // not IME startup. Isolate both controls from automatic focus
+                        // before any editor attaches or starts a spellchecker session.
+                        activity.host.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                         renderer = PamRenderer(activity, activity.host) { id, kind, _ ->
                             if (id == PRESS && kind == EventKind.PRESS.value) probe.changed()
                         }
-                        renderer.commit(listOf(fixture(retained, inputCount)))
+                        renderer.commit(listOf(fixture(retained, inputCount, syntheticInputs = true)))
                         press = requireNotNull(find(activity.host, "latency-press"))
                         repeat(inputCount) { index ->
-                            inputs += requireNotNull(find(activity.host, "latency-input-$index")) as EditText
+                            val input = requireNotNull(find(activity.host, "latency-input-$index")) as EditText
+                            assertTrue("synthetic edits must not start suggestions",
+                                (input.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) != 0)
+                            assertFalse("synthetic editor must not open the IME", input.showSoftInputOnFocus)
+                            assertFalse("synthetic editor must remain unfocused", input.hasFocus())
+                            inputs += input
                         }
                         probe = DrawProbe(activity)
                         platform = Button(activity).apply { text = "Platform"; setOnClickListener { probe.changed() } }
@@ -152,16 +164,26 @@ class PamInteractionLatencyInstrumentedTest {
             awaitFrames(instrumentation, 2)
             main {
                 val input = requireNotNull(find(activity.host, "latency-input-0")) as EditText
+                val press = requireNotNull(find(activity.host, "latency-press"))
                 input.showSoftInputOnFocus = false
-                input.requestFocus()
+                assertTrue("native input receives focus", input.requestFocus())
+                assertTrue("first press must flush a focused input", input.hasFocus())
                 input.setText("last visible character")
                 events.clear()
-                requireNotNull(find(activity.host, "latency-press")).performClick()
+                press.performClick()
                 assertEquals(listOf(EventKind.CHANGE.value, EventKind.PRESS.value), events.map { it.first })
                 assertEquals("last visible character", events.first().second)
-                input.clearFocus()
+                // clearFocus() can synchronously give focus back to the first
+                // EditText on older Android versions. Transfer it explicitly
+                // so this exercises the unfocused-input path on every API.
                 events.clear()
-                requireNotNull(find(activity.host, "latency-press")).performClick()
+                press.isFocusableInTouchMode = true
+                assertTrue("another control receives focus for blur", press.requestFocus())
+                assertFalse("second press must observe an unfocused input", input.hasFocus())
+                assertEquals(listOf(EventKind.CHANGE.value), events.map { it.first })
+                assertEquals("last visible character", events.single().second)
+                events.clear()
+                press.performClick()
                 assertEquals(listOf(EventKind.PRESS.value), events.map { it.first })
             }
         } finally { main { renderer.close(); activity.finish() } }
@@ -288,7 +310,7 @@ class PamInteractionLatencyInstrumentedTest {
         } finally { main { renderer.close(); activity.finish() } }
     }
 
-    private fun fixture(retained: Int, inputs: Int): List<Mutation> = buildList {
+    private fun fixture(retained: Int, inputs: Int, syntheticInputs: Boolean = false): List<Mutation> = buildList {
         add(Mutation.Create(NodeSpec(ROOT, 0, 0, NodeKind.SCREEN, emptyMap())))
         add(Mutation.Create(NodeSpec(PRESS, ROOT, 0, NodeKind.PRESSABLE, mapOf(
             PropKey.ON_PRESS to PropValue.Flag(true), PropKey.TEST_ID to PropValue.Text("latency-press"),
@@ -296,11 +318,16 @@ class PamInteractionLatencyInstrumentedTest {
         add(Mutation.Layout(ROOT, Frame(0f, 0f, 400f, 640f)))
         add(Mutation.Layout(PRESS, Frame(0f, 0f, 160f, 64f)))
         repeat(inputs) { index ->
-            add(Mutation.Create(NodeSpec(INPUT + index, ROOT, index + 1, NodeKind.INPUT, mapOf(
-                PropKey.ON_CHANGE to PropValue.Flag(true), PropKey.INPUT_SYNC_MODE to PropValue.Integer(2),
-                PropKey.INPUT_DEBOUNCE_MS to PropValue.Integer(5_000),
-                PropKey.TEST_ID to PropValue.Text("latency-input-$index"),
-            ))))
+            add(Mutation.Create(NodeSpec(INPUT + index, ROOT, index + 1, NodeKind.INPUT, buildMap {
+                put(PropKey.ON_CHANGE, PropValue.Flag(true))
+                put(PropKey.INPUT_SYNC_MODE, PropValue.Integer(2))
+                put(PropKey.INPUT_DEBOUNCE_MS, PropValue.Integer(5_000))
+                put(PropKey.TEST_ID, PropValue.Text("latency-input-$index"))
+                if (syntheticInputs) {
+                    put(PropKey.INPUT_AUTO_CORRECT, PropValue.Flag(false))
+                    put(PropKey.INPUT_SHOW_SOFT_INPUT_ON_FOCUS, PropValue.Flag(false))
+                }
+            })))
             add(Mutation.Layout(INPUT + index, Frame(0f, 150f + index * 56f, 160f, 48f)))
         }
         // Layout-only nodes retain engine/renderer state without allocating

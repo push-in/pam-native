@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.54.11 - 2026-11-24
+## 1.54.12 - 2026-11-25
 
 - Runtime: commit discrete user interactions before draining queued progress
   events. Continue deferred PHP rendering and scheduler work without waiting for
@@ -17,6 +17,9 @@
 - Image prefetch: deduplicate and bound queued work on both platforms, stop it
   while the app is inactive, and settle cancelled callbacks once. Queued duplicate
   requests inherit higher priority without restarting active downloads.
+
+- Android test isolation: transfer focus explicitly on Android 8 and keep the
+  synthetic latency benchmark independent of keyboard dictionary work.
 
 Migration: no public API, protocol or dependency changes are required. Rebuild
 native applications to include the host and renderer fixes.
