@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.54.14 - 2026-11-25
+## 1.54.15 - 2026-11-25
 
 - Navigation: commit the departing screen state before freezing it, so closing
   a sheet and navigating in the same event cannot retain an open native modal.
