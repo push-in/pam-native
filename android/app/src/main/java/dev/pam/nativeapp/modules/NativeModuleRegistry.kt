@@ -116,6 +116,10 @@ class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = n
         }
     }
 
+    internal fun setImagePrefetchActive(active: Boolean) {
+        image.setActive(active)
+    }
+
     fun prepareReload() {
         generation.incrementAndGet()
         PamDeepLinks.prepareReload()

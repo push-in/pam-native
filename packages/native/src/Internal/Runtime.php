@@ -520,32 +520,34 @@ final class Runtime
 
     /**
      * Renders once if anything was dispatched or scheduled since the last
-     * render. With deferred rendering (the device hosts) this is the only
-     * place the host hands PHP its turn, so the task queue runs here too:
-     * work scheduled by handlers (useResource loaders) before the render,
-     * work scheduled while rendering (a resource first read in setup())
-     * right after it, and one more render for what those tasks changed.
+     * render. Commit an already pending visual response before running
+     * scheduled work, then spend one task budget and render its changes.
+     * Work left after that budget (including tasks created by the last
+     * render) is continued by the host through hasPendingWork(), without
+     * waiting for another input or draining an unbounded queue in one turn.
      */
     public static function flush(): bool
     {
         if (self::$root === null) {
             return false;
         }
-        self::drainScheduledTasks();
-        if (!self::$pending) {
-            return false;
-        }
-        for ($pass = 0; $pass < 2 && self::$pending; $pass++) {
-            self::$pending = false;
-            try {
-                self::render();
-            } catch (Throwable $error) {
-                self::reportError($error, RuntimeErrorPhase::Render);
+        $rendered = false;
+        for ($pass = 0; $pass < 2; $pass++) {
+            if (self::$pending) {
+                self::$pending = false;
+                try {
+                    self::render();
+                } catch (Throwable $error) {
+                    self::reportError($error, RuntimeErrorPhase::Render);
+                }
+                $rendered = true;
             }
-            self::drainScheduledTasks();
+            if ($pass === 0) {
+                self::drainScheduledTasks();
+            }
         }
 
-        return true;
+        return $rendered;
     }
 
     private static function drainScheduledTasks(): void
@@ -563,6 +565,12 @@ final class Runtime
     public static function hasPendingRender(): bool
     {
         return self::$pending;
+    }
+
+    /** @internal Keeps the native worker runnable only while a turn has work. */
+    public static function hasPendingWork(): bool
+    {
+        return self::$root !== null && (self::$pending || Scheduler::pending() > 0);
     }
 
     private static function afterDispatch(): void

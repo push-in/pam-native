@@ -12,6 +12,7 @@ import android.view.Choreographer
 import dev.pam.nativeapp.modules.ModuleCompletion
 import dev.pam.nativeapp.modules.NativeModuleRegistry
 import dev.pam.nativeapp.protocol.BatchDecoder
+import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -563,15 +564,18 @@ class PamRuntime(
     }
 
     fun onHostPause() {
+        installedModules?.setImagePrefetchActive(false)
         renderer.onHostPause()
     }
 
     fun onHostResume() {
+        installedModules?.setImagePrefetchActive(true)
         renderer.onHostResume()
     }
 
     /** Activity stopped (app in background): media players release their decoders. */
     fun onHostBackground() {
+        installedModules?.setImagePrefetchActive(false)
         renderer.onHostBackground()
     }
 
@@ -1288,11 +1292,22 @@ class PamRuntime(
         /** A batch answering a user event within this window commits in-frame. */
         private const val INTERACTION_COMMIT_WINDOW_MS = 250L
         private val INTERACTION_EVENTS = setOf(
-            1, // press
-            2, // change (text input, toggles)
-            5, // long press
-            8, // submit
-            11, // toggle
+            EventKind.PRESS.value,
+            EventKind.CHANGE.value,
+            EventKind.BACK.value,
+            EventKind.LONG_PRESS.value,
+            EventKind.SUBMIT.value,
+            EventKind.REFRESH.value,
+            EventKind.TOGGLE.value,
+            EventKind.INPUT_KEY_PRESS.value,
+            EventKind.MODAL_REQUEST_CLOSE.value,
+            EventKind.DROP.value,
+            EventKind.MENU_ACTION.value,
+            EventKind.NAVIGATION_GESTURE_POP.value,
+            EventKind.ACCESSIBILITY_ACTION.value,
+            EventKind.SPAN_PRESS.value,
+            EventKind.DOUBLE_TAP.value,
+            EventKind.GESTURE_SETTLE.value,
         )
         private val COALESCED_EVENTS = setOf(
             9, // scroll

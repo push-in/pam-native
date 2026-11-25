@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.54.12 - 2026-11-25
+
+- Runtime: commit discrete user interactions before draining queued progress
+  events. Continue deferred PHP rendering and scheduler work without waiting for
+  another native event, and sleep without polling once pending work is drained.
+- Android inputs: index retained editors instead of scanning every render node
+  before a press; preserve pending edits and restore watchers when virtualized
+  editors are rematerialized. Ignore callbacks from detached or closed editors.
+- iOS interaction: prioritize recent user actions without reordering commits,
+  flush only pending editors, and preserve authoritative controlled input values.
+- iOS shared elements: skip covered source branches while preserving lookup of
+  pre-mounted destinations for shared transitions.
+- iOS images: bound decode concurrency, cancel obsolete decode deliveries and
+  placeholder requests, and keep local placeholder reads off the main thread.
+- Image prefetch: deduplicate and bound queued work on both platforms, stop it
+  while the app is inactive, and settle cancelled callbacks once. Queued duplicate
+  requests inherit higher priority without restarting active downloads.
+
+- Android test isolation: transfer focus explicitly on Android 8 and keep the
+  synthetic latency benchmark independent of keyboard dictionary work.
+
+Migration: no public API, protocol or dependency changes are required. Rebuild
+native applications to include the host and renderer fixes.
+
 ## 1.54.10 - 2026-11-24
 
 - iOS media: invalidate stale surface callbacks, cancel poster requests when

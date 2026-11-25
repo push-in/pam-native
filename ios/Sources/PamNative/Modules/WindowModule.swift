@@ -203,34 +203,83 @@ final class AccessibilityModule: NativeModule {
 /// higher priority first.
 final class ImagePrefetchModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
     static let maxUrls = 100
+    static let maxPending = 128
+    static let maxSubscribers = 512
+    typealias CacheLookup = @Sendable (String, String?, @escaping @Sendable (Data?) -> Void) -> Void
+    private let cacheLookup: CacheLookup
+    private struct Identity: Hashable {
+        let source: String
+        let headers: String
+        let cacheKey: String?
+    }
+    private final class Job: @unchecked Sendable {
+        let identity: Identity
+        let headers: [String: String]
+        var priority: Int64
+        let order: Int64
+        var waiters: [PrefetchTally] = []
+        var started = false
+        var task: URLSessionTask?
+        var operation: Operation?
+        init(identity: Identity, headers: [String: String], priority: Int64, order: Int64) {
+            self.identity = identity
+            self.headers = headers
+            self.priority = priority
+            self.order = order
+        }
+    }
     private let session: URLSession
-    private let operations: OperationQueue = {
+    private let assetQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.name = "dev.pam.image-prefetch"
+        queue.name = "dev.pam.image-prefetch-assets"
         queue.maxConcurrentOperationCount = 2
         queue.qualityOfService = .utility
         return queue
     }()
     private let lock = NSLock()
     private var closed = false
+    private var active = false
+    private var jobs: [Identity: Job] = [:]
+    // Canceled transports keep their slot until their completion has drained.
+    private var retiring: [ObjectIdentifier: Job] = [:]
+    private var running = 0
+    private var subscribers = 0
+    private var sequence: Int64 = 0
+    private var observers: [NSObjectProtocol] = []
 
-    init(session: URLSession = URLSession(configuration: .default)) {
+    init(
+        session: URLSession = URLSession(configuration: .default),
+        initiallyActive: Bool? = nil,
+        cacheLookup: @escaping CacheLookup = { source, key, completion in
+            PamMediaDiskCache.shared.data(source: source, stableKey: key, maxAgeMs: 0, completion: completion)
+        }
+    ) {
         self.session = session
+        self.cacheLookup = cacheLookup
+        observers = [
+            NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.setActive(false) },
+            NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.setActive(false) },
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.setActive(true) },
+        ]
+        if let initiallyActive {
+            setActive(initiallyActive)
+        } else if Thread.isMainThread {
+            setActive(UIApplication.shared.applicationState == .active)
+        } else {
+            // Fail speculative work until the main-thread snapshot is available.
+            DispatchQueue.main.async { [weak self] in
+                self?.setActive(UIApplication.shared.applicationState == .active)
+            }
+        }
     }
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         do {
             guard method == "prefetch" else { throw PrefetchError("Unknown image method \(method)") }
-            lock.lock()
-            let isClosed = closed
-            lock.unlock()
-            guard !isClosed else { throw PrefetchError("Image prefetch module is closed") }
             let values = try WireMap.decode(payload)
             guard case let .text(urlsJson)? = values["urls"],
-                  let urls = try JSONSerialization.jsonObject(with: Data(urlsJson.utf8)) as? [String] else {
-                throw PrefetchError("Image URLs are required")
-            }
-            guard (1...Self.maxUrls).contains(urls.count) else {
+                  let urls = try JSONSerialization.jsonObject(with: Data(urlsJson.utf8)) as? [String],
+                  (1...Self.maxUrls).contains(urls.count) else {
                 throw PrefetchError("Prefetch between 1 and \(Self.maxUrls) images")
             }
             var priority: Int64 = 2
@@ -239,104 +288,167 @@ final class ImagePrefetchModule: NativeModule, ClosableNativeModule, @unchecked 
             if case let .text(text)? = values["headers"], !text.trimmingCharacters(in: .whitespaces).isEmpty {
                 headers = (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: String]) ?? [:]
             }
+            let canonical = String(decoding: try JSONSerialization.data(withJSONObject: headers, options: .sortedKeys), as: UTF8.self)
             var cacheKeys: [String] = []
             if case let .text(text)? = values["cacheKeys"] {
-                cacheKeys = (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [Any])?
-                    .map { $0 as? String ?? "" } ?? []
+                cacheKeys = (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [Any])?.map { $0 as? String ?? "" } ?? []
             }
             let tally = PrefetchTally(count: urls.count, completion: completion)
             for (index, source) in urls.enumerated() {
                 let key = index < cacheKeys.count && !cacheKeys[index].isEmpty ? cacheKeys[index] : nil
-                let operation = BlockOperation { [weak self] in
-                    guard let self else {
-                        tally.finish(bytes: nil)
-                        return
-                    }
-                    tally.finish(bytes: self.fetch(source: source, headers: headers, cacheKey: key))
+                let identity = Identity(source: source, headers: canonical, cacheKey: key)
+                lock.lock()
+                let existing = jobs[identity]
+                let rejected = closed || !active || subscribers >= Self.maxSubscribers
+                    || (existing == nil && jobs.count + retiring.count >= Self.maxPending)
+                if !rejected {
+                    sequence += 1
+                    let job = existing ?? Job(identity: identity, headers: headers, priority: priority, order: sequence)
+                    // A shared queued request inherits its most urgent consumer.
+                    if !job.started { job.priority = max(job.priority, priority) }
+                    job.waiters.append(tally)
+                    subscribers += 1
+                    jobs[identity] = job
                 }
-                operation.queuePriority = Self.queuePriority(priority)
-                operations.addOperation(operation)
+                lock.unlock()
+                if rejected { tally.finish(bytes: nil) } else { pump() }
             }
         } catch {
             completion(.failure, Data(error.localizedDescription.utf8))
         }
     }
 
+    /// Cancels speculative requests only. The session remains reusable after foregrounding.
+    func setActive(_ value: Bool) {
+        if value {
+            lock.lock()
+            if !closed { active = true }
+            lock.unlock()
+        } else {
+            cancelPending()
+        }
+    }
+
     func close() {
         lock.lock()
+        guard !closed else { lock.unlock(); return }
         closed = true
+        let registered = observers
+        observers.removeAll()
         lock.unlock()
-        operations.cancelAllOperations()
+        cancelPending()
+        for observer in registered { NotificationCenter.default.removeObserver(observer) }
         session.invalidateAndCancel()
     }
 
-    /// Synchronous on the prefetch queue; returns stored bytes or nil.
-    private func fetch(source: String, headers: [String: String], cacheKey: String?) -> Int64? {
-        // A packaged image has nothing to download: decode it now and keep
-        // it for the process, so its first Image paints in the bind frame.
-        if source.range(of: "asset://", options: [.anchored, .caseInsensitive]) != nil {
-            return PamInlineImages.preloadAsset(source)
+    private func cancelPending() {
+        lock.lock()
+        active = false
+        let pending = Array(jobs.values)
+        jobs.removeAll()
+        subscribers = 0
+        let callbacks = pending.flatMap { job -> [PrefetchTally] in
+            if job.started { retiring[ObjectIdentifier(job)] = job }
+            job.task?.cancel()
+            job.operation?.cancel()
+            let result = job.waiters
+            job.waiters.removeAll()
+            return result
         }
-        guard let url = URL(string: source), let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http", url.host != nil else { return nil }
-        let cache = PamMediaDiskCache.shared
-        let cached = PrefetchWaiter<Data?>()
-        cache.data(source: source, stableKey: cacheKey, maxAgeMs: 0) { cached.resolve($0) }
-        if let data = cached.wait(), !data.isEmpty { return Int64(data.count) }
-        var request = URLRequest(url: url, timeoutInterval: 30)
-        for (name, value) in headers where name.range(of: "^[A-Za-z0-9-]{1,64}$", options: .regularExpression) != nil {
-            request.setValue(value, forHTTPHeaderField: name)
-        }
-        let downloaded = PrefetchWaiter<Data?>()
-        session.dataTask(with: request) { data, response, error in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard error == nil, (200..<300).contains(status), let data, !data.isEmpty,
-                  UIImage(data: data) != nil else {
-                downloaded.resolve(nil)
-                return
-            }
-            downloaded.resolve(data)
-        }.resume()
-        guard let data = downloaded.wait() else { return nil }
-        let stored = PrefetchWaiter<Bool>()
-        cache.store(data, source: source, stableKey: cacheKey, checksum: nil, limit: 0, pinned: false) {
-            stored.resolve($0)
-        }
-        return stored.wait() == true ? Int64(data.count) : nil
+        lock.unlock()
+        for callback in callbacks { callback.finish(bytes: nil) }
     }
 
-    private static func queuePriority(_ value: Int64) -> Operation.QueuePriority {
-        switch value {
-        case 5: return .veryHigh
-        case 4: return .high
-        case 3: return .normal
-        case 2: return .low
-        default: return .veryLow
+    private func pump() {
+        lock.lock()
+        guard active, !closed, running < 2 else { lock.unlock(); return }
+        let ready = jobs.values.filter { !$0.started }.sorted {
+            $0.priority == $1.priority ? $0.order < $1.order : $0.priority > $1.priority
+        }.prefix(2 - running)
+        for job in ready { job.started = true; running += 1 }
+        lock.unlock()
+        for job in ready { start(job) }
+    }
+
+    private func accepts(_ job: Job) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return active && !closed && jobs[job.identity] === job
+    }
+
+    private func finish(_ job: Job, bytes: Int64?) {
+        lock.lock()
+        let retired = retiring.removeValue(forKey: ObjectIdentifier(job)) != nil
+        guard retired || jobs[job.identity] === job else { lock.unlock(); return }
+        if !retired { jobs[job.identity] = nil }
+        if job.started { running -= 1; job.started = false }
+        let callbacks = job.waiters
+        subscribers -= callbacks.count
+        job.waiters.removeAll()
+        job.task = nil
+        job.operation = nil
+        lock.unlock()
+        for callback in callbacks { callback.finish(bytes: bytes) }
+        pump()
+    }
+
+    private func start(_ job: Job) {
+        guard accepts(job) else { finish(job, bytes: nil); return }
+        let source = job.identity.source
+        if source.range(of: "asset://", options: [.anchored, .caseInsensitive]) != nil {
+            let operation = BlockOperation { [weak self, weak job] in
+                guard let self, let job, self.accepts(job) else { return }
+                let bytes = PamInlineImages.preloadAsset(source)
+                self.finish(job, bytes: bytes)
+            }
+            operation.completionBlock = { [weak self, weak job] in
+                guard let self, let job else { return }
+                self.finish(job, bytes: nil)
+            }
+            lock.lock()
+            let accepted = active && !closed && jobs[job.identity] === job
+            if accepted { job.operation = operation }
+            lock.unlock()
+            if accepted { assetQueue.addOperation(operation) } else { finish(job, bytes: nil) }
+            return
         }
+        guard let url = URL(string: source), let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http", url.host != nil else { finish(job, bytes: nil); return }
+        cacheLookup(source, job.identity.cacheKey) { [weak self, weak job] data in
+            guard let self, let job else { return }
+            guard self.accepts(job) else { self.finish(job, bytes: nil); return }
+            if let data, !data.isEmpty { self.finish(job, bytes: Int64(data.count)); return }
+            self.download(job, url: url)
+        }
+    }
+
+    private func download(_ job: Job, url: URL) {
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        for (name, value) in job.headers where name.range(of: "^[A-Za-z0-9-]{1,64}$", options: .regularExpression) != nil {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let task = session.dataTask(with: request) { [weak self, weak job] data, response, error in
+            guard let self, let job else { return }
+            guard self.accepts(job) else { self.finish(job, bytes: nil); return }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard error == nil, (200..<300).contains(status), let data, !data.isEmpty,
+                  UIImage(data: data) != nil else { self.finish(job, bytes: nil); return }
+            PamMediaDiskCache.shared.store(data, source: job.identity.source, stableKey: job.identity.cacheKey, checksum: nil, limit: 0, pinned: false) { [weak self, weak job] stored in
+                guard let self, let job else { return }
+                self.finish(job, bytes: stored ? Int64(data.count) : nil)
+            }
+        }
+        lock.lock()
+        let accepted = active && !closed && jobs[job.identity] === job
+        if accepted { job.task = task }
+        lock.unlock()
+        if accepted { task.resume() } else { task.cancel(); finish(job, bytes: nil) }
     }
 
     private struct PrefetchError: LocalizedError {
         let message: String
         init(_ message: String) { self.message = message }
         var errorDescription: String? { message }
-    }
-}
-
-private final class PrefetchWaiter<Value>: @unchecked Sendable {
-    private let semaphore = DispatchSemaphore(value: 0)
-    private var value: Value?
-
-    func resolve(_ value: Value) {
-        self.value = value
-        semaphore.signal()
-    }
-
-    func wait() -> Value {
-        semaphore.wait()
-        // `resolve` stores the value before signalling the semaphore, so a
-        // completed wait always has a value. Keeping Optional inside `Value`
-        // still lets callers deliberately resolve `nil` (for example Data?).
-        return value!
     }
 }
 
@@ -363,11 +475,11 @@ private final class PrefetchTally: @unchecked Sendable {
         }
         remaining -= 1
         let done = remaining == 0
-        let payload = (try? WireMap.encode([
+        let payload = done ? ((try? WireMap.encode([
             "succeeded": .integer(succeeded),
             "failed": .integer(failed),
             "bytes": .integer(bytes),
-        ])) ?? Data()
+        ])) ?? Data()) : Data()
         lock.unlock()
         if done { completion(.success, payload) }
     }

@@ -1677,6 +1677,7 @@ internal class NativeImageLoader(
         progress: (Long, Long) -> Unit,
         partial: (ByteArray) -> Unit,
     ): ByteArray {
+        check(!closed.get() && !Thread.currentThread().isInterrupted) { "Image load was cancelled" }
         validateRemote(URI(source), null)
         val headers = parseHeaders(request.requestHeaders)
         val origin = URI(source)
@@ -1704,6 +1705,10 @@ internal class NativeImageLoader(
             val call = imageClient(attempt).newCall(builder.build())
             calls += call
             val response = try {
+                if (closed.get() || Thread.currentThread().isInterrupted) {
+                    call.cancel()
+                    error("Image load was cancelled")
+                }
                 call.execute()
             } catch (error: Throwable) {
                 calls -= call
@@ -1766,6 +1771,7 @@ internal class NativeImageLoader(
                 // the app named the cache key itself (it owns that policy).
                 val noStore = request.mediaCacheKey == null &&
                     response.header("Cache-Control")?.contains("no-store", ignoreCase = true) == true
+                check(!closed.get() && !Thread.currentThread().isInterrupted) { "Image load was cancelled" }
                 if (diskEnabled && !noStore) {
                     writeDisk(
                         cacheFile,

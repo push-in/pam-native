@@ -41,11 +41,13 @@ public final class PamRenderer: @unchecked Sendable {
     private let nativeViews: NativeViewRegistry
     private let imageSession: URLSession
     private let imageSessionDelegate: ImageLoadSessionDelegate
-    private let imageDecodeQueue = DispatchQueue(
-        label: "dev.pam.native.image-decode",
-        qos: .userInitiated,
-        attributes: .concurrent
-    )
+    private let imageDecodeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "dev.pam.native.image-decode"
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
     /// Remote images waiting to load again: a transient failure parked until
     /// the view is near the screen, or a reported failure that loads again
@@ -93,6 +95,8 @@ public final class PamRenderer: @unchecked Sendable {
     /// Scroll offset of each switched-away section, per list.
     private var listSectionOffsets: [Int64: [String: CGFloat]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
+    /// Only dirty input bridges, never the complete rendered/event node set.
+    private var pendingNativeInputs: [ObjectIdentifier: EventBridge] = [:]
     private var interactionBridges: [Int64: PamInteractionBridge] = [:]
     private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
     private var workletAnimators: [Int64: PamWorkletAnimator] = [:]
@@ -385,6 +389,13 @@ public final class PamRenderer: @unchecked Sendable {
             PamImageResidency.requestSweep()
         }
         committing = outerCommit
+        if !outerCommit {
+            // A sync-mode change must observe the final authored value of
+            // this commit, irrespective of the order of its prop mutations.
+            for bridge in Array(pendingNativeInputs.values) {
+                bridge.flushImmediateNativeChange()
+            }
+        }
         if !outerCommit, !deferredNavigations.isEmpty {
             let navigations = deferredNavigations
             deferredNavigations.removeAll()
@@ -757,6 +768,7 @@ public final class PamRenderer: @unchecked Sendable {
             }
         }
         eventBridges.removeAll()
+        pendingNativeInputs.removeAll()
         interactionBridges.values.forEach { $0.detach() }
         interactionBridges.removeAll()
         animationDelegates.removeAll()
@@ -2309,8 +2321,12 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func flushPendingNativeInputs() {
-        for (_, bridges) in eventBridges {
-            bridges[EventKind.change.rawValue]?.flushPendingNativeChange()
+        // A callback may detach a field or edit another one. A snapshot keeps
+        // iteration stable; each bridge clears its entry before dispatching.
+        let pending = Array(pendingNativeInputs.values)
+        for bridge in pending {
+            guard pendingNativeInputs[ObjectIdentifier(bridge)] === bridge else { continue }
+            bridge.flushPendingNativeChange()
         }
     }
 
@@ -2320,6 +2336,7 @@ public final class PamRenderer: @unchecked Sendable {
         }
 
         let previous = eventBridges[nodeId] ?? [:]
+        let pendingInputValue = previous[EventKind.change.rawValue]?.pendingInputValue
         for (_, bridge) in previous {
             bridge.detach()
         }
@@ -2542,12 +2559,20 @@ public final class PamRenderer: @unchecked Sendable {
 
         if eventProperties.contains(PamConstants.onChange), let field = inputField {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.change.rawValue, dispatchEvent: dispatchEvent)
+            bridge.onPendingInputChanged = { [weak self, weak bridge] pending in
+                guard let self, let bridge else { return }
+                let identity = ObjectIdentifier(bridge)
+                if pending { self.pendingNativeInputs[identity] = bridge }
+                else { self.pendingNativeInputs.removeValue(forKey: identity) }
+            }
             bridge.attachTextChange(field)
             bridge.configureInputSync(
                 mode: state.properties[PamConstants.inputSyncMode]?.integerOrNil() ?? 2,
-                debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48
+                debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48,
+                flushImmediately: !committing
             )
             eventBridges[nodeId]?[EventKind.change.rawValue] = bridge
+            if let pendingInputValue { bridge.restorePendingInput(pendingInputValue, deferImmediate: committing) }
         }
 
         if eventProperties.contains(PamConstants.onSubmit), let field = inputField {
@@ -3169,7 +3194,8 @@ public final class PamRenderer: @unchecked Sendable {
               let bridge = eventBridges[nodeId]?[EventKind.change.rawValue] else { return }
         bridge.configureInputSync(
             mode: state.properties[PamConstants.inputSyncMode]?.integerOrNil() ?? 2,
-            debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48
+            debounceMs: state.properties[PamConstants.inputDebounceMs]?.integerOrNil() ?? 48,
+            flushImmediately: !committing
         )
     }
 
@@ -3226,6 +3252,7 @@ public final class PamRenderer: @unchecked Sendable {
                     button.setTitle(textValue, for: .normal)
                 } else if let field = view as? (any PamTextInputHost) {
                     field.setFormattedTextFromRenderer(textValue)
+                    eventBridges[nodeId]?[EventKind.change.rawValue]?.discardSupersededNativeChange()
                 } else if let field = view as? UITextField {
                     field.text = textValue
                 }
@@ -3284,6 +3311,7 @@ public final class PamRenderer: @unchecked Sendable {
                 drawing.setDrawing(textValue)
             } else if let textValue = value.textOrNil(), let field = view as? (any PamTextInputHost) {
                 field.setFormattedTextFromRenderer(textValue)
+                eventBridges[nodeId]?[EventKind.change.rawValue]?.discardSupersededNativeChange()
             } else if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.text = textValue
             } else if let boolValue = value.boolOrNil(), let switchView = view as? PamVuetifySwitch {
@@ -5922,7 +5950,8 @@ public final class PamRenderer: @unchecked Sendable {
     private func decodeImage(
         _ data: Data,
         targetSize: CGSize,
-        multiplier: CGFloat
+        multiplier: CGFloat,
+        scale: CGFloat
     ) -> UIImage? {
         // Decode at the size that covers the view (both edges), not at the
         // view's longest edge: a portrait photo in a square cell kept a
@@ -5930,6 +5959,7 @@ public final class PamRenderer: @unchecked Sendable {
         if let image = PamImageDownsampling.image(
             data: data,
             targetSize: targetSize,
+            scale: scale,
             multiplier: multiplier
         ) {
             return image
@@ -5940,7 +5970,7 @@ public final class PamRenderer: @unchecked Sendable {
         return image.preparingForDisplay() ?? image
     }
 
-    private func localImage(_ source: String, targetSize: CGSize = .zero) -> UIImage? {
+    private func localImage(_ source: String, targetSize: CGSize = .zero, scale: CGFloat = UIScreen.main.scale) -> UIImage? {
         if let image = PamInlineImages.image(source) {
             return image
         }
@@ -5948,7 +5978,7 @@ public final class PamRenderer: @unchecked Sendable {
         // ImageIO instead of keeping their full resolution.
         func fileImage(_ url: URL) -> UIImage? {
             // Animated files (any view size) and large photos go through ImageIO.
-            if let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
+            if let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize, scale: scale) {
                 return image
             }
             return UIImage(contentsOfFile: url.path)
@@ -6017,24 +6047,45 @@ public final class PamRenderer: @unchecked Sendable {
         nodeId: Int64,
         generation: Int
     ) {
-        if let image = localImage(source) {
+        guard let state = nodes[nodeId], state.imageGeneration == generation else { return }
+        // Tiny inline glyphs and an already warmed asset still paint immediately.
+        if let image = PamInlineImages.image(source) ?? PamInlineImages.cachedAsset(source) {
             imageView.image = image
             notifyDrawingImageChanged(nodeId: nodeId)
             return
         }
-        guard let url = URL(string: source),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http" else { return }
-        imageSession.dataTask(with: url) { [weak self, weak imageView] data, _, _ in
-            guard let self, let data, let image = UIImage(data: data) else { return }
+        let demand = state.imagePlaceholderWork
+        let targetSize = imageView.bounds.size
+        let scale = UIScreen.main.scale
+        let apply: @Sendable (UIImage?) -> Void = { [weak self, weak imageView] image in
+            guard !demand.isCancelled, let image else { return }
             DispatchQueue.main.async {
-                guard let state = self.nodes[nodeId],
+                guard let self, let state = self.nodes[nodeId],
                       state.imageGeneration == generation,
-                      state.imageLoading else { return }
+                      state.imageLoading, !demand.isCancelled else { return }
                 imageView?.image = image
                 self.notifyDrawingImageChanged(nodeId: nodeId)
             }
-        }.resume()
+        }
+        if let url = URL(string: source), let scheme = url.scheme?.lowercased(),
+           scheme == "https" || scheme == "http" {
+            let task = imageSession.dataTask(with: url) { [weak self] data, response, error in
+                guard let self, !demand.isCancelled, error == nil, let data,
+                      let status = (response as? HTTPURLResponse)?.statusCode,
+                      (200..<300).contains(status) else { return }
+                demand.submit(on: self.imageDecodeQueue) { [weak self] in
+                    guard let self, !demand.isCancelled else { return }
+                    apply(self.decodeImage(data, targetSize: targetSize, multiplier: 1, scale: scale))
+                }
+            }
+            state.imagePlaceholderTask = task
+            task.resume()
+        } else {
+            demand.submit(on: imageDecodeQueue) { [weak self] in
+                guard let self, !demand.isCancelled else { return }
+                apply(self.localImage(source, targetSize: targetSize, scale: scale))
+            }
+        }
     }
 
     private func rememberResidentImage(
@@ -6211,6 +6262,8 @@ public final class PamRenderer: @unchecked Sendable {
         state.imageGeneration += 1
         state.imageLoading = true
         let generation = state.imageGeneration
+        let demand = state.imageDecodeWork
+        let scale = UIScreen.main.scale
         let key = state.properties[PamConstants.mediaCacheKey]?.textOrNil()
         let identity = PamMediaDiskCache.shared.identity(source: resolvedSource, stableKey: key)
         let targetSize = imageView.bounds.size
@@ -6253,21 +6306,9 @@ public final class PamRenderer: @unchecked Sendable {
                 NSLog("PamImage lookup %@ %.0fms %@", data == nil ? "miss" : "hit", (CACurrentMediaTime() - traceStart) * 1_000, URL(string: resolvedSource)?.path ?? "")
             }
             #endif
-            // Decoded off the cache queue: one serial decode per tile there
-            // held every later lookup of a grid behind it.
-            self.imageDecodeQueue.async {
-                let image = PamDecodedImageCache.shared.image(forKey: decodedKey) ?? data.flatMap {
-                    self.decodeImage(
-                        $0,
-                        targetSize: targetSize,
-                        multiplier: multiplier
-                    )
-                }
-                if let image {
-                    PamDecodedImageCache.shared.store(image, forKey: decodedKey)
-                }
+            let deliver: @Sendable (UIImage?) -> Void = { image in
                 DispatchQueue.main.async {
-                    guard let current = self.nodes[nodeId],
+                    guard !demand.isCancelled, let current = self.nodes[nodeId],
                           current.imageGeneration == generation,
                           let imageView else { return }
                     let silent = current.imageSilentRestore
@@ -6313,6 +6354,23 @@ public final class PamRenderer: @unchecked Sendable {
                         self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
                     }
                 }
+            }
+            guard !demand.isCancelled else { return }
+            if let decoded = PamDecodedImageCache.shared.image(forKey: decodedKey) {
+                deliver(decoded)
+                return
+            }
+            guard let data else {
+                deliver(nil)
+                return
+            }
+            // Disk lookup never waits behind pixel work; only actual decode uses these workers.
+            demand.submit(on: self.imageDecodeQueue) {
+                guard !demand.isCancelled else { return }
+                let image = self.decodeImage(data, targetSize: targetSize, multiplier: multiplier, scale: scale)
+                guard !demand.isCancelled else { return }
+                if let image { PamDecodedImageCache.shared.store(image, forKey: decodedKey) }
+                deliver(image)
             }
         }
     }
@@ -6514,6 +6572,9 @@ public final class PamRenderer: @unchecked Sendable {
                   let imageView = self.imageView(for: hostView) else {
                 return
             }
+            state.imagePlaceholderTask?.cancel()
+            state.imagePlaceholderTask = nil
+            state.imagePlaceholderWork.cancel()
             let targetSize = imageView.bounds.size
             let multiplier = CGFloat(
                 state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
@@ -6564,21 +6625,27 @@ public final class PamRenderer: @unchecked Sendable {
                 multiplier: multiplier
             )
             let residentSource = source
+            let demand = state.imageDecodeWork
+            let scale = UIScreen.main.scale
             let releasable = cachePolicy != 5 && [3, 4, 5, 8].contains(mediaPolicy)
-            self.imageDecodeQueue.async { [weak self, weak imageView] in
-                guard let self,
+            demand.submit(on: self.imageDecodeQueue) { [weak self, weak imageView] in
+                guard let self, !demand.isCancelled,
                       let image = self.decodeImage(
                         data,
                         targetSize: targetSize,
-                        multiplier: multiplier
+                        multiplier: multiplier,
+                        scale: scale
                       ) else { return }
+                guard !demand.isCancelled else { return }
                 if releasable {
                     PamDecodedImageCache.shared.store(image, forKey: decodedKey)
                 }
                 DispatchQueue.main.async {
-                    guard let state = self.nodes[context.nodeId],
+                    guard !demand.isCancelled, let state = self.nodes[context.nodeId],
                           state.imageGeneration == context.generation,
                           let imageView else { return }
+                    state.imagePlaceholderTask?.cancel()
+                    state.imagePlaceholderTask = nil
                     let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
                     if fade > 0 && !PamMotionPolicy.isReduced {
                         UIView.transition(
@@ -6743,6 +6810,12 @@ public final class PamRenderer: @unchecked Sendable {
     }
 
     private func cancelImageLoad(for state: NodeState) {
+        state.imageDecodeWork.cancel()
+        state.imageDecodeWork = PamImageDecodeWork()
+        state.imagePlaceholderWork.cancel()
+        state.imagePlaceholderWork = PamImageDecodeWork()
+        state.imagePlaceholderTask?.cancel()
+        state.imagePlaceholderTask = nil
         if state.photoRequestId != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(state.photoRequestId)
             state.photoRequestId = PHInvalidImageRequestID
@@ -6801,7 +6874,35 @@ public final class PamRenderer: @unchecked Sendable {
         private var inputSyncMode: Int64 = 2
         private var inputDebounce: TimeInterval = 0.048
         private var pendingChange: DispatchWorkItem?
-        private var pendingChangeValue: String?
+        var onPendingInputChanged: ((Bool) -> Void)?
+        private var pendingChangeValue: String? {
+            didSet {
+                if (oldValue == nil) != (pendingChangeValue == nil) {
+                    onPendingInputChanged?(pendingChangeValue != nil)
+                }
+            }
+        }
+        var pendingInputValue: String? {
+            guard pendingChangeValue == textField?.inputText else { return nil }
+            return pendingChangeValue
+        }
+        func restorePendingInput(_ value: String, deferImmediate: Bool) {
+            guard value == textField?.inputText else { return }
+            if inputSyncMode == 3 && deferImmediate {
+                pendingChangeValue = value
+            } else {
+                handleTextChange(value)
+            }
+        }
+        func flushImmediateNativeChange() {
+            if inputSyncMode == 3 { onInputSyncFlush() }
+        }
+        func discardSupersededNativeChange() {
+            guard pendingChangeValue != nil, pendingChangeValue != textField?.inputText else { return }
+            pendingChange?.cancel()
+            pendingChange = nil
+            pendingChangeValue = nil
+        }
         private weak var control: UIControl?
         private weak var scrollView: UIScrollView?
         private weak var refreshControl: PamRefreshContainer?
@@ -7161,10 +7262,10 @@ public final class PamRenderer: @unchecked Sendable {
         /// Android `inputSyncMode` / `inputDebounceMs`: immediate (3) sends
         /// every edit, debounced (2) coalesces edits within the window, and
         /// native/blur/submit (1/4/5) hold the value until blur or submit.
-        func configureInputSync(mode: Int64, debounceMs: Int64) {
+        func configureInputSync(mode: Int64, debounceMs: Int64, flushImmediately: Bool = true) {
             inputSyncMode = (1...5).contains(mode) ? mode : 2
             inputDebounce = TimeInterval(min(max(debounceMs, 0), 5_000)) / 1_000
-            if inputSyncMode == 3 { onInputSyncFlush() }
+            if inputSyncMode == 3 && flushImmediately { onInputSyncFlush() }
         }
 
         func attachFocus(_ field: any PamTextInputHost) {
@@ -8447,6 +8548,10 @@ public final class PamRenderer: @unchecked Sendable {
             pendingChange = nil
             guard let value = pendingChangeValue else { return }
             pendingChangeValue = nil
+            // An authored value may have replaced this draft while its
+            // debounce/handler update was pending. Stale controlled echoes
+            // already rejected by the field leave inputText unchanged.
+            guard value == textField?.inputText else { return }
             dispatchTextChange(value)
         }
 
@@ -8863,6 +8968,9 @@ private final class NodeState {
     var properties: [Int: PropValue]
     let mountOrder: Int64
     var imageTask: URLSessionTask?
+    var imagePlaceholderTask: URLSessionTask?
+    var imageDecodeWork = PamImageDecodeWork()
+    var imagePlaceholderWork = PamImageDecodeWork()
     var photoRequestId: PHImageRequestID = PHInvalidImageRequestID
     var photoTargetPixels: CGSize = .zero
     var childrenNeedRethrow: UIView?
