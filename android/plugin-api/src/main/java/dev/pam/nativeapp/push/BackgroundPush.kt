@@ -5,18 +5,33 @@ import android.content.Intent
 
 /**
  * Stable Android contract for PAM Native plugins that must react to data-only
- * push messages while the PHP runtime is suspended.
+ * push messages and token refreshes while the PHP runtime is suspended.
  *
  * Plugin receivers must be declared with `android:exported="false"`. PAM sends
  * the broadcast only to the current application package.
  */
 public object BackgroundPush {
     public const val ACTION_RECEIVED: String = "dev.pam.nativeapp.action.PUSH_RECEIVED"
+    public const val ACTION_TOKEN_REFRESHED: String = "dev.pam.nativeapp.action.PUSH_TOKEN_REFRESHED"
     public const val EXTRA_BODY: String = "dev.pam.nativeapp.push.BODY"
     public const val EXTRA_DATA_JSON: String = "dev.pam.nativeapp.push.DATA_JSON"
     public const val EXTRA_DEEP_LINK: String = "dev.pam.nativeapp.push.DEEP_LINK"
     public const val EXTRA_ID: String = "dev.pam.nativeapp.push.ID"
     public const val EXTRA_TITLE: String = "dev.pam.nativeapp.push.TITLE"
+    public const val EXTRA_TOKEN: String = "dev.pam.nativeapp.push.TOKEN"
+
+    /**
+     * Returns a package-restricted token event, or null for blank/oversized input.
+     * Tokens are opaque: never truncate, normalize or log their contents.
+     * A manifest receiver can handle this event before a plugin is loaded by PHP.
+     */
+    @JvmStatic
+    public fun tokenRefreshedIntent(context: Context, token: String): Intent? {
+        if (token.length > MAX_TOKEN_LENGTH || token.isBlank()) return null
+        return Intent(ACTION_TOKEN_REFRESHED)
+            .setPackage(context.packageName)
+            .putExtra(EXTRA_TOKEN, token)
+    }
 
     @JvmStatic
     public fun receivedIntent(
@@ -35,4 +50,5 @@ public object BackgroundPush {
         .putExtra(EXTRA_DEEP_LINK, deepLink.take(8_192))
 
     private const val MAX_DATA_BYTES: Int = 256 * 1024
+    private const val MAX_TOKEN_LENGTH: Int = 8_192
 }
