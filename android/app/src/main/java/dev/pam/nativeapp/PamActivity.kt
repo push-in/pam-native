@@ -583,7 +583,9 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
      * nearest `onKeyDown`, then `captureKeys`, `nextFocus*` and focus groups.
      */
     // super is the platform Activity method; lint flags androidx's override.
-    @SuppressLint("RestrictedApi")
+    // KeyEvent handling covers hardware keys and legacy Android; gesture Back
+    // is registered separately through OnBackAnimationCallback below.
+    @SuppressLint("RestrictedApi", "GestureBackNavigation")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (consumeModalBackKey(event)) return true
         val previousBackKey = dispatchingBackKey
@@ -599,6 +601,9 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     /** Shared by the activity and its dialog windows before key dispatch. */
+    // Deduplicate only delivered key events; predictive callbacks keep their
+    // own platform registration and are not synthesized into key presses.
+    @SuppressLint("GestureBackNavigation")
     internal fun consumeModalBackKey(event: KeyEvent): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
