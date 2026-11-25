@@ -5,13 +5,13 @@ internal data class PamBackKey(val deviceId: Int, val downTime: Long)
 
 /**
  * A modal owns its entire Back interaction, including duplicate host callbacks.
- * Identified new interactions release the fallback immediately. API 33's
- * OnBackInvokedCallback (and legacy OEM callbacks without a KeyEvent) supplies
- * no interaction identity: retain the existing conservative window for those.
+ * Without a key identity (including button Back on modern Android), only
+ * redispatches in the current main-loop turn can be identified as duplicates.
+ * A closing modal forwards later callbacks even while its window animates out.
  */
 internal class PamBackDispatchGuard {
     private var consumedKey: PamBackKey? = null
-    private var suppressUntil = Long.MIN_VALUE
+    private var consumedInDispatchTurn = false
 
     fun observeKey(key: PamBackKey, canBeginInteraction: Boolean): Boolean {
         if (key == consumedKey) return true
@@ -20,17 +20,17 @@ internal class PamBackDispatchGuard {
     }
 
     fun beginInteraction() {
-        suppressUntil = Long.MIN_VALUE
+        consumedInDispatchTurn = false
     }
 
-    fun modalConsumed(now: Long, key: PamBackKey? = null) {
+    fun modalConsumed(key: PamBackKey? = null) {
         if (key != null) consumedKey = key
-        suppressUntil = now + UNIDENTIFIED_CALLBACK_WINDOW_MS
+        consumedInDispatchTurn = true
     }
 
-    fun suppressesUnidentifiedCallback(now: Long): Boolean = now <= suppressUntil
-
-    private companion object {
-        const val UNIDENTIFIED_CALLBACK_WINDOW_MS = 1_000L
+    fun endDispatchTurn() {
+        consumedInDispatchTurn = false
     }
+
+    fun suppressesUnidentifiedCallback(): Boolean = consumedInDispatchTurn
 }

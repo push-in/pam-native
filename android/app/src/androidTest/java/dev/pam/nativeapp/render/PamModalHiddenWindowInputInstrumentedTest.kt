@@ -68,6 +68,25 @@ class PamModalHiddenWindowInputInstrumentedTest {
     }
 
     @Test
+    fun closingSheetReleasesBackBeforeItsWindowFinishesExiting() {
+        present()
+        var closeRequests = 0
+        instrumentation.runOnMainSync {
+            modal!!.setCallbacks(
+                onRequestClose = { closeRequests++ },
+                onShow = null,
+                onDismiss = null,
+                onOrientationChange = null,
+            )
+            assertTrue("the open sheet owns the first Back", modal!!.consumeActivityBack())
+            assertEquals(1, closeRequests)
+            assertTrue("the old window remains until its exit runs", modal!!.isPresented())
+            assertFalse("a closing sheet cannot discard a new Back", modal!!.consumeActivityBack())
+            assertEquals("the sheet close request is not repeated", 1, closeRequests)
+        }
+    }
+
+    @Test
     fun coveredSheetDoesNotConsumeBackAndRetainsItsPresentationOnReturn() {
         present()
         var closeRequests = 0

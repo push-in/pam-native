@@ -57,6 +57,8 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     private var backCallback: OnBackInvokedCallback? = null
     private val backDispatchGuard = PamBackDispatchGuard()
     private var dispatchingBackKey: PamBackKey? = null
+    private val backDispatchHandler = Handler(Looper.getMainLooper())
+    private val releaseBackDispatch = Runnable { backDispatchGuard.endDispatchTurn() }
     /** 32-bit device: this activity only handed off to [PamWebActivity]. */
     private var webFallback = false
     private var errorOverlay: ErrorOverlay? = null
@@ -695,6 +697,7 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
     }
 
     override fun onDestroy() {
+        backDispatchHandler.removeCallbacks(releaseBackDispatch)
         if (webFallback) {
             super.onDestroy()
             return
@@ -1004,11 +1007,27 @@ class PamActivity : FragmentActivity(), ActivityResultHost, PermissionHost, Nati
 
     internal fun suppressNextPamBack(event: KeyEvent? = null) {
         val key = event?.let { PamBackKey(it.deviceId, it.downTime) } ?: dispatchingBackKey
-        backDispatchGuard.modalConsumed(SystemClock.uptimeMillis(), key)
+        backDispatchGuard.modalConsumed(key)
+        // No time window: API 33+ button Back may have neither a KeyEvent
+        // nor onBackStarted. Its next callback is a new action once this
+        // dispatch finishes. Closing modal windows forward that new action.
+        backDispatchHandler.removeCallbacks(releaseBackDispatch)
+        backDispatchHandler.post(releaseBackDispatch)
     }
 
     private fun consumeSuppressedBack(): Boolean =
-        backDispatchGuard.suppressesUnidentifiedCallback(SystemClock.uptimeMillis())
+        backDispatchGuard.suppressesUnidentifiedCallback()
+
+    /** The dialog window can retain focus until its exit animation ends. */
+    @Suppress("DEPRECATION")
+    internal fun dispatchBackFromClosingModal(event: KeyEvent? = null) {
+        if (event != null && consumeModalBackKey(event)) return
+        if (consumeSuppressedBack()) return
+        onBackPressed()
+        // The same key or an OEM activity callback must not navigate twice
+        // after this explicit handoff from the closing dialog.
+        suppressNextPamBack(event)
+    }
 
 
     private fun isDarkAppearance(): Boolean = PamAppearance.isDark(this)
